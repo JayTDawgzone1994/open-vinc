@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/stem_shell.dir/src/stem_shell.cpp.o -o ../../stem_shell  ../module/libmodule.a -Wl,--whole-archive ../holon_test/libholon_test.a -Wl,--no-whole-archive ../axon_bus/libaxon_bus.a ../module/libmodule.a 

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libvinc_test.a CMakeFiles/vinc_test.dir/src/test_module.cpp.o
+/usr/bin/ranlib libvinc_test.a

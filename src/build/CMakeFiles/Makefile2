@@ -54,289 +54,289 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/dawgzone/open_vinc/src
+CMAKE_SOURCE_DIR = /home/dawgzone/code/open-vinc/src
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/dawgzone/open_vinc/src/build
+CMAKE_BINARY_DIR = /home/dawgzone/code/open-vinc/src/build
 
 #=============================================================================
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: holon/all
+all: vinc/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
-preinstall: holon/preinstall
+preinstall: vinc/preinstall
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: holon/clean
+clean: vinc/clean
 .PHONY : clean
 
 #=============================================================================
-# Directory level rules for directory holon
+# Directory level rules for directory vinc
 
 # Recursive "all" directory target.
-holon/all: holon/ribosome/all
-holon/all: holon/axon_bus/all
-holon/all: holon/module/all
-holon/all: holon/holon_test/all
-holon/all: holon/stem_shell/all
-.PHONY : holon/all
+vinc/all: vinc/ribosome/all
+vinc/all: vinc/axon_bus/all
+vinc/all: vinc/module/all
+vinc/all: vinc/vinc_test/all
+vinc/all: vinc/stem_shell/all
+.PHONY : vinc/all
 
 # Recursive "preinstall" directory target.
-holon/preinstall: holon/ribosome/preinstall
-holon/preinstall: holon/axon_bus/preinstall
-holon/preinstall: holon/module/preinstall
-holon/preinstall: holon/holon_test/preinstall
-holon/preinstall: holon/stem_shell/preinstall
-.PHONY : holon/preinstall
+vinc/preinstall: vinc/ribosome/preinstall
+vinc/preinstall: vinc/axon_bus/preinstall
+vinc/preinstall: vinc/module/preinstall
+vinc/preinstall: vinc/vinc_test/preinstall
+vinc/preinstall: vinc/stem_shell/preinstall
+.PHONY : vinc/preinstall
 
 # Recursive "clean" directory target.
-holon/clean: holon/CMakeFiles/generate_messages.dir/clean
-holon/clean: holon/ribosome/clean
-holon/clean: holon/axon_bus/clean
-holon/clean: holon/module/clean
-holon/clean: holon/holon_test/clean
-holon/clean: holon/stem_shell/clean
-.PHONY : holon/clean
+vinc/clean: vinc/CMakeFiles/generate_messages.dir/clean
+vinc/clean: vinc/ribosome/clean
+vinc/clean: vinc/axon_bus/clean
+vinc/clean: vinc/module/clean
+vinc/clean: vinc/vinc_test/clean
+vinc/clean: vinc/stem_shell/clean
+.PHONY : vinc/clean
 
 #=============================================================================
-# Directory level rules for directory holon/axon_bus
+# Directory level rules for directory vinc/axon_bus
 
 # Recursive "all" directory target.
-holon/axon_bus/all: holon/axon_bus/CMakeFiles/axon_bus.dir/all
-.PHONY : holon/axon_bus/all
+vinc/axon_bus/all: vinc/axon_bus/CMakeFiles/axon_bus.dir/all
+.PHONY : vinc/axon_bus/all
 
 # Recursive "preinstall" directory target.
-holon/axon_bus/preinstall:
-.PHONY : holon/axon_bus/preinstall
+vinc/axon_bus/preinstall:
+.PHONY : vinc/axon_bus/preinstall
 
 # Recursive "clean" directory target.
-holon/axon_bus/clean: holon/axon_bus/CMakeFiles/axon_bus.dir/clean
-.PHONY : holon/axon_bus/clean
+vinc/axon_bus/clean: vinc/axon_bus/CMakeFiles/axon_bus.dir/clean
+.PHONY : vinc/axon_bus/clean
 
 #=============================================================================
-# Directory level rules for directory holon/holon_test
+# Directory level rules for directory vinc/module
 
 # Recursive "all" directory target.
-holon/holon_test/all: holon/holon_test/CMakeFiles/holon_test.dir/all
-.PHONY : holon/holon_test/all
+vinc/module/all: vinc/module/CMakeFiles/module.dir/all
+.PHONY : vinc/module/all
 
 # Recursive "preinstall" directory target.
-holon/holon_test/preinstall:
-.PHONY : holon/holon_test/preinstall
+vinc/module/preinstall:
+.PHONY : vinc/module/preinstall
 
 # Recursive "clean" directory target.
-holon/holon_test/clean: holon/holon_test/CMakeFiles/holon_test.dir/clean
-.PHONY : holon/holon_test/clean
+vinc/module/clean: vinc/module/CMakeFiles/module.dir/clean
+.PHONY : vinc/module/clean
 
 #=============================================================================
-# Directory level rules for directory holon/module
+# Directory level rules for directory vinc/ribosome
 
 # Recursive "all" directory target.
-holon/module/all: holon/module/CMakeFiles/module.dir/all
-.PHONY : holon/module/all
+vinc/ribosome/all: vinc/ribosome/CMakeFiles/ribosome.dir/all
+.PHONY : vinc/ribosome/all
 
 # Recursive "preinstall" directory target.
-holon/module/preinstall:
-.PHONY : holon/module/preinstall
+vinc/ribosome/preinstall:
+.PHONY : vinc/ribosome/preinstall
 
 # Recursive "clean" directory target.
-holon/module/clean: holon/module/CMakeFiles/module.dir/clean
-.PHONY : holon/module/clean
+vinc/ribosome/clean: vinc/ribosome/CMakeFiles/ribosome.dir/clean
+.PHONY : vinc/ribosome/clean
 
 #=============================================================================
-# Directory level rules for directory holon/ribosome
+# Directory level rules for directory vinc/stem_shell
 
 # Recursive "all" directory target.
-holon/ribosome/all: holon/ribosome/CMakeFiles/ribosome.dir/all
-.PHONY : holon/ribosome/all
+vinc/stem_shell/all: vinc/stem_shell/CMakeFiles/stem_shell.dir/all
+.PHONY : vinc/stem_shell/all
 
 # Recursive "preinstall" directory target.
-holon/ribosome/preinstall:
-.PHONY : holon/ribosome/preinstall
+vinc/stem_shell/preinstall:
+.PHONY : vinc/stem_shell/preinstall
 
 # Recursive "clean" directory target.
-holon/ribosome/clean: holon/ribosome/CMakeFiles/ribosome.dir/clean
-.PHONY : holon/ribosome/clean
+vinc/stem_shell/clean: vinc/stem_shell/CMakeFiles/stem_shell.dir/clean
+.PHONY : vinc/stem_shell/clean
 
 #=============================================================================
-# Directory level rules for directory holon/stem_shell
+# Directory level rules for directory vinc/vinc_test
 
 # Recursive "all" directory target.
-holon/stem_shell/all: holon/stem_shell/CMakeFiles/stem_shell.dir/all
-.PHONY : holon/stem_shell/all
+vinc/vinc_test/all: vinc/vinc_test/CMakeFiles/vinc_test.dir/all
+.PHONY : vinc/vinc_test/all
 
 # Recursive "preinstall" directory target.
-holon/stem_shell/preinstall:
-.PHONY : holon/stem_shell/preinstall
+vinc/vinc_test/preinstall:
+.PHONY : vinc/vinc_test/preinstall
 
 # Recursive "clean" directory target.
-holon/stem_shell/clean: holon/stem_shell/CMakeFiles/stem_shell.dir/clean
-.PHONY : holon/stem_shell/clean
+vinc/vinc_test/clean: vinc/vinc_test/CMakeFiles/vinc_test.dir/clean
+.PHONY : vinc/vinc_test/clean
 
 #=============================================================================
-# Target rules for target holon/CMakeFiles/generate_messages.dir
+# Target rules for target vinc/CMakeFiles/generate_messages.dir
 
 # All Build rule for target.
-holon/CMakeFiles/generate_messages.dir/all: holon/ribosome/CMakeFiles/ribosome.dir/all
-	$(MAKE) $(MAKESILENT) -f holon/CMakeFiles/generate_messages.dir/build.make holon/CMakeFiles/generate_messages.dir/depend
-	$(MAKE) $(MAKESILENT) -f holon/CMakeFiles/generate_messages.dir/build.make holon/CMakeFiles/generate_messages.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/open_vinc/src/build/CMakeFiles --progress-num=4 "Built target generate_messages"
-.PHONY : holon/CMakeFiles/generate_messages.dir/all
+vinc/CMakeFiles/generate_messages.dir/all: vinc/ribosome/CMakeFiles/ribosome.dir/all
+	$(MAKE) $(MAKESILENT) -f vinc/CMakeFiles/generate_messages.dir/build.make vinc/CMakeFiles/generate_messages.dir/depend
+	$(MAKE) $(MAKESILENT) -f vinc/CMakeFiles/generate_messages.dir/build.make vinc/CMakeFiles/generate_messages.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/code/open-vinc/src/build/CMakeFiles --progress-num=4 "Built target generate_messages"
+.PHONY : vinc/CMakeFiles/generate_messages.dir/all
 
 # Build rule for subdir invocation for target.
-holon/CMakeFiles/generate_messages.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 3
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 holon/CMakeFiles/generate_messages.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 0
-.PHONY : holon/CMakeFiles/generate_messages.dir/rule
+vinc/CMakeFiles/generate_messages.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 3
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vinc/CMakeFiles/generate_messages.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 0
+.PHONY : vinc/CMakeFiles/generate_messages.dir/rule
 
 # Convenience name for target.
-generate_messages: holon/CMakeFiles/generate_messages.dir/rule
+generate_messages: vinc/CMakeFiles/generate_messages.dir/rule
 .PHONY : generate_messages
 
 # clean rule for target.
-holon/CMakeFiles/generate_messages.dir/clean:
-	$(MAKE) $(MAKESILENT) -f holon/CMakeFiles/generate_messages.dir/build.make holon/CMakeFiles/generate_messages.dir/clean
-.PHONY : holon/CMakeFiles/generate_messages.dir/clean
+vinc/CMakeFiles/generate_messages.dir/clean:
+	$(MAKE) $(MAKESILENT) -f vinc/CMakeFiles/generate_messages.dir/build.make vinc/CMakeFiles/generate_messages.dir/clean
+.PHONY : vinc/CMakeFiles/generate_messages.dir/clean
 
 #=============================================================================
-# Target rules for target holon/ribosome/CMakeFiles/ribosome.dir
+# Target rules for target vinc/ribosome/CMakeFiles/ribosome.dir
 
 # All Build rule for target.
-holon/ribosome/CMakeFiles/ribosome.dir/all:
-	$(MAKE) $(MAKESILENT) -f holon/ribosome/CMakeFiles/ribosome.dir/build.make holon/ribosome/CMakeFiles/ribosome.dir/depend
-	$(MAKE) $(MAKESILENT) -f holon/ribosome/CMakeFiles/ribosome.dir/build.make holon/ribosome/CMakeFiles/ribosome.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/open_vinc/src/build/CMakeFiles --progress-num=10,11 "Built target ribosome"
-.PHONY : holon/ribosome/CMakeFiles/ribosome.dir/all
+vinc/ribosome/CMakeFiles/ribosome.dir/all:
+	$(MAKE) $(MAKESILENT) -f vinc/ribosome/CMakeFiles/ribosome.dir/build.make vinc/ribosome/CMakeFiles/ribosome.dir/depend
+	$(MAKE) $(MAKESILENT) -f vinc/ribosome/CMakeFiles/ribosome.dir/build.make vinc/ribosome/CMakeFiles/ribosome.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/code/open-vinc/src/build/CMakeFiles --progress-num=8,9 "Built target ribosome"
+.PHONY : vinc/ribosome/CMakeFiles/ribosome.dir/all
 
 # Build rule for subdir invocation for target.
-holon/ribosome/CMakeFiles/ribosome.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 holon/ribosome/CMakeFiles/ribosome.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 0
-.PHONY : holon/ribosome/CMakeFiles/ribosome.dir/rule
+vinc/ribosome/CMakeFiles/ribosome.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vinc/ribosome/CMakeFiles/ribosome.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 0
+.PHONY : vinc/ribosome/CMakeFiles/ribosome.dir/rule
 
 # Convenience name for target.
-ribosome: holon/ribosome/CMakeFiles/ribosome.dir/rule
+ribosome: vinc/ribosome/CMakeFiles/ribosome.dir/rule
 .PHONY : ribosome
 
 # clean rule for target.
-holon/ribosome/CMakeFiles/ribosome.dir/clean:
-	$(MAKE) $(MAKESILENT) -f holon/ribosome/CMakeFiles/ribosome.dir/build.make holon/ribosome/CMakeFiles/ribosome.dir/clean
-.PHONY : holon/ribosome/CMakeFiles/ribosome.dir/clean
+vinc/ribosome/CMakeFiles/ribosome.dir/clean:
+	$(MAKE) $(MAKESILENT) -f vinc/ribosome/CMakeFiles/ribosome.dir/build.make vinc/ribosome/CMakeFiles/ribosome.dir/clean
+.PHONY : vinc/ribosome/CMakeFiles/ribosome.dir/clean
 
 #=============================================================================
-# Target rules for target holon/axon_bus/CMakeFiles/axon_bus.dir
+# Target rules for target vinc/axon_bus/CMakeFiles/axon_bus.dir
 
 # All Build rule for target.
-holon/axon_bus/CMakeFiles/axon_bus.dir/all: holon/CMakeFiles/generate_messages.dir/all
-holon/axon_bus/CMakeFiles/axon_bus.dir/all: holon/module/CMakeFiles/module.dir/all
-	$(MAKE) $(MAKESILENT) -f holon/axon_bus/CMakeFiles/axon_bus.dir/build.make holon/axon_bus/CMakeFiles/axon_bus.dir/depend
-	$(MAKE) $(MAKESILENT) -f holon/axon_bus/CMakeFiles/axon_bus.dir/build.make holon/axon_bus/CMakeFiles/axon_bus.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/open_vinc/src/build/CMakeFiles --progress-num=1,2,3 "Built target axon_bus"
-.PHONY : holon/axon_bus/CMakeFiles/axon_bus.dir/all
+vinc/axon_bus/CMakeFiles/axon_bus.dir/all: vinc/CMakeFiles/generate_messages.dir/all
+vinc/axon_bus/CMakeFiles/axon_bus.dir/all: vinc/module/CMakeFiles/module.dir/all
+	$(MAKE) $(MAKESILENT) -f vinc/axon_bus/CMakeFiles/axon_bus.dir/build.make vinc/axon_bus/CMakeFiles/axon_bus.dir/depend
+	$(MAKE) $(MAKESILENT) -f vinc/axon_bus/CMakeFiles/axon_bus.dir/build.make vinc/axon_bus/CMakeFiles/axon_bus.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/code/open-vinc/src/build/CMakeFiles --progress-num=1,2,3 "Built target axon_bus"
+.PHONY : vinc/axon_bus/CMakeFiles/axon_bus.dir/all
 
 # Build rule for subdir invocation for target.
-holon/axon_bus/CMakeFiles/axon_bus.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 9
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 holon/axon_bus/CMakeFiles/axon_bus.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 0
-.PHONY : holon/axon_bus/CMakeFiles/axon_bus.dir/rule
+vinc/axon_bus/CMakeFiles/axon_bus.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 9
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vinc/axon_bus/CMakeFiles/axon_bus.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 0
+.PHONY : vinc/axon_bus/CMakeFiles/axon_bus.dir/rule
 
 # Convenience name for target.
-axon_bus: holon/axon_bus/CMakeFiles/axon_bus.dir/rule
+axon_bus: vinc/axon_bus/CMakeFiles/axon_bus.dir/rule
 .PHONY : axon_bus
 
 # clean rule for target.
-holon/axon_bus/CMakeFiles/axon_bus.dir/clean:
-	$(MAKE) $(MAKESILENT) -f holon/axon_bus/CMakeFiles/axon_bus.dir/build.make holon/axon_bus/CMakeFiles/axon_bus.dir/clean
-.PHONY : holon/axon_bus/CMakeFiles/axon_bus.dir/clean
+vinc/axon_bus/CMakeFiles/axon_bus.dir/clean:
+	$(MAKE) $(MAKESILENT) -f vinc/axon_bus/CMakeFiles/axon_bus.dir/build.make vinc/axon_bus/CMakeFiles/axon_bus.dir/clean
+.PHONY : vinc/axon_bus/CMakeFiles/axon_bus.dir/clean
 
 #=============================================================================
-# Target rules for target holon/module/CMakeFiles/module.dir
+# Target rules for target vinc/module/CMakeFiles/module.dir
 
 # All Build rule for target.
-holon/module/CMakeFiles/module.dir/all:
-	$(MAKE) $(MAKESILENT) -f holon/module/CMakeFiles/module.dir/build.make holon/module/CMakeFiles/module.dir/depend
-	$(MAKE) $(MAKESILENT) -f holon/module/CMakeFiles/module.dir/build.make holon/module/CMakeFiles/module.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/open_vinc/src/build/CMakeFiles --progress-num=7,8,9 "Built target module"
-.PHONY : holon/module/CMakeFiles/module.dir/all
+vinc/module/CMakeFiles/module.dir/all:
+	$(MAKE) $(MAKESILENT) -f vinc/module/CMakeFiles/module.dir/build.make vinc/module/CMakeFiles/module.dir/depend
+	$(MAKE) $(MAKESILENT) -f vinc/module/CMakeFiles/module.dir/build.make vinc/module/CMakeFiles/module.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/code/open-vinc/src/build/CMakeFiles --progress-num=5,6,7 "Built target module"
+.PHONY : vinc/module/CMakeFiles/module.dir/all
 
 # Build rule for subdir invocation for target.
-holon/module/CMakeFiles/module.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 3
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 holon/module/CMakeFiles/module.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 0
-.PHONY : holon/module/CMakeFiles/module.dir/rule
+vinc/module/CMakeFiles/module.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 3
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vinc/module/CMakeFiles/module.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 0
+.PHONY : vinc/module/CMakeFiles/module.dir/rule
 
 # Convenience name for target.
-module: holon/module/CMakeFiles/module.dir/rule
+module: vinc/module/CMakeFiles/module.dir/rule
 .PHONY : module
 
 # clean rule for target.
-holon/module/CMakeFiles/module.dir/clean:
-	$(MAKE) $(MAKESILENT) -f holon/module/CMakeFiles/module.dir/build.make holon/module/CMakeFiles/module.dir/clean
-.PHONY : holon/module/CMakeFiles/module.dir/clean
+vinc/module/CMakeFiles/module.dir/clean:
+	$(MAKE) $(MAKESILENT) -f vinc/module/CMakeFiles/module.dir/build.make vinc/module/CMakeFiles/module.dir/clean
+.PHONY : vinc/module/CMakeFiles/module.dir/clean
 
 #=============================================================================
-# Target rules for target holon/holon_test/CMakeFiles/holon_test.dir
+# Target rules for target vinc/vinc_test/CMakeFiles/vinc_test.dir
 
 # All Build rule for target.
-holon/holon_test/CMakeFiles/holon_test.dir/all: holon/CMakeFiles/generate_messages.dir/all
-holon/holon_test/CMakeFiles/holon_test.dir/all: holon/axon_bus/CMakeFiles/axon_bus.dir/all
-holon/holon_test/CMakeFiles/holon_test.dir/all: holon/module/CMakeFiles/module.dir/all
-	$(MAKE) $(MAKESILENT) -f holon/holon_test/CMakeFiles/holon_test.dir/build.make holon/holon_test/CMakeFiles/holon_test.dir/depend
-	$(MAKE) $(MAKESILENT) -f holon/holon_test/CMakeFiles/holon_test.dir/build.make holon/holon_test/CMakeFiles/holon_test.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/open_vinc/src/build/CMakeFiles --progress-num=5,6 "Built target holon_test"
-.PHONY : holon/holon_test/CMakeFiles/holon_test.dir/all
+vinc/vinc_test/CMakeFiles/vinc_test.dir/all: vinc/CMakeFiles/generate_messages.dir/all
+vinc/vinc_test/CMakeFiles/vinc_test.dir/all: vinc/axon_bus/CMakeFiles/axon_bus.dir/all
+vinc/vinc_test/CMakeFiles/vinc_test.dir/all: vinc/module/CMakeFiles/module.dir/all
+	$(MAKE) $(MAKESILENT) -f vinc/vinc_test/CMakeFiles/vinc_test.dir/build.make vinc/vinc_test/CMakeFiles/vinc_test.dir/depend
+	$(MAKE) $(MAKESILENT) -f vinc/vinc_test/CMakeFiles/vinc_test.dir/build.make vinc/vinc_test/CMakeFiles/vinc_test.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/code/open-vinc/src/build/CMakeFiles --progress-num=12,13 "Built target vinc_test"
+.PHONY : vinc/vinc_test/CMakeFiles/vinc_test.dir/all
 
 # Build rule for subdir invocation for target.
-holon/holon_test/CMakeFiles/holon_test.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 11
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 holon/holon_test/CMakeFiles/holon_test.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 0
-.PHONY : holon/holon_test/CMakeFiles/holon_test.dir/rule
+vinc/vinc_test/CMakeFiles/vinc_test.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 11
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vinc/vinc_test/CMakeFiles/vinc_test.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 0
+.PHONY : vinc/vinc_test/CMakeFiles/vinc_test.dir/rule
 
 # Convenience name for target.
-holon_test: holon/holon_test/CMakeFiles/holon_test.dir/rule
-.PHONY : holon_test
+vinc_test: vinc/vinc_test/CMakeFiles/vinc_test.dir/rule
+.PHONY : vinc_test
 
 # clean rule for target.
-holon/holon_test/CMakeFiles/holon_test.dir/clean:
-	$(MAKE) $(MAKESILENT) -f holon/holon_test/CMakeFiles/holon_test.dir/build.make holon/holon_test/CMakeFiles/holon_test.dir/clean
-.PHONY : holon/holon_test/CMakeFiles/holon_test.dir/clean
+vinc/vinc_test/CMakeFiles/vinc_test.dir/clean:
+	$(MAKE) $(MAKESILENT) -f vinc/vinc_test/CMakeFiles/vinc_test.dir/build.make vinc/vinc_test/CMakeFiles/vinc_test.dir/clean
+.PHONY : vinc/vinc_test/CMakeFiles/vinc_test.dir/clean
 
 #=============================================================================
-# Target rules for target holon/stem_shell/CMakeFiles/stem_shell.dir
+# Target rules for target vinc/stem_shell/CMakeFiles/stem_shell.dir
 
 # All Build rule for target.
-holon/stem_shell/CMakeFiles/stem_shell.dir/all: holon/axon_bus/CMakeFiles/axon_bus.dir/all
-holon/stem_shell/CMakeFiles/stem_shell.dir/all: holon/module/CMakeFiles/module.dir/all
-holon/stem_shell/CMakeFiles/stem_shell.dir/all: holon/holon_test/CMakeFiles/holon_test.dir/all
-	$(MAKE) $(MAKESILENT) -f holon/stem_shell/CMakeFiles/stem_shell.dir/build.make holon/stem_shell/CMakeFiles/stem_shell.dir/depend
-	$(MAKE) $(MAKESILENT) -f holon/stem_shell/CMakeFiles/stem_shell.dir/build.make holon/stem_shell/CMakeFiles/stem_shell.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/open_vinc/src/build/CMakeFiles --progress-num=12,13 "Built target stem_shell"
-.PHONY : holon/stem_shell/CMakeFiles/stem_shell.dir/all
+vinc/stem_shell/CMakeFiles/stem_shell.dir/all: vinc/axon_bus/CMakeFiles/axon_bus.dir/all
+vinc/stem_shell/CMakeFiles/stem_shell.dir/all: vinc/module/CMakeFiles/module.dir/all
+vinc/stem_shell/CMakeFiles/stem_shell.dir/all: vinc/vinc_test/CMakeFiles/vinc_test.dir/all
+	$(MAKE) $(MAKESILENT) -f vinc/stem_shell/CMakeFiles/stem_shell.dir/build.make vinc/stem_shell/CMakeFiles/stem_shell.dir/depend
+	$(MAKE) $(MAKESILENT) -f vinc/stem_shell/CMakeFiles/stem_shell.dir/build.make vinc/stem_shell/CMakeFiles/stem_shell.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/dawgzone/code/open-vinc/src/build/CMakeFiles --progress-num=10,11 "Built target stem_shell"
+.PHONY : vinc/stem_shell/CMakeFiles/stem_shell.dir/all
 
 # Build rule for subdir invocation for target.
-holon/stem_shell/CMakeFiles/stem_shell.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 13
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 holon/stem_shell/CMakeFiles/stem_shell.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 0
-.PHONY : holon/stem_shell/CMakeFiles/stem_shell.dir/rule
+vinc/stem_shell/CMakeFiles/stem_shell.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 13
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vinc/stem_shell/CMakeFiles/stem_shell.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 0
+.PHONY : vinc/stem_shell/CMakeFiles/stem_shell.dir/rule
 
 # Convenience name for target.
-stem_shell: holon/stem_shell/CMakeFiles/stem_shell.dir/rule
+stem_shell: vinc/stem_shell/CMakeFiles/stem_shell.dir/rule
 .PHONY : stem_shell
 
 # clean rule for target.
-holon/stem_shell/CMakeFiles/stem_shell.dir/clean:
-	$(MAKE) $(MAKESILENT) -f holon/stem_shell/CMakeFiles/stem_shell.dir/build.make holon/stem_shell/CMakeFiles/stem_shell.dir/clean
-.PHONY : holon/stem_shell/CMakeFiles/stem_shell.dir/clean
+vinc/stem_shell/CMakeFiles/stem_shell.dir/clean:
+	$(MAKE) $(MAKESILENT) -f vinc/stem_shell/CMakeFiles/stem_shell.dir/build.make vinc/stem_shell/CMakeFiles/stem_shell.dir/clean
+.PHONY : vinc/stem_shell/CMakeFiles/stem_shell.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

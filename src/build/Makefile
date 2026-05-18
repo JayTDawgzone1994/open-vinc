@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/dawgzone/open_vinc/src
+CMAKE_SOURCE_DIR = /home/dawgzone/code/open-vinc/src
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/dawgzone/open_vinc/src/build
+CMAKE_BINARY_DIR = /home/dawgzone/code/open-vinc/src/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles /home/dawgzone/open_vinc/src/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles /home/dawgzone/code/open-vinc/src/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/open_vinc/src/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/dawgzone/code/open-vinc/src/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -126,7 +126,7 @@ generate_messages: cmake_check_build_system
 
 # fast build rule for target.
 generate_messages/fast:
-	$(MAKE) $(MAKESILENT) -f holon/CMakeFiles/generate_messages.dir/build.make holon/CMakeFiles/generate_messages.dir/build
+	$(MAKE) $(MAKESILENT) -f vinc/CMakeFiles/generate_messages.dir/build.make vinc/CMakeFiles/generate_messages.dir/build
 .PHONY : generate_messages/fast
 
 #=============================================================================
@@ -139,7 +139,7 @@ ribosome: cmake_check_build_system
 
 # fast build rule for target.
 ribosome/fast:
-	$(MAKE) $(MAKESILENT) -f holon/ribosome/CMakeFiles/ribosome.dir/build.make holon/ribosome/CMakeFiles/ribosome.dir/build
+	$(MAKE) $(MAKESILENT) -f vinc/ribosome/CMakeFiles/ribosome.dir/build.make vinc/ribosome/CMakeFiles/ribosome.dir/build
 .PHONY : ribosome/fast
 
 #=============================================================================
@@ -152,7 +152,7 @@ axon_bus: cmake_check_build_system
 
 # fast build rule for target.
 axon_bus/fast:
-	$(MAKE) $(MAKESILENT) -f holon/axon_bus/CMakeFiles/axon_bus.dir/build.make holon/axon_bus/CMakeFiles/axon_bus.dir/build
+	$(MAKE) $(MAKESILENT) -f vinc/axon_bus/CMakeFiles/axon_bus.dir/build.make vinc/axon_bus/CMakeFiles/axon_bus.dir/build
 .PHONY : axon_bus/fast
 
 #=============================================================================
@@ -165,21 +165,21 @@ module: cmake_check_build_system
 
 # fast build rule for target.
 module/fast:
-	$(MAKE) $(MAKESILENT) -f holon/module/CMakeFiles/module.dir/build.make holon/module/CMakeFiles/module.dir/build
+	$(MAKE) $(MAKESILENT) -f vinc/module/CMakeFiles/module.dir/build.make vinc/module/CMakeFiles/module.dir/build
 .PHONY : module/fast
 
 #=============================================================================
-# Target rules for targets named holon_test
+# Target rules for targets named vinc_test
 
 # Build rule for target.
-holon_test: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 holon_test
-.PHONY : holon_test
+vinc_test: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vinc_test
+.PHONY : vinc_test
 
 # fast build rule for target.
-holon_test/fast:
-	$(MAKE) $(MAKESILENT) -f holon/holon_test/CMakeFiles/holon_test.dir/build.make holon/holon_test/CMakeFiles/holon_test.dir/build
-.PHONY : holon_test/fast
+vinc_test/fast:
+	$(MAKE) $(MAKESILENT) -f vinc/vinc_test/CMakeFiles/vinc_test.dir/build.make vinc/vinc_test/CMakeFiles/vinc_test.dir/build
+.PHONY : vinc_test/fast
 
 #=============================================================================
 # Target rules for targets named stem_shell
@@ -191,7 +191,7 @@ stem_shell: cmake_check_build_system
 
 # fast build rule for target.
 stem_shell/fast:
-	$(MAKE) $(MAKESILENT) -f holon/stem_shell/CMakeFiles/stem_shell.dir/build.make holon/stem_shell/CMakeFiles/stem_shell.dir/build
+	$(MAKE) $(MAKESILENT) -f vinc/stem_shell/CMakeFiles/stem_shell.dir/build.make vinc/stem_shell/CMakeFiles/stem_shell.dir/build
 .PHONY : stem_shell/fast
 
 # Help Target
@@ -204,10 +204,10 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... generate_messages"
 	@echo "... axon_bus"
-	@echo "... holon_test"
 	@echo "... module"
 	@echo "... ribosome"
 	@echo "... stem_shell"
+	@echo "... vinc_test"
 .PHONY : help
 
 

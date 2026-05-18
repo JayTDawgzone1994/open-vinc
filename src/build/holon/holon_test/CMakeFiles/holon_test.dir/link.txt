@@ -1,2 +1,0 @@
-/usr/bin/ar qc libholon_test.a CMakeFiles/holon_test.dir/src/test_module.cpp.o
-/usr/bin/ranlib libholon_test.a
