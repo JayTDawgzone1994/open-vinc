@@ -1,9 +1,0 @@
-#pragma once
-#include <string_view>
-
-namespace vinc 
-{
-    // 透過 @ 符號，CMake 會在任何作業系統、任何編譯器下，精準填入無引號污染的絕對路徑
-    constexpr std::string_view kDefaultInputPath = "/home/dawgzone/code/open-vinc/src/messages";
-    constexpr std::string_view kDefaultOutputPath = "/home/dawgzone/code/open-vinc/src/vinc/vinc_messages/include/vinc_messages";
-}

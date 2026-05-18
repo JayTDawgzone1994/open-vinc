@@ -1,2 +1,0 @@
-/usr/bin/ar qc libaxon_bus.a CMakeFiles/axon_bus.dir/src/object_pool.cpp.o CMakeFiles/axon_bus.dir/src/axon_bus.cpp.o
-/usr/bin/ranlib libaxon_bus.a

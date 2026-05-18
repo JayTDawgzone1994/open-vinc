@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/ribosome.dir/src/ribosome.cpp.o -o ribosome 
