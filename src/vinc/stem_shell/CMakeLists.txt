@@ -9,6 +9,7 @@ include_directories(include)
 
 set(SOURCES
     src/stem_shell.cpp
+    src/scriptInterpreter.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
