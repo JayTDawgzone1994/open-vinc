@@ -1,112 +1,135 @@
 #include <ribosome/ribosome.hpp>
 
 #include <generated/ribosome_config.hpp>
+#include <stdexcept>
 
 namespace vinc
 {
 
 int8_t Ribosome::set_text_message_path(const std::filesystem::path& in_path)
 {
-    std::cout << "Setting text message path to: " << in_path.string() << std::endl;
-    //check path dir is exist
-    if (!std::filesystem::exists(in_path))
-    {
-        _last_error_str = "Input path does not exist.";
-        return -1;
-    }
+    // Validate during generation, after invalidating the previous output.
     _in_path = in_path;
-
-    std::cout << "Set text message path to: " << _in_path.string() << std::endl;
-
     return 0;
 }
 
 int8_t Ribosome::set_cpp_message_path(const std::filesystem::path& out_path)
 {
-    std::error_code ec;
-
-    // 1. 🧹 如果目標資料夾已經存在，先整包物理超渡（清空舊快取與殭屍檔案）
-    if (std::filesystem::exists(out_path, ec))
-    {
-        std::filesystem::remove_all(out_path, ec);
-        if (ec) [[unlikely]]
-        {
-            _last_error_str = "Failed to clear existing output directory: " + ec.message();
-            return -1;
-        }
-    }
-    else if (ec) [[unlikely]] // 預防 exists 函式本身因極端狀況（如上層權限崩潰）而失敗
-    {
-        _last_error_str = "Failed to check output directory existence: " + ec.message();
-        return -1;
-    }
-
-    // 2. 📁 重新建立一個全新、乾乾淨淨的空資料夾
-    std::filesystem::create_directories(out_path, ec);
-    if (ec) [[unlikely]]
-    {
-        _last_error_str = "Failed to create output directory: " + ec.message();
-        return -1;
-    }
-
-    // 3. 成功過關，寫入成員變數
     _out_path = out_path;
-
-    std::cout << "Set C++ message output path to: " << _out_path.string() << std::endl;
     return 0;
 }
 
 int8_t Ribosome::make_ligand()
 {
-    if(load_all_msg_files() != 0)
-    {
-        std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << _last_error_str << std::endl;
-        return -1;
-    }
+    namespace fs = std::filesystem;
+    // A fixed sibling directory also excludes concurrent generators sharing
+    // this output. A leftover directory after a process crash requires cleanup.
+    struct StagingDirectory {
+        fs::path path;
+        bool owned = false;
+        ~StagingDirectory() {
+            if (!owned) return;
+            std::error_code ec;
+            fs::remove_all(path, ec);
+            if (ec) std::cerr << "Failed to clean staging directory " << path << ": " << ec.message() << '\n';
+        }
+    } staging;
 
-    printf("Found %zu message files.\n", _raw_message_files.size());
+    try {
+        if (_out_path.empty() || _out_path.filename().empty() ||
+            _out_path.filename() == "." || _out_path.filename() == "..") {
+            throw std::runtime_error("Invalid generated-header output directory.");
+        }
+        const auto output = fs::absolute(_out_path).lexically_normal();
+        // Never follow a symlink when deleting the previous generated headers.
+        if (fs::is_symlink(fs::symlink_status(output))) {
+            throw std::runtime_error("Output directory must not be a symlink: " + output.string());
+        }
+        fs::create_directories(output.parent_path());
+        staging.path = output.parent_path() / (output.filename().string() + ".ribosome-stage");
+        if (!fs::create_directory(staging.path)) {
+            throw std::runtime_error("Staging directory already exists (another generator or an interrupted run): " + staging.path.string());
+        }
+        staging.owned = true;
 
-    std::vector<MessageInfo> vars;
-    for(const auto& msg : _raw_message_files)
-    { 
-        MessageInfo msg_info;
-        if(parse_message_file(msg.path, msg_info))
+        // Fail closed: old headers must not survive a failed generation attempt.
+        fs::remove_all(output);
+
+        const fs::path template_path(kDefaultTemplatePath);
+        std::ifstream template_file(template_path);
+        if (!template_file.is_open()) {
+            throw std::runtime_error("Failed to open message template: " + template_path.string());
+        }
+        std::string template_text;
+        std::string template_line;
+        while (std::getline(template_file, template_line)) {
+            template_text += template_line + '\n';
+        }
+        if (template_file.bad() || !template_file.eof()) {
+            throw std::runtime_error("Failed to read message template: " + template_path.string());
+        }
+        if (template_text.find_first_not_of(" \t\r\n") == std::string::npos) {
+            throw std::runtime_error("Message template is empty: " + template_path.string());
+        }
+
+        if(load_all_msg_files() != 0)
         {
-            printf("Failed to parse message file: %s\n", msg.path.string().c_str());
-            printf("%s\n", _last_error_str.c_str());
+            std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << _last_error_str << std::endl;
             return -1;
         }
-        printf("Parsed message [%s]: with %zu variables.\n", msg_info.name.c_str(), msg_info.variables.size());
-        update_message_sha(msg_info);
-        vars.push_back(msg_info);
-    }
 
-    std::cout << "Checking for hash collisions... ";
-    if (check_global_collisions(vars) != 0) {
-        std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << std::endl;
-        std::cerr << _last_error_str << std::endl;
+        printf("Found %zu message files.\n", _raw_message_files.size());
+
+        std::vector<MessageInfo> vars;
+        for(const auto& msg : _raw_message_files)
+        {
+            MessageInfo msg_info;
+            if(parse_message_file(msg.path, msg_info))
+            {
+                printf("Failed to parse message file: %s\n", msg.path.string().c_str());
+                printf("%s\n", _last_error_str.c_str());
+                return -1;
+            }
+            printf("Parsed message [%s]: with %zu variables.\n", msg_info.name.c_str(), msg_info.variables.size());
+            update_message_sha(msg_info);
+            vars.push_back(msg_info);
+        }
+
+        std::cout << "Checking for hash collisions... ";
+        if (check_global_collisions(vars) != 0) {
+            std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << std::endl;
+            std::cerr << _last_error_str << std::endl;
+            return -1;
+        }
+        std::cout << ANSI_GRN << "[OK]" << ANSI_RES << std::endl;
+
+        for(const auto& msg : vars)
+        {
+            const auto output_path = staging.path / (msg.name + ".hpp");
+            if (build_from_template(msg, template_text, output_path) != 0) {
+                std::cerr << "[FAILED] " << _last_error_str << '\n';
+                return -1;
+            }
+        }
+
+        // =================================================================
+        // 🎯【重構後調用】呼叫獨立打包函式
+        // =================================================================
+        if (generate_all_messages_header(vars, staging.path) != 0)
+        {
+            std::cout << ANSI_RED << "[FAILED] " << ANSI_RES << _last_error_str << std::endl;
+            return -1;
+        }
+
+        fs::rename(staging.path, output);
+        staging.owned = false;
+        std::cout << "Generated " << vars.size() << " message headers and all_messages.hpp at: " << output << '\n';
+        return 0;
+    } catch (const std::exception& error) {
+        _last_error_str = error.what();
+        std::cerr << "[FAILED] " << _last_error_str << '\n';
         return -1;
     }
-    std::cout << ANSI_GRN << "[OK]" << ANSI_RES << std::endl;
-
-    for(const auto& msg : vars)
-    {
-        std::filesystem::path template_path = "D:\\dead-world\\src\\vinc\\ribosome\\data\\message_sample.txt";
-        std::filesystem::path output_path = _out_path / (msg.name + ".hpp");
-        build_from_template(msg, template_path.string(), output_path.string());
-        printf("Generated message class for [%s] at: %s\n", msg.name.c_str(), output_path.string().c_str());
-    }
-
-    // =================================================================
-    // 🎯【重構後調用】呼叫獨立打包函式
-    // =================================================================
-    if (generate_all_messages_header(vars) != 0)
-    {
-        std::cout << ANSI_RED << "[FAILED] " << ANSI_RES << _last_error_str << std::endl;
-        return -1;
-    }
-
-    return 0;
 }
 
 int8_t Ribosome::load_all_msg_files()
@@ -135,7 +158,7 @@ int8_t Ribosome::load_all_msg_files()
         return -3;
     }
 
-    // 使用非拋出異常的方式迭代
+    // Iteration failures are caught by make_ligand().
     for (const auto& entry : it) 
     {
         const auto& path = entry.path();
@@ -144,7 +167,11 @@ int8_t Ribosome::load_all_msg_files()
         
         // 檢查是否為一般檔案
         bool is_reg = std::filesystem::is_regular_file(path, ec);
-        if (!ec && is_reg && path.extension() == ".msg") {
+        if (ec) {
+            _last_error_str = "Failed to inspect message file " + path.string() + ": " + ec.message();
+            return -1;
+        }
+        if (is_reg && path.extension() == ".msg") {
             RawMessage msg;
             msg.name = path.stem().string();
             msg.path = path;
@@ -264,18 +291,22 @@ int8_t Ribosome::parse_message_file(const std::filesystem::path& path, MessageIn
         }
     }
 
+    if (file.bad() || !file.eof()) {
+        _last_error_str = "Failed to read message file: " + path.string();
+        return -1;
+    }
     file.close();
     return 0;
 }
 
-void Ribosome::build_from_template(const MessageInfo& msg, const std::string& template_path, const std::string& output_path) 
+int8_t Ribosome::build_from_template(const MessageInfo& msg, const std::string& template_text, const std::filesystem::path& output_path)
 {
-    std::ifstream t_file(template_path);
+    std::istringstream t_file(template_text);
     std::ofstream o_file(output_path);
 
-    if (!t_file.is_open() || !o_file.is_open()) {
-        // 噴個偏執狂必備的 error
-        return;
+    if (!o_file.is_open()) {
+        _last_error_str = "Failed to open generated header for writing: " + output_path.string();
+        return -1;
     }
 
     std::map<std::string, std::string> block_macros = 
@@ -325,8 +356,12 @@ void Ribosome::build_from_template(const MessageInfo& msg, const std::string& te
         o_file << line << "\n";
     }
 
-    t_file.close();
     o_file.close();
+    if (!o_file) {
+        _last_error_str = "Failed to write generated header: " + output_path.string();
+        return -1;
+    }
+    return 0;
 }
 
 
@@ -518,9 +553,9 @@ void Ribosome::replace_all(std::string& str, const std::string& from, const std:
     }
 }
 
-int8_t Ribosome::generate_all_messages_header(const std::vector<MessageInfo>& all_msgs)
+int8_t Ribosome::generate_all_messages_header(const std::vector<MessageInfo>& all_msgs, const std::filesystem::path& output_dir)
 {
-    std::filesystem::path all_msg_path = _out_path / "all_messages.hpp";
+    std::filesystem::path all_msg_path = output_dir / "all_messages.hpp";
     std::ofstream all_msg_file(all_msg_path);
     if (!all_msg_file.is_open())
     {
@@ -537,11 +572,13 @@ int8_t Ribosome::generate_all_messages_header(const std::vector<MessageInfo>& al
     // 點名所有解析成功的 message，吐出對應的 include 程式碼
     for (const auto& msg : all_msgs)
     {
-        all_msg_file << "#include <vinc_message/" << msg.name << ".hpp>\n";
+        all_msg_file << "#include <vinc_messages/" << msg.name << ".hpp>\n";
     }
     all_msg_file.close();
-
-    printf("Generated master message header [all_messages.hpp] at: %s\n", all_msg_path.string().c_str());
+    if (!all_msg_file) {
+        _last_error_str = "Failed to write master message header: " + all_msg_path.string();
+        return -1;
+    }
     return 0;
 }
 
@@ -554,7 +591,7 @@ std::string Ribosome::generate_includes_code(const MessageInfo& msg)
     {
         if (var.is_func == false)
         {
-            ss << "#include <vinc_message/" << var.type << ".hpp>n";
+            ss << "#include <vinc_messages/" << var.type << ".hpp>\n";
         }
     }
 
@@ -799,7 +836,10 @@ int main()
         std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << std::endl;
         return -1;
     }
-    ribosome.set_cpp_message_path(vinc::kDefaultOutputPath);
+    if (ribosome.set_cpp_message_path(vinc::kDefaultOutputPath) != 0) {
+        std::cerr << "[FAILED] Could not set generated-header output path.\n";
+        return -1;
+    }
 
     return ribosome.make_ligand();
 

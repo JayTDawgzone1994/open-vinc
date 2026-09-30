@@ -1,0 +1,131 @@
+# Run in a compiler environment, using a new TEST_ROOT for each invocation:
+# cmake -DTEST_ROOT=<absolute-new-directory> -P tests/ribosome_generation.cmake
+# Optional: -DTEST_GENERATOR=Ninja -DTEST_CXX_COMPILER=cl
+cmake_minimum_required(VERSION 3.20)
+if(NOT DEFINED TEST_ROOT OR NOT IS_ABSOLUTE "${TEST_ROOT}" OR EXISTS "${TEST_ROOT}")
+    message(FATAL_ERROR "TEST_ROOT must be an absolute path to a new, nonexistent directory")
+endif()
+get_filename_component(repo "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+file(MAKE_DIRECTORY "${TEST_ROOT}")
+file(COPY "${repo}/src" DESTINATION "${TEST_ROOT}")
+file(COPY "${repo}/tests/header_smoke" DESTINATION "${TEST_ROOT}/src/vinc")
+file(APPEND "${TEST_ROOT}/src/vinc/CMakeLists.txt" "\nadd_subdirectory(header_smoke)\n")
+set(source "${TEST_ROOT}/src")
+set(binary "${TEST_ROOT}/build")
+set(output "${source}/vinc/vinc_messages/include/vinc_messages")
+set(template "${source}/vinc/ribosome/data/message_sample.txt")
+file(READ "${template}" template_contents)
+set(configure_args)
+if(DEFINED TEST_GENERATOR)
+    list(APPEND configure_args -G "${TEST_GENERATOR}")
+endif()
+if(DEFINED TEST_CXX_COMPILER)
+    list(APPEND configure_args "-DCMAKE_CXX_COMPILER=${TEST_CXX_COMPILER}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${binary}"
+    -DCMAKE_BUILD_TYPE=Debug ${configure_args}
+    RESULT_VARIABLE result OUTPUT_VARIABLE log ERROR_VARIABLE errors TIMEOUT 120)
+file(WRITE "${TEST_ROOT}/configure.log" "${log}\n${errors}")
+if(NOT result STREQUAL "0")
+    message(FATAL_ERROR "Fixture configure failed: ${log}\n${errors}")
+endif()
+
+function(build_case name expect_success diagnostic)
+    set(build_target generate_messages)
+    if(ARGC GREATER 3)
+        set(build_target "${ARGV3}")
+    endif()
+    execute_process(COMMAND "${CMAKE_COMMAND}" --build "${binary}" --config Debug --target "${build_target}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE log ERROR_VARIABLE errors TIMEOUT 120)
+    file(WRITE "${TEST_ROOT}/${name}.log" "${log}\n${errors}")
+    if(expect_success)
+        if(NOT result STREQUAL "0")
+            message(FATAL_ERROR "${name} unexpectedly failed: ${log}\n${errors}")
+        endif()
+        file(GLOB headers "${output}/*.hpp")
+        list(LENGTH headers count)
+        file(GLOB messages "${source}/messages/*.msg")
+        list(LENGTH messages expected_count)
+        math(EXPR expected_count "${expected_count} + 1")
+        if(NOT count EQUAL expected_count)
+            message(FATAL_ERROR "Expected ${expected_count} generated headers, got ${count}")
+        endif()
+        foreach(header IN LISTS headers)
+            file(SIZE "${header}" size)
+            if(size EQUAL 0)
+                message(FATAL_ERROR "Generated an empty header: ${header}")
+            endif()
+        endforeach()
+        file(READ "${output}/float3.hpp" generated)
+        string(FIND "${generated}" "class float3" class_position)
+        string(FIND "${generated}" "\${" placeholder_position)
+        if(class_position EQUAL -1 OR NOT placeholder_position EQUAL -1)
+            message(FATAL_ERROR "Template substitution failed")
+        endif()
+    else()
+        if(result STREQUAL "0")
+            message(FATAL_ERROR "${name} unexpectedly succeeded")
+        endif()
+        string(FIND "${log}\n${errors}" "${diagnostic}" diagnostic_position)
+        if(diagnostic_position EQUAL -1)
+            message(FATAL_ERROR "${name} failed without expected diagnostic: ${log}\n${errors}")
+        endif()
+        if(EXISTS "${output}")
+            message(FATAL_ERROR "${name} left stale or partial output")
+        endif()
+    endif()
+    if(EXISTS "${output}/stale.hpp" OR EXISTS "${output}.ribosome-stage")
+        message(FATAL_ERROR "${name} left stale headers or staging files")
+    endif()
+    message(STATUS "PASS: ${name}")
+endfunction()
+
+build_case(normal_header_compilation TRUE "" message_header_smoke)
+file(WRITE "${output}/stale.hpp" "old output")
+build_case(regenerate_without_input_changes TRUE "")
+
+file(RENAME "${template}" "${template}.saved")
+build_case(missing_template FALSE "Failed to open message template" message_header_smoke)
+file(RENAME "${template}.saved" "${template}")
+build_case(recover_after_missing_template TRUE "")
+
+file(WRITE "${template}" " \n\t")
+build_case(empty_template FALSE "Message template is empty")
+file(WRITE "${template}" "${template_contents}")
+build_case(recover_after_empty_template TRUE "")
+
+file(RENAME "${source}/messages" "${source}/messages.saved")
+build_case(missing_input FALSE "Input path does not exist")
+file(RENAME "${source}/messages.saved" "${source}/messages")
+build_case(recover_after_missing_input TRUE "")
+
+file(WRITE "${source}/messages/broken.msg" "unknown_type value\n")
+build_case(invalid_message FALSE "Failed to parse message file")
+file(REMOVE "${source}/messages/broken.msg")
+build_case(recover_after_invalid_message TRUE "")
+
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${binary}" --config Debug
+    RESULT_VARIABLE result OUTPUT_VARIABLE log ERROR_VARIABLE errors TIMEOUT 180)
+file(WRITE "${TEST_ROOT}/full-build.log" "${log}\n${errors}")
+if(NOT result STREQUAL "0")
+    message(FATAL_ERROR "Full build failed; see ${TEST_ROOT}/full-build.log")
+endif()
+message(STATUS "PASS: full build")
+
+# Isolate nested include routing from the known production deserialize defect.
+file(WRITE "${source}/messages/nested.msg" "float3 position;\nint3 index;\n")
+file(WRITE "${template}" [=[
+#pragma once
+#include <vector>
+${DO_INCLUDE_DEPENDENT_MESSAGES}
+namespace vinc {
+class ${MESSAGE_NAME} {
+public:
+${DO_ADD_MESSAGE_FIELDS}
+};
+}
+]=])
+build_case(nested_header_compilation TRUE "" nested_header_smoke)
+file(REMOVE "${source}/messages/nested.msg")
+file(WRITE "${template}" "${template_contents}")
+build_case(restore_production_headers TRUE "" message_header_smoke)

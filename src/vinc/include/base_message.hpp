@@ -6,6 +6,8 @@
 #include <vector>
 #include <cstring>
 #include <typeindex>
+#include <limits>
+#include <type_traits>
 
 
 namespace vinc

@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 project(stem_shell LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -31,7 +31,11 @@ get_property(ALL_VINC_MODULES GLOBAL PROPERTY VINC_MODULES_LIST)
 if(MSVC)
     # MSVC 使用 /WHOLEARCHIVE 強制載入所有符號
     foreach(mod ${ALL_VINC_MODULES})
-        target_link_libraries(${PROJECT_NAME} PRIVATE -WHOLEARCHIVE:${mod})
+        # Link the target for build ordering and transitive dependencies.
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${mod})
+        target_link_options(${PROJECT_NAME} PRIVATE
+            "/WHOLEARCHIVE:$<TARGET_FILE:${mod}>"
+        )
     endforeach()
 else()
     # GCC/Clang 使用 --whole-archive

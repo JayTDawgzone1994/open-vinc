@@ -64,7 +64,7 @@ private:
 
     int8_t parse_message_file(const std::filesystem::path& path, MessageInfo& out_msg);
 
-    void build_from_template(const MessageInfo& msg, const std::string& template_path, const std::string& output_path);
+    int8_t build_from_template(const MessageInfo& msg, const std::string& template_text, const std::filesystem::path& output_path);
 
     bool is_fundamental_type(const std::string& type);
 
@@ -85,7 +85,7 @@ private:
 
     void replace_all(std::string& str, const std::string& from, const std::string& to);
 
-    int8_t generate_all_messages_header(const std::vector<MessageInfo>& all_msgs);
+    int8_t generate_all_messages_header(const std::vector<MessageInfo>& all_msgs, const std::filesystem::path& output_dir);
 
     std::string generate_includes_code(const MessageInfo& msg);
     std::string generate_fields_code(const MessageInfo& msg);

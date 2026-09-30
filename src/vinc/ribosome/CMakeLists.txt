@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 project(ribosome LANGUAGES CXX)
 
-# 因為你用了 line.starts_with("//")，這需要 C++20
-set(CMAKE_CXX_STANDARD 20)
+# 訊息產生器與框架統一使用 C++23
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -27,6 +27,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ribosome/ribosome_config.hpp.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/ribosome_config.hpp"
+    @ONLY
 )
 
 target_include_directories(ribosome PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")

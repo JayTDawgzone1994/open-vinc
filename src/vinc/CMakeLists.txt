@@ -1,12 +1,17 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 project(vinc LANGUAGES CXX)
 
 # =================================================================
-# ⚙️ 1. 全域 C++20 標準設定
+# ⚙️ 1. 全域 C++23 標準設定
 # =================================================================
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Source files contain UTF-8 text; do not depend on the Windows code page.
+if(MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
+endif()
 
 # 初始化全域模組註冊清單
 set_property(GLOBAL PROPERTY VINC_MODULES_LIST "")
@@ -16,9 +21,10 @@ set_property(GLOBAL PROPERTY VINC_MODULES_LIST "")
 # =================================================================
 # 這裡先定義任務藍圖，此時 ribosome 執行檔還不需要真正出生
 add_custom_target(generate_messages
-    COMMAND ribosome
+    COMMAND $<TARGET_FILE:ribosome>
     COMMENT "🧬 Ribosome is synthesizing messages from inputs..."
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    VERBATIM
 )
 
 # =================================================================
@@ -38,10 +44,7 @@ function(vinc_add_module TARGET_NAME)
     # 這一行會觸發 CMake 黑魔法，強制 axon_bus 必須比該子模組先編譯完成
     target_link_libraries(${TARGET_NAME} PRIVATE axon_bus)
     
-    target_include_directories(${TARGET_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/include")
-
-    # 🔒 強迫該子模組在編譯前，generate_messages 必須先執行完畢（拿到最新標頭檔）
-    add_dependencies(${TARGET_NAME} generate_messages)
+    # axon_bus publicly supplies vinc_messages, including generation ordering.
     
     message(STATUS "[Holon] Registered module: ${TARGET_NAME}")
 endfunction()
@@ -51,6 +54,8 @@ endfunction()
 # =================================================================
 # 這裡的載入順序不會影響底部的鋼鐵鎖鏈，但建議依邏輯層次排列
 add_subdirectory(ribosome)       # 訊息生成器執行檔 (ribosome)
+add_subdirectory(osal)           # Independent OS process primitives
+add_subdirectory(vinc_messages)  # Generated-header usage requirements
 add_subdirectory(axon_bus)       # 核心無鎖通訊公車庫 (axon_bus)
 add_subdirectory(module)         # 基礎模組框架庫 (module)
 
@@ -66,5 +71,4 @@ add_subdirectory(stem_shell)
 # 【鎖鏈一】強迫「執行代碼生成任務」前，必須先把 ribosome.exe 自己編譯出來！
 add_dependencies(generate_messages ribosome)
 
-# 【鎖鏈二】強迫「核心公車 axon_bus」編譯前，必須先讓工廠吐出最新的訊息標頭檔！
-add_dependencies(axon_bus generate_messages)
+# axon_bus and its consumers inherit generation ordering through vinc_messages.
