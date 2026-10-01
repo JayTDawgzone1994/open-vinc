@@ -1,3 +1,6 @@
+// Shared process-service state machine. The service retains children and exit records
+// while a monitor observes native exits; dropping a public view does not stop a child.
+
 #include "native.hpp"
 #include "process_pipe_native.hpp"
 
@@ -10,6 +13,8 @@
 
 namespace vinc::osal::detail {
 
+// One record per service identity, retained even after the native process is reaped.
+// Lock order is ServiceState::mutex before ProcessRecord::mutex when both are needed.
 struct ProcessRecord {
     ProcessId id;
     std::uint64_t pid = 0;

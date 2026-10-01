@@ -1,3 +1,6 @@
+// Transactional endpoint handoff: validate and pin first, spawn second, release parent ends last.
+// The duplex convenience API is two independent one-way streams, not a different transport.
+
 #include "pipe_state.hpp"
 #include "process_pipe_native.hpp"
 #include <vinc/osal/process_pipe.hpp>

@@ -1,4 +1,8 @@
 #pragma once
+
+// Private bootstrap manifest for explicit child endpoint inheritance.
+// Slots are application identities; native handles are temporary launch details.
+
 #include "pipe_native.hpp"
 #include <utility>
 

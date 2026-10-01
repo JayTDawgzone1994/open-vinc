@@ -1,3 +1,5 @@
+# Build real child fixtures, including a silent peer, for session/lifecycle failure tests.
+
 add_executable(module_process_helper module_helper.cpp ../src/module_main.cpp)
 target_link_libraries(module_process_helper PRIVATE module)
 add_executable(module_integration_tests module_tests.cpp)

@@ -1,3 +1,6 @@
+// Central Bus registry and shared-memory owner. One worker serializes topology changes
+// and process-exit cleanup; payload copies never pass through this broker.
+
 #include "protocol.hpp"
 #include <condition_variable>
 #include <deque>
@@ -10,6 +13,8 @@ namespace vinc::bus::detail {
 struct Broker::Impl {
     struct Peer { std::shared_ptr<control::Session> session; std::uint64_t last_request = 0; };
     struct Sub { std::uint64_t id, owner; std::uint32_t index; };
+    // A topic shares its schema and count, but each Publisher owns a separate ring.
+    // Adding another Publisher does not relocate memory already mapped by existing clients.
     struct Topic {
         std::uint64_t schema = 0;
         std::shared_ptr<NamedCounter> counter;
@@ -76,6 +81,8 @@ struct Broker::Impl {
         allocated -= Ring::control_bytes(ring->descriptor.slots, ring->descriptor.readers) + ring->descriptor.slots * Ring::slot_stride(ring->descriptor.bytes);
         t.publishers.erase(it);
     }
+    // Called only after a quiescent unsubscribe or confirmed owner-process exit.
+    // Clearing a live reader lease based only on a timeout would permit unsafe overwrite.
     void remove_subscriber(Topic& t, std::map<std::uint64_t, Sub>::iterator it) {
         for (auto& [_, p] : t.publishers) p->clear_reader(it->second.index);
         t.used[it->second.index] = false; t.subscribers.erase(it);
@@ -92,6 +99,8 @@ struct Broker::Impl {
         }
         peers.erase(owner); prune();
     }
+    // Run on the broker worker. Validate schema and aggregate memory limits before
+    // creating resources, then notify subscriptions of the resulting topology change.
     Result<control::Bytes> execute(const Work& w) {
         control::Reader r(w.frame.payload); control::Bytes body;
         if (w.frame.operation == Advertise) {
@@ -141,6 +150,8 @@ struct Broker::Impl {
         } else return std::unexpected(error(ErrorCode::Protocol, "unsupported Bus operation"));
         return body;
     }
+    // Serialize registration and cleanup work outside the ModuleManager supervisor.
+    // pending_work includes the active item, allowing shutdown to wait for cleanup completion.
     void run() {
         for (;;) {
             Work w;

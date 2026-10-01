@@ -1,3 +1,6 @@
+// Verify generated classes preserve value copies, bound field access and nested records.
+// Fixed-loan invalidation and malformed-schema tests exercise the same storage path used by Bus.
+
 #include <vinc_messages/all_messages.hpp>
 #include "framework_access.hpp"
 #include <vinc/osal/shared_memory.hpp>
@@ -50,6 +53,8 @@ void inspect(const Frame& frame) {
     require(frame.data().flags[0] && !frame.data().flags[1], "bool array");
     require(frame.data().labels[1].str() == "rear", "string array");
 }
+// Distinguish auto value copies from auto& aliases, especially for nested record fields.
+// Relocation must preserve a live binding while removal must invalidate it.
 void value_tests() {
     auto frame = vinc::make_message<Frame>(); fill(*frame); inspect(*frame);
     auto copied = frame->data().detections;

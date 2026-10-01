@@ -1,3 +1,6 @@
+# Build central supervision and the shared child runtime. The helper function
+# creates a separate executable per module and records it in the central launch catalog.
+
 cmake_minimum_required(VERSION 3.20)
 project(module LANGUAGES CXX)
 
@@ -27,6 +30,8 @@ function(vinc_add_process_module TARGET)
     add_executable(${TARGET} ${MOD_SOURCES} "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/src/module_main.cpp")
     target_link_libraries(${TARGET} PRIVATE module)
     set_property(GLOBAL APPEND PROPERTY VINC_PROCESS_TARGETS ${TARGET})
+    # Record the built executable's absolute path. This is a build-tree catalog,
+    # not yet a relocatable installation manifest.
     set_property(GLOBAL APPEND_STRING PROPERTY VINC_PROCESS_CATALOG
         "    if (!manager.register_module({\"${MOD_MODULE_NAME}\", std::filesystem::path(u8\"$<TARGET_FILE:${TARGET}>\"), \"${MOD_NODE_NAME}\"})) throw std::runtime_error(\"module catalog registration failed\");\n")
 endfunction()

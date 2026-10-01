@@ -1,4 +1,8 @@
 #pragma once
+
+// Private lifecycle and command operation numbers shared by central and child runtimes.
+// Keep these identities aligned on both ends of the control channel.
+
 #include <vinc/control/protocol.hpp>
 namespace vinc::detail {
 constexpr std::uint16_t lifecycle = static_cast<std::uint16_t>(control::Domain::Lifecycle);

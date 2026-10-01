@@ -1,4 +1,8 @@
 #pragma once
+
+// Typed cross-process publication for Ribosome-generated messages.
+// Socket handles registration/topology; each Publisher owns a shared-memory ring for payloads.
+
 #include <vinc/message/generated.hpp>
 #include <chrono>
 #include <expected>
@@ -13,13 +17,19 @@ enum class ErrorCode : std::uint32_t {
 };
 struct Error { ErrorCode code; std::string message; };
 template<class T> using Result = std::expected<T, Error>;
+// max_message_bytes is the complete encoded size of one message, including layout
+// metadata/alignment. Each Publisher gets its own ring; a requested one slot becomes two.
 struct PublisherOptions { std::uint32_t slots = 2; std::uint64_t max_message_bytes = 1024 * 1024; };
+// OldestRetained permits existing data; NewOnly starts each attached source cursor
+// at its current head. get_last() is independent of this next() cursor.
 enum class StartPosition { OldestRetained, NewOnly };
 struct SubscriberOptions { StartPosition start = StartPosition::OldestRetained; };
 struct Limits {
     std::uint32_t max_topics = 128, publishers_per_topic = 32, subscribers_per_topic = 128;
     std::uint64_t max_shared_bytes = 1024ULL * 1024 * 1024;
 };
+// Observe capacity and overwrite contention. A collision counts one reserve operation
+// that had to wait; wait times describe reader protection, not application processing time.
 struct PublisherStats {
     std::uint32_t requested_slots = 0, effective_slots = 0;
     std::uint64_t max_message_bytes = 0, shared_bytes = 0, published = 0;
@@ -44,6 +54,8 @@ template<class T> concept Message = std::is_base_of_v<message::GeneratedMessage<
 template<Message T> class Publisher;
 template<Message T> class Subscriber;
 
+// Move-only exclusive write access obtained from one Publisher. commit() consumes it.
+// Dropping an uncommitted loan intentionally leaves that Publisher blocked from borrowing again.
 template<Message T> class WriteLoan {
     friend class Publisher<T>;
     std::shared_ptr<detail::LoanCore> loan_;
@@ -63,6 +75,8 @@ public:
     T& operator*() { return *operator->(); }
 };
 
+// Runtime-attached entry point available through BaseModule::bus().
+// Registration may wait for the central broker; normal payload transfers use shared memory.
 class Client {
     friend class detail::RuntimeAccess;
     struct Impl;
@@ -96,6 +110,8 @@ public:
     Publisher(Publisher&&) noexcept = default;
     Publisher& operator=(Publisher&& other) noexcept { if (this != &other) { close(); core_ = std::move(other.core_); } return *this; }
     ~Publisher() { close(); }
+    // Reserve the next write slot. Overwrite waits for existing readers to finish their
+    // framework copy; there is no contention timeout while the Publisher remains open.
     Result<WriteLoan<T>> get_next() {
         auto b = detail::borrow(core_, T::schema());
         if (!b) return std::unexpected(b.error());
@@ -103,12 +119,16 @@ public:
         try { return WriteLoan<T>(std::move(*b)); }
         catch (const std::bad_alloc&) { detail::construction_failed(core_, loan); return std::unexpected(Error{ErrorCode::ResourceExhausted, "allocate message facade"}); }
     }
+    // Seal without a payload copy, assign publication metadata, and expose the slot.
+    // Saved references into this loan must not be used after a successful commit.
     Result<void> commit(WriteLoan<T>& loan) {
         if (!loan.value_) return std::unexpected(Error{ErrorCode::InvalidLoan, "empty or consumed loan"});
         auto r = detail::commit(core_, loan.loan_, message::detail::RecordAccess::binding(*loan.value_));
         if (r) { loan.value_.reset(); loan.loan_.reset(); }
         return r;
     }
+    // Copy a local message into a reserved slot without consuming the source.
+    // Reject an oversized packed image before reserving or modifying the ring.
     Result<void> push(const T& value) { return detail::push(core_, message::detail::RecordAccess::binding(value)); }
     PublisherStats stats() const { return detail::stats(core_); }
     void close() noexcept { detail::close(core_); core_.reset(); }
@@ -131,7 +151,11 @@ public:
     Subscriber(Subscriber&&) noexcept = default;
     Subscriber& operator=(Subscriber&& other) noexcept { if (this != &other) { close(); core_ = std::move(other.core_); } return *this; }
     ~Subscriber() { close(); }
+    // Return an owned local copy and advance only the chosen Publisher's cursor.
+    // Slow readers skip overwritten data; NoNewData means no eligible message is available now.
     Result<std::unique_ptr<T>> next() { return receive(false); }
+    // Return the newest currently visible message, even if already returned before.
+    // Do not advance next() progress; return NoPublishedData when no source has retained data.
     Result<std::unique_ptr<T>> get_last() { return receive(true); }
     void close() noexcept { detail::close(core_); core_.reset(); }
 };

@@ -1,3 +1,6 @@
+// Central supervision integration tests against real helper processes.
+// Check readiness, name allocation, request failure, parent loss, restart and stop behavior.
+
 #include <module/module_manager.hpp>
 #include <algorithm>
 #include <array>

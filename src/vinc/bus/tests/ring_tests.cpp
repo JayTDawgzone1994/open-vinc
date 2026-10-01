@@ -1,3 +1,6 @@
+// Low-level ring tests for publication, overwrite protection and reader contention.
+// Use private APIs deliberately to place readers/writers at protocol boundaries.
+
 #include "ring.hpp"
 #include <future>
 #include <iostream>

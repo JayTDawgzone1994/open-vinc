@@ -1,4 +1,8 @@
 #pragma once
+
+// Common OSAL result type: portable error category plus operation and native cause.
+// Keep the native error when reporting failures; a portable category alone loses diagnostics.
+
 #include <chrono>
 #include <expected>
 #include <system_error>

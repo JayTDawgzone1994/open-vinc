@@ -1,4 +1,8 @@
 #pragma once
+
+// MessageArray and the relocatable byte-image format used by generated message fields.
+// C++ wrappers and ownership metadata stay local; only encoded bytes cross process boundaries.
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -44,6 +48,8 @@ namespace detail {
 struct State;
 struct Image;
 class FrameworkAccess; // definition is in a framework-private, non-exported header
+// Index identifies a local descriptor; generation rejects references to removed/reused nodes.
+// These handles and Schema pointers are local bookkeeping, not the transmitted image format.
 struct Handle { std::uint64_t index = 0, generation = 0; friend bool operator==(Handle, Handle) = default; };
 struct Schema;
 // depth 0 = record, depth 1 = array of scalars/records, depth > 1 = nested array.
@@ -68,6 +74,8 @@ template<class T> inline constexpr bool scalar =
     std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::int32_t> ||
     std::is_same_v<T, std::uint64_t> || std::is_same_v<T, std::int64_t> ||
     std::is_same_v<T, float> || std::is_same_v<T, double>;
+// Select arena-backed elements for scalars, generated records and nested arrays.
+// Other C++ types use the local vector specialization below; Bus accepts generated messages only.
 template<class T> consteval bool transferable() {
     if constexpr (is_array<T>) return transferable<typename IsArray<T>::Element>();
     else return scalar<T> || Record<T>;
@@ -94,6 +102,8 @@ template<class T> Type type() {
     else return {scalar_code<T>(), 1};
 }
 template<Record T> Type record_type() { return {0, 0, &T::schema(), T::schema().hash}; }
+// Canonical scalar bytes use little endian. bool is one byte containing 0 or 1,
+// so no std::vector<bool> bit proxy or native bool representation enters the image.
 template<class T> auto encode(T value) {
     if constexpr (std::is_same_v<T, bool>) return std::array<std::byte, 1>{value ? std::byte{1} : std::byte{0}};
     else {
@@ -205,6 +215,8 @@ public:
         if (!h) return std::unexpected(h.error());
         return detail::replace({state_, *h, true}, detail::RecordAccess::binding(value));
     }
+    // at() returns a value: nested records/arrays are cloned into local storage.
+    // Use operator[] with auto& to keep a nested element bound to its owning message.
     [[nodiscard]] Result<T> at(std::uint64_t index) const {
         if constexpr (!detail::scalar<T>) {
             auto result = detail::child(state_, handle_, index);
@@ -220,6 +232,8 @@ public:
             return detail::decode<T>(*result);
         }
     }
+    // Scalar indexing uses a checked proxy, not a raw reference into a movable arena.
+    // Its saved revision detects structural edits that invalidate the old element access.
     class Reference {
     public:
         operator T() const { detail::check_node_epoch(state_, handle_, epoch_); return detail::checked(MessageArray(state_, handle_).at(index_)); }
@@ -243,6 +257,8 @@ public:
         if constexpr (!detail::scalar<T>) return static_cast<const T&>(element(index));
         else return detail::checked(at(index));
     }
+    // Iterators borrow their MessageArray wrapper; it must outlive iteration.
+    // Structural changes to that array invalidate the saved revision.
     template<bool Constant> class BasicIterator {
     public:
         using value_type = T;
@@ -268,6 +284,8 @@ public:
     Iterator end() { return Iterator(*this, size()); }
     ConstIterator begin() const { (void)size(); return ConstIterator(*this, 0); }
     ConstIterator end() const { return ConstIterator(*this, size()); }
+    // Import element by element through canonical encoding, including vector<bool>.
+    // The destination message budget is checked before allocating the temporary encoded buffer.
     [[nodiscard]] Result<void> copy_from(const std::vector<T>& values) requires (detail::scalar<T>) {
         constexpr auto stride = sizeof(detail::encode(T{}));
         if (values.size() > static_cast<std::size_t>((std::numeric_limits<std::ptrdiff_t>::max)()) / stride)
@@ -319,6 +337,8 @@ private:
     MessageArray(std::shared_ptr<detail::State> state, detail::Handle handle) : state_(std::move(state)), handle_(handle) {}
     MessageArray(detail::BindTag, detail::Binding b) : state_(std::move(b.state)), handle_(b.handle), field_(b.field) {}
     detail::Binding binding() const { return {state_, handle_, field_}; }
+    // Moving a field must not steal storage from its parent message. Detached arrays
+    // can transfer ownership; a bound field is copied into a separate local arena instead.
     static detail::Binding take_binding(MessageArray& other) {
         if (other.field_) return detail::checked(detail::clone(other.binding()));
         return {std::exchange(other.state_, {}), other.handle_, false};
@@ -375,6 +395,8 @@ private:
     std::vector<T> values_;
 };
 
+// Read-only access to a retained Snapshot. Nested array views share the image;
+// record elements are materialized as independent local message objects.
 template<class T> class MessageArrayView {
     template<class> friend class MessageArrayView;
     friend class Snapshot;
@@ -409,6 +431,8 @@ private:
     std::uint64_t id_;
 };
 
+// An immutable encoded image plus its owner. A borrowed framework snapshot keeps
+// the mapping alive, but Bus is still responsible for preventing slot reuse during access.
 class Snapshot {
 public:
     Snapshot() = default;
@@ -435,6 +459,8 @@ template<class T> Result<Snapshot> MessageArray<T>::snapshot(std::uint64_t max_b
     return detail::snapshot(state_, max_bytes); // snapshots the entire owning message
 }
 
+// Low-level local arena for composing root arrays. Generated message classes provide
+// the schema-bound application API; this owner is not a Bus ring or publisher.
 class Message {
 public:
     Message(); // local, growable; may throw bad_alloc during construction

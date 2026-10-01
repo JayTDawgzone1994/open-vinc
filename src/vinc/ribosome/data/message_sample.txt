@@ -5,5 +5,11 @@
 #include <sstream>
 ${DO_INCLUDE_DEPENDENT_MESSAGES}
 namespace vinc {
+// The generated Schema describes field order and types; it is local metadata.
+// Data_t fields are wrappers bound to one message arena, not a packed C++ wire struct.
+// data() returns that bound facade: auto& edits it, while a value copy owns local data.
+// Copy construction detaches; assignment preserves the destination binding and budget.
+// Array fields use MessageArray, so nested arrays share the owning message's capacity.
+// Only the encoded byte image crosses processes; never memcpy this message class.
 ${DO_MESSAGE_CLASS}
 }

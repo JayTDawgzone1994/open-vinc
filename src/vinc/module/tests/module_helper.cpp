@@ -1,3 +1,6 @@
+// Test-only BaseModule with controlled startup, command and stop behaviors.
+// Intentional hangs/crashes let the parent test the framework's supervision boundaries.
+
 #include <module/base_module.hpp>
 #include <fstream>
 #include <filesystem>

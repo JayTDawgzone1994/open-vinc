@@ -1,3 +1,6 @@
+// Encode fixed-width wire fields explicitly and decode arbitrary stream fragments.
+// Length checks happen before buffering a payload; callers must reject malformed frames.
+
 #include <vinc/control/protocol.hpp>
 #include <algorithm>
 #include <stdexcept>
@@ -37,6 +40,8 @@ std::string Reader::string() {
     std::string s(reinterpret_cast<const char*>(bytes_.data() + offset_), size);
     offset_ += size; return s;
 }
+// Wire layout: magic/version/kind, domain/operation, request ID, payload length, payload.
+// Do not memcpy Frame: vector storage, padding and native byte order are process-local.
 Bytes encode(const Frame& frame) {
     if (frame.payload.size() > max_payload) throw std::length_error("control payload limit");
     Bytes out; out.reserve(header_size + frame.payload.size());
@@ -45,6 +50,8 @@ Bytes encode(const Frame& frame) {
     put_u64(out, frame.request); put_u32(out, static_cast<std::uint32_t>(frame.payload.size()));
     out.insert(out.end(), frame.payload.begin(), frame.payload.end()); return out;
 }
+// One receive can contain half a header, several frames, or a frame plus a tail.
+// Accumulate only to the next boundary and validate the header before accepting its length.
 std::expected<std::vector<Frame>, std::string> Decoder::feed(std::span<const std::byte> bytes) {
     std::vector<Frame> frames;
     while (!bytes.empty()) {

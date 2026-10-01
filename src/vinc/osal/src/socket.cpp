@@ -1,3 +1,6 @@
+// Translate nonblocking OS socket calls into the shared OSAL contract.
+// Deadline helpers wait for readiness and retry; they do not implement a message protocol.
+
 #include "socket_native.hpp"
 #include <algorithm>
 

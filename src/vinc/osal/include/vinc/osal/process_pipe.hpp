@@ -1,4 +1,8 @@
 #pragma once
+
+// Optional child-process handoff for already-created Pipe endpoints.
+// This adapter connects Process and Pipe without making either depend on module commands.
+
 #include <vinc/osal/process.hpp>
 #include <vinc/osal/pipe.hpp>
 #include <variant>

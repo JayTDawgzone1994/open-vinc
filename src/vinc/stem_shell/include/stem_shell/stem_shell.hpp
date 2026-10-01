@@ -1,4 +1,8 @@
 #pragma once
+
+// Central user-facing Shell with asynchronous commands and a foreground Tcl script.
+// Its exit path waits for module processes and Bus cleanup before returning.
+
 #include <module/module_manager.hpp>
 #include <filesystem>
 #include <iosfwd>
@@ -12,10 +16,9 @@ public:
     ~StemShell();
     StemShell(const StemShell&) = delete;
     StemShell& operator=(const StemShell&) = delete;
-    void run();
-    // Synchronous compatibility entry for the existing script interpreter.
+    void run(std::filesystem::path startup_script = {}, std::vector<std::string> script_args = {});
+    // Synchronous command entry. Does not parse Tcl.
     int8_t process_line(const std::string&);
-    int8_t run_script(std::filesystem::path);
     std::string get_last_error() const;
     void request_shutdown();
     void wait_shutdown();

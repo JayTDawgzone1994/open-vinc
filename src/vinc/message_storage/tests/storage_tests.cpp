@@ -1,3 +1,6 @@
+// Arena contract tests for scalar/nested arrays, fixed loans and malformed images.
+// Also compare randomized edits with local reference data and open images in another process.
+
 #include <vinc/message/storage.hpp>
 #include "framework_access.hpp"
 #include <vinc/osal/shared_memory.hpp>
@@ -118,6 +121,8 @@ void nested_tests() {
     require(take(standalone[0].at(0)) == 1, "cross-message nested copy aliased");
     std::cout << "PASS: multiple roots, nested growth, deep copy, subtree removal, stale generations\n";
 }
+// Exercise fixed byte budgets through the private framework seam. Failed edits must
+// leave the previous snapshot unchanged, and sealed/revoked handles must reject access.
 void fixed_tests() {
     constexpr std::size_t limit = 1024 * 1024;
     auto backing = std::make_shared<std::vector<std::byte>>(limit);

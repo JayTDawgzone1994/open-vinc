@@ -1,3 +1,6 @@
+// Module-side Bus client: register through the control session, then read/write mapped rings.
+// User message objects stay local; shared write loans are explicitly sealed and committed.
+
 #include "protocol.hpp"
 #include "framework_access.hpp"
 #include <condition_variable>
@@ -12,6 +15,8 @@ template<class F> auto guarded(F&& f) -> decltype(f()) {
     catch (const message::AccessError& e) { return std::unexpected(storage_error(e.error())); }
     catch (const std::exception& e) { return std::unexpected(error(ErrorCode::InvalidData, e.what())); }
 }
+// Share the existing module control session. The module receive dispatcher fills
+// responses/topology while caller threads wait; no second reader competes for Socket frames.
 struct Transport {
     struct Pending { std::uint16_t operation; std::optional<control::Frame> response; };
     std::shared_ptr<control::Session> session;
@@ -95,6 +100,8 @@ struct LoanCore {
     message::detail::Binding binding;
     std::atomic<bool> active{true};
 };
+// The operation mutex prevents overlapping writer operations within this process.
+// Shared atomics separately protect the cross-process reader/writer boundary.
 struct PublisherCore {
     std::shared_ptr<Transport> transport;
     std::shared_ptr<Ring> ring;
@@ -147,6 +154,8 @@ void construction_failed(const std::shared_ptr<PublisherCore>& p, const std::sha
     std::lock_guard lock(p->operation);
     if (p->outstanding == loan) { abandon(loan); p->ring->abandon(loan->reservation); p->outstanding.reset(); }
 }
+// Only a matching outstanding loan can be committed. Seal revokes writable field
+// access, then timestamp/count are assigned immediately before ring publication.
 Result<void> commit(const std::shared_ptr<PublisherCore>& p, const std::shared_ptr<LoanCore>& loan, message::detail::Binding binding) {
     return guarded([&]() -> Result<void> {
         if (!p) return std::unexpected(error(ErrorCode::Closed, "empty Publisher"));
@@ -164,6 +173,8 @@ Result<void> commit(const std::shared_ptr<PublisherCore>& p, const std::shared_p
         return published;
     });
 }
+// Copied publication has no user-visible loan: reserve, render into shared storage,
+// then publish. Rollback abandons an unpublished reservation when an intermediate step fails.
 Result<void> push(const std::shared_ptr<PublisherCore>& p, message::detail::Binding binding) {
     return guarded([&]() -> Result<void> {
         if (!p) return std::unexpected(error(ErrorCode::Closed, "empty Publisher"));
@@ -222,6 +233,8 @@ Result<void> refresh(SubscriberCore& s) {
     }
     return {};
 }
+// Merge one candidate per Publisher. Protect only the selected payload during memcpy;
+// validation and C++ facade construction happen after releasing the shared read lease.
 Result<std::unique_ptr<BaseMessage>> read(const std::shared_ptr<SubscriberCore>& s, bool latest, const message::detail::Schema& schema, Factory factory) {
     return guarded([&]() -> Result<std::unique_ptr<BaseMessage>> {
         if (!s) return std::unexpected(error(ErrorCode::Closed, "empty Subscriber"));
@@ -241,6 +254,8 @@ Result<std::unique_ptr<BaseMessage>> read(const std::shared_ptr<SubscriberCore>&
             // Allocation and zero-initialization are outside the read protection.
             std::vector<std::byte> bytes(static_cast<std::size_t>(candidate.size));
             auto& ring = *selected->ring; const auto reader = selected->attachment.reader;
+            // The writer may have recycled the slot since selection/allocation. Revalidate
+            // after announcing the lease; retry rather than copying a torn or unrelated message.
             if (!ring.protect(candidate, reader)) continue;
             std::memcpy(bytes.data(), ring.payload(candidate).data(), bytes.size());
             ring.unprotect(reader); // Only the bounded payload copy held the lease.
@@ -248,6 +263,8 @@ Result<std::unique_ptr<BaseMessage>> read(const std::shared_ptr<SubscriberCore>&
             if (!binding) return std::unexpected(storage_error(binding.error()));
             auto value = factory(std::move(*binding));
             MessageAccess::metadata(*value, s->topic, selected->attachment.descriptor, candidate);
+            // Advance only after a complete local message exists. get_last() intentionally
+            // leaves all next() cursors unchanged, including when it returns the same message again.
             if (!latest) selected->cursor = candidate.sequence;
             return value;
         }

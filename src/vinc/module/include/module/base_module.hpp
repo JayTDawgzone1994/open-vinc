@@ -1,4 +1,8 @@
 #pragma once
+
+// Application extension point inside a child process.
+// Users implement hooks; the framework hides Socket commands, heartbeat and Bus attachment.
+
 #include <cstdint>
 #include <functional>
 #include <memory>

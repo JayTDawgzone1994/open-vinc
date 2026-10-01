@@ -1,3 +1,6 @@
+// Shell test module with argument/completion probes and controlled blocking hooks.
+// Its cleanup marker proves the central shutdown path reached the module lifecycle hook.
+
 #include <module/base_module.hpp>
 #include <filesystem>
 #include <fstream>

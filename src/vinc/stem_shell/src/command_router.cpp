@@ -1,3 +1,6 @@
+// Resolve builtins, factory starts, instance commands and legacy micro-programs.
+// Return a structured result so terminal display and Tcl errors share the same dispatch behavior.
+
 #include <stem_shell/command_router.hpp>
 #include <algorithm>
 #include <sstream>
@@ -39,14 +42,17 @@ CommandRouter::CommandRouter(ModuleManager& manager) : manager_(manager) {
     }
 }
 bool CommandRouter::builtin(std::string_view name) const { return builtins_.contains(std::string(name)); }
-CommandResult CommandRouter::execute(const std::vector<std::string>& args) {
+CommandResult CommandRouter::execute(const std::vector<std::string>& args, std::stop_token stop) {
+    if (stop.stop_requested()) return {false, false, "Script canceled"};
     if (args.empty()) return {};
     const auto& target = args.front();
     if (const auto b = builtins_.find(target); b != builtins_.end()) {
+        if (b->second == Builtin::Script || b->second == Builtin::Cancel)
+            return {false, false, target + " requires a Shell script session"};
         if (args.size() != 1) return {false, false, target + " takes no arguments"};
         if (b->second == Builtin::Exit) return {true, true, {}};
         std::ostringstream out;
-        out << "[Commands] help, exit (Ctrl+C also shuts down the framework)\n[Modules]";
+        out << "[Commands] help, srun file.tcl [args...], scancel, exit\nCtrl+D cancels a script; Ctrl+C shuts down the framework.\n[Modules]";
         for (const auto& name : manager_.get_registered_factory_names()) out << "\n  " << name;
         out << "\n[Instances]";
         for (const auto& s : manager_.snapshots()) {
@@ -62,14 +68,14 @@ CommandResult CommandRouter::execute(const std::vector<std::string>& args) {
         return {code == 0, false, code ? target + " returned " + std::to_string(code) : ""};
     }
     if (manager_.inspect(target)) {
-        auto result = manager_.command(target, args, control::Clock::now() + 5s);
+        auto result = manager_.command(target, args, control::Clock::now() + 5s, stop);
         if (!result) return {false, false, target + ": " + describe(result.error())};
         return {*result == 0, false, *result ? target + " returned " + std::to_string(*result) : ""};
     }
     if (manager_.has_factory(target)) {
         auto started = manager_.start_module(target, args);
         if (!started) return {false, false, target + ": " + describe(started.error())};
-        auto ready = manager_.wait_started(*started);
+        auto ready = manager_.wait_started(*started, stop);
         if (!ready) return {false, false, *started + ": " + describe(ready.error())};
         return {true, false, "Started " + *started};
     }

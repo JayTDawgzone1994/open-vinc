@@ -1,4 +1,8 @@
 #pragma once
+
+// Private ownership split between a named memory handle and each local mapping.
+// A mapping retains its owner until unmap; neither object stores message or ring metadata.
+
 #include <vinc/osal/shared_memory.hpp>
 #include <string>
 

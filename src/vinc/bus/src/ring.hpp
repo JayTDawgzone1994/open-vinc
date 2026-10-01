@@ -1,4 +1,8 @@
 #pragma once
+
+// Private per-Publisher ring format and read-lease protocol.
+// Control words are writable by participants; Subscribers map the payload region read-only.
+
 #include <vinc/bus/bus.hpp>
 #include <vinc/osal/shared_memory.hpp>
 #include <vinc/osal/shared_atomic.hpp>
@@ -8,6 +12,8 @@
 namespace vinc::bus::detail {
 using osal::SharedWord;
 using osal::shared_load; using osal::shared_store; using osal::shared_fetch_add; using osal::shared_compare_exchange;
+// Broker-issued identity and dimensions. owner is a process generation; rank is
+// registration order for equal timestamps. The names locate independently mapped regions.
 struct Descriptor {
     std::uint64_t id = 0, owner = 0, schema = 0, rank = 0;
     std::uint32_t slots = 0, readers = 0;
@@ -15,18 +21,28 @@ struct Descriptor {
     std::string control, data, counter, publisher;
 };
 struct Attachment { Descriptor descriptor; std::uint32_t reader = 0; std::uint64_t floor = 0; };
+// head is the last published sequence in this Publisher ring, not a topic-wide FIFO.
+// generation advances on each reservation, including a write that is later abandoned.
 struct alignas(64) RingHeader {
     std::uint64_t magic = 0, version = 1, id = 0, schema = 0, slots = 0, bytes = 0, readers = 0;
     SharedWord alive, head, generation, collisions, wait_total, wait_max, wait_start;
     std::uint64_t reserved[2]{};
 };
+// gate packs generation in the high bits and ready/draining/writing in the low two.
+// Reusing a physical slot cannot recreate an old token, preventing stale reader acceptance.
 struct alignas(64) Slot { SharedWord gate, sequence, timestamp, count, size; std::uint64_t reserved[3]{}; };
+// Each subscription owns one entry per ring. Zero means idle; a ready gate token
+// announces the exact slot generation whose bytes the framework is about to copy.
 struct alignas(64) ReaderSlot { SharedWord token; std::uint64_t reserved[7]{}; };
 static_assert(sizeof(RingHeader) == 128 && sizeof(Slot) == 64 && sizeof(ReaderSlot) == 64);
 struct Metadata { std::uint64_t sequence = 0, timestamp = 0, count = 0, size = 0, token = 0; std::uint32_t slot = 0; };
+// Merge currently visible candidates by monotonic timestamp, breaking ties by rank.
+// This cannot order against an earlier timestamp whose publisher has not exposed its slot yet.
 inline bool preferred(const Metadata& a, std::uint64_t a_rank, const Metadata& b, std::uint64_t b_rank, bool latest) {
     return a.timestamp == b.timestamp ? a_rank < b_rank : (latest ? a.timestamp > b.timestamp : a.timestamp < b.timestamp);
 }
+// Exclusive writable extent for one unpublished generation. Its span is only usable
+// while the Ring mapping is retained and this reservation has not been published or abandoned.
 struct Reservation { std::uint32_t slot; std::uint64_t sequence, generation; std::span<std::byte> bytes; };
 class Ring : public std::enable_shared_from_this<Ring> {
     osal::SharedMemory control_, data_;

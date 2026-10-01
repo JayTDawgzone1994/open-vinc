@@ -1,3 +1,6 @@
+# Build the common OSAL API with exactly one supported native backend.
+# Feature probes below enforce descriptor-isolation requirements before compiling POSIX spawn.
+
 cmake_minimum_required(VERSION 3.20)
 project(vinc_osal LANGUAGES CXX)
 

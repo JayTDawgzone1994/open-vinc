@@ -1,3 +1,6 @@
+# Use helper executables to test native process, Pipe and shared-memory lifetimes.
+# CTest timeouts bound fault scenarios that would otherwise leave a hanging test run.
+
 add_executable(osal_process_helper process_helper.cpp)
 target_link_libraries(osal_process_helper PRIVATE Threads::Threads)
 set_target_properties(osal_process_helper PROPERTIES

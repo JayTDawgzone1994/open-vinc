@@ -1,3 +1,6 @@
+// Common name, size and access checks for all shared-memory backends.
+// Mappings retain ownership independently, so closing a handle does not invalidate a live view.
+
 #include "shared_memory_state.hpp"
 #include <limits>
 #include <utility>
@@ -43,6 +46,8 @@ Result<SharedMemory> SharedMemory::open(std::string_view name, SharedMemoryAcces
     state->access = access;
     return SharedMemory(std::move(state));
 }
+// Validate local permissions before asking the backend to map. The mapping holds
+// a shared owner reference but its virtual address is meaningful only in this process.
 Result<SharedMemoryMapping> SharedMemory::map(std::uint64_t size, SharedMemoryAccess access) const {
     constexpr auto op = Operation::MapSharedMemory;
     if (!*this) return std::unexpected(OsError{ErrorCode::Closed, op});

@@ -37,12 +37,13 @@ The project is structured around several biologically inspired core components:
 *   **Message Bus (`bus`)**: Shared-memory publication and copied local reception of generated messages across Module processes. Socket carries registration and topology only. The older **Axon Bus (`axon_bus`)** remains as legacy code and is not the new transport.
 *   **Ribosome (`ribosome`)**: An automated message synthesizer and code generator. It reads simplified `.msg` definition files (located in `src/messages/`) and compiles them into type-safe C++ header files for the C++23 build (including SHA256 hashing for structural integrity validation).
 *   **Module Framework (`module`)**: The foundational building block for all system components. Developers extend `base_module` to create independent, modular logical units that are managed by the `module_manager`.
-*   **Stem Shell (`stem_shell`)**: An [interactive control interface](src/vinc/stem_shell/README.md) with bounded asynchronous command dispatch, quoted arguments, history and completion. Ctrl+C and `exit` wait for managed Module processes and Bus cleanup before restoring the terminal. The older script interpreter remains available separately.
+*   **Stem Shell (`stem_shell`, executable `Vinc`)**: An [interactive control interface](src/vinc/stem_shell/README.md) with bounded asynchronous command dispatch, quoted arguments, history and completion. Standard Tcl startup scripts use `Vinc -S file.tcl`; `srun file.tcl` runs scripts from the Shell. Ctrl+D cancels the foreground script; Ctrl+C and `exit` wait for managed Module processes and Bus cleanup. The legacy script interpreter and `-sc` option have been removed.
 
 ## Build Requirements
 
 *   **CMake** (Version 3.20 or higher; newer toolchains may require a newer CMake)
 *   A compiler and standard library supporting the **C++23** features used by the project (GCC, Clang, MSVC, etc.)
+*   Ninja; Windows uses MSVC and NMAKE from a Developer Command Prompt. Linux/macOS also need make and zlib development files for Tcl.
 
 CMake 3.20 introduced support for the `CXX_STANDARD` value `23`. The build requires this standard level and disables compiler-specific language extensions; it does not silently fall back to an older standard. This setting alone does not verify support for every C++23 feature.
 
@@ -53,11 +54,15 @@ The minimum Linux deployment target is Ubuntu 22.04, with a separately installed
 VINC relies on a strict CMake dependency chain to ensure that the Ribosome message generator is built first, which in turn generates the required message headers before compiling the Axon Bus and other downstream modules.
 
 ```bash
-mkdir -p build
-cd build
-cmake ../src
-cmake --build .
+git submodule update --init --recursive
+cmake -S src -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/debug
+ctest --test-dir build/debug --output-on-failure
 ```
+
+Use a separate build directory with `-DCMAKE_BUILD_TYPE=Release` for Release.
+The Tcl integration currently requires a single-configuration generator; see the
+[Tcl integration guide](library/tcl/README.md) for platform and deployment details.
 
 ## Creating a New Module
 

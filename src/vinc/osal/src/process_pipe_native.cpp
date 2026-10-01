@@ -1,3 +1,6 @@
+// Encode, validate and consume the one-time inherited-endpoint manifest.
+// Reject malformed or duplicate entries before exposing endpoints through PipeService.
+
 #include "process_pipe_native.hpp"
 #include <algorithm>
 #include <atomic>

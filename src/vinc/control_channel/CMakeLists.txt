@@ -1,3 +1,5 @@
+# Build framed control sessions on OSAL Socket; no application module code belongs here.
+
 add_library(vinc_control src/channel.cpp src/protocol.cpp)
 add_library(vinc::control ALIAS vinc_control)
 target_include_directories(vinc_control PUBLIC include)

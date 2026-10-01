@@ -1,3 +1,6 @@
+// Feed redirected bytes into OSAL Terminal to test decoding and ownership.
+// Keep Ctrl+D cancellation distinct from Ctrl+C interruption and actual input EOF.
+
 #include "input_pipe.hpp"
 #include <vinc/osal/terminal.hpp>
 #include <future>
@@ -22,6 +25,7 @@ int main() {
         check(next().key == TerminalKey::Up && next().key == TerminalKey::Down, "escape direction keys");
         check(next().key == TerminalKey::Tab && next().key == TerminalKey::Backspace, "edit keys");
         check(next().key == TerminalKey::Interrupt, "Ctrl+C is distinct from EOF");
+        input.send("\x04"); check(next().key == TerminalKey::Cancel, "Ctrl+D cancels a script, not EOF");
         input.send("\x1b");
         const auto begin = std::chrono::steady_clock::now();
         check(next().key == TerminalKey::Escape && std::chrono::steady_clock::now() - begin < 500ms, "standalone Escape does not hang");

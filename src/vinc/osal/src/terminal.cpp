@@ -1,3 +1,6 @@
+// Own terminal modes and decode input without running framework shutdown in an OS handler.
+// Control handlers record an event; the Shell loop performs cancellation and cleanup.
+
 #include <vinc/osal/terminal.hpp>
 #include <algorithm>
 #include <atomic>
@@ -94,7 +97,7 @@ struct Terminal::Impl {
             bytes.erase(0, 1);
             switch (c) {
             case 3: return TerminalEvent{TerminalKey::Interrupt, {}};
-            case 4: return TerminalEvent{TerminalKey::End, {}};
+            case 4: return TerminalEvent{TerminalKey::Cancel, {}};
             case '\r': previous_cr = true; [[fallthrough]];
             case '\n': return TerminalEvent{TerminalKey::Enter, {}};
             case '\t': return TerminalEvent{TerminalKey::Tab, {}};
@@ -202,7 +205,8 @@ Result<TerminalEvent> Terminal::read_until(Deadline deadline) {
             default: {
                 std::uint32_t c = k.uChar.UnicodeChar;
                 if (c == 3) event.key = TerminalKey::Interrupt;
-                else if (c == 4 || c == 26) event.key = TerminalKey::End;
+                else if (c == 4) event.key = TerminalKey::Cancel;
+                else if (c == 26) event.key = TerminalKey::End;
                 else if (c >= 0xd800 && c <= 0xdbff) { p.surrogate = static_cast<WCHAR>(c); continue; }
                 else if (c >= 0xdc00 && c <= 0xdfff) {
                     c = p.surrogate ? 0x10000 + ((p.surrogate - 0xd800) << 10) + c - 0xdc00 : 0xfffd;

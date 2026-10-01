@@ -1,4 +1,8 @@
 #pragma once
+
+// Named, fixed-size storage shared by processes on the same host.
+// OSAL manages handles and mappings only; message layout, rings and synchronization live above it.
+
 #include <vinc/osal/error.hpp>
 #include <cstddef>
 #include <cstdint>

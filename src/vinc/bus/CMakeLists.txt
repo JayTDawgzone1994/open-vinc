@@ -1,3 +1,6 @@
+# Build the shared-memory Bus and its private broker/ring implementation.
+# Applications receive the typed public API; module runtime wiring stays private.
+
 add_library(vinc_bus STATIC src/ring.cpp src/bus.cpp src/broker.cpp)
 add_library(vinc::bus ALIAS vinc_bus)
 target_include_directories(vinc_bus PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

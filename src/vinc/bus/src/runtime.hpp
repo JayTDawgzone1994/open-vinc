@@ -1,4 +1,8 @@
 #pragma once
+
+// Private bridge between module supervision, control sessions and the Bus.
+// Application code receives Client from BaseModule instead of constructing its own transport.
+
 #include <vinc/bus/bus.hpp>
 #include <vinc/control/channel.hpp>
 #include <functional>

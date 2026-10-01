@@ -1,3 +1,6 @@
+// Common Pipe scheduler: accept owned buffers, advance native I/O, then return completions.
+// Endpoint close requests cancellation; native completion determines when storage is safe to free.
+
 #include "pipe_state.hpp"
 #include <algorithm>
 #include <atomic>
@@ -41,6 +44,8 @@ void finish(PipeOperationState& op, NativeIoResult result) noexcept {
     op.result = result;
     op.done = true;
 }
+// Only this worker starts, polls and cancels native transfers. Completed buffers
+// remain charged to the service budget until collected or explicitly abandoned.
 void pipe_worker(const std::shared_ptr<PipeState>& state) noexcept {
     auto initialized = state->monitor->initialize_worker();
     if (!initialized) {
@@ -220,6 +225,8 @@ Result<Pipe> PipeService::create_pipe() {
         return result;
     } catch (...) { detail::PipeAccess::rollback(*this, *records); throw; }
 }
+// Admission checks precede ownership transfer: rejection leaves the caller buffer intact.
+// An uncollected completion still occupies this endpoint and its resource credits.
 Result<IoId> PipeService::submit(detail::PipeEnd& pipe, IoBuffer&& buffer, Deadline deadline, IoKind kind) {
     const auto operation = kind == IoKind::Read ? Operation::ReadPipe : Operation::WritePipe;
     if (!state_) return std::unexpected(OsError{ErrorCode::ServiceClosed, operation});

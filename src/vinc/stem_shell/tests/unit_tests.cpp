@@ -1,13 +1,18 @@
+// Local Shell tests for parsing, quoting, UTF-8 editing, name reservation and dispatch.
+// No child process is needed for these command/editor contracts.
+
 #include <stem_shell/command_router.hpp>
 #include <stem_shell/stem_shell.hpp>
+#include <stem_shell/tcl_runtime.hpp>
 #include <sstream>
 #include <iostream>
 #include <stdexcept>
 
 using namespace vinc;
 void check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
-int main() {
+int main(int, char** argv) {
     try {
+        shell::initialize_tcl(argv[0]);
         auto args = shell::parse_line(R"(node open "D:\My Project\file.txt" '' 'a b' a\ b "say \"hi\"")");
         check(args && args->arguments == std::vector<std::string>{"node", "open", "D:\\My Project\\file.txt", "", "a b", "a b", "say \"hi\""}, "quotes, empty arguments, escapes and Windows paths");
         check(!shell::parse_line("node \"unfinished"), "unfinished quote rejected");

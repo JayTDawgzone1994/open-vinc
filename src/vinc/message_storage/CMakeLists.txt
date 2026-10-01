@@ -1,3 +1,6 @@
+# Build the byte-image/container runtime independently of OSAL and Bus.
+# Only the public storage API is exported; framework_access.hpp stays an internal seam.
+
 cmake_minimum_required(VERSION 3.20)
 project(vinc_message_storage LANGUAGES CXX)
 add_library(vinc_message_storage STATIC src/storage.cpp)

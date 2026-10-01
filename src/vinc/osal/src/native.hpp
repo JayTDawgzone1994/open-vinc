@@ -1,4 +1,8 @@
 #pragma once
+
+// Private process backend boundary: native spawn, observation and wake primitives.
+// The common service owns policy and records; platform files own OS resources.
+
 #include <vinc/osal/process.hpp>
 
 namespace vinc::osal::detail {

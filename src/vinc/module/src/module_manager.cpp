@@ -1,3 +1,6 @@
+// Central module supervisor: allocate names, launch through OSAL, wait for Ready,
+// route requests, and stop/reap each generation before retiring its Bus resources.
+
 #include <module/module_manager.hpp>
 #include "module_protocol.hpp"
 #include "runtime.hpp"
@@ -30,6 +33,8 @@ std::string nonce() {
     return result;
 }
 std::atomic<std::uint64_t> next_generation{1};
+// One logical instance across restarts. Record::mutex protects its current generation.
+// Keep pending_request after a caller timeout: the child may still be executing it.
 struct Record {
     std::mutex mutex;
     std::condition_variable changed;
@@ -94,6 +99,8 @@ struct ModuleManager::Impl {
         std::lock_guard lock(mutex); std::vector<std::shared_ptr<Record>> out;
         for (const auto& [_, record] : records) out.push_back(record); return out;
     }
+    // Every launch gets a fresh generation, token and endpoint. Replies and Bus ownership
+    // from an old process must never be mistaken for the newly started process.
     void launch(Record& record) {
         record.snapshot.generation = next_generation.fetch_add(1);
         record.snapshot.pid = 0; record.fault = false; record.stop_sent = false; record.next_terminate = {};
@@ -121,6 +128,8 @@ struct ModuleManager::Impl {
         record.process.emplace(std::move(*child)); record.snapshot.pid = record.process->pid();
         record.snapshot.state = ModuleState::Starting; record.changed.notify_all();
     }
+    // Release the completed run and apply restart policy to the same logical instance.
+    // An explicit user stop suppresses restart even if retries remain.
     void finished(Record& record) {
         if (record.session) record.session->close(); record.session.reset(); close_listener(record);
         if (record.process) { (void)processes.forget(record.process->id()); record.process.reset(); }
@@ -143,6 +152,8 @@ struct ModuleManager::Impl {
             if (!exit) { record_failure(record, "observe module", exit.error()); }
             else if (*exit) {
                 record.snapshot.last_exit = **exit;
+                // Only confirmed OS exit permits reclaiming this generation's shared reader leases.
+                // A missing heartbeat alone does not prove that the process has stopped touching memory.
                 broker.exited(record.snapshot.generation);
                 if (!record.user_stop && !record.fault) record.snapshot.last_error = "module exited unexpectedly";
                 finished(record); return;
@@ -219,8 +230,11 @@ struct ModuleManager::Impl {
             std::unique_lock lock(mutex); wake.wait_for(lock, 20ms);
         }
     }
+    // Allow one outstanding command/completion per instance. Capture its generation before
+    // waiting, and never replay the request if timeout, cancellation or restart loses the result.
     control::Result<control::Frame> request(const std::string& name, std::uint16_t operation,
-        std::vector<std::string> args, Deadline deadline) {
+        std::vector<std::string> args, Deadline deadline, std::stop_token stop = {}) {
+        if (stop.stop_requested()) return std::unexpected(failure(control::ErrorCode::Closed, "command wait canceled"));
         auto record = find(name);
         if (!record) return std::unexpected(failure(control::ErrorCode::InvalidArgument, "unknown module"));
         control::Bytes payload;
@@ -236,14 +250,18 @@ struct ModuleManager::Impl {
         record->pending_request = id; record->pending_operation = operation; record->response.reset(); record->pending_waiter = true;
         auto sent = record->session->send({control::Kind::Request, detail::commands, operation, id, std::move(payload)});
         if (!sent) { record->pending_request = 0; return std::unexpected(sent.error()); }
-        record->changed.wait_until(lock, deadline, [&] {
-            return record->response.has_value() || record->user_stop || record->snapshot.state != ModuleState::Running || record->snapshot.generation != generation;
-        });
+        while (!record->response && !record->user_stop && record->snapshot.state == ModuleState::Running &&
+            record->snapshot.generation == generation && !stop.stop_requested() && Clock::now() < deadline)
+            record->changed.wait_until(lock, (std::min)(deadline, Clock::now() + 20ms));
         if (record->snapshot.generation != generation)
             return std::unexpected(failure(control::ErrorCode::Closed, "module generation changed; command outcome may be unknown"));
+        // Detach the caller without freeing the in-flight request ID. The supervisor clears
+        // Busy on a late response or process exit, preventing overlapping commands after cancellation.
         record->pending_waiter = false;
         if (record->user_stop || record->snapshot.state != ModuleState::Running)
             return std::unexpected(failure(control::ErrorCode::Closed, "module session ended; command outcome may be unknown"));
+        if (!record->response && stop.stop_requested())
+            return std::unexpected(failure(control::ErrorCode::Closed, "command wait canceled; command outcome may be unknown"));
         if (!record->response) return std::unexpected(failure(control::ErrorCode::Timeout, "command outcome may be unknown"));
         record->pending_request = 0;
         auto response = std::move(*record->response); record->response.reset(); return response;
@@ -285,6 +303,8 @@ control::Result<void> ModuleManager::register_module(ModuleDefinition definition
         return std::unexpected(failure(control::ErrorCode::InvalidArgument, "invalid module definition or policy"));
     if (definition.node_base_name.empty()) definition.node_base_name = definition.name;
     std::lock_guard lock(impl_->mutex);
+    if (impl_->reserved_commands.contains(definition.name) || impl_->reserved_commands.contains(definition.node_base_name))
+        return std::unexpected(failure(control::ErrorCode::InvalidArgument, "module name or instance base name is a reserved command"));
     if (impl_->closing || impl_->reserved_commands.contains(definition.name) || impl_->definitions.contains(definition.name) || impl_->programs.contains(definition.name) || impl_->records.contains(definition.name))
         return std::unexpected(failure(control::ErrorCode::InvalidArgument, "module factory name already registered or manager closing"));
     impl_->definitions.emplace(definition.name, std::move(definition)); return {};
@@ -309,26 +329,33 @@ control::Result<std::string> ModuleManager::start_module(const std::string& fact
     record->arguments = std::move(args); record->snapshot.name = name;
     impl_->records.emplace(name, record); impl_->wake.notify_all(); return name;
 }
-control::Result<void> ModuleManager::wait_running(const std::string& name, Deadline deadline) {
+control::Result<void> ModuleManager::wait_running(const std::string& name, Deadline deadline, std::stop_token stop) {
     auto record = impl_->find(name);
     if (!record) return std::unexpected(failure(control::ErrorCode::InvalidArgument, "unknown module"));
     std::unique_lock lock(record->mutex);
-    if (!record->changed.wait_until(lock, deadline, [&] { return record->user_stop || record->snapshot.state == ModuleState::Running || terminal(record->snapshot.state); }))
+    while (!record->user_stop && record->snapshot.state != ModuleState::Running && !terminal(record->snapshot.state) &&
+        !stop.stop_requested() && Clock::now() < deadline)
+        record->changed.wait_until(lock, (std::min)(deadline, Clock::now() + 20ms));
+    if (stop.stop_requested()) return std::unexpected(failure(control::ErrorCode::Closed, "startup wait canceled; process remains supervised"));
+    if (!record->user_stop && record->snapshot.state != ModuleState::Running && !terminal(record->snapshot.state))
         return std::unexpected(failure(control::ErrorCode::Timeout, "waiting for module readiness"));
     if (record->user_stop) return std::unexpected(failure(control::ErrorCode::Closed, "module is stopping"));
     if (record->snapshot.state != ModuleState::Running)
         return std::unexpected(control::Error{control::ErrorCode::Closed, record->snapshot.last_error, record->snapshot.os_error});
     return {};
 }
-control::Result<void> ModuleManager::wait_started(const std::string& name) {
+control::Result<void> ModuleManager::wait_started(const std::string& name, std::stop_token stop) {
     auto record = impl_->find(name);
     if (!record) return std::unexpected(failure(control::ErrorCode::InvalidArgument, "unknown module"));
-    return wait_running(name, Clock::now() + record->definition.policy.startup_timeout + 1s);
+    return wait_running(name, Clock::now() + record->definition.policy.startup_timeout + 1s, stop);
 }
 control::Result<void> ModuleManager::reserve_command_name(const std::string& name) {
     std::lock_guard lock(impl_->mutex);
     if (name.empty() || impl_->closing || impl_->definitions.contains(name) || impl_->programs.contains(name) || impl_->records.contains(name))
         return std::unexpected(failure(control::ErrorCode::InvalidArgument, "command name conflicts with module namespace: " + name));
+    for (const auto& [_, definition] : impl_->definitions)
+        if (definition.node_base_name == name)
+            return std::unexpected(failure(control::ErrorCode::InvalidArgument, "reserved command conflicts with instance base name: " + name));
     impl_->reserved_commands.insert(name);
     return {};
 }
@@ -350,6 +377,8 @@ std::vector<ModuleSnapshot> ModuleManager::snapshots() const {
     }
     return result;
 }
+// Finish means both OS exit observation and broker cleanup have completed.
+// A caller deadline only ends this wait; the supervisor continues stopping children.
 control::Result<void> ModuleManager::wait_shutdown(Deadline deadline) {
     begin_shutdown();
     for (auto& record : impl_->snapshot_records()) {
@@ -380,8 +409,8 @@ std::optional<ModuleSnapshot> ModuleManager::inspect(const std::string& name) co
     auto record = impl_->find(name); if (!record) return {};
     std::lock_guard lock(record->mutex); return record->snapshot;
 }
-control::Result<int32_t> ModuleManager::command(const std::string& name, std::vector<std::string> args, Deadline deadline) {
-    auto response = impl_->request(name, detail::execute, std::move(args), deadline);
+control::Result<int32_t> ModuleManager::command(const std::string& name, std::vector<std::string> args, Deadline deadline, std::stop_token stop) {
+    auto response = impl_->request(name, detail::execute, std::move(args), deadline, stop);
     if (!response) return std::unexpected(response.error());
     control::Reader reader(response->payload); const auto code = reader.u32();
     if (!reader.done()) return std::unexpected(failure(control::ErrorCode::Protocol, "invalid command response"));

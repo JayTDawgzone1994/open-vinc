@@ -1,3 +1,6 @@
+// Control-channel tests for framing, handshake, two-way heartbeat and bounded queues.
+// Exercise real Socket sessions without invoking application module hooks.
+
 #include <vinc/control/channel.hpp>
 #include <array>
 #include <iostream>

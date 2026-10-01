@@ -4,7 +4,7 @@
 
 | 套件 | 固定版本 | 來源管理 | 目前狀態 |
 | --- | --- | --- | --- |
-| [Tcl](tcl/README.md) | 9.1.0 | 官方 GitHub 鏡像 submodule，固定 commit | 已納入原始碼；尚未接入建置或 Shell |
+| [Tcl](tcl/README.md) | 9.1.0 | 官方 GitHub 鏡像 submodule，固定 commit | 已接入 CMake 與 Shell；Windows 驗證，Linux／macOS 待驗證 |
 
 ## 維護原則
 

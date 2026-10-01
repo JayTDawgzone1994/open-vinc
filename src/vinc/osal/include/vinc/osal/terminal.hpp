@@ -1,10 +1,15 @@
 #pragma once
+
+// Translate console events or redirected bytes into portable Shell input events.
+// Terminal owns temporary OS settings; Shell decides what cancel, interrupt and EOF mean.
+
 #include <vinc/osal/error.hpp>
 #include <memory>
 #include <string>
 
 namespace vinc::osal {
-enum class TerminalKey { Text, Enter, Backspace, Up, Down, Tab, Escape, Interrupt, End, Idle };
+// Interrupt = Ctrl+C, Cancel = Ctrl+D, End = actual input EOF, Idle = no event yet.
+enum class TerminalKey { Text, Enter, Backspace, Up, Down, Tab, Escape, Interrupt, Cancel, End, Idle };
 struct TerminalEvent {
     TerminalKey key = TerminalKey::Idle;
     std::string text; // one complete UTF-8 code point for Text

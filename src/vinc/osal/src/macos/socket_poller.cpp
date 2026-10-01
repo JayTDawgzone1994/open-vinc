@@ -1,3 +1,6 @@
+// macOS socket readiness backend using kqueue read/write filters and a user-event wakeup.
+// The common poller owns registration lifetime and translates readiness for callers.
+
 #include "../socket_native.hpp"
 #include <sys/event.h>
 

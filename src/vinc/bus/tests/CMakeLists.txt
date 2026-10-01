@@ -1,3 +1,5 @@
+# Use private ring tests for synchronization edges and process tests for broker cleanup.
+
 add_executable(bus_ring_tests ring_tests.cpp)
 target_link_libraries(bus_ring_tests PRIVATE vinc::bus)
 target_include_directories(bus_ring_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")

@@ -1,6 +1,9 @@
+// Shell event loop: keep keyboard/control input responsive while command jobs run.
+// A foreground script suppresses ordinary input but keeps cancel and full shutdown available.
+
 #include <stem_shell/stem_shell.hpp>
 #include <stem_shell/command_router.hpp>
-#include <stem_shell/scriptInterpreter.hpp>
+#include <stem_shell/tcl_runtime.hpp>
 #include <vinc/osal/terminal.hpp>
 #include <atomic>
 #include <future>
@@ -14,7 +17,6 @@ struct StemShell::Impl {
     ModuleManager& manager;
     std::ostream& output;
     shell::CommandRouter router;
-    ScriptInterpreter script;
     shell::LineEditor editor;
     std::atomic<bool> closing{false};
     std::string last_error;
@@ -24,14 +26,22 @@ struct StemShell::Impl {
     osal::Terminal* terminal = nullptr;
     bool prompt = false, shutdown_complete = false, rejected_line = false;
     control::Deadline next_report{};
-    Impl(StemShell* owner, ModuleManager& m, std::ostream& out) : manager(m), output(out), router(m), script(owner) { jobs.reserve(16); }
+    // Destroy/join the script before any state captured by its dispatch callback.
+    shell::TclRuntime script;
+    Impl(ModuleManager& m, std::ostream& out) : manager(m), output(out), router(m) {
+        for (const auto& name : shell::tcl_reserved_commands()) {
+            auto result = manager.reserve_command_name(name);
+            if (!result) throw std::runtime_error(shell::describe(result.error()));
+        }
+        jobs.reserve(16);
+    }
     bool interactive() const { return terminal && terminal->interactive() && terminal->ansi_output(); }
     void clear_prompt() {
         if (prompt && interactive()) output << "\r\x1b[2K";
         prompt = false;
     }
     void redraw() {
-        if (closing.load() || !interactive()) return;
+        if (closing.load() || script.active() || !interactive()) return;
         const auto columns = terminal->columns();
         output << "\r\x1b[2KVINC > " << editor.visible_tail(columns > 8 ? columns - 8 : 0) << std::flush;
         prompt = true;
@@ -42,18 +52,35 @@ struct StemShell::Impl {
     }
     void shutdown() {
         if (closing.exchange(true)) return;
+        script.cancel();
         manager.begin_shutdown();
         clear_prompt(); output << "Shutting down: waiting for all module processes...\n" << std::flush;
     }
-    shell::CommandResult execute(const std::vector<std::string>& args) {
-        try { return router.execute(args); }
+    shell::CommandResult execute(const std::vector<std::string>& args, std::stop_token stop = {}) {
+        try { return router.execute(args, stop); }
         catch (const std::exception& e) { return {false, false, std::string("Command error: ") + e.what()}; }
         catch (...) { return {false, false, "Command threw an unknown exception"}; }
     }
+    // Bound concurrent Shell jobs and reject a second job for the same target.
+    // ModuleManager separately guards requests already sent to the child process.
     bool available(const std::string& target) {
         if (jobs.size() >= 16) { show("Busy: 16 requests are already in flight"); return false; }
         for (const auto& job : jobs) if (job.target == target) { show("Busy: " + target + " already has a request in flight"); return false; }
         return true;
+    }
+    void start_script(std::filesystem::path path, std::vector<std::string> args = {}) {
+        if (script.active()) { show("Busy: a script is already running"); return; }
+        clear_prompt();
+        try {
+            script.start(std::move(path), std::move(args), [this](const auto& command, std::stop_token stop) {
+                if (closing.load()) return shell::CommandResult{false, false, "Framework is shutting down"};
+                return execute(command, stop);
+            });
+            show("Script running. Ctrl+D cancels the script; Ctrl+C shuts down the framework.");
+        } catch (const std::exception& e) { show(std::string("Cannot start script: ") + e.what()); }
+    }
+    void cancel_script() {
+        show(script.cancel() ? "Script cancellation requested" : "No script is running");
     }
     void submit(std::string input, bool completion = false) {
         if (closing.load()) return;
@@ -61,6 +88,17 @@ struct StemShell::Impl {
         if (!parsed) { show("Parse error: " + parsed.error()); return; }
         const auto target = parsed->arguments.empty() ? std::string{} : parsed->arguments.front();
         if (!completion && parsed->arguments.empty()) return;
+        if (!completion && target == "srun") {
+            if (parsed->arguments.size() < 2) { show("Usage: srun file.tcl [args...]"); return; }
+            const auto& file = parsed->arguments[1];
+            start_script(std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(file.data()), file.size())),
+                {parsed->arguments.begin() + 2, parsed->arguments.end()}); return;
+        }
+        if (!completion && target == "scancel") {
+            if (parsed->arguments.size() != 1) show("scancel takes no arguments");
+            else cancel_script();
+            return;
+        }
         if (!completion && router.builtin(target)) {
             auto result = execute(parsed->arguments);
             if (result.shutdown) shutdown(); else show(result.message);
@@ -76,7 +114,18 @@ struct StemShell::Impl {
             })});
         } catch (const std::exception& e) { show(std::string("Cannot start command: ") + e.what()); }
     }
+    // Consume worker results only on the Shell thread, keeping editor state and output
+    // out of command callbacks. Script errors are displayed without shutting down modules.
     void collect() {
+        const auto script_output = script.take_output();
+        if (!script_output.empty()) { clear_prompt(); output << script_output << std::flush; redraw(); }
+        if (script.ready()) {
+            auto result = script.finish();
+            const auto tail = script.take_output();
+            if (!tail.empty()) output << tail << std::flush;
+            if (result.shutdown) shutdown();
+            else { show(result.message); redraw(); }
+        }
         for (auto it = jobs.begin(); it != jobs.end();) {
             if (it->reply.wait_for(0ms) != std::future_status::ready) { ++it; continue; }
             auto reply = it->reply.get(); it = jobs.erase(it);
@@ -99,6 +148,8 @@ struct StemShell::Impl {
             }
         }
     }
+    // Shutdown is a wait for observed completion, not just a batch of terminate requests.
+    // Keep collecting jobs while supervision and Bus cleanup finish; repeated Ctrl+C does not skip it.
     void wait_shutdown() {
         if (shutdown_complete) return;
         shutdown();
@@ -118,13 +169,13 @@ struct StemShell::Impl {
                 next_report = now + 1s;
             }
         }
-        while (!jobs.empty()) { collect(); if (!jobs.empty()) std::this_thread::sleep_for(10ms); }
+        while (!jobs.empty() || script.active()) { collect(); if (!jobs.empty() || script.active()) std::this_thread::sleep_for(10ms); }
         shutdown_complete = true;
         output << "All module processes exited; Bus cleanup complete.\n" << std::flush;
     }
 };
 StemShell::StemShell() : StemShell(ModuleManager::get(), std::cout) {}
-StemShell::StemShell(ModuleManager& manager, std::ostream& out) : impl_(std::make_unique<Impl>(this, manager, out)) {}
+StemShell::StemShell(ModuleManager& manager, std::ostream& out) : impl_(std::make_unique<Impl>(manager, out)) {}
 StemShell::~StemShell() = default;
 std::string StemShell::get_last_error() const { return impl_->last_error; }
 void StemShell::request_shutdown() { impl_->shutdown(); }
@@ -139,14 +190,7 @@ int8_t StemShell::process_line(const std::string& line) {
     if (result.shutdown) impl_->shutdown(); else impl_->show(result.message);
     return 0;
 }
-int8_t StemShell::run_script(std::filesystem::path path) {
-    // Keep the interpreter language outside this refactor; preserve its synchronous entry.
-    if (!impl_->script.load_from_file(path)) { impl_->last_error = impl_->script.get_last_error(); impl_->show(impl_->last_error); return -1; }
-    const auto code = impl_->script.execute();
-    if (code) { impl_->last_error = impl_->script.get_last_error(); impl_->show(impl_->last_error); }
-    return code;
-}
-void StemShell::run() {
+void StemShell::run(std::filesystem::path startup_script, std::vector<std::string> script_args) {
     if (impl_->closing.load()) { impl_->wait_shutdown(); return; }
     auto opened = osal::Terminal::open();
     if (!opened) {
@@ -155,6 +199,10 @@ void StemShell::run() {
     }
     auto terminal = std::move(*opened); impl_->terminal = terminal.get();
     struct Detach { Impl& state; ~Detach() { state.terminal = nullptr; } } detach{*impl_};
+    // A startup deployment can intentionally have no terminal. Its stdin EOF must not
+    // turn a finished or failed script into an automatic framework shutdown.
+    const bool headless_deployment = !startup_script.empty() && !terminal->interactive();
+    if (!startup_script.empty()) impl_->start_script(std::move(startup_script), std::move(script_args));
     impl_->show("VINC ready. Type help; exit or Ctrl+C shuts down all modules."); impl_->redraw();
     try {
         while (!impl_->closing.load()) {
@@ -162,18 +210,25 @@ void StemShell::run() {
             auto event = terminal->read_until(control::Clock::now() + 20ms);
             if (!event) { impl_->show("Input error: " + event.error().native.message()); impl_->shutdown(); break; }
             switch (event->key) {
-            case osal::TerminalKey::Interrupt: case osal::TerminalKey::End: impl_->shutdown(); break;
+            case osal::TerminalKey::Interrupt: impl_->shutdown(); break;
+            case osal::TerminalKey::Cancel: impl_->cancel_script(); break;
+            case osal::TerminalKey::End:
+                if (headless_deployment) std::this_thread::sleep_for(20ms);
+                else impl_->shutdown();
+                break;
             case osal::TerminalKey::Text:
+                if (impl_->script.active()) break;
                 if (!impl_->editor.append(event->text) && !impl_->rejected_line) {
                     impl_->rejected_line = true;
                     impl_->show("Command exceeds 4096 bytes; this line will not execute");
                 }
                 impl_->redraw(); break;
-            case osal::TerminalKey::Backspace: impl_->editor.backspace(); impl_->redraw(); break;
-            case osal::TerminalKey::Up: impl_->editor.older(); impl_->redraw(); break;
-            case osal::TerminalKey::Down: impl_->editor.newer(); impl_->redraw(); break;
-            case osal::TerminalKey::Tab: impl_->submit(impl_->editor.line(), true); break;
+            case osal::TerminalKey::Backspace: if (!impl_->script.active()) { impl_->editor.backspace(); impl_->redraw(); } break;
+            case osal::TerminalKey::Up: if (!impl_->script.active()) { impl_->editor.older(); impl_->redraw(); } break;
+            case osal::TerminalKey::Down: if (!impl_->script.active()) { impl_->editor.newer(); impl_->redraw(); } break;
+            case osal::TerminalKey::Tab: if (!impl_->script.active()) impl_->submit(impl_->editor.line(), true); break;
             case osal::TerminalKey::Enter: {
+                if (impl_->script.active()) break;
                 if (impl_->rejected_line) impl_->editor.replace({}); // Do not retain an executable truncated prefix in history.
                 auto line = impl_->editor.submit(); impl_->clear_prompt();
                 if (terminal->interactive()) impl_->output << "VINC > " << line << '\n';

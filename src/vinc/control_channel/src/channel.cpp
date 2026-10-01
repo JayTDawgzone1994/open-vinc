@@ -1,3 +1,6 @@
+// Shared Socket reactor for session handshake, heartbeat and bounded control queues.
+// Public calls enqueue/dequeue under a peer lock; one worker owns actual socket I/O.
+
 #include <vinc/control/channel.hpp>
 #include <algorithm>
 #include <array>
@@ -10,6 +13,8 @@ namespace vinc::control {
 namespace detail {
 constexpr std::size_t queue_bytes_limit = 256 * 1024;
 constexpr std::size_t queue_count_limit = 64;
+// Peer::mutex protects both public queue access and reactor state.
+// The weak Engine link lets a retained Session fail cleanly after Service destruction.
 struct Peer {
     mutable std::mutex mutex;
     std::condition_variable changed;
@@ -62,6 +67,8 @@ Frame hello(const Options& options) {
     put_u32(result.payload, static_cast<std::uint32_t>(options.heartbeat_timeout.count()));
     return result;
 }
+// Validate the expected role, generation and token before accepting application frames.
+// Only heartbeat frames refresh liveness; ordinary traffic is not a replacement heartbeat.
 void incoming(detail::Peer& peer, Frame frame, Deadline now) {
     if (frame.kind == Kind::Hello) {
         Reader reader(frame.payload);
@@ -123,6 +130,8 @@ void advance(detail::Engine& engine, detail::Peer& peer, Deadline now) {
     for (int budget = 0; budget < 8 && !peer.closing; ++budget) {
         if (peer.active.empty()) {
             peer.offset = 0; peer.active_application = false;
+            // Prioritize heartbeat between complete frames. Never interleave bytes into a
+            // partially sent application frame, because the receiver sees one ordered stream.
             if (peer.state == State::Open && now >= peer.next_heartbeat) {
                 Frame heartbeat{Kind::Heartbeat}; put_u64(heartbeat.payload, ++peer.sent_sequence);
                 peer.active = encode(heartbeat); peer.next_heartbeat = now + peer.options.heartbeat_interval;
@@ -148,6 +157,8 @@ void advance(detail::Engine& engine, detail::Peer& peer, Deadline now) {
     auto changed = engine.poller.modify(*peer.registration, interests);
     if (!changed) { fail(peer, {ErrorCode::Io, "modify socket registration", changed.error()}); dispose(engine, peer); }
 }
+// Use the nearest session deadline as the poll timeout. Each peer has a work budget
+// so one busy connection cannot prevent the others from advancing.
 void run(detail::Engine& engine, std::stop_token stop) noexcept {
     try {
         while (!stop.stop_requested()) {

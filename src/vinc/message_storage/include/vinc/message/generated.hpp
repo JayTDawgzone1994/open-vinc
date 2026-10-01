@@ -1,4 +1,8 @@
 #pragma once
+
+// Runtime support used by Ribosome-generated classes: bound scalar/string fields,
+// value-copy behavior and schema-checked conversion between classes and byte images.
+
 #include <vinc/message/storage.hpp>
 #include <base_message.hpp>
 #include <ostream>
@@ -39,6 +43,8 @@ class MessageString;
 namespace detail {
 template<> struct IsArray<MessageString> : std::true_type { using Element = std::uint8_t; };
 }
+// String bytes share the parent arena and byte budget. str() returns a local copy;
+// there is no borrowed std::string pointer into shared memory.
 class MessageString {
     friend class detail::RecordAccess;
 public:
@@ -133,6 +139,8 @@ public:
 protected:
     explicit GeneratedMessage(detail::Binding b) : binding_(std::move(b)) {}
     static detail::Binding copy_binding(const Derived& other) { return detail::checked(detail::clone(detail::RecordAccess::binding(other))); }
+    // A nested record belongs to its parent: moving it out creates a local copy.
+    // Only a root record may transfer its entire binding to the destination object.
     static detail::Binding move_binding(Derived& other) {
         auto& b = static_cast<GeneratedMessage&>(other).binding_;
         if (b.field) return detail::checked(detail::clone(b));
@@ -150,6 +158,8 @@ private:
 } // namespace vinc::message
 
 namespace vinc {
+// Public message creation always allocates process-local storage.
+// Obtain shared storage through Publisher::get_next(), never through this factory.
 template<class T, class... Args> requires std::is_base_of_v<message::GeneratedMessage<T>, T>
 std::unique_ptr<T> make_message(Args&&... args) { return std::make_unique<T>(std::forward<Args>(args)...); }
 }

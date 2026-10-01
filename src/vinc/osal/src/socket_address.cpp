@@ -1,3 +1,6 @@
+// Convert portable IPv4, IPv6 and local endpoints to and from native addresses.
+// Explicit hostname resolution is kept separate from nonblocking socket I/O.
+
 #include "socket_native.hpp"
 #include <algorithm>
 #include <charconv>

@@ -1,2 +1,4 @@
+# Register the minimal example as its own process executable and central launch entry.
+
 vinc_add_process_module(vinc_module_example
     MODULE_NAME exampleModule NODE_NAME exampleNode SOURCES example_module.cpp)

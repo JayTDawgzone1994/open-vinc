@@ -1,4 +1,8 @@
 #pragma once
+
+// Framework-only access to externally owned, fixed-capacity message storage.
+// Public constructors create local memory; Bus alone supplies and synchronizes a shared-memory loan.
+
 // Framework-private integration seam; deliberately outside PUBLIC include paths.
 // Bus supplies a lease owner retaining the slot/mapping; synchronization lives in Bus.
 #include <vinc/message/storage.hpp>

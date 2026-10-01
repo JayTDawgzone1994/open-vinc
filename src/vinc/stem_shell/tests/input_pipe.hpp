@@ -1,4 +1,8 @@
 #pragma once
+
+// RAII test input source: temporarily replace stdin and restore it on destruction.
+// Tests can deliver control bytes or EOF without borrowing the user's console.
+
 #include <string_view>
 #include <stdexcept>
 #ifdef _WIN32

@@ -1,3 +1,6 @@
+// Windows Pipe backend using private named-pipe endpoints and overlapped I/O.
+// IOCP completion, not a cancel request, ends the native operation lifetime.
+
 #include "../pipe_native.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

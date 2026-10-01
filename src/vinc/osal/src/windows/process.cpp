@@ -1,3 +1,6 @@
+// Windows process backend: UTF-16 launch data, explicit handle inheritance and exit observation.
+// Prepare ownership before CreateProcess so a successfully created child is never lost.
+
 #include "../native.hpp"
 #include "../process_pipe_native.hpp"
 

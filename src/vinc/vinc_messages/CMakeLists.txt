@@ -1,3 +1,6 @@
+# Interface target for generated classes. Consumers inherit both storage linkage
+# and generation ordering, so a build cannot race compilation against header generation.
+
 cmake_minimum_required(VERSION 3.20)
 
 # Generated headers and their runtime/storage dependency.

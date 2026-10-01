@@ -1,3 +1,6 @@
+// Local BaseModule state and access to its runtime-attached Bus client.
+// Module constructors run before attachment; use bus() from lifecycle/command hooks.
+
 #include <module/base_module.hpp>
 #include <utility>
 namespace vinc {

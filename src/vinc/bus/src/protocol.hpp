@@ -1,4 +1,8 @@
 #pragma once
+
+// Bus control-plane codec: exchange ring descriptors, reader identities and topology.
+// These frames carry shared-memory names and sizes, never the message payload itself.
+
 #include "ring.hpp"
 #include "runtime.hpp"
 namespace vinc::bus::detail {

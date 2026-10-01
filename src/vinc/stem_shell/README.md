@@ -5,19 +5,23 @@ Shell 是中央的操作介面，模組命令仍經 `ModuleManager → control S
 
 ## 分工與所有權
 
-- `main.cpp`：建立並持有 ModuleManager，登記 CMake 模組目錄，選擇原有 `-sc` 入口或互動介面。
-- `CommandRouter`：Shell 自己的 `help`／`exit` 註冊表、命令派送、完整錯誤與補全結果。
+- `main.cpp`：初始化 Tcl、建立 ModuleManager／Shell、先保留命令名稱再登記 CMake 模組目錄，處理 `-S`。
+- `CommandRouter`：共用命令派送、完整錯誤與補全結果；Shell 管理 `help`／`exit`／`srun`／`scancel`。
+- `TclRuntime`：每次腳本建立獨立 Tcl interpreter，工作執行緒持有、執行及銷毀；支援取消與有界輸出暫存。
 - `command_line`：引號與參數解析、128 筆歷史、4096-byte 輸入上限與 UTF-8 行尾編輯。
 - `StemShell`：終端事件迴圈、命令工作與補全結果顯示、完整關閉流程。
 - OSAL `Terminal`：Windows console／POSIX terminal 的模式管理、按鍵、UTF-8、EOF、SIGINT／Ctrl+C。
-  終端設定只在進入互動迴圈時啟用，離開時還原。
+  終端與停止事件處理在啟動腳本之前啟用，離開時還原。
 
 `StemShell(manager, output)` 明確借用 manager 與輸出；它們必須比 Shell 活得久。
+嵌入 Shell 的程式須先呼叫 `vinc::shell::initialize_tcl(argv[0])`，執行檔旁必須有 `lib/tcl9.1`。
 預設建構子保留 singleton 相容入口。Shell 的 UI／process_line／生命週期操作由同一控制執行緒使用，
 不可與另一個 `run`／析構並行。模組工作在框架內部的工作執行緒進行。
 全程序同時只允許一個 OSAL Terminal 擁有標準輸入，第二個 open 回 Busy。
 
-ModuleManager 只保留 `help`、`exit` 的命名保留，直到 manager 析構；不持有指向 Shell 的 callback。
+ModuleManager 保留框架命令及初始化後的 Tcl 全域命令／autoload 名稱，直到 manager 析構；不持有指向 Shell 的 callback。
+factory 與 `node_base_name` 使用保留字時直接拒絕，不靠 `_1` 避開；既有名稱衝突會在 Shell 初始化時回報。
+先建構 Shell 再登記模組可讓錯誤發生在登記當下。腳本自己的 `proc` 等名稱仍應避免遮蔽模組命令。
 重新建立 Shell 不會呼叫已析構 Shell 的函式；factory／實例名稱不會與這些內建命令衝突。
 既有 `register_micro_program` 仍可用，其 callback 是中央原生程式碼，需自行保證會返回；
 本次未將 legacy micro-program 改成獨立程序。
@@ -78,7 +82,8 @@ Bus 範例仍兼容兩種呼叫來源。若未來統一移除目標名稱，需�
 
 ## Ctrl+C／exit 的完整關閉流程
 
-第一次 Ctrl+C、`exit` 或輸入 EOF 都啟動同一流程；重複 Ctrl+C 不跳過清理，也不直接 `_Exit`：
+第一次 Ctrl+C 或 `exit` 啟動同一流程，先取消執行中的腳本；重複 Ctrl+C 不跳過清理，也不直接 `_Exit`。
+一般 Shell 的輸入 EOF 也會關閉；以 `-S` 啟動且 stdin 非互動終端時，EOF 只表示沒有本機輸入，框架繼續運作。
 
 模組透過 OSAL 建立獨立程序群組，讓終端的 Ctrl+C 由中央接收並協調停止，
 避免子程序先被 OS 預設處理器結束而跳過 `on_stop()`。Windows 使用 `CREATE_NEW_PROCESS_GROUP`，
@@ -116,11 +121,68 @@ Windows console 模式依據 [Microsoft GetConsoleMode](https://learn.microsoft.
 POSIX 模式及等待依據 [termios](https://www.man7.org/linux/man-pages/man3/termios.3.html) 與
 [poll](https://www.man7.org/linux/man-pages/man2/poll.2.html)。
 
-## 腳本範圍
+## Tcl 腳本
 
-`ScriptInterpreter` 的語言、變數、條件與迴圈未在這次重構。
-保留同步 `process_line` 供原有腳本使用；必要入口銜接會檢查載入失敗及 `-sc` 缺少參數，
-並保留失敗退出碼。不要將本次互動式 Ctrl+C 驗證解讀成已修復腳本迴圈與數值解析。
+舊 `ScriptInterpreter`、自訂語法、`run_script` API 與 `-sc` 已移除。使用標準 Tcl 9.1，慣用副檔名 `.tcl`，檔案採 UTF-8。
+互動 Shell 仍使用上面的命令列語法，不將一般輸入當作 Tcl 程式執行。
+
+從專案根目錄啟動：
+
+```powershell
+.\build\windows-msvc-debug\Vinc.exe -S examples/scripts/startup.tcl
+```
+
+Shell 中：
+
+```text
+srun examples/scripts/maintenance.tcl
+srun examples/scripts/cancel-demo.tcl
+```
+
+`Vinc -S file.tcl [args...]` 與 `srun file.tcl [args...]` 共用執行器。
+參數透過 Tcl `argv`／`argc` 提供，`argv0` 為腳本路徑。
+每次執行使用獨立變數、proc 與事件環境；一次只執行一份腳本。
+`source` 可在同一次環境引入檔案，嵌套 `srun` 則回 Busy。
+路徑相對於程序目前工作目錄，不自動 `cd`。相對於腳本所在目錄引入檔案可寫：
+
+```tcl
+source [file join [file dirname [info script]] common.tcl]
+```
+
+模組命令直接依名稱派送，Tcl 的變數／清單／引號先解析成參數陣列，不再拼成字串重做 Shell 解析：
+
+```tcl
+set action hello
+exampleModule
+exampleNode $action
+if {[catch {exampleNode status} reason]} {
+    puts "Command failed: $reason"
+}
+```
+
+- 命令依序等待完成；啟動等 Ready 後才執行下一行。成功回傳 `0`，啟動時另外顯示完整名稱。
+- 自動尾碼保留，腳本作者負責呼叫正確的完整實例名稱；框架不改寫腳本中的目標。
+- 非零 hook 回傳、未知命令、啟動失敗、逾時轉為 Tcl error，可由 `catch` 處理。
+- 未處理錯誤顯示檔名、行號及 Tcl 呼叫堆疊；包括 `-S` 在內，都只終止該次腳本，框架與已啟動模組繼續運作。
+- 本機 Shell 前景等待腳本時，忽略一般輸入，保留 Ctrl+D／Ctrl+C；完成後恢復 prompt。
+  先前已送出的非同步命令仍可能執行，因此腳本不是交易或全域互斥區段。Socket Shell 尚未實作。
+- Ctrl+D 與 `scancel` 都要求取消腳本，沒有腳本時只提示；Ctrl+D 與 stdin EOF 是不同事件。
+  本機前景執行期間使用快捷鍵；腳本也可用 `scancel` 取消自己。
+- `return` 正常結束目前腳本檔案。Tcl 的 `exit` 改接框架完整關閉，只接受無參數形式，不能直接跳過清理。
+- 取消採 Tcl `TCL_CANCEL_UNWIND`，一般 `catch` 不能攔截；純 Tcl 迴圈、`after ms` 與框架提供的模組命令／啟動等待可響應取消。
+  已送出的命令不撤銷，遲到回覆／程序退出前仍保持 Busy；已完成操作不回滾，已啟動模組不自動停止。
+- 原生擴充、原生 micro-program、阻塞檔案／外部程序操作仍可能延遲取消；不強殺中央執行緒。
+  腳本應將長時間工作交給模組，且不從 stdin 與 Shell 搶讀輸入。
+- Tcl 標準功能保留，腳本是受信任的程序內部署程式，不是隔離的安全沙箱。
+  定時 callback 只在該次 Tcl 環境存在期間有效，不會在腳本結束後繼續運作。
+- Tcl `puts` 的 stdout／stderr 經 Shell 輸出，每次尚未消費資料上限 256 KiB，超量標記截斷；寫檔仍使用 Tcl 原有行為。
+
+### 建置與部署
+
+Tcl 使用未修改的固定上游，透過 [library/tcl](../../../library/tcl/README.md) 整合。
+使用單一組態的 Ninja 建置，Debug／Release 分開目錄；Windows 使用 MSVC／NMAKE，Linux／macOS 路徑使用上游 configure／make 與 zlib 開發套件。
+Tcl 核心靜態連結，初始化腳本、編碼資料及授權放在 `Vinc` 旁的 `lib/tcl9.1`，不要求安裝系統 Tcl。
+部署時須一併保留該目錄。現有自動生成的模組目錄仍記錄建置時的模組絕對路徑；Tcl 資源可搬移不代表整套模組部署已支援任意搬移。
 
 ## 驗證
 
@@ -132,7 +194,10 @@ POSIX 模式及等待依據 [termios](https://www.man7.org/linux/man-pages/man3/
 - Windows 的 `shell.console`：在獨立隱藏 console 注入原生鍵盤事件，驗證中文、代理對、Ctrl+C、
   方向鍵、Backspace，以及 input/output mode 與 code page 還原；另外實際廣播 OS CTRL_C_EVENT，
   確認中央收到事件，模組經框架完成 `on_stop()` 並以正常退出碼結束。不是人工實機操作紀錄。
+- `shell.tcl`：標準 Tcl 控制流程、source、argv、中文／空白／空參數、錯誤位置、獨立環境、保留字、
+  catch 內無限迴圈／after／模組等待取消、取消後再次執行、前景輸入、啟動失敗保留框架、啟動期間 Ctrl+C 與真實模組退出。
+- `shell.console` 另驗證原生 Ctrl+D、搬移後的 Tcl 資源、Unicode `-S` 路徑與參數、無 stdin 的失敗部署保持存活及 OS Ctrl+C 關閉。
 
 本次在 Windows x64／MSVC 19.51.36257、Windows SDK 10.0.26100.0、CMake 4.3.2、Ninja 1.13.2
-完成 Debug 與 Release 建置：各 19/19 套 CTest 通過，包含以上四套 Shell 測試與既有回歸測試。
+完成建置與測試：Debug 20/20、Release 20/20 全數通過。
 Linux／macOS 後端尚未進行原生建置與行為驗證。

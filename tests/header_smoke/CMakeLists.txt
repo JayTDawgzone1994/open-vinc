@@ -1,3 +1,6 @@
+# Compile generated headers through their public usage target to catch missing
+# includes or generation-order dependencies hidden by the main application build.
+
 # Included only by the isolated ribosome_generation.cmake test checkout.
 # Each production header must compile as the first include in its own TU.
 file(GLOB message_files "${CMAKE_SOURCE_DIR}/messages/*.msg")

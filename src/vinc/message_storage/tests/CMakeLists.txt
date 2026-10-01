@@ -1,3 +1,6 @@
+# Generate dedicated test messages and compile their public API before checking
+# local storage, fixed loans and cross-process byte-image compatibility.
+
 add_executable(message_storage_tests storage_tests.cpp)
 target_link_libraries(message_storage_tests PRIVATE vinc::message_storage vinc::osal)
 # Only framework integration tests can see the fixed-memory binding seam.

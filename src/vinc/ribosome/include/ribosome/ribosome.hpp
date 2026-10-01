@@ -1,4 +1,8 @@
 #pragma once
+
+// Build-time .msg compiler: parse definitions, resolve dependent schemas, then emit C++ facades.
+// Generated fields bind to message storage instead of embedding process-specific wire pointers.
+
 #include <filesystem>
 #include <string>
 #include <vector>

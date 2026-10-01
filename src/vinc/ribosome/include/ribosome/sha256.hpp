@@ -1,4 +1,8 @@
 #pragma once
+
+// Incremental SHA-256 used to derive deterministic schema fingerprints.
+// Ribosome truncates the digest for type identification; this is not message authentication.
+
 #include <vector>
 #include <string>
 #include <cstdint>

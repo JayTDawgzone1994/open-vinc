@@ -1,3 +1,6 @@
+// Framework-supplied child entry point. Forward launch arguments to the runtime
+// so application modules only need a registered factory and BaseModule hooks.
+
 #include <module/base_module.hpp>
 #include <filesystem>
 #ifdef _WIN32

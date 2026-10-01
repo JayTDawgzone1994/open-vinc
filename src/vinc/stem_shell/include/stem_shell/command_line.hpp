@@ -1,4 +1,8 @@
 #pragma once
+
+// Interactive Shell parsing and line editing only; Tcl scripts use Tcl's own parser.
+// Arguments stay as a vector after parsing so quoting is not interpreted twice.
+
 #include <expected>
 #include <string>
 #include <string_view>

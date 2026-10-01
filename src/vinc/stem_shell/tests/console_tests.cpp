@@ -1,3 +1,6 @@
+// Windows-only native console tests in an isolated hidden console.
+// Exercise real key/control events and headless Tcl deployment without changing the user's terminal.
+
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -5,6 +8,8 @@
 #include <module/module_manager.hpp>
 #include <filesystem>
 #include <iostream>
+#include <fstream>
+#include <thread>
 #include <stdexcept>
 #include <vector>
 using namespace vinc::osal;
@@ -43,7 +48,39 @@ void broadcast_shutdown(Terminal& terminal) {
         "child exits through framework, not default console handler");
     check(std::filesystem::exists(directory / (*node + ".stopped")), "broadcast permits on_stop cleanup");
 }
-int child() {
+// Move the executable and Tcl resources to a Unicode path, remove interactive stdin,
+// and prove script errors leave the process alive until an OS shutdown event arrives.
+void headless_deployment(Terminal& terminal, const std::filesystem::path& vinc_exe) {
+    const auto directory = std::filesystem::current_path() / ("tcl-deploy-" + std::to_string(GetCurrentProcessId()));
+    check(std::filesystem::create_directory(directory), "create deployment fixture");
+    struct Cleanup { std::filesystem::path path; ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); } } cleanup{directory};
+    // Test Tcl resource relocation independently of the existing build-time module catalog.
+    std::filesystem::copy_file(vinc_exe, directory / "Vinc.exe");
+    std::filesystem::copy(vinc_exe.parent_path() / "lib", directory / "lib", std::filesystem::copy_options::recursive);
+    const auto script = directory / std::filesystem::path(u8"啟動 腳本.tcl");
+    const auto marker = directory / "ready.txt";
+    std::ofstream(script) << "set f [open [lindex $argv 0] w]\nputs $f [lindex $argv 1]\nclose $f\nerror deliberate-startup-error\n";
+    auto text = [](const auto& p) { auto value = p.generic_u8string(); return std::string(reinterpret_cast<const char*>(value.data()), value.size()); };
+    auto service = ProcessService::create(); check(bool(service), "deployment process service");
+    SpawnOptions options; options.executable = directory / "Vinc.exe";
+    options.arguments = {"-S", text(script), text(marker), "中文 空白"};
+    options.working_directory = directory; options.stdin_mode = StdioMode::Null;
+    auto process = service->spawn(options); check(bool(process), "start relocated headless Vinc");
+    struct Reap { Process& process; ~Reap() { (void)process.terminate(); (void)process.wait_until(std::chrono::steady_clock::now() + 3s); } } reap{*process};
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (!std::filesystem::exists(marker) && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(10ms);
+    check(std::filesystem::exists(marker), "Unicode -S path and argv reached Tcl");
+    std::this_thread::sleep_for(150ms);
+    std::string value; std::ifstream(marker) >> value; check(value == "中文", "Unicode CLI argument preserved");
+    auto status = process->try_wait(); check(status && !*status, "startup error and stdin EOF leave framework running");
+    check(GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0), "interrupt headless deployment");
+    auto exit = process->wait_until(std::chrono::steady_clock::now() + 4s);
+    check(exit && exit->kind == ExitKind::Code && exit->value == 0, "headless framework handles Ctrl+C normally");
+    // Consume the same broadcast in this fixture's terminal.
+    auto event = terminal.read_until(std::chrono::steady_clock::now() + 1s);
+    check(event && event->key == TerminalKey::Interrupt, "fixture observes broadcast");
+}
+int child(const std::filesystem::path& vinc_exe) {
     const auto input = GetStdHandle(STD_INPUT_HANDLE), output = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD before_input = 0, before_output = 0;
     check(GetConsoleMode(input, &before_input) && GetConsoleMode(output, &before_output), "hidden console attached");
@@ -64,19 +101,26 @@ int child() {
         check(next().text == "\xf0\x9f\x98\x80", "UTF-16 surrogate pair to UTF-8");
         check(next().key == TerminalKey::Up && next().key == TerminalKey::Tab && next().key == TerminalKey::Backspace, "native edit keys");
         check(next().key == TerminalKey::Interrupt, "native Ctrl+C input initiates shutdown event");
+        INPUT_RECORD cancel{}; cancel.EventType = KEY_EVENT; cancel.Event.KeyEvent.bKeyDown = TRUE;
+        cancel.Event.KeyEvent.wRepeatCount = 1; cancel.Event.KeyEvent.wVirtualKeyCode = 'D';
+        cancel.Event.KeyEvent.uChar.UnicodeChar = 4;
+        check(WriteConsoleInputW(input, &cancel, 1, &written), "inject Ctrl+D");
+        check(next().key == TerminalKey::Cancel, "native Ctrl+D is distinct from EOF");
         broadcast_shutdown(*terminal);
+        headless_deployment(*terminal, vinc_exe);
     }
     DWORD after_input = 0, after_output = 0;
     check(GetConsoleMode(input, &after_input) && GetConsoleMode(output, &after_output), "query restored console");
     check(after_input == before_input && after_output == before_output && GetConsoleOutputCP() == cp, "console modes and code page restored");
     return 0;
 }
-int main(int argc, char**) {
+int main(int argc, char** argv) {
     try {
-        if (argc == 2) return child();
+        if (argc == 3) return child(std::filesystem::absolute(argv[2]));
+        if (argc != 2) return 2;
         std::wstring path(32768, L'\0'); const auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
         check(length > 0 && length < path.size(), "executable path"); path.resize(length);
-        auto command = L"\"" + path + L"\" --child";
+        auto command = L"\"" + path + L"\" --child \"" + std::filesystem::absolute(argv[1]).wstring() + L"\"";
         STARTUPINFOW startup{}; startup.cb = sizeof(startup); startup.dwFlags = STARTF_USESHOWWINDOW; startup.wShowWindow = SW_HIDE;
         PROCESS_INFORMATION process{};
         check(CreateProcessW(path.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE, nullptr, nullptr, &startup, &process), "start hidden console test");
@@ -84,7 +128,7 @@ int main(int argc, char**) {
             PROCESS_INFORMATION p;
             ~Reap() { TerminateProcess(p.hProcess, 99); WaitForSingleObject(p.hProcess, 3000); CloseHandle(p.hThread); CloseHandle(p.hProcess); }
         } reap{process};
-        check(WaitForSingleObject(process.hProcess, 10000) == WAIT_OBJECT_0, "console child completed");
+        check(WaitForSingleObject(process.hProcess, 15000) == WAIT_OBJECT_0, "console child completed");
         DWORD code = 0; check(GetExitCodeProcess(process.hProcess, &code) && code == 0, "native console verification");
         std::cout << "native console tests passed\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

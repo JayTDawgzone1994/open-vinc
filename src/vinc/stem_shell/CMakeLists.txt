@@ -1,12 +1,18 @@
+# Build reusable Shell logic plus Vinc, the central executable.
+# Deploy Tcl resources beside executables and generate the catalog after module registration.
+
 cmake_minimum_required(VERSION 3.20)
 project(stem_shell LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-add_library(vinc_shell STATIC src/stem_shell.cpp src/scriptInterpreter.cpp src/command_line.cpp src/command_router.cpp)
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../library/tcl" "${CMAKE_BINARY_DIR}/library/tcl")
+add_library(vinc_shell STATIC src/stem_shell.cpp src/tcl_runtime.cpp src/command_line.cpp src/command_router.cpp)
 target_include_directories(vinc_shell PUBLIC include)
-target_link_libraries(vinc_shell PUBLIC module)
+target_link_libraries(vinc_shell PUBLIC module PRIVATE vinc_tcl)
 add_executable(stem_shell src/main.cpp)
+set_target_properties(stem_shell PROPERTIES OUTPUT_NAME Vinc)
+vinc_deploy_tcl(stem_shell "${CMAKE_BINARY_DIR}")
 target_include_directories(stem_shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(stem_shell PRIVATE vinc_shell)
 set_target_properties(stem_shell PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -18,15 +24,17 @@ if(PROCESS_TARGETS)
 endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/module-smoke.vinc"
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/module-smoke.tcl"
         "exampleModule\nexampleNode hello\nexampleModule\nexampleNode_1 status\nexit\n")
-    add_test(NAME module.shell COMMAND stem_shell -sc "${CMAKE_CURRENT_BINARY_DIR}/module-smoke.vinc")
+    add_test(NAME module.shell COMMAND stem_shell -S "${CMAKE_CURRENT_BINARY_DIR}/module-smoke.tcl")
     set_tests_properties(module.shell PROPERTIES TIMEOUT 20 PASS_REGULAR_EXPRESSION "exampleNode_1 status")
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bus-smoke.vinc"
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bus-smoke.tcl"
         "busExample sub demo\nbusExample pub demo\nbusNode_1 push 10\nbusNode last\nbusNode last\nbusNode next\nbusNode_1 loan 20\nbusNode last\nbusNode_1 commit\nbusNode next\nbusNode_1 stats\nexit\n")
-    add_test(NAME bus.shell COMMAND stem_shell -sc "${CMAKE_CURRENT_BINARY_DIR}/bus-smoke.vinc")
+    add_test(NAME bus.shell COMMAND stem_shell -S "${CMAKE_CURRENT_BINARY_DIR}/bus-smoke.tcl")
     set_tests_properties(bus.shell PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "value=20")
 endif()
+# Generate after collecting all process modules. Generator expressions resolve
+# each executable path for this build configuration.
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/module_catalog.hpp" CONTENT
 "#pragma once\n#include <module/module_manager.hpp>\n#include <stdexcept>\nnamespace vinc { inline void register_built_modules(ModuleManager& manager) {\n${PROCESS_CATALOG}} }\n")
 if(MSVC)

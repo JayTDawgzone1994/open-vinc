@@ -1,3 +1,6 @@
+// POSIX process backend using posix_spawn and waitpid for OSAL-owned children.
+// Native readiness wakes the observer; waitpid remains the authority for the final exit result.
+
 #include "platform.hpp"
 #include "../process_pipe_native.hpp"
 

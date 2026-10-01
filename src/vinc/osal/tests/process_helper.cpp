@@ -1,3 +1,6 @@
+// Child-only fault/behavior fixture for Process tests. Each command-line mode
+// performs one observable action so the parent can verify the OSAL launch contract.
+
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>

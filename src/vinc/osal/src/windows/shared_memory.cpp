@@ -1,3 +1,6 @@
+// Windows named mappings in the current session, restricted to the creating user.
+// The OS releases the object after the last reference; there is no POSIX-style unlink operation.
+
 #include "../shared_memory_state.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

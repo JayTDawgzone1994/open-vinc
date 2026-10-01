@@ -1,3 +1,6 @@
+// Mutable message arena and validated immutable images.
+// Structural edits build a replacement layout before committing; shared loans enforce one byte budget.
+
 #include "framework_access.hpp"
 #include <cstring>
 #include <functional>
@@ -64,6 +67,8 @@ struct Node {
     std::vector<Handle> children;
     std::span<const std::byte> imported; // transaction-local; cleared before commit
 };
+// Editable descriptor tree used to prepare structural changes off to the side.
+// The live State is updated only after layout, allocation and rendering all succeed.
 struct Plan {
     std::vector<Node> nodes;
     std::vector<Handle> roots;
@@ -74,6 +79,8 @@ struct Layout {
     std::uint64_t table = 0, payload = 0, total = 0, count = 0;
     std::vector<std::uint64_t> ids, offsets;
 };
+// Compute one contiguous image: header, root IDs, descriptors, then aligned payloads.
+// Compact images count used elements; construction images also reserve array capacity.
 Layout layout(const Plan& plan, bool compact) {
     Layout result;
     result.ids.resize(plan.nodes.size(), UINT64_MAX);
@@ -97,6 +104,8 @@ Layout layout(const Plan& plan, bool compact) {
 }
 }
 
+// One mutable arena, either growable local bytes or a fixed framework loan.
+// All nested fields share its budget. The owner keeps external storage alive; it is not a lock.
 struct State {
     std::vector<std::byte> local;
     std::span<std::byte> fixed;
@@ -107,6 +116,8 @@ struct State {
     std::span<std::byte> bytes() { return is_fixed ? fixed : std::span<std::byte>(local); }
     std::uint64_t limit() const { return is_fixed ? fixed.size() : UINT64_MAX; }
 };
+// Validated read-only representation. Entries and roots are local lookup metadata;
+// the serialized image contains IDs and offsets rather than these vectors or pointers.
 struct Image {
     struct Entry { Type type; std::uint64_t offset, size, capacity; };
     std::vector<std::byte> owned;
@@ -188,6 +199,8 @@ std::span<const std::byte> source_bytes(State& state, std::size_t index, const N
     if (!size) return {};
     return state.bytes().subspan(host_size(source.offset), host_size(size));
 }
+// Write the portable image explicitly. Child references become descriptor IDs,
+// reserved bytes are zeroed, and scalar payloads are copied from the previous layout/imports.
 void render_into(std::span<std::byte> bytes, State& state, const Plan& plan, const Layout& positions, bool compact) {
     std::fill(bytes.begin(), bytes.end(), std::byte{0});
     put(bytes, 0, magic); put(bytes, 8, 2, 4); put(bytes, 12, compact ? 1 : 2, 4);
@@ -222,6 +235,8 @@ std::vector<std::byte> render(State& state, const Plan& plan, const Layout& posi
     render_into(bytes, state, plan, positions, compact);
     return bytes;
 }
+// Strong failure boundary for structural edits: render to temporary storage first.
+// A capacity/allocation failure leaves the old tree and payload available to the caller.
 void rebuild(State& state, Plan& plan) {
     before_change(state);
     auto positions = layout(plan, false);
@@ -252,6 +267,8 @@ std::uint64_t preferred_capacity(std::uint64_t previous, std::uint64_t needed) {
     const auto growth = previous > UINT64_MAX / 2 ? needed : std::max<std::uint64_t>(4, previous * 2);
     return std::max(needed, growth);
 }
+// Prefer geometric capacity growth, but retry with exactly the requested size when
+// spare capacity alone would exceed the byte budget. A valid small edit should still fit.
 void rebuild_with_growth(State& state, Plan& plan, std::uint64_t id, std::uint64_t minimum) {
     const auto old = plan.nodes[host_size(id)].capacity;
     plan.nodes[host_size(id)].capacity = preferred_capacity(old, minimum);
@@ -286,6 +303,8 @@ Handle clone_tree(Plan& plan, State& source, Handle root) {
     }
     return result;
 }
+// Treat incoming bytes as untrusted layout data. Check extents, padding, element types
+// and unique tree ownership before allowing any descriptor-based payload access.
 void validate(Image& image) {
     const auto bytes = image.bytes();
     require(bytes.size() >= header_size && get(bytes, 0) == magic && get(bytes, 8, 4) == 2 &&
@@ -348,6 +367,8 @@ void validate(Image& image) {
     }
     require(reached == count, ErrorCode::InvalidData);
 }
+// Layout validation alone is insufficient: match every nested field to the expected
+// generated schema before exposing a typed message facade.
 void validate_schema(Image& image, std::uint64_t id, Type expected) {
     struct Check { std::uint64_t id; Type type; bool singular; };
     std::vector<Check> pending{{id, expected, false}};
@@ -438,6 +459,8 @@ Result<void> write(const std::shared_ptr<State>& ptr, Handle handle, std::uint64
         std::memcpy(state.bytes().data() + host_size(value.offset + index * bytes.size()), bytes.data(), bytes.size());
     });
 }
+// Use an in-place fast path for scalar arrays that already have enough capacity.
+// Nested/relocating edits instead stage a new tree and rebuild the owning image.
 Result<void> resize(const std::shared_ptr<State>& ptr, Handle handle, std::uint64_t size, bool reserve_only) {
     return guarded([&] {
         auto& state = live(ptr); const auto& original = node(state, handle);
@@ -766,6 +789,8 @@ Result<Message> FrameworkAccess::borrow(std::span<std::byte> bytes, std::shared_
 Result<Snapshot> FrameworkAccess::seal(Message& message) {
     return seal_binding({message.state_, {}, false});
 }
+// End exclusive construction without moving payload bytes. Revoking the writable
+// binding invalidates saved field wrappers; Bus publishes the retained image afterward.
 Result<Snapshot> seal_binding(Binding binding) {
     return guarded([&] {
         auto& state = live(binding.state);
@@ -787,6 +812,8 @@ Result<Binding> FrameworkAccess::borrow_record(const Schema& schema, std::span<s
         return Binding{std::move(state), *handle, false};
     });
 }
+// Local push path: check packed size and reject overlap, then render straight into
+// the reserved shared slot. The source remains local and usable after publication.
 Result<Snapshot> publish_binding(Binding binding, std::span<std::byte> bytes, std::shared_ptr<void> owner) {
     return guarded([&] {
         auto& state = live(binding.state);

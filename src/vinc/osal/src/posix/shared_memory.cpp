@@ -1,3 +1,6 @@
+// POSIX shm_open/mmap backend with exclusive creation and owner-only initial permissions.
+// Names and mappings have separate lifetimes: unlink removes discovery, not existing views.
+
 #include "../shared_memory_state.hpp"
 #include <cerrno>
 #include <fcntl.h>

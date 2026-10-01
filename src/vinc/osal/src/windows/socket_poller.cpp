@@ -1,3 +1,6 @@
+// Windows socket readiness backend using WSAPoll.
+// A private connected loopback pair wakes the same wait for cancellation or cross-thread work.
+
 #include "../socket_native.hpp"
 #include <algorithm>
 #include <mutex>

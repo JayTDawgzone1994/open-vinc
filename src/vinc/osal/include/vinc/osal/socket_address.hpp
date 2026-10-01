@@ -1,4 +1,8 @@
 #pragma once
+
+// Portable address values; native sockaddr conversion stays in the implementation.
+// Numeric parsing is local work. Hostname resolution is a separate blocking operation.
+
 #include <vinc/osal/error.hpp>
 #include <array>
 #include <cstdint>

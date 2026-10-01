@@ -1,3 +1,6 @@
+# Generator-level schema tests: invoke the real compiler on valid/invalid definitions
+# and check canonical types, dependencies and diagnostics before C++ compilation.
+
 cmake_minimum_required(VERSION 3.20)
 if(NOT DEFINED GENERATOR OR NOT DEFINED WORK OR NOT DEFINED TEMPLATE)
     message(FATAL_ERROR "GENERATOR, WORK and TEMPLATE are required")

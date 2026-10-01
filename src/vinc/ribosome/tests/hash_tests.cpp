@@ -1,3 +1,6 @@
+// Known-answer SHA-256 tests, including incremental updates.
+// These protect schema fingerprint reproducibility independently of generator output formatting.
+
 #include <ribosome/sha256.hpp>
 #include <iostream>
 #include <stdexcept>

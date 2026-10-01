@@ -1,3 +1,6 @@
+// Process-independent PipeReader/PipeWriter tests. Verify one-way stream behavior
+// and ownership/limits without involving child bootstrap or module policy.
+
 // Intentionally no process.hpp/process_pipe.hpp: Pipe works independently.
 #include <vinc/osal/pipe.hpp>
 #include <algorithm>

@@ -5,6 +5,12 @@
 #include <sstream>
 
 namespace vinc {
+// The generated Schema describes field order and types; it is local metadata.
+// Data_t fields are wrappers bound to one message arena, not a packed C++ wire struct.
+// data() returns that bound facade: auto& edits it, while a value copy owns local data.
+// Copy construction detaches; assignment preserves the destination binding and budget.
+// Array fields use MessageArray, so nested arrays share the owning message's capacity.
+// Only the encoded byte image crosses processes; never memcpy this message class.
 inline const message::detail::Schema& ribosome_schema_double3() {
     static const message::detail::Schema value{3931266877810359076ULL, {
         {"x", message::detail::type<double>(), true},

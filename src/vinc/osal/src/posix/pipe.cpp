@@ -1,3 +1,6 @@
+// POSIX Pipe backend using nonblocking descriptors and readiness notification.
+// Only the dedicated Pipe worker performs I/O; SIGPIPE handling stays local to that thread.
+
 #include "pipe_platform.hpp"
 #include <atomic>
 #include <cerrno>

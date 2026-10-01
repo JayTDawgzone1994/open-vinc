@@ -1,4 +1,8 @@
 #pragma once
+
+// A connected Socket becomes a versioned session with a handshake and two-way heartbeat.
+// This layer reports connection health; ModuleManager decides whether to stop or restart a module.
+
 #include <vinc/control/protocol.hpp>
 #include <vinc/osal/socket_poller.hpp>
 #include <chrono>

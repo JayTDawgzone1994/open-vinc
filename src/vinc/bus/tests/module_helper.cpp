@@ -1,3 +1,6 @@
+// Bus fault-injection module used only by tests. Private ring access deliberately
+// holds a reader lease so confirmed process death can exercise broker reclamation.
+
 #include <module/base_module.hpp>
 #include <vinc_messages/Frame.hpp>
 #include <vinc_messages/Point.hpp>

@@ -1,3 +1,6 @@
+# Top-level entry point. CTest is enabled here and the vinc subtree defines
+# the C++ targets, generated messages, process examples and central executable.
+
 cmake_minimum_required(VERSION 3.20)
 project(vinc_root LANGUAGES CXX)
 

@@ -1,4 +1,8 @@
 #pragma once
+
+// Private socket handles, connection state and poller backend interface.
+// Public code carries portable addresses and registration IDs instead of native descriptors.
+
 #include <vinc/osal/socket_poller.hpp>
 #include <climits>
 #include <cstring>

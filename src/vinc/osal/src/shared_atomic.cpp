@@ -1,3 +1,6 @@
+// Implement sequentially consistent IPC atomics using native 64-bit operations.
+// A process-local fallback lock would not protect another process mapping the same word.
+
 #include <vinc/osal/shared_atomic.hpp>
 #include <bit>
 #include <cstdlib>

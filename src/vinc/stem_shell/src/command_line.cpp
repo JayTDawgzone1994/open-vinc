@@ -1,3 +1,6 @@
+// Parse the small interactive command syntax and maintain bounded UTF-8 line history.
+// This is not a system shell: there is no variable expansion, pipeline or script execution here.
+
 #include <stem_shell/command_line.hpp>
 
 namespace vinc::shell {

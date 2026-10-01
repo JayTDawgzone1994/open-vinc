@@ -1,5 +1,9 @@
+// Run Shell against real module helpers while feeding controlled terminal input.
+// Verify responsive commands, late replies and shutdown that waits for actual child exit.
+
 #include "input_pipe.hpp"
 #include <stem_shell/stem_shell.hpp>
+#include <stem_shell/tcl_runtime.hpp>
 #include <stem_shell/command_router.hpp>
 #include <atomic>
 #include <filesystem>
@@ -34,6 +38,7 @@ std::string start(ModuleManager& manager, const Workspace& files, const std::str
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
     try {
+        shell::initialize_tcl(argv[0]);
         const auto exe = std::filesystem::absolute(argv[1]);
         {
             Workspace files; ModuleManager manager; register_helper(manager, exe);

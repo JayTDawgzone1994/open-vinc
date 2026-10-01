@@ -1,3 +1,6 @@
+// Linux process wakeup backend: epoll observes pidfds and an eventfd wakes service work.
+// The common observer still reaps children; unavailable native watches use its polling fallback.
+
 #include "../posix/platform.hpp"
 
 #include <cerrno>

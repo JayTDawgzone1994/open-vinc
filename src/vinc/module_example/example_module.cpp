@@ -1,3 +1,6 @@
+// Minimal process module: implement lifecycle/command hooks and register the factory.
+// No Socket, heartbeat or process-management code is required in the application class.
+
 #include <module/base_module.hpp>
 #include <iostream>
 

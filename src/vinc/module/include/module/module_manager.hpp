@@ -1,4 +1,8 @@
 #pragma once
+
+// Central owner of module definitions, named instances and restart/stop policy.
+// A logical instance can have several process generations; never identify a run by name or PID alone.
+
 #include <vinc/control/channel.hpp>
 #include <vinc/osal/process.hpp>
 #include <vinc_define.hpp>
@@ -6,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -23,6 +28,8 @@ struct ModulePolicy {
     std::uint32_t max_restarts = 0;
     std::chrono::milliseconds restart_delay{1000};
 };
+// A factory describes an executable and naming/policy defaults; registering it does not launch.
+// Each successful start allocates a final instance name, adding a suffix when needed.
 struct ModuleDefinition {
     std::string name;
     std::filesystem::path executable;
@@ -48,8 +55,10 @@ public:
     ModuleManager& operator=(const ModuleManager&) = delete;
     static ModuleManager& get();
     control::Result<void> register_module(ModuleDefinition);
+    // Queue startup and return the allocated name. Use wait_started/wait_running
+    // when later work requires on_start to have completed successfully.
     control::Result<std::string> start_module(const std::string& factory, std::vector<std::string> args = {});
-    control::Result<void> wait_running(const std::string&, control::Deadline);
+    control::Result<void> wait_running(const std::string&, control::Deadline, std::stop_token = {});
     control::Result<void> stop_module(const std::string&, control::Deadline);
     // Idempotent. Closes admission and asks every managed instance to stop.
     void begin_shutdown();
@@ -57,11 +66,14 @@ public:
     control::Result<void> wait_shutdown(control::Deadline);
     std::vector<ModuleSnapshot> snapshots() const;
     control::Result<void> reserve_command_name(const std::string&);
-    control::Result<void> wait_started(const std::string&);
+    control::Result<void> wait_started(const std::string&, std::stop_token = {});
     control::Result<void> forget_module(const std::string&);
     std::optional<ModuleSnapshot> inspect(const std::string&) const;
-    control::Result<int32_t> command(const std::string&, std::vector<std::string>, control::Deadline);
+    // Canceling a wait does not undo a sent request; Busy persists until reply/exit.
+    control::Result<int32_t> command(const std::string&, std::vector<std::string>, control::Deadline, std::stop_token = {});
     control::Result<std::vector<std::string>> complete(const std::string&, std::vector<std::string>, control::Deadline);
+    // Legacy convenience adapters below preserve older status-code APIs.
+    // Micro-program callbacks execute in the central process and have no process isolation.
     int8_t unregister_module_factory(const std::string&);
     int32_t call_module_interface(const std::string&, std::vector<std::string>);
     int32_t call_node_interface(const std::string&, std::vector<std::string>);

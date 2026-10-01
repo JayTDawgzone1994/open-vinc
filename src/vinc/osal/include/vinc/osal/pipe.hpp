@@ -1,4 +1,8 @@
 #pragma once
+
+// Owned, asynchronous, one-way byte streams.
+// PipeService owns accepted buffers until completion; protocol framing belongs above OSAL.
+
 #include <vinc/osal/error.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +25,8 @@ enum class IoKind { Read, Write };
 enum class IoStatus { Completed, EndOfStream, PeerClosed, Cancelled, TimedOut, Closed, Failed };
 enum class CancelResult { Requested, AlreadyCompleted };
 
+// Move-only transfer storage. On successful submit, do not retain pointers into it;
+// regain access through the buffer returned in IoCompletion.
 class IoBuffer {
 public:
     IoBuffer() = default;

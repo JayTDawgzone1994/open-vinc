@@ -1,3 +1,6 @@
+// Named-memory lifetime, access and real cross-process visibility tests.
+// Pipe tokens synchronize test steps; SharedMemory itself supplies no message synchronization.
+
 #include <vinc/osal/shared_memory.hpp>
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>

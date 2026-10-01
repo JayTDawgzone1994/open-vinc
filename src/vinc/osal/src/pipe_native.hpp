@@ -1,4 +1,8 @@
 #pragma once
+
+// Private Pipe backend contract. Native transfers borrow scheduler-owned buffers
+// until completion, including when cancellation has already been requested.
+
 #include <vinc/osal/pipe.hpp>
 #include <array>
 #include <string>

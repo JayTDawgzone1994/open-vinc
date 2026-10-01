@@ -139,7 +139,7 @@ Windows x64 為實測平台；Linux／macOS 尚待原生建置與故障驗證，
 Windows Debug 建置後，從儲存庫根目錄執行：
 
 ```powershell
-.\build\windows-msvc-debug\stem_shell.exe
+.\build\windows-msvc-debug\Vinc.exe
 ```
 
 依序輸入（新的 Shell，尚無其他 busNode）：

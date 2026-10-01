@@ -1,3 +1,6 @@
+// Ribosome pipeline: validate .msg syntax, canonicalize types, resolve dependencies,
+// fingerprint schemas, and publish a complete set of generated headers from a staging directory.
+
 #include <ribosome/ribosome.hpp>
 #include <ribosome/sha256.hpp>
 #include <generated/ribosome_config.hpp>
@@ -48,6 +51,8 @@ bool identifier(const std::string& name) {
     };
     return std::regex_match(name, pattern) && name.find("__") == std::string::npos && !name.starts_with("ribosome_") && !reserved.contains(name);
 }
+// Resolve source aliases to explicit widths before hashing or emitting C++.
+// For example, the schema meaning of long is int64 even on an OS where native long is 32-bit.
 std::string builtin(std::string type) {
     if (type.starts_with("std::")) type.erase(0, 5);
     static const std::map<std::string, std::string> aliases{
@@ -63,6 +68,8 @@ std::string builtin(std::string type) {
 [[noreturn]] void error(const MessageInfo& m, std::uint32_t line, const std::string& reason) {
     throw std::runtime_error(m.path.string() + ":" + std::to_string(line) + ": error: " + reason);
 }
+// Validate constants as data in the declared type's range. Never paste unchecked
+// .msg text into a C++ initializer, where it could become arbitrary source code.
 std::string constant(const MessageInfo& m, const VariableInfo& f, std::string text) {
     if (!f.builtin || f.dimensions) error(m, f.line, "constants require a scalar or string type");
     if (f.type == "message::MessageString") {
@@ -131,6 +138,8 @@ void replace_all(std::string& text, const std::string& from, const std::string& 
 }
 }
 
+// Sort input paths for reproducible output and reject names that collide on
+// case-insensitive filesystems, even when generation runs on a case-sensitive OS.
 std::vector<MessageInfo> Ribosome::load() {
     if (!fs::is_directory(input_)) throw std::runtime_error("Input path does not exist or is not a directory: " + input_.string());
     std::vector<fs::path> paths;
@@ -174,6 +183,8 @@ std::vector<MessageInfo> Ribosome::load() {
     return messages;
 }
 
+// Depth-first dependency resolution rejects cycles before emission. Parent hashes
+// include dependent hashes, so changing a nested message also changes its containing schema.
 void Ribosome::resolve(std::vector<MessageInfo>& messages) {
     std::map<std::string, std::size_t> index;
     std::set<std::string> symbols;
@@ -191,6 +202,8 @@ void Ribosome::resolve(std::vector<MessageInfo>& messages) {
         if (depth > 64) error(m, 1, "message dependency nesting exceeds 64");
         state[id] = 1;
         crypto::SHA256 sha;
+        // Length-prefix hash inputs to distinguish different field/token boundaries.
+        // Whitespace and comments never participate in the canonical schema fingerprint.
         auto token = [&](const std::string& s) { sha.update(std::to_string(s.size()) + ":" + s); };
         token("vinc-record-wire-v2"); token(m.name);
         for (const auto& f : m.variables) {
@@ -213,6 +226,8 @@ void Ribosome::resolve(std::vector<MessageInfo>& messages) {
     }
 }
 
+// Emit a local class facade and bound Data_t fields from the validated schema.
+// Field constructors bind into one arena; no C++ object layout is used as the wire format.
 std::string Ribosome::generate(const MessageInfo& m, const std::string& source) {
     std::ostringstream out, includes;
     std::set<std::string> dependencies;
@@ -265,6 +280,8 @@ std::string Ribosome::generate(const MessageInfo& m, const std::string& source) 
     return text;
 }
 
+// Fail closed: remove the old output and generate the complete new set in staging.
+// An error must not leave stale headers that make a later build appear successful.
 std::int8_t Ribosome::make_ligand() {
     struct Staging {
         fs::path path; bool owned = false;

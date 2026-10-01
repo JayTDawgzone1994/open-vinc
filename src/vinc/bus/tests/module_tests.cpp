@@ -1,3 +1,6 @@
+// End-to-end Bus tests through independent Module processes and the central broker.
+// Verify multiple Publishers, copied reads, loans, topology changes and crash cleanup.
+
 #include <module/module_manager.hpp>
 #include <iostream>
 #include <stdexcept>

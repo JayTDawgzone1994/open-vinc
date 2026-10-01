@@ -1,3 +1,6 @@
+// Child bootstrap and hook dispatcher. A separate watchdog receives control frames
+// while application hooks run serially, so a blocked hook cannot disable parent-loss detection.
+
 #include <module/base_module.hpp>
 #include <vinc/control/channel.hpp>
 #include "module_protocol.hpp"
@@ -30,6 +33,8 @@ bool detail::register_compiled_module(std::string name, ModuleFactory factory) {
     if (entry.factory) { entry.duplicate = true; return false; }
     entry.name = std::move(name); entry.factory = std::move(factory); return true;
 }
+// The first ten arguments are the framework bootstrap contract. Application startup
+// arguments follow them unchanged; ordinary users should launch through ModuleManager.
 int run_module_process(const std::vector<std::string>& args) {
     if (args.size() < 10 || args[0] != "--vinc-module-v1" || !compiled().factory || compiled().duplicate) return 64;
     const auto generation = number(args[4]), interval = number(args[5]), timeout = number(args[6]),
@@ -60,6 +65,8 @@ int run_module_process(const std::vector<std::string>& args) {
     bool stopping = false;
     std::atomic<bool> finished{false};
     // Independent of application constructors, hooks and destructors.
+    // This watches the framework connection, not arbitrary application-thread health.
+    // Loss of the session or an expired stop grace period uses _Exit because hooks may be stuck.
     std::jthread watchdog([&](std::stop_token token) {
         try {
             auto stop_deadline = (control::Deadline::max)();
@@ -91,6 +98,8 @@ int run_module_process(const std::vector<std::string>& args) {
         auto node = compiled().factory(args[2]);
         if (!node || node->get_node_name() != args[2]) throw std::runtime_error("invalid module factory");
         detail::ModuleBusAccess::attach(*node, bus_client);
+        // Attach framework services before user startup. Ready is sent only after on_start
+        // returns success, so central callers can distinguish a live process from a usable module.
         result = node->on_start(std::vector<std::string>(args.begin() + 10, args.end()));
         if (!result) {
             control::Frame ready{control::Kind::Event, detail::lifecycle, detail::ready};
@@ -102,6 +111,8 @@ int run_module_process(const std::vector<std::string>& args) {
                   changed.wait(lock, [&] { return stopping || !requests.empty(); });
                   if (stopping) break;
                   request = std::move(requests.front()); requests.pop_front(); }
+                // Keep each response tied to the original domain, operation and request ID.
+                // Hook exceptions become status codes instead of escaping the dispatch loop.
                 control::Frame response{control::Kind::Response, request.domain, request.operation, request.request};
                 int32_t status = detail::unsupported_operation;
                 std::vector<std::string> completions;

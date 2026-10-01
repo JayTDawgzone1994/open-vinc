@@ -1,3 +1,6 @@
+// Child endpoint-adoption fixture for Pipe tests. Mode arguments select transfer,
+// closure or failure behavior; the framework transport is not mocked.
+
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>
 #include <array>

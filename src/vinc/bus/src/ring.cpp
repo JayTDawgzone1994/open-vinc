@@ -1,3 +1,6 @@
+// Ring publication and overwrite protection using generation-tagged shared atomic words.
+// Atomic metadata selects a complete payload; the payload bytes themselves are not atomic.
+
 #include "ring.hpp"
 #include <algorithm>
 #include <cstring>
@@ -9,6 +12,8 @@
 namespace vinc::bus::detail {
 namespace {
 constexpr std::uint64_t magic = 0x31474e495242564fULL;
+// Slot lifecycle: empty -> writing -> ready -> draining -> writing.
+// Draining blocks new readers before the writer waits for old-generation leases to clear.
 constexpr std::uint64_t ready = 1, draining = 2, writing = 3;
 Error io(const osal::OsError& e) {
     return error(ErrorCode::Io, "shared memory operation=" + std::to_string(static_cast<unsigned>(e.operation)) +
@@ -90,6 +95,8 @@ Result<std::shared_ptr<Ring>> Ring::open(Descriptor d, bool writer) {
 void Ring::retire() noexcept { if (header_) shared_store(header_->alive, 0); }
 bool Ring::alive() const noexcept { return header_ && shared_load(header_->alive) != 0; }
 void Ring::clear_reader(std::uint32_t i) noexcept { if (i < descriptor.readers) shared_store(readers_[i].token, 0); }
+// Only one writer operation may enter for a Publisher. Pick the next physical slot,
+// close its old read gate, then wait for announced readers before granting writable bytes.
 Result<Reservation> Ring::reserve(const std::atomic<bool>& closed) {
     if (!writable_ || !alive() || closed.load()) return std::unexpected(error(ErrorCode::Closed, "publisher closed"));
     const auto head = shared_load(header_->head), generation = shared_load(header_->generation);
@@ -104,6 +111,8 @@ Result<Reservation> Ring::reserve(const std::atomic<bool>& closed) {
             return std::unexpected(error(ErrorCode::Protocol, "concurrent writer on publisher ring"));
         std::uint64_t started = 0;
         std::uint32_t spins = 0;
+        // An OS-suspended reader can hold this wait indefinitely. Record contention instead
+        // of overwriting live bytes; explicit close/retirement still interrupts the wait.
         for (;;) {
             bool held = false;
             for (std::uint32_t i = 0; i < descriptor.readers; ++i) if (shared_load(readers_[i].token) == old) { held = true; break; }
@@ -131,6 +140,8 @@ Result<Reservation> Ring::reserve(const std::atomic<bool>& closed) {
     auto bytes = data_map_.writable_bytes(); if (!bytes) return std::unexpected(io(bytes.error()));
     return Reservation{index, head + 1, generation + 1, bytes->subspan(index * slot_stride(descriptor.bytes), descriptor.bytes)};
 }
+// Publish metadata first, then the ready token, then head. Readers must observe
+// both readiness and a sequence no newer than head before treating a slot as published.
 Result<void> Ring::publish(const Reservation& r, std::uint64_t bytes, std::uint64_t timestamp, std::uint64_t count) {
     if (!alive()) return std::unexpected(error(ErrorCode::Closed, "publisher retired"));
     auto& s = slots_[r.slot];
@@ -146,6 +157,8 @@ void Ring::abandon(const Reservation& r) noexcept {
     auto expected = (r.generation << 2) | writing;
     (void)shared_compare_exchange(slots_[r.slot].gate, expected, 0);
 }
+// Find a currently readable sequence within the retained window. This is only a
+// metadata candidate: the caller must protect/revalidate it before touching payload bytes.
 std::optional<Metadata> Ring::candidate(std::uint64_t cursor, bool latest) {
     if (!alive()) return {};
     const auto head = shared_load(header_->head);
@@ -163,6 +176,8 @@ std::optional<Metadata> Ring::candidate(std::uint64_t cursor, bool latest) {
         ++sequence;
     }
 }
+// Announce first, then recheck the exact generation/state. If the writer won the
+// race, discard this candidate and retry without copying any potentially changing bytes.
 bool Ring::protect(const Metadata& m, std::uint32_t reader_index) {
     if (reader_index >= descriptor.readers) return false;
     // SC announce/revalidate pairs with the writer's SC close/scan. If validation
@@ -199,6 +214,8 @@ Result<std::shared_ptr<NamedCounter>> NamedCounter::open(std::string name) {
     r->memory = std::move(*m); auto map = r->memory.map(sizeof(SharedWord), osal::SharedMemoryAccess::ReadWrite);
     if (!map) return std::unexpected(io(map.error())); r->mapping = std::move(*map); return r;
 }
+// Allocate a topic-wide diagnostic count. It does not serialize ring publication
+// and is not the FIFO merge key; stop before wrapping and reusing an old count.
 Result<std::uint64_t> NamedCounter::next() {
     auto bytes = mapping.writable_bytes(); if (!bytes) return std::unexpected(io(bytes.error()));
     auto& word = *reinterpret_cast<SharedWord*>(bytes->data()); auto value = shared_load(word);

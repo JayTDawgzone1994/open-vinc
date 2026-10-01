@@ -1,3 +1,6 @@
+// Interactive example of copied local publication, direct shared-memory loans,
+// and copied subscription reads. All operations are invoked through ordinary module hooks.
+
 #include <module/base_module.hpp>
 #include <vinc_messages/test.hpp>
 #include <charconv>
@@ -40,6 +43,8 @@ public:
         if (subscriber_ && (command == "next" || command == "last")) {
             auto r = command == "next" ? subscriber_->next() : subscriber_->get_last();
             if (!r) return report(r.error());
+            // The framework has already copied the payload locally and released its read lease.
+            // Application processing here cannot keep the Publisher waiting on this message.
             auto& m = **r;
             std::cout << '[' << get_node_name() << "] value=" << m.data().y.at(0).value()
                       << " publisher=" << m.publisher_name() << " count=" << m.get_topic_count()
@@ -58,10 +63,14 @@ public:
         if ((command == "push" || command == "loan") && args.size() == 2) {
             std::int32_t value = 0; auto [end, ec] = std::from_chars(args[1].data(), args[1].data() + args[1].size(), value);
             if (ec != std::errc{} || end != args[1].data() + args[1].size()) return 1;
+            // Path 1: build freely in local memory; push copies the packed payload into
+            // the Publisher ring and fails if it exceeds this Publisher's byte budget.
             if (command == "push") {
                 auto m = vinc::make_message<Message>(); fill(*m, value);
                 auto r = publisher_->push(*m); return r ? 0 : report(r.error());
             }
+            // Path 2: borrow a fixed shared slot now and publish later with commit.
+            // Array growth can fail immediately here because the shared byte budget already applies.
             auto r = publisher_->get_next(); if (!r) return report(r.error());
             loan_.emplace(std::move(*r)); fill(**loan_, value); return 0;
         }
