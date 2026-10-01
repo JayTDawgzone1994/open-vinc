@@ -9,9 +9,7 @@ namespace vinc
 // 一個用來測試 AxonBus 的假訊息
 class DummyMsg : public vinc::BaseMessage {
 public:
-    DummyMsg() {
-        _topic_name = "test_topic";
-    }
+    DummyMsg() = default; // Routing metadata is assigned by the framework.
 
     std::string to_string() const override { return "DummyMsg"; }
     uint64_t type_hash() const override { return 1; }

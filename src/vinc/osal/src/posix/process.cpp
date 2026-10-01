@@ -145,6 +145,11 @@ Result<std::unique_ptr<NativeProcess>> NativeProcess::spawn(const SpawnOptions& 
         }
     }
     short flags = POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF;
+    if (options.new_process_group) {
+        flags |= POSIX_SPAWN_SETPGROUP;
+        error = posix_spawnattr_setpgroup(&attributes.value, 0);
+        if (error) return std::unexpected(native_error(Operation::Spawn, error));
+    }
 #if defined(VINC_OSAL_MACOS)
     flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
 #else

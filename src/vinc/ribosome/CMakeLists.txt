@@ -41,3 +41,15 @@ if(MSVC)
 else()
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+if(BUILD_TESTING)
+    add_executable(ribosome_hash_tests tests/hash_tests.cpp)
+    target_include_directories(ribosome_hash_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    add_test(NAME ribosome.hash COMMAND ribosome_hash_tests)
+    set_tests_properties(ribosome.hash PROPERTIES TIMEOUT 30)
+    add_test(NAME ribosome.schema COMMAND ${CMAKE_COMMAND}
+        "-DGENERATOR=$<TARGET_FILE:ribosome>" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/schema-tests"
+        "-DTEMPLATE=${CMAKE_CURRENT_SOURCE_DIR}/data/message_sample.txt"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/schema_tests.cmake")
+    set_tests_properties(ribosome.schema PROPERTIES TIMEOUT 60)
+endif()

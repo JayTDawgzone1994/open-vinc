@@ -36,6 +36,10 @@ struct SpawnOptions {
     StdioMode stdin_mode = StdioMode::Null;
     StdioMode stdout_mode = StdioMode::Inherit;
     StdioMode stderr_mode = StdioMode::Inherit;
+    // Isolate terminal Ctrl+C: Windows creates a group with CTRL_C disabled;
+    // POSIX creates a process group with the child's PID. No new console/session.
+    // terminate() still targets only this process, not its descendants.
+    bool new_process_group = false;
 };
 
 enum class ExitKind { Code, Signal };

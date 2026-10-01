@@ -55,12 +55,17 @@ endfunction()
 # 這裡的載入順序不會影響底部的鋼鐵鎖鏈，但建議依邏輯層次排列
 add_subdirectory(ribosome)       # 訊息生成器執行檔 (ribosome)
 add_subdirectory(osal)           # Independent OS process primitives
+add_subdirectory(message_storage) # Relocatable arrays; independent of Bus and Ribosome
+add_subdirectory(control_channel) # Shared framed Socket sessions
+add_subdirectory(bus)             # Shared-memory publish/subscribe
 add_subdirectory(vinc_messages)  # Generated-header usage requirements
 add_subdirectory(axon_bus)       # 核心無鎖通訊公車庫 (axon_bus)
 add_subdirectory(module)         # 基礎模組框架庫 (module)
 
 # 系統應用元件與測試（內部會呼叫 vinc_add_module）
 add_subdirectory(vinc_test)
+add_subdirectory(module_example)
+add_subdirectory(bus_example)
 add_subdirectory(stem_shell)
 
 # =================================================================

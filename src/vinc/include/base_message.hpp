@@ -12,17 +12,18 @@
 
 namespace vinc
 {
+namespace bus::detail { class MessageAccess; }
 
 class BaseMessage
 {
 friend class AxonBus;
+friend class bus::detail::MessageAccess;
 public:
 
     BaseMessage() = default;
     BaseMessage(const BaseMessage& msg) = default;
     virtual ~BaseMessage() = default;
 
-    BaseMessage& operator =(const BaseMessage& msg) = default;
 
     const std::string& topic_name() const
     {
@@ -33,6 +34,8 @@ public:
     {
         return _message_timestamp;
     }
+    uint64_t get_topic_count() const noexcept { return _topic_count; }
+    uint64_t publisher_instance() const noexcept { return _publisher_instance; }
 
     const std::string& publisher_name() const
     {
@@ -54,13 +57,14 @@ public:
     virtual int8_t deserialize(const std::vector<uint8_t>& buffer, size_t& offset) = 0;
 
 protected:
-
-    std::string _topic_name = "unknown";
+    BaseMessage& operator =(const BaseMessage& msg) = default;
 
 private:
-
+    std::string _topic_name = "unknown";
     std::string _publisher_name = "unknown";
     uint64_t _message_timestamp = 0;
+    uint64_t _topic_count = 0;
+    uint64_t _publisher_instance = 0;
 };
 
 template<typename T>

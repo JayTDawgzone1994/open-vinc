@@ -65,6 +65,7 @@ void AxonBus::unsubscribe(const std::string& topic, uint64_t id)
  * 使用 shared_lock 上讀鎖，允許多個模組並行 publish，彼此完全不卡頓！
  */
 void AxonBus::low_level_publish(const std::string& topic, std::shared_ptr<BaseMessage> msg) {
+    if (msg) msg->_topic_name = topic;
     std::shared_lock<std::shared_mutex> lock(_sub_mutex); // 👈 共享讀鎖：並行關鍵！
 
     auto it = _sub_map.find(topic);

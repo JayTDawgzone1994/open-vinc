@@ -16,13 +16,20 @@ add_library(message_header_smoke OBJECT ${smoke_sources})
 # No manual include paths or generation dependencies: test the public target.
 target_link_libraries(message_header_smoke PRIVATE vinc_messages)
 
-# An include-only template is used for this fixture to isolate include routing
-# from the production template's existing deserialize/abstract-class problems.
+# Instantiate nested production classes, including serialization operations.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/nested.cpp" [=[
 #include <vinc_messages/nested.hpp>
 #include <type_traits>
-static_assert(std::is_same_v<decltype(vinc::nested::position), vinc::float3>);
-static_assert(std::is_same_v<decltype(vinc::nested::index), vinc::int3>);
+static_assert(!std::is_abstract_v<vinc::nested>);
+void exercise_nested() {
+    auto value = vinc::make_message<vinc::nested>();
+    value->data().position.data().x = 1.0f;
+    value->data().index.data().x = 1;
+    auto copy = *value;
+    std::vector<std::uint8_t> bytes;
+    copy.serialize(bytes);
+    (void)value->deserialize(bytes);
+}
 ]=])
 add_library(nested_header_smoke OBJECT EXCLUDE_FROM_ALL "${CMAKE_CURRENT_BINARY_DIR}/nested.cpp")
 target_link_libraries(nested_header_smoke PRIVATE vinc_messages)

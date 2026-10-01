@@ -1,51 +1,38 @@
 cmake_minimum_required(VERSION 3.20)
 project(stem_shell LANGUAGES CXX)
-
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-include_directories(include)
-
-set(SOURCES
-    src/stem_shell.cpp
-    src/scriptInterpreter.cpp
-)
-
-add_executable(${PROJECT_NAME} ${SOURCES})
-
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
-)
-
-target_link_libraries(${PROJECT_NAME} PRIVATE 
-    module
-)
-
-get_property(ALL_VINC_MODULES GLOBAL PROPERTY VINC_MODULES_LIST)
-
-
-# 重要：解決「懶惰連結」問題
-if(MSVC)
-    # MSVC 使用 /WHOLEARCHIVE 強制載入所有符號
-    foreach(mod ${ALL_VINC_MODULES})
-        # Link the target for build ordering and transitive dependencies.
-        target_link_libraries(${PROJECT_NAME} PRIVATE ${mod})
-        target_link_options(${PROJECT_NAME} PRIVATE
-            "/WHOLEARCHIVE:$<TARGET_FILE:${mod}>"
-        )
-    endforeach()
-else()
-    # GCC/Clang 使用 --whole-archive
-    target_link_libraries(${PROJECT_NAME} PRIVATE 
-        -Wl,--whole-archive ${ALL_VINC_MODULES} -Wl,--no-whole-archive
-    )
+add_library(vinc_shell STATIC src/stem_shell.cpp src/scriptInterpreter.cpp src/command_line.cpp src/command_router.cpp)
+target_include_directories(vinc_shell PUBLIC include)
+target_link_libraries(vinc_shell PUBLIC module)
+add_executable(stem_shell src/main.cpp)
+target_include_directories(stem_shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(stem_shell PRIVATE vinc_shell)
+set_target_properties(stem_shell PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}")
+get_property(PROCESS_TARGETS GLOBAL PROPERTY VINC_PROCESS_TARGETS)
+get_property(PROCESS_CATALOG GLOBAL PROPERTY VINC_PROCESS_CATALOG)
+if(PROCESS_TARGETS)
+    add_dependencies(stem_shell ${PROCESS_TARGETS})
 endif()
-
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/module-smoke.vinc"
+        "exampleModule\nexampleNode hello\nexampleModule\nexampleNode_1 status\nexit\n")
+    add_test(NAME module.shell COMMAND stem_shell -sc "${CMAKE_CURRENT_BINARY_DIR}/module-smoke.vinc")
+    set_tests_properties(module.shell PROPERTIES TIMEOUT 20 PASS_REGULAR_EXPRESSION "exampleNode_1 status")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bus-smoke.vinc"
+        "busExample sub demo\nbusExample pub demo\nbusNode_1 push 10\nbusNode last\nbusNode last\nbusNode next\nbusNode_1 loan 20\nbusNode last\nbusNode_1 commit\nbusNode next\nbusNode_1 stats\nexit\n")
+    add_test(NAME bus.shell COMMAND stem_shell -sc "${CMAKE_CURRENT_BINARY_DIR}/bus-smoke.vinc")
+    set_tests_properties(bus.shell PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "value=20")
+endif()
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/module_catalog.hpp" CONTENT
+"#pragma once\n#include <module/module_manager.hpp>\n#include <stdexcept>\nnamespace vinc { inline void register_built_modules(ModuleManager& manager) {\n${PROCESS_CATALOG}} }\n")
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
+    target_compile_options(vinc_shell PRIVATE /W4 /utf-8)
+    target_compile_options(stem_shell PRIVATE /W4)
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(vinc_shell PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(stem_shell PRIVATE -Wall -Wextra -Wpedantic)
 endif()

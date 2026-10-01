@@ -1,0 +1,15 @@
+int8 a;
+uint8 b;
+int16 c;
+uint16 d;
+int32 e;
+uint32 f;
+int64 g;
+uint64 h;
+bool yes;
+double precise;
+long wide;
+size_t count;
+float not_a_number = nan;
+int64 minimum = -9223372036854775808;
+string greeting = "hello // world";

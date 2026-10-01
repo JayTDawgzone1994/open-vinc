@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 #include <array>
+#include <algorithm>
 
 namespace vinc::crypto {
 
@@ -19,33 +20,14 @@ public:
     }
 
     void update(const uint8_t* data, size_t len) {
-        uint32_t i = 0;
-        size_t fill = _buffer_len;
-        _buffer_len += len;
-
-        if (fill > 0 && fill + len >= 64) {
-            i = 64 - fill;
-            std::copy(data, data + i, _buffer.begin() + fill);
-            transform(_buffer.data());
-            len -= i;
-            fill = 0;
-        } else {
-            i = 0;
+        _total_len += len;
+        while (len) {
+            const auto count = std::min<std::size_t>(len, 64 - _buffer_len);
+            std::copy_n(data, count, _buffer.begin() + _buffer_len);
+            _buffer_len += static_cast<std::uint32_t>(count);
+            data += count; len -= count;
+            if (_buffer_len == 64) { transform(_buffer.data()); _buffer_len = 0; }
         }
-
-        while (len >= 64) {
-            transform(data + i);
-            i += 64;
-            len -= 64;
-        }
-
-        if (len > 0) {
-            std::copy(data + i, data + i + len, _buffer.begin() + fill);
-            _buffer_len = fill + len;
-        } else {
-            _buffer_len = 0;
-        }
-        _total_len += (i + len);
     }
 
     HashBytes digest() {
@@ -53,10 +35,10 @@ public:
         uint8_t pad[128];
         uint32_t pad_len = (_buffer_len < 56) ? (56 - _buffer_len) : (120 - _buffer_len);
         
-        std::fill(pad, pad + 128, 0);
+        std::fill(pad, pad + 128, uint8_t{0});
         pad[0] = 0x80;
         
-        uint64_t bits = (_total_len + _buffer_len) * 8;
+        uint64_t bits = _total_len * 8;
         for (int i = 0; i < 8; i++) {
             pad[pad_len + i] = (uint8_t)(bits >> (56 - i * 8));
         }

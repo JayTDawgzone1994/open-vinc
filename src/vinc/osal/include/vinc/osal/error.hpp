@@ -10,7 +10,8 @@ enum class ErrorCode {
     Unsupported, Timeout, Cancelled, ServiceClosed, Busy,
     ObservationLost, SystemError, Closed, PeerClosed,
     WouldBlock, AddressInUse, AddressNotAvailable, ConnectionRefused,
-    ConnectionReset, NotConnected, MessageTooLarge, NetworkUnreachable
+    ConnectionReset, NotConnected, MessageTooLarge, NetworkUnreachable,
+    AlreadyExists
 };
 enum class Operation {
     InitializeService, Spawn, Observe, Wait, Terminate, Forget, Shutdown,
@@ -18,7 +19,10 @@ enum class Operation {
     CreateSocket, ParseAddress, ResolveAddress, BindSocket, ListenSocket,
     AcceptSocket, ConnectSocket, SendSocket, ReceiveSocket, ShutdownSocket,
     CloseSocket, QuerySocket, SetSocketOption, GetSocketOption,
-    RegisterSocket, WaitSocket, WakeSocket
+    RegisterSocket, WaitSocket, WakeSocket,
+    CreateSharedMemory, OpenSharedMemory, MapSharedMemory,
+    UnmapSharedMemory, CloseSharedMemory, UnlinkSharedMemory,
+    OpenTerminal, ReadTerminal
 };
 struct OsError {
     ErrorCode code;

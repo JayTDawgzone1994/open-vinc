@@ -247,7 +247,8 @@ Result<std::unique_ptr<NativeProcess>> NativeProcess::spawn(const SpawnOptions& 
     if (!native->impl_->wait) return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
     PROCESS_INFORMATION process{};
     if (!CreateProcessW(options.executable.c_str(), command.data(), nullptr, nullptr, TRUE,
-        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
+            (options.new_process_group ? CREATE_NEW_PROCESS_GROUP : 0),
         environment->data(), options.working_directory ? options.working_directory->c_str() : nullptr,
         &startup.StartupInfo, &process))
         return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));

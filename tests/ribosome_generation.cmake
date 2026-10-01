@@ -100,7 +100,7 @@ file(RENAME "${source}/messages.saved" "${source}/messages")
 build_case(recover_after_missing_input TRUE "")
 
 file(WRITE "${source}/messages/broken.msg" "unknown_type value\n")
-build_case(invalid_message FALSE "Failed to parse message file")
+build_case(invalid_message FALSE "Unknown type")
 file(REMOVE "${source}/messages/broken.msg")
 build_case(recover_after_invalid_message TRUE "")
 
@@ -112,19 +112,8 @@ if(NOT result STREQUAL "0")
 endif()
 message(STATUS "PASS: full build")
 
-# Isolate nested include routing from the known production deserialize defect.
+# Exercise nested messages using the production template.
 file(WRITE "${source}/messages/nested.msg" "float3 position;\nint3 index;\n")
-file(WRITE "${template}" [=[
-#pragma once
-#include <vector>
-${DO_INCLUDE_DEPENDENT_MESSAGES}
-namespace vinc {
-class ${MESSAGE_NAME} {
-public:
-${DO_ADD_MESSAGE_FIELDS}
-};
-}
-]=])
 build_case(nested_header_compilation TRUE "" nested_header_smoke)
 file(REMOVE "${source}/messages/nested.msg")
 file(WRITE "${template}" "${template_contents}")
