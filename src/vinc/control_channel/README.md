@@ -14,6 +14,21 @@
 - Service 析構會關閉會話並 join I/O 執行緒；不等待應用訊息完成交付。
 - 程序終止與重啟由上層 ModuleManager／模組執行環境處理。
 
+### 程式碼閱讀順序
+
+- `protocol.hpp`／`protocol.cpp`：v1 封包欄位、編碼、串流分段解碼及參數字串。
+- `channel.hpp`：Service／Session 的公開操作、等待與生命週期契約。
+- `channel.cpp`：`create_engine()` 準備 poller 與狀態，Service 取得所有權後才由
+  `start_worker()` 啟動執行緒；`prepare_peer()` 準備會話，通過容量檢查後才交付 I/O 執行緒。
+- I/O 執行緒透過 `advance()` 依序接收（`receive_frames()`）、檢查期限
+  （`check_session_deadlines()`）、傳送（`send_frames()`），最後更新 poller 關注事件。
+  這些階段共用同一次 peer lock，不在 helper 邊界釋放鎖。
+- Engine mutex 保護會話清單與停止狀態；Peer mutex 保護單一會話狀態與佇列。
+  需要同時持有兩者時，先取得 Engine mutex，再取得 Peer mutex。
+
+目前仍保留既有 `control::Result`／`control::Error` 與編碼超限時的
+`std::length_error` 行為；統一至 common 錯誤介面的遷移須另行處理。
+
 ## v1 封包
 
 所有整數採 big endian，不直接傳輸 C++ struct、pointer 或 ABI 物件。
@@ -62,3 +77,5 @@ Module 的啟動 token 用來綁定本次程序啟動，避免誤接舊會話；
 
 `control.channel` 測試封包分割／合併、版本及長度拒絕、雙向 heartbeat、錯誤握手、
 Socket 斷線、佇列背壓與連線仍存活時的 heartbeat 逾時。
+另以固定 v1 bytes 驗證封包相容性，涵蓋字串內嵌 NUL／UTF-8、截斷與多餘資料拒絕，
+以及等待逾時、會話容量拒絕和 Session 比 Service 長壽時的關閉行為。

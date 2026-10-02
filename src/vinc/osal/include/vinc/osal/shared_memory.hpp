@@ -11,8 +11,15 @@
 #include <string_view>
 
 namespace vinc::osal {
-enum class SharedMemoryAccess { ReadOnly, ReadWrite };
-namespace detail { struct SharedMemoryState; struct SharedMemoryMappingState; }
+enum class SharedMemoryAccess {
+    ReadOnly,
+    ReadWrite
+};
+
+namespace detail {
+struct SharedMemoryState;
+struct SharedMemoryMappingState;
+}
 
 // Owns a local mapping. All borrowed spans expire on unmap/destruction/move
 // assignment that replaces this mapping. This class supplies no synchronization.
@@ -56,6 +63,7 @@ public:
     // POSIX: removes the name, not existing mappings. NotFound if absent.
     // Windows: Unsupported. Use unique names; only the designated owner unlinks.
     [[nodiscard]] static Result<void> unlink_name(std::string_view name);
+
 private:
     explicit SharedMemory(std::shared_ptr<detail::SharedMemoryState>);
     std::shared_ptr<detail::SharedMemoryState> state_;

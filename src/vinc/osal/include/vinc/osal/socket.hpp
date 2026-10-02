@@ -12,29 +12,49 @@
 #include <type_traits>
 
 namespace vinc::osal {
-enum class ConnectProgress { Connected, InProgress };
-enum class ShutdownDirection { Read, Write, Both };
+enum class ConnectProgress {
+    Connected,
+    InProgress
+};
+enum class ShutdownDirection {
+    Read,
+    Write,
+    Both
+};
+
 struct ReceiveResult {
     std::size_t bytes = 0;
-    bool eof = false; // only for streams, never for an empty datagram
+    bool eof = false;       // only for streams, never for an empty datagram
     bool truncated = false; // datagram tail was discarded
 };
+
 struct DatagramResult {
     ReceiveResult data;
     SocketAddress sender;
 };
+
 namespace detail {
 struct SocketState;
 enum class SocketOptionKey {
-    ReceiveBuffer, SendBuffer, NoDelay, KeepAlive, IPv6Only, Broadcast,
-    ReuseAddress, ExclusiveAddressUse, MulticastLoop, MulticastHops
+    ReceiveBuffer,
+    SendBuffer,
+    NoDelay,
+    KeepAlive,
+    IPv6Only,
+    Broadcast,
+    ReuseAddress,
+    ExclusiveAddressUse,
+    MulticastLoop,
+    MulticastHops
 };
 }
+
 namespace socket_options {
-template<detail::SocketOptionKey Key, class T> struct Option {
+template <detail::SocketOptionKey Key, class T> struct Option {
     using value_type = T;
     static constexpr auto key = Key;
 };
+
 using ReceiveBuffer = Option<detail::SocketOptionKey::ReceiveBuffer, int>;
 using SendBuffer = Option<detail::SocketOptionKey::SendBuffer, int>;
 using NoDelay = Option<detail::SocketOptionKey::NoDelay, bool>;
@@ -48,12 +68,14 @@ using ExclusiveAddressUse = Option<detail::SocketOptionKey::ExclusiveAddressUse,
 using MulticastLoop = Option<detail::SocketOptionKey::MulticastLoop, bool>;
 using MulticastHops = Option<detail::SocketOptionKey::MulticastHops, int>;
 }
-template<class T> concept SocketOption = requires {
+template <class T>
+concept SocketOption = requires {
     typename T::value_type;
     { T::key } -> std::convertible_to<detail::SocketOptionKey>;
 } && (std::same_as<typename T::value_type, int> || std::same_as<typename T::value_type, bool>);
 
 class SocketPoller;
+
 class Socket {
 public:
     Socket() noexcept = default;
@@ -80,8 +102,10 @@ public:
     [[nodiscard]] Result<void> connect_until(const SocketAddress&, Deadline, std::stop_token = {});
     [[nodiscard]] Result<std::size_t> send_until(std::span<const std::byte>, Deadline, std::stop_token = {});
     [[nodiscard]] Result<ReceiveResult> receive_until(std::span<std::byte>, Deadline, std::stop_token = {});
-    [[nodiscard]] Result<std::size_t> send_to_until(std::span<const std::byte>, const SocketAddress&, Deadline, std::stop_token = {});
-    [[nodiscard]] Result<DatagramResult> receive_from_until(std::span<std::byte>, Deadline, std::stop_token = {});
+    [[nodiscard]] Result<std::size_t> send_to_until(std::span<const std::byte>, const SocketAddress&,
+                                                    Deadline, std::stop_token = {});
+    [[nodiscard]] Result<DatagramResult> receive_from_until(std::span<std::byte>, Deadline,
+                                                            std::stop_token = {});
     [[nodiscard]] Result<void> shutdown(ShutdownDirection);
     [[nodiscard]] Result<void> close(); // idempotent; unregister from pollers first
     [[nodiscard]] Result<SocketAddress> local_address() const;
@@ -89,14 +113,20 @@ public:
     // Consumes SO_ERROR. During/after a failed connect use finish_connect()
     // instead, so querying diagnostics cannot erase the connection result.
     [[nodiscard]] Result<std::optional<OsError>> take_pending_error();
-    template<SocketOption Option> Result<void> set_option(typename Option::value_type value) {
+
+    template <SocketOption Option> Result<void> set_option(typename Option::value_type value) {
         return set_option_value(Option::key, static_cast<int>(value));
     }
-    template<SocketOption Option> Result<typename Option::value_type> get_option() const {
+
+    template <SocketOption Option> Result<typename Option::value_type> get_option() const {
         auto value = get_option_value(Option::key);
-        if (!value) return std::unexpected(value.error());
+        if (!value) {
+            return std::unexpected(value.error());
+        }
+
         return static_cast<typename Option::value_type>(*value);
     }
+
     Result<void> set_multicast_interface(IPv4Address);
     Result<void> set_multicast_interface(std::uint32_t ipv6_index);
     Result<IPv4Address> multicast_interface_v4() const;
@@ -105,6 +135,7 @@ public:
     Result<void> leave_multicast(IPv4Address group, IPv4Address interface_address = {});
     Result<void> join_multicast(IPv6Address group, std::uint32_t interface_index);
     Result<void> leave_multicast(IPv6Address group, std::uint32_t interface_index);
+
 private:
     friend class SocketPoller;
     explicit Socket(std::shared_ptr<detail::SocketState>);

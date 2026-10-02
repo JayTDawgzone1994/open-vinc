@@ -52,6 +52,11 @@ Context 是先前 PH 設計的正式概念名稱，預計提供：
 
 ## 已確認的鎖分層
 
+共用工具集中於 `src/vinc/components/`。原 `sync` 已搬至 `components/concurrency`，
+命名空間與 CMake alias 均為 `vinc::concurrency`，實際 library target 為 `vinc_concurrency`，
+標頭使用 `<vinc/concurrency/...>`。此分類目前提供跨程序互斥鎖，不是獨立啟動的服務；
+搬移與重命名保留原有行為；舊名稱與標頭路徑不保留相容別名。
+
 | 名稱 | 所在層與含義 |
 | --- | --- |
 | `FileLock` | OSAL 的專用檔案排他鎖抽象，封裝原生資源、等待與釋放。 |
@@ -65,7 +70,7 @@ Context 是先前 PH 設計的正式概念名稱，預計提供：
 FileLockGuard 不綁定取得 thread，可以經同步交付後在其他 thread 釋放；
 InterprocessMutexGuard 必須由取得鎖的 thread 釋放。
 兩者目前已分層實作，細節見 [OSAL FileLock](src/vinc/osal/FILE_LOCK.md) 與
-[共用同步層](src/vinc/sync/README.md)。
+[共用同步層](src/vinc/components/concurrency/README.md)。
 
 程式中的持鎖物件已統一命名為 `FileLockGuard` 與 `InterprocessMutexGuard`。
 

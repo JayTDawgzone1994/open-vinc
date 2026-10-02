@@ -19,6 +19,7 @@ struct PipeRecord {
     bool used = false;
     IoKind direction = IoKind::Read;
 };
+
 struct PipeOperationState {
     IoId id;
     std::shared_ptr<PipeRecord> pipe;
@@ -32,6 +33,7 @@ struct PipeOperationState {
     std::optional<IoStatus> stop_reason;
     NativeIoResult result{IoStatus::Failed};
 };
+
 struct PipeState {
     std::mutex mutex;
     std::condition_variable_any changed;
@@ -45,23 +47,56 @@ struct PipeState {
     bool abandoned = false;
     std::optional<OsError> monitor_error;
 };
+
 struct PipeWorker {
     std::mutex join_mutex;
     std::thread thread;
-    ~PipeWorker() { if (thread.joinable()) thread.detach(); }
+
+    ~PipeWorker() {
+        if (thread.joinable()) {
+            thread.detach();
+        }
+    }
 };
 
 struct PipeAccess {
-    static std::shared_ptr<PipeState> state(PipeService& s) { return s.state_; }
-    static PipeEnd& end(PipeReader& p) { return p.end_; }
-    static PipeEnd& end(PipeWriter& p) { return p.end_; }
-    static std::shared_ptr<PipeState> state(PipeEnd& p) { return p.state_; }
-    static std::shared_ptr<PipeRecord> record(PipeEnd& p) { return p.record_; }
+    static std::shared_ptr<PipeState> state(PipeService& service) {
+        return service.state_;
+    }
+
+    static PipeEnd& end(PipeReader& reader) {
+        return reader.end_;
+    }
+
+    static PipeEnd& end(PipeWriter& writer) {
+        return writer.end_;
+    }
+
+    static std::shared_ptr<PipeState> state(PipeEnd& endpoint) {
+        return endpoint.state_;
+    }
+
+    static std::shared_ptr<PipeRecord> record(PipeEnd& endpoint) {
+        return endpoint.record_;
+    }
+
     static Result<std::vector<std::shared_ptr<PipeRecord>>> reserve(PipeService&, std::size_t);
     static void rollback(PipeService&, std::span<const std::shared_ptr<PipeRecord>>) noexcept;
-    static PipeEnd commit(PipeService&, const std::shared_ptr<PipeRecord>&, std::unique_ptr<NativePipe>, IoKind);
-    static PipeReader reader(PipeEnd e) { PipeReader p; p.end_ = std::move(e); return p; }
-    static PipeWriter writer(PipeEnd e) { PipeWriter p; p.end_ = std::move(e); return p; }
+    static PipeEnd commit(PipeService&, const std::shared_ptr<PipeRecord>&, std::unique_ptr<NativePipe>,
+                          IoKind);
+
+    static PipeReader reader(PipeEnd endpoint) {
+        PipeReader reader;
+        reader.end_ = std::move(endpoint);
+        return reader;
+    }
+
+    static PipeWriter writer(PipeEnd endpoint) {
+        PipeWriter writer;
+        writer.end_ = std::move(endpoint);
+        return writer;
+    }
+
     static void discard(PipeEnd&) noexcept;
 };
 }

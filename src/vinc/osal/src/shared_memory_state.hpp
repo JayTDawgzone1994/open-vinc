@@ -14,6 +14,7 @@ struct SharedMemoryState {
     ~SharedMemoryState();
     Result<void> close_native() noexcept;
 };
+
 struct SharedMemoryMappingState {
     // Keeps the native object alive after the public handle is closed.
     std::shared_ptr<SharedMemoryState> owner;
@@ -23,6 +24,7 @@ struct SharedMemoryMappingState {
     ~SharedMemoryMappingState();
     Result<void> unmap_native() noexcept;
 };
+
 Result<void> create_memory(SharedMemoryState&, const std::string&, std::uint64_t);
 Result<void> open_memory(SharedMemoryState&, const std::string&, SharedMemoryAccess);
 Result<void> map_memory(SharedMemoryMappingState&);

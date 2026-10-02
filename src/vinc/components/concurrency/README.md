@@ -1,21 +1,35 @@
-# 共用同步層
+# Concurrency：並行控制工具
 
-`vinc::sync` 將通用 OSAL 能力組合成框架需要的同步機制。它不依賴 Param、Module、Context、
+`vinc::concurrency` 將通用 OSAL 能力組合成框架需要的同步機制。它不依賴 Param、Module、Context、
 Bus 或中央服務，也不含任何原生平台 handle、平台標頭或條件後端。
 Open-VINC 不將此 Mutex 暴露在 Module／Context 使用者介面。
 
+本元件位於 `src/vinc/components/concurrency/`，由使用它的元件建立及管理生命週期，
+不自行啟動背景執行緒或中央服務。原 `sync` 名稱已改為 `concurrency`；
+搬移與後續可讀性整理皆保留原有行為。
+
+## 程式碼閱讀順序
+
+`InterprocessMutex::try_lock()`／`lock_until()` 依序保留本地 thread 名額、取得 OSAL
+FileLock，再交付持鎖物件。`try_reserve_local_slot()`／`reserve_local_slot_until()`
+只管理本地等待，`PendingReservation` 負責取得失敗時的名額回收，
+`retain_file_guard()` 保存成功取得的原生持鎖物件。
+
+`unlock()` 先驗證持鎖 thread，再釋放 FileLock；成功後才清除本地名額並喚醒等待者。
+測試依所有權、guard 生命週期、取消、FileLock 組合、thread 競爭及程序故障回收分成具名案例。
+
 ```text
 Param／其他框架功能（尚未接線）
-    → vinc::sync::InterprocessMutex
+    → vinc::concurrency::InterprocessMutex
         → vinc::osal::FileLock
             → Windows／POSIX 原生檔案鎖
 ```
 
 ## InterprocessMutex
 
-標頭 `<vinc/sync/interprocess_mutex.hpp>`，連結 `vinc::sync`。
+標頭 `<vinc/concurrency/interprocess_mutex.hpp>`，連結 `vinc::concurrency`。
 此元件移自 OSAL；舊 `<vinc/osal/interprocess_mutex.hpp>` 不再保留。
-它只呼叫 [FileLock 抽象](../osal/FILE_LOCK.md)，附加以下規則：
+它只呼叫 [FileLock 抽象](../../osal/FILE_LOCK.md)，附加以下規則：
 
 - 一個取得操作先保留本地 thread 名額，再透過 FileLock 取得跨程序占用。
 - 同一物件的同 thread 重入回報 `Busy`；其他 thread 可等待，`try_lock` 回報 `WouldBlock`。
@@ -54,11 +68,28 @@ callback、Socket 等待、存檔與其他鎖等待應在鎖外。
 
 ## 驗證
 
-`sync.interprocess_mutex` 驗證本地 thread 互斥、非遞迴、錯 thread 釋放、guard
+`concurrency.interprocess_mutex` 驗證本地 thread 互斥、非遞迴、錯 thread 釋放、guard
 生命週期、本地與外部等待取消、FileLock 與 Mutex 直接交互競爭，以及多程序共享快照一致性。
 持鎖程序 `_Exit`／OS 終止測試保留，確認上層組合未破壞回收行為。
 `osal.file_lock` 另外驗證原生 handle 所有權，特別確認 FileLock guard 可跨 thread 交付。
 Linux／macOS 尚待原生驗證，未做效能量測。
 
 2026-10-02：Windows x64／MSVC Debug／Release 建置成功，各 25 套 CTest 全通過，
-包含分開的 `osal.file_lock` 與 `sync.interprocess_mutex`。
+包含分開的 FileLock 與跨程序互斥鎖測試。
+
+2026-10-03：搬至 `components/concurrency` 並更新名稱後，Windows x64／MSVC
+Debug／Release 建置成功，兩種組態的 `concurrency.interprocess_mutex` 與
+`osal.file_lock` 均通過；本輪未重跑其餘測試，Linux／macOS 未驗證。
+
+同日後續可讀性整理：Windows x64／MSVC Debug／Release 的 concurrency 函式庫與
+測試 target 建置成功，兩種組態的 `concurrency.interprocess_mutex` 均通過。
+本輪未重跑其他元件測試；原有測試情境、逾時與負載數值保留。
+
+## 待處理的測試工具問題
+
+`tests/interprocess_mutex_tests.cpp` 的 `path_from_utf8()` 仍沿用既有
+`char*` → `char8_t*` 轉型。`char8_t` 不屬於可通用讀取其他型別物件表示的字元型別，
+不能僅因 byte 寬度相同就認定這條讀取路徑符合別名規則；見
+[C++ 型別存取規則](https://eel.is/c++draft/basic.lval#11)。
+後續可改為建立真正的 `char8_t` 儲存區並複製 UTF-8 bytes，另驗證非 ASCII 路徑。
+本輪可讀性整理僅標記問題，未更改轉換行為。

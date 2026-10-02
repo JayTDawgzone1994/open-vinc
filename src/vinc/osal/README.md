@@ -6,7 +6,7 @@ OSAL 提供同一份 C++23 程序操作介面。框架只使用
 
 目前提供程序管理、[通用 OSAL Socket](SOCKET.md)、[通用 OSAL Pipe](PIPE.md)
 及 [OSAL Shared Memory](SHARED_MEMORY.md)，另有通用
-[OSAL FileLock](FILE_LOCK.md)。跨程序 Mutex 由上層[共用同步庫](../sync/README.md)
+[OSAL FileLock](FILE_LOCK.md)。跨程序 Mutex 由上層[共用同步庫](../components/concurrency/README.md)
 組合 FileLock 實作，OSAL 不依賴該庫。`<vinc/osal/terminal.hpp>` 另提供 Shell 所需的
 終端模式、具期限的文字／按鍵／EOF 事件，以及 Windows／POSIX 模式還原；使用邊界見
 [Shell 說明](../stem_shell/README.md)。
@@ -15,7 +15,9 @@ Windows 使用 BCrypt、Linux／macOS 使用 getentropy；不包含框架 Sessio
 失敗保留原生錯誤；緩衝區可能已部分寫入，不可將失敗結果當成有效 token。
 上層的 [Module 執行環境](../module/README.md) 已接入獨立程序、就緒握手、雙向 heartbeat
 與重啟政策；這些行為由 Module／共用通訊層處理，不屬於 OSAL 的程序原語。
-Shared Memory 提供原始 bytes 的映射與資源生命週期；訊息布局 ABI、同步協定與容器尚未實作。
+Shared Memory 提供原始 bytes 的映射與資源生命週期；訊息布局與容器由上層
+[Message Storage](../message_storage/README.md) 負責，跨程序讀寫同步與占用回收協定見
+[Bus 設計](../bus/DESIGN.md)。這些功能不屬於 OSAL Shared Memory 的職責。
 
 ## 統一操作契約
 

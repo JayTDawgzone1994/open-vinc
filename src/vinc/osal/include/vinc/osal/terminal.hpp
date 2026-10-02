@@ -9,11 +9,25 @@
 
 namespace vinc::osal {
 // Interrupt = Ctrl+C, Cancel = Ctrl+D, End = actual input EOF, Idle = no event yet.
-enum class TerminalKey { Text, Enter, Backspace, Up, Down, Tab, Escape, Interrupt, Cancel, End, Idle };
+enum class TerminalKey {
+    Text,
+    Enter,
+    Backspace,
+    Up,
+    Down,
+    Tab,
+    Escape,
+    Interrupt,
+    Cancel,
+    End,
+    Idle
+};
+
 struct TerminalEvent {
     TerminalKey key = TerminalKey::Idle;
     std::string text; // one complete UTF-8 code point for Text
 };
+
 // Exclusive standard-input owner. Open/read/destruction are serialized by caller.
 // Raw console settings are restored by destruction. Redirected input is also supported.
 class Terminal {
@@ -26,6 +40,7 @@ public:
     bool interactive() const noexcept;
     bool ansi_output() const noexcept;
     std::size_t columns() const noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

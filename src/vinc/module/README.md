@@ -8,6 +8,29 @@ stdout／stderr 由中央 [OutputHub](../output/README.md) 自啟動起擷取，
 啟動 generation。本地 Shell 會顯示訂閱之後的輸出；沒有接收者仍持續讀取，不保留歷史。
 `wait_shutdown()` 包含已退出程序的有期限輸出收尾，不保證所有目的地已顯示資料。
 
+## 程式閱讀順序
+
+1. [`BaseModule`](include/module/base_module.hpp)：應用 hook、MID／名稱與 Bus 的可用時機。
+2. [`ModuleManager`](include/module/module_manager.hpp)：中央登記、啟停、命令與查詢介面。
+3. [`module_protocol.hpp`](src/module_protocol.hpp)：中央與子程序共用的操作碼、啟動參數位置與回覆布局。
+4. [`module_runtime.cpp`](src/module_runtime.cpp)：`run_module_process` 串起啟動流程；
+   `parse_bootstrap`／`connect_to_central` 驗證並建立連線，`register_module_name` 完成名稱註冊，
+   `dispatch_commands`／`dispatch_request` 執行使用者 hook，`watch_central` 獨立接收控制訊息與監督停止期限。
+5. [`module_manager.cpp`](src/module_manager.cpp)：`launch` 依序重設 generation、準備 listener、
+   組裝參數與建立子程序；`tick` 推進生命週期，`receive_control_frames` 處理有限批次訊息，
+   `register_name` 在取得 registry lock 後核准名稱。
+6. [`module_tests.cpp`](tests/module_tests.cpp)：依序檢查命名、程序隔離、hook、重啟與停止；
+   `test_parent_loss` 以原始 Socket 模擬中央失聯，和正常 Manager 情境分開閱讀。
+
+`RuntimeInbox` 只在子程序內供主執行緒與 watchdog 交換狀態，不是跨程序記憶體布局。
+其 mutex 保護名稱回覆、停止旗標與待派送請求；使用者 hook 執行時不持有這把鎖。
+Manager 的 launch／tick helper 由呼叫端持有 record lock，拆分 helper 不轉移鎖的責任。
+啟動中取得的部分資源留在 Record，由既有監督收尾流程釋放。
+
+每個 Module 每輪最多處理 `control_messages_per_pass = 16` 筆控制訊息，避免一個忙碌模組
+占滿監督執行緒；子程序的待派送請求上限為 `pending_request_limit = 32`。
+設定性的數值在所屬檔案以具名常數表達，本輪未遷移至 `vinc/config.hpp`，未改變既有值。
+
 ## 建立模組
 
 ```cpp
@@ -152,3 +175,27 @@ Module watchdog 統一路由 Bus Domain=3 的控制訊息；中央另有 Broker 
 命名遷移另驗證 ModuleType 啟動入口與 Module 命令／補全入口沒有混用、
 種類登記與已啟動模組的查詢，以及 Snapshot 的 `module_type`／`mid`／generation 對應。
 Linux／macOS 尚待原生建置與行為驗證；未進行效能量測。
+
+2026-10-03 可讀性整理後：Windows x64／MSVC 的完整 Debug、Release 建置成功，
+各 25／25 套 CTest 通過（Debug 79.83 秒、Release 40.44 秒）。
+驗證包含 Module 程序生命週期、Control Channel、Bus 與 Shell／Socket Shell／Tcl 整合。
+本輪未更動測試情境與既有等待值；Linux／macOS 仍未執行。
+
+## 待處理事項
+
+以下項目尚未修正；本輪只整理可讀性，並保留現有公開介面、協定、鎖範圍與錯誤政策。
+
+- **已確認：錯誤介面與子程序診斷尚未統一。**
+  `module_runtime.cpp` 的應用生命週期例外集中回傳 70，watchdog 例外以 75 結束，
+  命令 hook 例外回覆 -111；例外內容未在這些邊界保留下來。
+  `module_manager.cpp` 的服務初始化、端點目錄建立與 MID 耗盡也仍有 `throw`。
+  因此目前不能只靠統一的 `vinc::Error` 查得所有 Module 失敗原因。
+  待錯誤介面遷移輪次，再討論穩定錯誤碼、原生錯誤及診斷資訊如何保留；
+  本次為既有子程序退出碼加名稱，不代表它們已加入共同 Error 表。
+- **待修正／驗證：測試 helper 的 UTF-8 路徑轉換。**
+  `tests/module_helper.cpp` 的 `on_start` 將 `std::string` 的 char 儲存區轉為
+  `const char8_t*`，再用它建構 `std::u8string`。相同位元寬度不足以保證別名存取合法，
+  會影響啟動／停止 marker 測試的可攜性；與 concurrency 測試記錄的疑慮相同。
+  建議後續改為真正的 char8_t 儲存區與明確複製，再驗證非 ASCII 路徑。
+  本輪保留原轉換並標記 TODO；Windows 測試通過不能證明這種型別存取在所有平台合法。
+  Manager 與 Windows main 的反向轉換是經 char 讀取 char8_t 物件位元組，屬於不同的別名方向。

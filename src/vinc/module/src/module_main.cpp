@@ -8,6 +8,8 @@ int wmain(int argc, wchar_t** argv) {
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) {
         auto text = std::filesystem::path(argv[i]).u8string();
+        // Windows argument/UTF-8 boundary: char aliases the char8_t code units;
+        // the string copies exactly text.size() bytes without retaining this storage.
         args.emplace_back(reinterpret_cast<const char*>(text.data()), text.size());
     }
     return vinc::run_module_process(args);

@@ -8,7 +8,10 @@
 #include <stop_token>
 
 namespace vinc::osal {
-namespace detail { struct FileLockState; }
+namespace detail {
+struct FileLockState;
+}
+
 class FileLockGuard {
 public:
     FileLockGuard() noexcept;
@@ -22,12 +25,14 @@ public:
     explicit operator bool() const noexcept;
     // May run on any thread after a synchronized handoff; do not race this guard.
     [[nodiscard]] Result<void> unlock() noexcept;
+
 private:
     friend class FileLock;
     explicit FileLockGuard(std::shared_ptr<detail::FileLockState>) noexcept;
     void release_or_terminate() noexcept;
     std::shared_ptr<detail::FileLockState> state_;
 };
+
 class FileLock {
 public:
     FileLock() noexcept;
@@ -49,6 +54,7 @@ public:
     // A live guard retains the handle. Synchronize close/move/destruction with
     // other calls on this public object; it does not cancel or force-unlock.
     void close() noexcept;
+
 private:
     explicit FileLock(std::shared_ptr<detail::FileLockState>) noexcept;
     std::shared_ptr<detail::FileLockState> state_;

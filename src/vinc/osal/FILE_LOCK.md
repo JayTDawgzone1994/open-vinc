@@ -3,7 +3,7 @@
 `<vinc/osal/file_lock.hpp>`，連結 `vinc::osal`。本元件只封裝專用鎖檔的排他鎖與
 原生資源生命週期，不認識 Module、Param、Context 或上層 Mutex。
 需要「同一 thread 取得／釋放、非遞迴、本地等待」的規則時，使用
-[共用同步層 InterprocessMutex](../sync/README.md)。
+[共用同步層 InterprocessMutex](../components/concurrency/README.md)。
 
 ## 原生能力與範圍
 

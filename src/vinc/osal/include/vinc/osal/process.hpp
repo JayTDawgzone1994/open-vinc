@@ -25,16 +25,25 @@ struct ProcessId {
     friend bool operator==(ProcessId, ProcessId) = default;
 };
 
-enum class EnvironmentMode { Inherit, Replace };
+enum class EnvironmentMode {
+    Inherit,
+    Replace
+};
+
 struct EnvironmentEntry {
-    std::string name;  // UTF-8, without '=' or NUL
+    std::string name;                 // UTF-8, without '=' or NUL
     std::optional<std::string> value; // nullopt removes an inherited variable
 };
 // Capture is output-only and requires spawn_with_output (process_pipe.hpp).
-enum class StdioMode { Inherit, Null, Capture };
+enum class StdioMode {
+    Inherit,
+    Null,
+    Capture
+};
+
 struct SpawnOptions {
-    std::filesystem::path executable; // absolute; no shell or PATH lookup
-    std::vector<std::string> arguments; // UTF-8; excludes argv[0]
+    std::filesystem::path executable;                       // absolute; no shell or PATH lookup
+    std::vector<std::string> arguments;                     // UTF-8; excludes argv[0]
     std::optional<std::filesystem::path> working_directory; // absolute if set
     EnvironmentMode environment_mode = EnvironmentMode::Inherit;
     std::vector<EnvironmentEntry> environment;
@@ -47,22 +56,36 @@ struct SpawnOptions {
     bool new_process_group = false;
 };
 
-enum class ExitKind { Code, Signal };
+enum class ExitKind {
+    Code,
+    Signal
+};
+
 struct ExitStatus {
     ExitKind kind;
     std::uint32_t value; // full Windows exit code, POSIX exit code or signal
     bool core_dumped = false;
     friend bool operator==(const ExitStatus&, const ExitStatus&) = default;
 };
-enum class TerminateResult { Requested, AlreadyExited };
+enum class TerminateResult {
+    Requested,
+    AlreadyExited
+};
+
 struct ServiceOptions {
     // Includes retained exit results. Use forget() to release completed records.
     std::size_t max_records = 256;
 };
 
-namespace detail { struct ServiceState; struct ProcessRecord; class ChildPipe; struct ProcessAccess; }
+namespace detail {
+struct ServiceState;
+struct ProcessRecord;
+class ChildPipe;
+struct ProcessAccess;
+}
 
 class ProcessService;
+
 class Process {
 public:
     Process() noexcept = default;

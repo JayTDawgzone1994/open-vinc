@@ -11,6 +11,7 @@ struct FileLockState {
     bool occupied = false; // one pending acquisition OR one live guard
     ~FileLockState();
 };
+
 Result<void> open_file_lock(FileLockState&, const std::filesystem::path&, bool create);
 Result<void> try_lock_file_lock(FileLockState&);
 Result<void> unlock_file_lock(FileLockState&);
