@@ -1,7 +1,9 @@
 // Child-only fault/behavior fixture for Process tests. Each command-line mode
 // performs one observable action so the parent can verify the OSAL launch contract.
 
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -16,6 +18,8 @@
 #define NOMINMAX
 #include <windows.h>
 #include <crtdbg.h>
+#include <fcntl.h>
+#include <io.h>
 #else
 #include <sys/resource.h>
 #include <unistd.h>
@@ -49,12 +53,54 @@ std::string environment_value(const wchar_t* name) {
 
 int helper(const std::vector<std::string>& args) {
     if (args.empty()) return 90;
+    if (args[0] == "stdio-small" || args[0] == "stdio-large" || args[0] == "stdio-tail-abort") {
+        // This executable does not link OSAL. Exercise ordinary CRT/iostream
+        // writes, including NUL and non-ASCII bytes without text-mode rewriting.
+#ifdef _WIN32
+        _setmode(_fileno(stdout), _O_BINARY);
+        _setmode(_fileno(stderr), _O_BINARY);
+#endif
+#ifdef _WIN32
+        if (environment_value(L"VINC_OSAL_PIPE_BOOTSTRAP") != "<missing>") return 95;
+#else
+        if (std::getenv("VINC_OSAL_PIPE_BOOTSTRAP")) return 95;
+#endif
+        if (args[0] == "stdio-large") {
+            const auto emit = [](FILE* stream, unsigned seed) {
+                std::vector<unsigned char> block(4093);
+                constexpr std::size_t total = 1024 * 1024 + 17;
+                for (std::size_t offset = 0; offset < total;) {
+                    const auto count = std::min(block.size(), total - offset);
+                    for (std::size_t i = 0; i < count; ++i)
+                        block[i] = static_cast<unsigned char>(((offset + i) * 37 + seed) & 255);
+                    if (std::fwrite(block.data(), 1, count, stream) != count) std::_Exit(96);
+                    offset += count;
+                }
+                if (std::fflush(stream)) std::_Exit(97);
+            };
+            std::thread out(emit, stdout, 11);
+            std::thread err(emit, stderr, 73);
+            out.join(); err.join();
+            return 0;
+        }
+        std::printf("printf:");
+        std::cout.write("A\0\xE4\xB8\xAD", 5);
+        std::fprintf(stderr, "fprintf:");
+        std::cerr << "cerr";
+        if (args[0] == "stdio-small") return 0; // normal exit flushes the tail
+        std::cout.flush(); std::cerr.flush(); std::fflush(nullptr);
+    }
+    if (args[0] == "stdio-close") {
+        std::fclose(stdout); std::fclose(stderr);
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        return 0;
+    }
     if (args[0] == "exit") return std::stoi(args.at(1));
     if (args[0] == "sleep") {
         std::this_thread::sleep_for(std::chrono::milliseconds(std::stoi(args.at(1))));
         return args.size() > 2 ? std::stoi(args[2]) : 0;
     }
-    if (args[0] == "abort") {
+    if (args[0] == "abort" || args[0] == "stdio-tail-abort") {
 #ifdef _WIN32
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
         _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);

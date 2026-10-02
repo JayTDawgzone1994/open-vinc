@@ -3,11 +3,16 @@
 Shell 是中央的操作介面，模組命令仍經 `ModuleManager → control Socket → BaseModule virtual hook`。
 訊息 Bus payload 不經 Shell 或 Socket 傳遞。
 
+Vinc 預設開啟 `127.0.0.1:5500` 的 [Socket Shell](SOCKET.md)，可用 PuTTY Raw 連入；
+啟動參數、Session 恢復與容量限制見該文件。
+
 ## 分工與所有權
 
 - `main.cpp`：初始化 Tcl、建立 ModuleManager／Shell、先保留命令名稱再登記 CMake 模組目錄，處理 `-S`。
 - `CommandRouter`：共用命令派送、完整錯誤與補全結果；Shell 管理 `help`／`exit`／`srun`／`scancel`。
 - `TclRuntime`：每次腳本建立獨立 Tcl interpreter，工作執行緒持有、執行及銷毀；支援取消與有界輸出暫存。
+- `ScriptService`：本機與遠端共用一個 Tcl 工作；以 Session ID 路由輸出、結果與斷線取消。
+- `SocketShell`：OSAL TCP／Poller 收送、整行輸入、Session 恢復、有界傳送與輸出訂閱。
 - `command_line`：引號與參數解析、128 筆歷史、4096-byte 輸入上限與 UTF-8 行尾編輯。
 - `StemShell`：終端事件迴圈、命令工作與補全結果顯示、完整關閉流程。
 - OSAL `Terminal`：Windows console／POSIX terminal 的模式管理、按鍵、UTF-8、EOF、SIGINT／Ctrl+C。
@@ -20,9 +25,9 @@ Shell 是中央的操作介面，模組命令仍經 `ModuleManager → control S
 全程序同時只允許一個 OSAL Terminal 擁有標準輸入，第二個 open 回 Busy。
 
 ModuleManager 保留框架命令及初始化後的 Tcl 全域命令／autoload 名稱，直到 manager 析構；不持有指向 Shell 的 callback。
-factory 與 `node_base_name` 使用保留字時直接拒絕，不靠 `_1` 避開；既有名稱衝突會在 Shell 初始化時回報。
+ModuleType 與 `module_base_name` 使用保留字時直接拒絕，不靠 `_1` 避開；既有名稱衝突會在 Shell 初始化時回報。
 先建構 Shell 再登記模組可讓錯誤發生在登記當下。腳本自己的 `proc` 等名稱仍應避免遮蔽模組命令。
-重新建立 Shell 不會呼叫已析構 Shell 的函式；factory／實例名稱不會與這些內建命令衝突。
+重新建立 Shell 不會呼叫已析構 Shell 的函式；ModuleType／實例名稱不會與這些內建命令衝突。
 既有 `register_micro_program` 仍可用，其 callback 是中央原生程式碼，需自行保證會返回；
 本次未將 legacy micro-program 改成獨立程序。
 
@@ -32,10 +37,10 @@ factory 與 `node_base_name` 使用保留字時直接拒絕，不靠 `_1` 避開
 help
 exampleModule
 exampleNode hello
-busExample sub demo
-busExample pub demo
-busNode_1 push 42
-busNode last
+busExample --name subscriber sub demo
+busExample --name publisher pub demo
+publisher push 42
+subscriber last
 exit
 ```
 
@@ -58,8 +63,8 @@ node set path '\\server\share\file'
 
 ### 本次保留的 hook 相容性
 
-尚未變更 hook 的既有位置約定：Shell 送入 `on_start` 的參數包含 factory 名，
-送入 `node_interface`／`node_autoComplete` 的參數包含完整 node 名。
+尚未變更 hook 的既有位置約定：Shell 送入 `on_start` 的參數包含 ModuleType 名，
+送入 `module_interface`／`module_autoComplete` 的參數包含完整 Module 名。
 直接呼叫 ModuleManager 的 API 則原樣傳遞呼叫端提供的 vector，不擅自增刪。
 Bus 範例仍兼容兩種呼叫來源。若未來統一移除目標名稱，需同步遷移各 hook。
 
@@ -77,13 +82,16 @@ Bus 範例仍兼容兩種呼叫來源。若未來統一移除目標名稱，需�
 - Tab 同樣非同步；結果抵達時，若輸入已改變便丟棄舊結果。
   多候選全部顯示，不要求候選本身是全域節點；單候選會依引號規則填入。
 
-不同程序仍直接繼承 stdout／stderr；非同步日誌可能與 prompt 交錯。
-本次未加入集中日誌擷取或命令文字回覆協定，命令結果本身仍是狀態碼。
+模組 stdout／stderr 由 [OutputHub](../output/README.md) 擷取，Shell 在事件迴圈中
+批次顯示，再還原輸入列。模組控制字元以普通文字轉義，不直接執行 ANSI 序列。
+Shell 佇列有容量上限，過慢時略過最舊輸出並提示；命令結果與 Tcl 輸出仍走原本路由。
+模組的任意 stdout 不會被當作某個請求的專屬回覆；命令 hook 的結果仍是狀態碼。
+Shell 建構時即訂閱，因此應先建立 Shell，再啟動需要顯示初始化輸出的模組。
 
 ## Ctrl+C／exit 的完整關閉流程
 
 第一次 Ctrl+C 或 `exit` 啟動同一流程，先取消執行中的腳本；重複 Ctrl+C 不跳過清理，也不直接 `_Exit`。
-一般 Shell 的輸入 EOF 也會關閉；以 `-S` 啟動且 stdin 非互動終端時，EOF 只表示沒有本機輸入，框架繼續運作。
+一般嵌入式 Shell 的輸入 EOF 會關閉；啟用 Socket Shell 或 `-S` 且 stdin 非互動終端時，EOF 只表示沒有本機輸入，框架繼續運作。
 
 模組透過 OSAL 建立獨立程序群組，讓終端的 Ctrl+C 由中央接收並協調停止，
 避免子程序先被 OS 預設處理器結束而跳過 `on_stop()`。Windows 使用 `CREATE_NEW_PROCESS_GROUP`，
@@ -161,11 +169,12 @@ if {[catch {exampleNode status} reason]} {
 ```
 
 - 命令依序等待完成；啟動等 Ready 後才執行下一行。成功回傳 `0`，啟動時另外顯示完整名稱。
-- 自動尾碼保留，腳本作者負責呼叫正確的完整實例名稱；框架不改寫腳本中的目標。
+- 不再自動添加尾碼；同名實例直接報錯。模組可在 `on_name(args)` 解析自己的命名選項，腳本呼叫核准後的完整名稱；框架不改寫腳本中的目標。
 - 非零 hook 回傳、未知命令、啟動失敗、逾時轉為 Tcl error，可由 `catch` 處理。
 - 未處理錯誤顯示檔名、行號及 Tcl 呼叫堆疊；包括 `-S` 在內，都只終止該次腳本，框架與已啟動模組繼續運作。
 - 本機 Shell 前景等待腳本時，忽略一般輸入，保留 Ctrl+D／Ctrl+C；完成後恢復 prompt。
-  先前已送出的非同步命令仍可能執行，因此腳本不是交易或全域互斥區段。Socket Shell 尚未實作。
+  先前已送出的非同步命令仍可能執行，因此腳本不是交易或全域互斥區段。其他 Socket Shell 可繼續操作；
+  遠端腳本不占住本機輸入，本機仍可操作模組或用 `scancel` 取消全域腳本。
 - Ctrl+D 與 `scancel` 都要求取消腳本，沒有腳本時只提示；Ctrl+D 與 stdin EOF 是不同事件。
   本機前景執行期間使用快捷鍵；腳本也可用 `scancel` 取消自己。
 - `return` 正常結束目前腳本檔案。Tcl 的 `exit` 改接框架完整關閉，只接受無參數形式，不能直接跳過清理。

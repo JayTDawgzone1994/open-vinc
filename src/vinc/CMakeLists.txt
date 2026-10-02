@@ -58,6 +58,8 @@ endfunction()
 # Explicit target dependencies below govern message generation.
 add_subdirectory(ribosome)       # Build-time message compiler
 add_subdirectory(osal)           # Independent OS process primitives
+add_subdirectory(sync)           # Thread-owned IPC mutex composed from OSAL FileLock
+add_subdirectory(output)         # Bounded process-output fanout and plain-text rendering
 add_subdirectory(message_storage) # Relocatable arrays; independent of Bus and Ribosome
 add_subdirectory(control_channel) # Shared framed Socket sessions
 add_subdirectory(bus)             # Shared-memory publish/subscribe

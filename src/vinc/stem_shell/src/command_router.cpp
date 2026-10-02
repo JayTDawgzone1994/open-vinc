@@ -1,4 +1,4 @@
-// Resolve builtins, factory starts, instance commands and legacy micro-programs.
+// Resolve builtins, ModuleType starts, Module commands and legacy micro-programs.
 // Return a structured result so terminal display and Tcl errors share the same dispatch behavior.
 
 #include <stem_shell/command_router.hpp>
@@ -47,16 +47,16 @@ CommandResult CommandRouter::execute(const std::vector<std::string>& args, std::
     if (args.empty()) return {};
     const auto& target = args.front();
     if (const auto b = builtins_.find(target); b != builtins_.end()) {
-        if (b->second == Builtin::Script || b->second == Builtin::Cancel)
+        if (b->second == Builtin::Script || b->second == Builtin::Cancel || b->second == Builtin::Session)
             return {false, false, target + " requires a Shell script session"};
         if (args.size() != 1) return {false, false, target + " takes no arguments"};
         if (b->second == Builtin::Exit) return {true, true, {}};
         std::ostringstream out;
-        out << "[Commands] help, srun file.tcl [args...], scancel, exit\nCtrl+D cancels a script; Ctrl+C shuts down the framework.\n[Modules]";
-        for (const auto& name : manager_.get_registered_factory_names()) out << "\n  " << name;
-        out << "\n[Instances]";
+        out << "[Commands] help, srun file.tcl [args...], scancel, sstatus, output on|off, exit\n[Remote] disconnect, resume <code>\nCtrl+D cancels a local script; Ctrl+C shuts down the framework.\n[ModuleTypes]";
+        for (const auto& name : manager_.get_registered_module_type_names()) out << "\n  " << name;
+        out << "\n[Modules]";
         for (const auto& s : manager_.snapshots()) {
-            out << "\n  " << s.name << " " << state_name(s.state) << " pid=" << s.pid;
+            out << "\n  " << (s.name.empty() ? "<unnamed>" : s.name) << " " << state_name(s.state) << " MID=" << s.mid << " PID=" << s.pid;
             if (!s.last_error.empty()) out << " : " << s.last_error;
         }
         auto legacy = manager_.get_micro_program_names();
@@ -72,12 +72,14 @@ CommandResult CommandRouter::execute(const std::vector<std::string>& args, std::
         if (!result) return {false, false, target + ": " + describe(result.error())};
         return {*result == 0, false, *result ? target + " returned " + std::to_string(*result) : ""};
     }
-    if (manager_.has_factory(target)) {
+    if (manager_.has_module_type(target)) {
         auto started = manager_.start_module(target, args);
         if (!started) return {false, false, target + ": " + describe(started.error())};
         auto ready = manager_.wait_started(*started, stop);
-        if (!ready) return {false, false, *started + ": " + describe(ready.error())};
-        return {true, false, "Started " + *started};
+        if (!ready) return {false, false, "Module " + std::to_string(*started) + ": " + describe(ready.error())};
+        auto snapshot = manager_.inspect(*started);
+        if (!snapshot) return {false, false, "Module exited or restarted after startup"};
+        return {true, false, "Started " + snapshot->name + " (MID=" + std::to_string(snapshot->mid) + ")"};
     }
     return {false, false, "Unknown command: " + target};
 }
@@ -91,7 +93,7 @@ CompletionResult CommandRouter::complete(std::string input) {
     const auto prefix = args.empty() || parsed->trailing_space ? "" : args.back();
     if (target_position) {
         for (const auto& [name, _] : builtins_) result.choices.push_back(name);
-        for (const auto& names : {manager_.get_registered_factory_names(), manager_.get_active_node_names(), manager_.get_micro_program_names()})
+        for (const auto& names : {manager_.get_registered_module_type_names(), manager_.get_active_module_names(), manager_.get_micro_program_names()})
             result.choices.insert(result.choices.end(), names.begin(), names.end());
     } else {
         const auto target = args.front();
@@ -100,7 +102,7 @@ CompletionResult CommandRouter::complete(std::string input) {
             if (!response) result.error = describe(response.error());
             else result.choices = std::move(*response);
         } else if (manager_.has_micro_program(target)) result.choices = manager_.call_micro_program_autoComplete(target, args);
-        else if (manager_.has_factory(target)) result.choices = manager_.call_module_autoComplete(target, args);
+        else if (manager_.has_module_type(target)) result.choices = manager_.call_module_type_autoComplete(target, args);
     }
     std::erase_if(result.choices, [&](const auto& value) { return !value.starts_with(prefix) || value.find_first_of("\r\n\x1b") != std::string::npos; });
     std::sort(result.choices.begin(), result.choices.end());

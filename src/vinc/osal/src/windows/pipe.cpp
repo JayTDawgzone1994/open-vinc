@@ -106,7 +106,7 @@ Result<void> PipeMonitor::wait(int milliseconds) noexcept {
 }
 NativePipe::NativePipe(std::unique_ptr<NativePipeImpl> impl) : impl_(std::move(impl)) {}
 NativePipe::~NativePipe() = default;
-Result<NativePipePair> NativePipe::create_pair() {
+Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
     std::array<unsigned char, 16> random{};
     if (BCryptGenRandom(nullptr, random.data(), static_cast<ULONG>(random.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
         return std::unexpected(OsError{ErrorCode::SystemError, Operation::CreatePipe});
@@ -127,7 +127,7 @@ Result<NativePipePair> NativePipe::create_pair() {
     // or attached to a service until explicitly used or handed off.
     SECURITY_ATTRIBUTES inherited{sizeof(SECURITY_ATTRIBUTES), nullptr, FALSE};
     child->handle = Handle(CreateFileW(name.c_str(), GENERIC_WRITE, 0, &inherited,
-        OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
+        OPEN_EXISTING, blocking_writer ? 0 : FILE_FLAG_OVERLAPPED, nullptr));
     if (child->handle.value == INVALID_HANDLE_VALUE) return std::unexpected(win_error(Operation::CreatePipe));
     Handle connected_event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!connected_event.value) return std::unexpected(win_error(Operation::CreatePipe));

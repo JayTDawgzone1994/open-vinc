@@ -1,0 +1,5 @@
+add_executable(output_tests output_tests.cpp)
+target_link_libraries(output_tests PRIVATE vinc::output)
+add_dependencies(output_tests osal_process_helper)
+add_test(NAME output.hub COMMAND output_tests "$<TARGET_FILE:osal_process_helper>")
+set_tests_properties(output.hub PROPERTIES TIMEOUT 40)

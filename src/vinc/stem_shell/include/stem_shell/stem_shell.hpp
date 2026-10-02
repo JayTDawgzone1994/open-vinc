@@ -4,6 +4,7 @@
 // Its exit path waits for module processes and Bus cleanup before returning.
 
 #include <module/module_manager.hpp>
+#include <stem_shell/socket_shell.hpp>
 #include <filesystem>
 #include <iosfwd>
 #include <memory>
@@ -17,6 +18,8 @@ public:
     StemShell(const StemShell&) = delete;
     StemShell& operator=(const StemShell&) = delete;
     void run(std::filesystem::path startup_script = {}, std::vector<std::string> script_args = {});
+    // Bind before deployment; throws on invalid configuration or unavailable address.
+    osal::IpEndpoint start_socket_shell(shell::SocketShellOptions = {});
     // Synchronous command entry. Does not parse Tcl.
     int8_t process_line(const std::string&);
     std::string get_last_error() const;

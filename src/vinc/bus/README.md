@@ -142,20 +142,20 @@ Windows Debug 建置後，從儲存庫根目錄執行：
 .\build\windows-msvc-debug\Vinc.exe
 ```
 
-依序輸入（新的 Shell，尚無其他 busNode）：
+依序輸入（新的 Shell，尚無同名實例；`--name` 由 Bus 範例解析）：
 
 ```text
-busExample sub demo
-busExample pub demo
-busNode_1 push 10
-busNode last
-busNode last
-busNode next
-busNode_1 loan 20
-busNode last
-busNode_1 commit
-busNode next
-busNode_1 stats
+busExample --name subscriber sub demo
+busExample --name publisher pub demo
+publisher push 10
+subscriber last
+subscriber last
+subscriber next
+publisher loan 20
+subscriber last
+publisher commit
+subscriber next
+publisher stats
 exit
 ```
 

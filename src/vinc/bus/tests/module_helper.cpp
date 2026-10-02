@@ -27,6 +27,12 @@ class BusTestModule : public vinc::BaseModule {
     }
 public:
     explicit BusTestModule(std::string name) : BaseModule(std::move(name)) {}
+    std::string on_name(std::vector<std::string>& args) override {
+        if (args.size() >= 2 && args[0] == "--name") {
+            auto name = args[1]; args.erase(args.begin(), args.begin() + 2); return name;
+        }
+        return get_module_name();
+    }
     int32_t on_start(const std::vector<std::string>& args) override {
         if (args.size() < 2) return 2;
         topic_ = args[1];
@@ -42,7 +48,7 @@ public:
         }
         return 0;
     }
-    int32_t node_interface(std::vector<std::string> args) override {
+    int32_t module_interface(std::vector<std::string> args) override {
         if (args.empty()) return 0;
         const auto& cmd = args[0];
         if (cmd == "crash") std::_Exit(42);

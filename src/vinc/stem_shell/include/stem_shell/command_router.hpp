@@ -13,9 +13,10 @@ struct CompletionResult { std::string input; std::size_t replace_start = 0; std:
 std::string describe(const control::Error&);
 // Shell owns its builtins. No callback capturing the Shell is stored in ModuleManager.
 class CommandRouter {
-    enum class Builtin { Help, Exit, Script, Cancel };
+    enum class Builtin { Help, Exit, Script, Cancel, Session };
     ModuleManager& manager_;
-    const std::map<std::string, Builtin> builtins_{{"exit", Builtin::Exit}, {"help", Builtin::Help}, {"srun", Builtin::Script}, {"scancel", Builtin::Cancel}};
+    const std::map<std::string, Builtin> builtins_{{"exit", Builtin::Exit}, {"help", Builtin::Help}, {"srun", Builtin::Script}, {"scancel", Builtin::Cancel},
+        {"output", Builtin::Session}, {"disconnect", Builtin::Session}, {"resume", Builtin::Session}, {"sstatus", Builtin::Session}};
 public:
     explicit CommandRouter(ModuleManager&);
     bool builtin(std::string_view) const;

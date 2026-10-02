@@ -26,7 +26,8 @@ enum class Operation {
     RegisterSocket, WaitSocket, WakeSocket,
     CreateSharedMemory, OpenSharedMemory, MapSharedMemory,
     UnmapSharedMemory, CloseSharedMemory, UnlinkSharedMemory,
-    OpenTerminal, ReadTerminal
+    OpenTerminal, ReadTerminal, RandomBytes,
+    CreateFileLock, OpenFileLock, LockFileLock, UnlockFileLock
 };
 struct OsError {
     ErrorCode code;

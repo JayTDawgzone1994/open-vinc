@@ -6,6 +6,10 @@
 #include <windows.h>
 #include <vinc/osal/terminal.hpp>
 #include <module/module_manager.hpp>
+#include <stem_shell/stem_shell.hpp>
+#include <stem_shell/tcl_runtime.hpp>
+#include <sstream>
+#include <atomic>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
@@ -15,6 +19,48 @@
 using namespace vinc::osal;
 using namespace std::chrono_literals;
 void check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+void output_redraw() {
+    // Use the real console for keyboard state and an ostream to inspect the
+    // exact redraw sequence without scraping console pixels.
+    vinc::ModuleManager manager;
+    std::ostringstream rendered;
+    vinc::StemShell shell(manager, rendered);
+    auto service = ProcessService::create(); check(bool(service), "redraw process service");
+    std::wstring self(32768, L'\0');
+    const auto length = GetModuleFileNameW(nullptr, self.data(), static_cast<DWORD>(self.size()));
+    check(length > 0 && length < self.size(), "redraw fixture path"); self.resize(length);
+    SpawnOptions options; options.executable = self; options.arguments = {"--output-fixture"};
+    auto child = manager.output_hub().spawn(*service, options, "fixture", 1);
+    check(bool(child), "spawn redraw output");
+    struct Reap { Process& process; ~Reap() { (void)process.terminate(); (void)process.wait_until(std::chrono::steady_clock::now() + 2s); } } reap{child->process};
+    auto send = [](const std::wstring& text) {
+        std::vector<INPUT_RECORD> keys;
+        for (wchar_t ch : text) {
+            INPUT_RECORD record{}; record.EventType = KEY_EVENT;
+            record.Event.KeyEvent.bKeyDown = TRUE; record.Event.KeyEvent.wRepeatCount = 1;
+            record.Event.KeyEvent.uChar.UnicodeChar = ch;
+            if (ch == '\r') record.Event.KeyEvent.wVirtualKeyCode = VK_RETURN;
+            keys.push_back(record);
+        }
+        DWORD count = 0;
+        return WriteConsoleInputW(GetStdHandle(STD_INPUT_HANDLE), keys.data(), static_cast<DWORD>(keys.size()), &count) && count == keys.size();
+    };
+    check(send(L"hel"), "queue partial command");
+    std::atomic<bool> fed{false};
+    std::jthread feeder([&] {
+        auto status = child->process.wait_until(std::chrono::steady_clock::now() + 3s);
+        manager.output_hub().exited(child->capture);
+        std::this_thread::sleep_for(200ms);
+        fed = status && status->value == 0;
+        if (!send(L"p\rexit\r")) GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
+    });
+    shell.run(); feeder.join();
+    const auto text = rendered.str();
+    const auto output = text.find("interactive-output");
+    check(fed && output != std::string::npos, "interactive output fixture");
+    check(text.find("\r\x1b[2KVINC > hel", output) != std::string::npos, "partial input not redrawn after output");
+    check(text.find("[Modules]", output) != std::string::npos, "redrawn command did not execute");
+}
 void broadcast_shutdown(Terminal& terminal) {
     const auto root = std::filesystem::absolute(std::filesystem::current_path());
     const auto directory = root / ("shell-console-" + std::to_string(GetCurrentProcessId()));
@@ -28,10 +74,10 @@ void broadcast_shutdown(Terminal& terminal) {
     check(length > 0 && length < executable.size(), "helper executable directory"); executable.resize(length);
     vinc::ModuleManager manager;
     vinc::ModulePolicy policy; policy.stop_timeout = 1500ms;
-    check(bool(manager.register_module({"shellHelper", std::filesystem::path(executable).parent_path() / "shell_process_helper.exe", "consoleNode", policy})), "register console helper");
+    check(bool(manager.register_module_type({"shellHelper", std::filesystem::path(executable).parent_path() / "shell_process_helper.exe", "consoleNode", policy})), "register console helper");
     const auto path = directory.u8string();
-    auto node = manager.start_module("shellHelper", {"slow-stop", std::string(reinterpret_cast<const char*>(path.data()), path.size())});
-    check(bool(node) && bool(manager.wait_started(*node)), "console helper ready");
+    auto module = manager.start_module("shellHelper", {"slow-stop", std::string(reinterpret_cast<const char*>(path.data()), path.size())});
+    check(bool(module) && bool(manager.wait_started(*module)), "console helper ready");
     // This test runs in its own hidden console; never broadcasts to the user's console.
     check(GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0), "broadcast OS Ctrl+C");
     bool interrupted = false;
@@ -43,10 +89,10 @@ void broadcast_shutdown(Terminal& terminal) {
     check(interrupted, "parent receives OS Ctrl+C");
     manager.begin_shutdown();
     check(bool(manager.wait_shutdown(std::chrono::steady_clock::now() + 4s)), "broadcast shutdown confirms exit");
-    const auto status = manager.inspect(*node);
+    const auto status = manager.inspect(*module);
     check(status && status->last_exit && status->last_exit->kind == ExitKind::Code && status->last_exit->value == 0,
         "child exits through framework, not default console handler");
-    check(std::filesystem::exists(directory / (*node + ".stopped")), "broadcast permits on_stop cleanup");
+    check(std::filesystem::exists(directory / (status->name + ".stopped")), "broadcast permits on_stop cleanup");
 }
 // Move the executable and Tcl resources to a Unicode path, remove interactive stdin,
 // and prove script errors leave the process alive until an OS shutdown event arrives.
@@ -63,7 +109,7 @@ void headless_deployment(Terminal& terminal, const std::filesystem::path& vinc_e
     auto text = [](const auto& p) { auto value = p.generic_u8string(); return std::string(reinterpret_cast<const char*>(value.data()), value.size()); };
     auto service = ProcessService::create(); check(bool(service), "deployment process service");
     SpawnOptions options; options.executable = directory / "Vinc.exe";
-    options.arguments = {"-S", text(script), text(marker), "中文 空白"};
+    options.arguments = {"--shell-port", "0", "-S", text(script), text(marker), "中文 空白"};
     options.working_directory = directory; options.stdin_mode = StdioMode::Null;
     auto process = service->spawn(options); check(bool(process), "start relocated headless Vinc");
     struct Reap { Process& process; ~Reap() { (void)process.terminate(); (void)process.wait_until(std::chrono::steady_clock::now() + 3s); } } reap{*process};
@@ -109,6 +155,7 @@ int child(const std::filesystem::path& vinc_exe) {
         broadcast_shutdown(*terminal);
         headless_deployment(*terminal, vinc_exe);
     }
+    output_redraw();
     DWORD after_input = 0, after_output = 0;
     check(GetConsoleMode(input, &after_input) && GetConsoleMode(output, &after_output), "query restored console");
     check(after_input == before_input && after_output == before_output && GetConsoleOutputCP() == cp, "console modes and code page restored");
@@ -116,11 +163,21 @@ int child(const std::filesystem::path& vinc_exe) {
 }
 int main(int argc, char** argv) {
     try {
-        if (argc == 3) return child(std::filesystem::absolute(argv[2]));
+        if (argc == 2 && std::string(argv[1]) == "--output-fixture") {
+            std::this_thread::sleep_for(200ms);
+            std::cout << "interactive-output\n" << std::flush;
+            return 0;
+        }
+        if (argc == 4) {
+            vinc::shell::initialize_tcl(argv[0]);
+            return child(std::filesystem::absolute(argv[2]));
+        }
         if (argc != 2) return 2;
         std::wstring path(32768, L'\0'); const auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
         check(length > 0 && length < path.size(), "executable path"); path.resize(length);
-        auto command = L"\"" + path + L"\" --child \"" + std::filesystem::absolute(argv[1]).wstring() + L"\"";
+        const auto diagnostic = std::filesystem::absolute("console-output-test-" + std::to_string(GetCurrentProcessId()) + ".txt");
+        struct RemoveDiagnostic { std::filesystem::path path; ~RemoveDiagnostic() { std::error_code e; std::filesystem::remove(path, e); } } cleanup{diagnostic};
+        auto command = L"\"" + path + L"\" --child \"" + std::filesystem::absolute(argv[1]).wstring() + L"\" \"" + diagnostic.wstring() + L"\"";
         STARTUPINFOW startup{}; startup.cb = sizeof(startup); startup.dwFlags = STARTF_USESHOWWINDOW; startup.wShowWindow = SW_HIDE;
         PROCESS_INFORMATION process{};
         check(CreateProcessW(path.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE, nullptr, nullptr, &startup, &process), "start hidden console test");
@@ -129,7 +186,16 @@ int main(int argc, char** argv) {
             ~Reap() { TerminateProcess(p.hProcess, 99); WaitForSingleObject(p.hProcess, 3000); CloseHandle(p.hThread); CloseHandle(p.hProcess); }
         } reap{process};
         check(WaitForSingleObject(process.hProcess, 15000) == WAIT_OBJECT_0, "console child completed");
-        DWORD code = 0; check(GetExitCodeProcess(process.hProcess, &code) && code == 0, "native console verification");
+        DWORD code = 0; check(GetExitCodeProcess(process.hProcess, &code), "console exit code");
+        if (code != 0) {
+            std::ifstream file(diagnostic);
+            std::string detail((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            throw std::runtime_error("native console verification: " + detail);
+        }
         std::cout << "native console tests passed\n";
-    } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
+    } catch (const std::exception& e) {
+        if (argc == 4) std::ofstream(std::filesystem::path(
+            std::u8string_view(reinterpret_cast<const char8_t*>(argv[3])))) << e.what();
+        std::cerr << e.what() << '\n'; return 1;
+    }
 }

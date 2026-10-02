@@ -26,8 +26,8 @@ static void dummy_handler(const BaseMessage* msg, void* userData)
     std::cout << "[testModule] Received message on topic: " << msg->topic_name() << std::endl;
 }
 
-testModule::testModule(std::string node_name): 
-BaseModule(node_name) 
+testModule::testModule(std::string module_name):
+BaseModule(module_name)
 {
     // Ensure engine is started so worker threads run
     AxonBus::get().start_engine();
@@ -44,7 +44,7 @@ testModule::~testModule()
     }
 }
 
-int32_t testModule::node_interface(std::vector<std::string> arg)
+int32_t testModule::module_interface(std::vector<std::string> arg)
 {
     std::cout << "[testModule] Sending message to 'test_topic'..." << std::endl;
 
@@ -55,9 +55,9 @@ int32_t testModule::node_interface(std::vector<std::string> arg)
     return 0;
 }
 
-int32_t testModule::module_interface(std::vector<std::string> arg)
+int32_t testModule::module_type_interface(std::vector<std::string> arg)
 {
-    std::cout << "Hello from testModule's static module_interface!" << std::endl;
+    std::cout << "Hello from testModule's static module_type_interface!" << std::endl;
     new testModule("testNode");
     return 0;
 }

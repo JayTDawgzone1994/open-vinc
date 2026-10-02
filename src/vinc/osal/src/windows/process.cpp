@@ -90,7 +90,7 @@ Result<std::vector<wchar_t>> environment_block(const SpawnOptions& options, cons
         }
     }
     entries.erase(L"VINC_OSAL_PIPE_BOOTSTRAP");
-    if (child_pipe) {
+    if (child_pipe && !child_pipe->inheritance().empty()) {
         auto bootstrap = widen(child_pipe->bootstrap());
         if (!bootstrap) return std::unexpected(bootstrap.error());
         entries[L"VINC_OSAL_PIPE_BOOTSTRAP"] = std::move(*bootstrap);
@@ -107,7 +107,14 @@ Result<std::vector<wchar_t>> environment_block(const SpawnOptions& options, cons
     return block;
 }
 
-Result<Handle> standard_handle(StdioMode mode, DWORD standard, bool input) {
+Result<Handle> standard_handle(StdioMode mode, DWORD standard, bool input, std::intptr_t captured = -1) {
+    if (mode == StdioMode::Capture) {
+        HANDLE duplicate = nullptr;
+        if (!DuplicateHandle(GetCurrentProcess(), reinterpret_cast<HANDLE>(captured),
+            GetCurrentProcess(), &duplicate, 0, TRUE, DUPLICATE_SAME_ACCESS))
+            return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+        return Handle(duplicate);
+    }
     if (mode == StdioMode::Inherit) {
         const HANDLE source = GetStdHandle(standard);
         if (source && source != INVALID_HANDLE_VALUE) {
@@ -214,9 +221,9 @@ Result<std::unique_ptr<NativeProcess>> NativeProcess::spawn(const SpawnOptions& 
     if (!environment) return std::unexpected(environment.error());
     auto input = standard_handle(options.stdin_mode, STD_INPUT_HANDLE, true);
     if (!input) return std::unexpected(input.error());
-    auto output = standard_handle(options.stdout_mode, STD_OUTPUT_HANDLE, false);
+    auto output = standard_handle(options.stdout_mode, STD_OUTPUT_HANDLE, false, child_pipe ? child_pipe->output(0) : -1);
     if (!output) return std::unexpected(output.error());
-    auto error = standard_handle(options.stderr_mode, STD_ERROR_HANDLE, false);
+    auto error = standard_handle(options.stderr_mode, STD_ERROR_HANDLE, false, child_pipe ? child_pipe->output(1) : -1);
     if (!error) return std::unexpected(error.error());
 
     SIZE_T bytes = 0;

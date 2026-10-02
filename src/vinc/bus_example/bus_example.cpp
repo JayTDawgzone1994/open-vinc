@@ -6,6 +6,7 @@
 #include <charconv>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 
 class BusExample final : public vinc::BaseModule {
     using Message = vinc::test;
@@ -20,6 +21,13 @@ class BusExample final : public vinc::BaseModule {
     }
 public:
     using BaseModule::BaseModule;
+    std::string on_name(std::vector<std::string>& args) override {
+        for (auto it = args.begin(); it != args.end(); ++it) if (*it == "--name") {
+            if (it + 1 == args.end()) throw std::invalid_argument("--name requires a value");
+            auto name = *(it + 1); args.erase(it, it + 2); return name;
+        }
+        return get_module_name();
+    }
     int32_t on_start(const std::vector<std::string>& input) override {
         auto args = input;
         // Shell includes the command target; direct ModuleManager callers may omit it.
@@ -34,10 +42,10 @@ public:
         } else {
             auto s = bus().subscribe<Message>(topic); if (!s) return report(s.error()); subscriber_.emplace(std::move(*s));
         }
-        std::cout << '[' << get_node_name() << "] Bus " << args[0] << " topic=" << topic << '\n'; return 0;
+        std::cout << '[' << get_module_name() << "] Bus " << args[0] << " topic=" << topic << '\n'; return 0;
     }
-    int32_t node_interface(std::vector<std::string> args) override {
-        if (!args.empty() && args.front() == get_node_name()) args.erase(args.begin());
+    int32_t module_interface(std::vector<std::string> args) override {
+        if (!args.empty() && args.front() == get_module_name()) args.erase(args.begin());
         if (args.empty()) return 1;
         const auto& command = args[0];
         if (subscriber_ && (command == "next" || command == "last")) {
@@ -46,7 +54,7 @@ public:
             // The framework has already copied the payload locally and released its read lease.
             // Application processing here cannot keep the Publisher waiting on this message.
             auto& m = **r;
-            std::cout << '[' << get_node_name() << "] value=" << m.data().y.at(0).value()
+            std::cout << '[' << get_module_name() << "] value=" << m.data().y.at(0).value()
                       << " publisher=" << m.publisher_name() << " count=" << m.get_topic_count()
                       << " timestamp_ns=" << m.get_message_timestamp() << '\n'; return 0;
         }
@@ -76,7 +84,7 @@ public:
         }
         return 1;
     }
-    std::vector<std::string> node_autoComplete(std::vector<std::string>) override {
+    std::vector<std::string> module_autoComplete(std::vector<std::string>) override {
         return publisher_ ? std::vector<std::string>{"push", "loan", "commit", "stats"} : std::vector<std::string>{"next", "last"};
     }
 };

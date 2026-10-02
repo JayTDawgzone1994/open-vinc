@@ -30,7 +30,8 @@ struct EnvironmentEntry {
     std::string name;  // UTF-8, without '=' or NUL
     std::optional<std::string> value; // nullopt removes an inherited variable
 };
-enum class StdioMode { Inherit, Null };
+// Capture is output-only and requires spawn_with_output (process_pipe.hpp).
+enum class StdioMode { Inherit, Null, Capture };
 struct SpawnOptions {
     std::filesystem::path executable; // absolute; no shell or PATH lookup
     std::vector<std::string> arguments; // UTF-8; excludes argv[0]

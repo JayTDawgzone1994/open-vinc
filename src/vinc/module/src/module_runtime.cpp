@@ -18,17 +18,19 @@ namespace vinc {
 class detail::ModuleBusAccess {
 public:
     static void attach(BaseModule& module, std::shared_ptr<bus::Client> client) { module.bus_ = std::move(client); }
+    static void identify(BaseModule& module, MID mid) { module.mid_ = mid; }
+    static void name(BaseModule& module, std::string name) { module.module_name_ = std::move(name); }
 };
 namespace {
-struct CompiledModule { std::string name; detail::ModuleFactory factory; bool duplicate = false; };
-CompiledModule& compiled() { static CompiledModule instance; return instance; }
+struct CompiledModuleType { std::string name; detail::ModuleFactory factory; bool duplicate = false; };
+CompiledModuleType& compiled() { static CompiledModuleType instance; return instance; }
 std::optional<std::uint64_t> number(const std::string& s) {
     std::uint64_t n = 0; auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), n);
     if (ec != std::errc{} || end != s.data() + s.size()) return {};
     return n;
 }
 }
-bool detail::register_compiled_module(std::string name, ModuleFactory factory) {
+bool detail::register_compiled_module_type(std::string name, ModuleFactory factory) {
     auto& entry = compiled();
     if (entry.factory) { entry.duplicate = true; return false; }
     entry.name = std::move(name); entry.factory = std::move(factory); return true;
@@ -36,7 +38,7 @@ bool detail::register_compiled_module(std::string name, ModuleFactory factory) {
 // The first ten arguments are the framework bootstrap contract. Application startup
 // arguments follow them unchanged; ordinary users should launch through ModuleManager.
 int run_module_process(const std::vector<std::string>& args) {
-    if (args.size() < 10 || args[0] != "--vinc-module-v1" || !compiled().factory || compiled().duplicate) return 64;
+    if (args.size() < 10 || args[0] != "--vinc-module-v2" || !compiled().factory || compiled().duplicate) return 64;
     const auto generation = number(args[4]), interval = number(args[5]), timeout = number(args[6]),
         startup = number(args[7]), grace = number(args[8]);
     if (!generation || !interval || !timeout || !startup || !grace || args[9] != compiled().name ||
@@ -63,6 +65,7 @@ int run_module_process(const std::vector<std::string>& args) {
     std::condition_variable changed;
     std::deque<control::Frame> requests;
     bool stopping = false;
+    std::optional<control::Frame> registration;
     std::atomic<bool> finished{false};
     // Independent of application constructors, hooks and destructors.
     // This watches the framework connection, not arbitrary application-thread health.
@@ -78,7 +81,11 @@ int run_module_process(const std::vector<std::string>& args) {
                     if (frame.error().code == control::ErrorCode::Timeout && session->state() != control::State::Closed) continue;
                     std::_Exit(72);
                 }
-                if (frame->domain == bus::detail::bus_domain) {
+                if (frame->kind == control::Kind::Response && frame->domain == detail::lifecycle && frame->operation == detail::register_name && frame->request == 1) {
+                    std::lock_guard lock(mutex);
+                    if (registration) { session->close(); continue; }
+                    registration = std::move(*frame); changed.notify_all();
+                } else if (frame->domain == bus::detail::bus_domain) {
                     if (!bus::detail::RuntimeAccess::receive(*bus_client, std::move(*frame))) session->close();
                 } else if (frame->kind == control::Kind::Event && frame->domain == detail::lifecycle && frame->operation == detail::stop) {
                     if (!frame->payload.empty()) std::_Exit(74);
@@ -95,15 +102,29 @@ int run_module_process(const std::vector<std::string>& args) {
     });
     int result = 0;
     try {
-        auto node = compiled().factory(args[2]);
-        if (!node || node->get_node_name() != args[2]) throw std::runtime_error("invalid module factory");
-        detail::ModuleBusAccess::attach(*node, bus_client);
+        auto module = compiled().factory(args[2]);
+        if (!module || module->get_module_name() != args[2]) throw std::runtime_error("invalid module factory");
+        detail::ModuleBusAccess::identify(*module, *generation);
+        auto startup_args = std::vector<std::string>(args.begin() + 10, args.end());
+        const auto proposed = module->on_name(startup_args);
+        control::Frame claim{control::Kind::Request, detail::lifecycle, detail::register_name, 1};
+        control::put_string(claim.payload, proposed);
+        if (!session->send(std::move(claim))) throw std::runtime_error("send name registration failed");
+        {
+            std::unique_lock lock(mutex);
+            if (!changed.wait_until(lock, control::Clock::now() + options.handshake_timeout, [&] { return registration.has_value() || stopping; }) || stopping)
+                throw std::runtime_error("name registration interrupted");
+            control::Reader reader(registration->payload); const auto code = reader.u32(); const auto name = reader.string();
+            if (!reader.done() || code || name != proposed) throw std::runtime_error("name registration rejected");
+            detail::ModuleBusAccess::name(*module, name);
+        }
+        detail::ModuleBusAccess::attach(*module, bus_client);
         // Attach framework services before user startup. Ready is sent only after on_start
         // returns success, so central callers can distinguish a live process from a usable module.
-        result = node->on_start(std::vector<std::string>(args.begin() + 10, args.end()));
+        result = module->on_start(startup_args);
         if (!result) {
             control::Frame ready{control::Kind::Event, detail::lifecycle, detail::ready};
-            control::put_string(ready.payload, node->get_node_name());
+            control::put_string(ready.payload, module->get_module_name());
             if (!session->send(std::move(ready))) throw std::runtime_error("send ready failed");
             while (true) {
                 control::Frame request;
@@ -120,8 +141,8 @@ int run_module_process(const std::vector<std::string>& args) {
                     if (request.domain == detail::commands) {
                         auto decoded = control::decode_arguments(request.payload);
                         if (!decoded) { session->close(); continue; }
-                        if (request.operation == detail::execute) status = node->node_interface(std::move(*decoded));
-                        else if (request.operation == detail::complete) { completions = node->node_autoComplete(std::move(*decoded)); status = 0; }
+                        if (request.operation == detail::execute) status = module->module_interface(std::move(*decoded));
+                        else if (request.operation == detail::complete) { completions = module->module_autoComplete(std::move(*decoded)); status = 0; }
                     }
                 } catch (...) { status = detail::hook_exception; }
                 control::put_u32(response.payload, std::bit_cast<std::uint32_t>(status));
@@ -132,7 +153,7 @@ int run_module_process(const std::vector<std::string>& args) {
                 if (!session->send(std::move(response))) session->close();
             }
         }
-        node->on_stop(); node.reset();
+        module->on_stop(); module.reset();
     } catch (...) { result = 70; }
     finished.store(true); bus::detail::RuntimeAccess::shutdown(*bus_client); session->close(); watchdog.request_stop(); watchdog.join();
     return result;

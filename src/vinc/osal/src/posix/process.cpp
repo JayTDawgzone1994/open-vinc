@@ -86,7 +86,7 @@ Result<std::unique_ptr<NativeProcess>> NativeProcess::spawn(const SpawnOptions& 
         else environment.erase(entry.name);
     }
     environment.erase(pipe_bootstrap_name);
-    if (child_pipe) environment[pipe_bootstrap_name] = child_pipe->bootstrap();
+    if (child_pipe && !child_pipe->inheritance().empty()) environment[pipe_bootstrap_name] = child_pipe->bootstrap();
     std::vector<std::string> environment_strings;
     environment_strings.reserve(environment.size());
     for (const auto& [name, value] : environment) environment_strings.push_back(name + "=" + value);
@@ -122,6 +122,14 @@ Result<std::unique_ptr<NativeProcess>> NativeProcess::spawn(const SpawnOptions& 
 
     const StdioMode modes[]{options.stdin_mode, options.stdout_mode, options.stderr_mode};
     for (int fd = 0; fd < 3; ++fd) {
+        if (modes[fd] == StdioMode::Capture) {
+            // Sources are duplicated above all bootstrap targets. Apply stdio
+            // redirection before closefrom and before handing off generic pipes.
+            error = posix_spawn_file_actions_adddup2(&actions.value,
+                static_cast<int>(child_pipe->output(static_cast<std::size_t>(fd - 1))), fd);
+            if (error) return std::unexpected(native_error(Operation::Spawn, error));
+            continue;
+        }
         bool inherit = modes[fd] == StdioMode::Inherit;
         if (inherit && fcntl(fd, F_GETFD) == -1) {
             if (errno != EBADF) return std::unexpected(native_error(Operation::Spawn, errno));

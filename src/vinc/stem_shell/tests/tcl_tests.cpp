@@ -78,7 +78,7 @@ if {![catch {fail} reason] || $reason ne "remote returned 17"} {error catch}
         {
             ModuleManager manager; shell::CommandRouter router(manager);
             ModulePolicy policy; policy.stop_timeout = 1s;
-            check(bool(manager.register_module({"shellHelper", std::filesystem::absolute(argv[1]), "waitingNode", policy})), "register waiting helper");
+            check(bool(manager.register_module_type({"shellHelper", std::filesystem::absolute(argv[1]), "waitingNode", policy})), "register waiting helper");
             auto name = manager.start_module("shellHelper", {"normal", utf8(files.path)});
             check(name && manager.wait_started(*name), "waiting helper ready");
             auto waiting = files.write("waiting.tcl", "waitingNode slow\nwaitingNode fail\n");
@@ -96,10 +96,10 @@ if {![catch {fail} reason] || $reason ne "remote returned 17"} {error catch}
         {
             ModuleManager manager; std::ostringstream output; StemShell shell(manager, output);
             const auto exe = std::filesystem::absolute(argv[1]);
-            check(!manager.register_module({"set", exe, "valid", {}}), "Tcl factory name reserved");
-            check(!manager.register_module({"valid", exe, "list", {}}), "Tcl instance base reserved instead of adding suffix");
+            check(!manager.register_module_type({"set", exe, "valid", {}}), "Tcl module type name reserved");
+            check(!manager.register_module_type({"valid", exe, "list", {}}), "Tcl module base reserved instead of adding suffix");
             ModulePolicy policy; policy.stop_timeout = 1s; policy.startup_timeout = 4s;
-            check(bool(manager.register_module({"shellHelper", exe, "node", policy})), "register helper");
+            check(bool(manager.register_module_type({"shellHelper", exe, "node", policy})), "register helper");
             auto startup = files.write("deployment.tcl", "shellHelper normal {" + utf8(files.path) + "}\nnode check {中文 空白} {} {D:\\Some Folder\\a.txt}\nnode fail\nerror unreachable\n");
             InputPipe input; std::atomic<bool> ok{true};
             std::jthread feeder([&] {
@@ -113,7 +113,7 @@ if {![catch {fail} reason] || $reason ne "remote returned 17"} {error catch}
             shell.run(startup); feeder.join();
             check(ok.load(), "startup feeder");
             check(std::filesystem::exists(files.path / "node.checked"), "real module gets Tcl arguments unchanged");
-            check(output.str().find("line 3") != std::string::npos && output.str().find("[Instances]") != std::string::npos, "startup error returns to Shell");
+            check(output.str().find("line 3") != std::string::npos && output.str().find("[Modules]") != std::string::npos, "startup error returns to Shell");
             check(manager.inspect("node")->last_exit.has_value(), "exit waits for module process");
         }
         {
@@ -145,7 +145,7 @@ if {![catch {fail} reason] || $reason ne "remote returned 17"} {error catch}
             std::atomic<bool> entered_loop{false};
             check(manager.register_micro_program("loopStarted", [&](auto&) { entered_loop.store(true); return 0; }) == 0, "shutdown loop marker");
             ModulePolicy policy; policy.stop_timeout = 1s;
-            check(bool(manager.register_module({"shellHelper", std::filesystem::absolute(argv[1]), "shutdownNode", policy})), "shutdown helper");
+            check(bool(manager.register_module_type({"shellHelper", std::filesystem::absolute(argv[1]), "shutdownNode", policy})), "shutdown helper");
             auto startup = files.write("interrupt-startup.tcl", "shellHelper normal {" + utf8(files.path) + "}\nloopStarted\nwhile {1} {}\n");
             std::atomic<bool> ok{true};
             std::jthread feeder([&] {

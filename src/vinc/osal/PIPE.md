@@ -14,7 +14,7 @@ Windows 已實際驗證；Linux／macOS 已更新後端，但仍待目標平台�
 | 標頭 | 責任 |
 | --- | --- |
 | `<vinc/osal/pipe.hpp>` | `Pipe`、`PipeReader`、`PipeWriter`、`PipeService`、buffer 與完成事件 |
-| `<vinc/osal/process_pipe.hpp>` | 把指定端點交給子程序、取得繼承端點、雙向便利組合 |
+| `<vinc/osal/process_pipe.hpp>` | 程序 stdout／stderr 擷取、端點交付、取得繼承端點、雙向便利組合 |
 | `<vinc/osal/error.hpp>` | 共用的 `Result`、`OsError`、`Deadline` |
 
 消費者連結 `vinc::osal`；只使用 Pipe 時不必引入 Process 公開標頭。
@@ -27,7 +27,8 @@ Windows 已實際驗證；Linux／macOS 已更新後端，但仍待目標平台�
 - 本版保留單一非同步模型，不另外提供同步收發、借用 buffer 的 `try_read/write()`
   或 `SocketPoller` 整合。Windows 使用完成通知，POSIX readiness 在後端轉成完成結果。
 - 不提供訊息邊界、文字編碼、原生 handle 匯入、公開命名管道、監聽或連線探索。
-  本版亦不提供任意子程序的 stdin／stdout／stderr 重導；OSAL 子程序需接手交付端點。
+  任意子程序的 stdout／stderr 可透過 [輸出擷取整合層](OUTPUT.md) 重導；不需要子程序
+  接手 OSAL 端點。stdin 仍只提供 Inherit／Null。
 
 ## 建立與收發
 

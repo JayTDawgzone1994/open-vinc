@@ -14,15 +14,17 @@ int main(int argc, char** argv) {
     try {
         ModuleManager manager;
         ModulePolicy policy; policy.heartbeat_interval = 100ms; policy.heartbeat_timeout = 1500ms; policy.startup_timeout = 15s;
-        check(bool(manager.register_module({"busTest", std::filesystem::absolute(argv[1]), "busNode", policy})), "register helper");
+        check(bool(manager.register_module_type({"busTest", std::filesystem::absolute(argv[1]), "busNode", policy})), "register helper");
+        unsigned instance = 0;
         auto start = [&](std::vector<std::string> args) {
+            args.insert(args.begin(), {"--name", "busFixture" + std::to_string(++instance)});
             auto name = manager.start_module("busTest", std::move(args)); check(bool(name), "start helper");
             auto r = manager.wait_running(*name, control::Clock::now() + 18s);
             if (!r) { const auto s = manager.inspect(*name); throw std::runtime_error(r.error().message + " " + s->last_error); }
-            return *name;
+            return manager.inspect(*name)->name;
         };
-        auto command = [&](const std::string& node, std::vector<std::string> args) {
-            auto r = manager.command(node, std::move(args), control::Clock::now() + 10s);
+        auto command = [&](const std::string& module, std::vector<std::string> args) {
+            auto r = manager.command(module, std::move(args), control::Clock::now() + 10s);
             if (!r) throw std::runtime_error(r.error().message); return *r;
         };
         auto eventually = [&](auto predicate) {
@@ -89,7 +91,7 @@ int main(int argc, char** argv) {
         check(waiting.get() == 0, "confirmed reader death releases writer");
         check(command(blocked_writer, {"collisions"}) == 1 && command(blocked_writer, {"waited"}) == 1, "collision count and duration recorded");
         check(bool(manager.stop_module(blocked_writer, control::Clock::now() + 5s)), "stop recovered writer");
-        for (const auto& node : {sub, old, fresh, b, restarted}) check(bool(manager.stop_module(node, control::Clock::now() + 5s)), "stop helper");
+        for (const auto& module : {sub, old, fresh, b, restarted}) check(bool(manager.stop_module(module, control::Clock::now() + 5s)), "stop helper");
         std::cout << "bus module integration passed\n"; return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }
