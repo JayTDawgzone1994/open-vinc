@@ -1,3 +1,6 @@
+// Process contract tests using real child executables: arguments, environment,
+// exit observation, termination, cancellation and resource ownership.
+
 #include <vinc/osal/process.hpp>
 
 #include <atomic>

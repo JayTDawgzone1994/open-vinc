@@ -1,3 +1,6 @@
+// Socket contract tests across addresses, streams, datagrams and readiness polling.
+// Include cancellation, peer loss and descriptor reuse so readiness is not confused with completed I/O.
+
 #include <vinc/osal/socket_poller.hpp>
 #include <vinc/osal/process.hpp>
 #include <algorithm>

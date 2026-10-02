@@ -1,68 +1,32 @@
 #pragma once
 
-#include <iostream>
-#include <string>
-#include <vector>
-#include <sstream>
-#include <atomic>
-#include <csignal>
-#include <map>
-#include <functional>
-#include <filesystem>
+// Central user-facing Shell with asynchronous commands and a foreground Tcl script.
+// Its exit path waits for module processes and Bus cleanup before returning.
 
 #include <module/module_manager.hpp>
+#include <stem_shell/socket_shell.hpp>
+#include <filesystem>
+#include <iosfwd>
+#include <memory>
 
-#include <stem_shell/terinal_guard.hpp>
-#include <stem_shell/scriptInterpreter.hpp>
-
-namespace vinc
-{
-
-class StemShell
-{
-
+namespace vinc {
+class StemShell {
 public:
     StemShell();
-    ~StemShell() = default;
-
-    void run();
-
-    int8_t process_line(const std::string& line);
-
-    int8_t run_script(std::filesystem::path file_path);
-
-    const std::string get_last_error() const { return _last_error_str; }
-
+    explicit StemShell(ModuleManager&, std::ostream&);
+    ~StemShell();
+    StemShell(const StemShell&) = delete;
+    StemShell& operator=(const StemShell&) = delete;
+    void run(std::filesystem::path startup_script = {}, std::vector<std::string> script_args = {});
+    // Bind before deployment; throws on invalid configuration or unavailable address.
+    osal::IpEndpoint start_socket_shell(shell::SocketShellOptions = {});
+    // Synchronous command entry. Does not parse Tcl.
+    int8_t process_line(const std::string&);
+    std::string get_last_error() const;
+    void request_shutdown();
+    void wait_shutdown();
 private:
-
-    //TODO :void TCP_UDP_SHELL();
-    ScriptInterpreter _script_terp;
-
-    int8_t init_basic_functions();
-
-    void handle_tab_completion(std::string& buffer);
-
-    void handle_history_scroll(bool is_up, std::string& buffer);
-    
-    std::vector<std::string> tokenize(const std::string& line);
-
-    int32_t microHelp(std::vector<std::string>& );
-
-    TerminalGuard _terminal_guard;
-
-    ModuleManager& _module_manager = vinc::ModuleManager::get();
-
-    std::atomic<bool> _running;
-
-    uint8_t ctrl_c_count = 0;
-
-    std::string _last_error_str;
-
-    std::string _prompt = "\033[32mVINC\033[0m > ";
-
-    std::vector<std::string> _history; // 儲存歷史指令的口袋
-    int32_t _history_index = -1;       // 目前循環到哪一條指令（-1 代表沒有在循環）
-
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
-
-} // namespace vinc
+}

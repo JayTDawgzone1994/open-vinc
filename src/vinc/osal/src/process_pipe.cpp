@@ -1,4 +1,8 @@
+// Transactional endpoint handoff: validate and pin first, spawn second, release parent ends last.
+// The duplex convenience API is two independent one-way streams, not a different transport.
+
 #include "pipe_state.hpp"
+#include "native.hpp"
 #include "process_pipe_native.hpp"
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>
@@ -31,9 +35,11 @@ struct PipeHandoff {
 };
 }
 namespace vinc::osal {
-Result<Process> spawn_with_pipes(ProcessService& processes, PipeService& pipes,
-    const SpawnOptions& options, std::span<const PipeBinding> bindings) {
-    if (bindings.empty() || bindings.size() > detail::max_pipe_bindings)
+namespace {
+Result<Process> spawn_bound(ProcessService& processes, PipeService& pipes,
+    const SpawnOptions& options, std::span<const PipeBinding> bindings,
+    const std::array<detail::NativePipe*, 2>& outputs = {}) {
+    if (bindings.size() > detail::max_pipe_bindings)
         return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
     detail::PipeHandoff handoff;
     handoff.state = detail::PipeAccess::state(pipes);
@@ -57,7 +63,7 @@ Result<Process> spawn_with_pipes(ProcessService& processes, PipeService& pipes,
             })) return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
             native.push_back({binding.slot, record->direction, record->native.get()});
         }
-        auto result = detail::ChildPipe::prepare(native);
+        auto result = detail::ChildPipe::prepare(native, outputs);
         if (!result) return result;
         for (const auto& binding : bindings) {
             auto& end = std::visit([](auto* p) -> detail::PipeEnd& { return detail::PipeAccess::end(*p); }, binding.endpoint);
@@ -71,6 +77,54 @@ Result<Process> spawn_with_pipes(ProcessService& processes, PipeService& pipes,
     auto process = detail::ProcessAccess::spawn(processes, options, *prepared);
     if (process) handoff.committed = true;
     return process; // No allocation or fallible work after native spawn succeeds.
+}
+}
+
+Result<Process> spawn_with_pipes(ProcessService& processes, PipeService& pipes,
+    const SpawnOptions& options, std::span<const PipeBinding> bindings) {
+    if (bindings.empty()) return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+    return spawn_bound(processes, pipes, options, bindings);
+}
+
+Result<ProcessWithOutput> spawn_with_output(ProcessService& processes, PipeService& pipes,
+    const SpawnOptions& options, std::span<const PipeBinding> bindings) {
+    auto valid = detail::validate_options(options);
+    if (!valid) return std::unexpected(valid.error());
+    const std::array<bool, 2> capture{options.stdout_mode == StdioMode::Capture,
+        options.stderr_mode == StdioMode::Capture};
+    const auto count = static_cast<std::size_t>(capture[0]) + static_cast<std::size_t>(capture[1]);
+    auto records = detail::PipeAccess::reserve(pipes, count);
+    if (!records) return std::unexpected(records.error());
+    struct Reservation {
+        PipeService& service;
+        std::span<const std::shared_ptr<detail::PipeRecord>> records;
+        bool committed = false;
+        ~Reservation() { if (!committed) detail::PipeAccess::rollback(service, records); }
+    } reservation{pipes, *records};
+    std::array<detail::NativePipePair, 2> pairs;
+    std::array<detail::NativePipe*, 2> outputs{};
+    for (std::size_t i = 0; i < capture.size(); ++i) {
+        if (!capture[i]) continue;
+        auto pair = detail::NativePipe::create_pair(true);
+        if (!pair) return std::unexpected(pair.error());
+        pairs[i] = std::move(*pair);
+        outputs[i] = pairs[i].writer.get();
+    }
+    auto child = spawn_bound(processes, pipes, options, bindings, outputs);
+    if (!child) return std::unexpected(child.error());
+    // All allocations and capacity checks preceded spawn. Publish only moves;
+    // closing every parent writer copy here lets readers eventually observe EOF.
+    ProcessWithOutput result{std::move(*child), {}, {}};
+    std::array<std::optional<PipeReader>*, 2> readers{&result.stdout_reader, &result.stderr_reader};
+    std::size_t record = 0;
+    for (std::size_t i = 0; i < capture.size(); ++i) {
+        if (!capture[i]) continue;
+        pairs[i].writer.reset();
+        readers[i]->emplace(detail::PipeAccess::reader(detail::PipeAccess::commit(
+            pipes, (*records)[record++], std::move(pairs[i].reader), IoKind::Read)));
+    }
+    reservation.committed = true;
+    return result;
 }
 
 Result<std::vector<InheritedPipe>> take_inherited_pipes(PipeService& pipes) {

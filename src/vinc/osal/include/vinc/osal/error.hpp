@@ -1,4 +1,8 @@
 #pragma once
+
+// Common OSAL result type: portable error category plus operation and native cause.
+// Keep the native error when reporting failures; a portable category alone loses diagnostics.
+
 #include <chrono>
 #include <expected>
 #include <system_error>
@@ -10,7 +14,8 @@ enum class ErrorCode {
     Unsupported, Timeout, Cancelled, ServiceClosed, Busy,
     ObservationLost, SystemError, Closed, PeerClosed,
     WouldBlock, AddressInUse, AddressNotAvailable, ConnectionRefused,
-    ConnectionReset, NotConnected, MessageTooLarge, NetworkUnreachable
+    ConnectionReset, NotConnected, MessageTooLarge, NetworkUnreachable,
+    AlreadyExists
 };
 enum class Operation {
     InitializeService, Spawn, Observe, Wait, Terminate, Forget, Shutdown,
@@ -18,7 +23,11 @@ enum class Operation {
     CreateSocket, ParseAddress, ResolveAddress, BindSocket, ListenSocket,
     AcceptSocket, ConnectSocket, SendSocket, ReceiveSocket, ShutdownSocket,
     CloseSocket, QuerySocket, SetSocketOption, GetSocketOption,
-    RegisterSocket, WaitSocket, WakeSocket
+    RegisterSocket, WaitSocket, WakeSocket,
+    CreateSharedMemory, OpenSharedMemory, MapSharedMemory,
+    UnmapSharedMemory, CloseSharedMemory, UnlinkSharedMemory,
+    OpenTerminal, ReadTerminal, RandomBytes,
+    CreateFileLock, OpenFileLock, LockFileLock, UnlockFileLock
 };
 struct OsError {
     ErrorCode code;

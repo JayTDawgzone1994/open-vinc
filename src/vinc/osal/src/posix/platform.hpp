@@ -1,4 +1,7 @@
 #pragma once
+
+// Internal POSIX process-monitor bridge implemented separately by Linux and macOS.
+
 #include "../native.hpp"
 #include <sys/types.h>
 

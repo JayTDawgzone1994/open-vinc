@@ -1,72 +1,56 @@
 #pragma once
 
-#include <iostream>
+// Application extension point inside a child process.
+// Users implement hooks; the framework hides Socket commands, heartbeat and Bus attachment.
+
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
+#include <vinc/bus/bus.hpp>
+#include <module/mid.hpp>
+
+namespace vinc {
+namespace detail { class ModuleBusAccess; }
+class BaseModule {
+    friend class detail::ModuleBusAccess;
+public:
+    // The framework supplies a default proposal; on_name runs before central registration.
+    explicit BaseModule(std::string module_name);
+    virtual ~BaseModule();
+    const std::string& get_module_name() const noexcept { return module_name_; }
+    MID get_mid() const noexcept { return mid_; }
+    // Called once per process before name registration and on_start. The initial
+    // name is only a proposal. Parse application args here and return the desired
+    // final name; do not start normal work or use Bus before central acceptance.
+    // Consumed arguments may be erased here; on_start receives the remaining args.
+    virtual std::string on_name(std::vector<std::string>&) { return module_name_; }
+    // All application hooks execute serially on the module's main thread.
+    virtual int32_t on_start(const std::vector<std::string>&) { return 0; }
+    virtual void on_stop() {}
+    virtual int32_t module_interface(std::vector<std::string> args) = 0;
+    virtual std::vector<std::string> module_autoComplete(std::vector<std::string>) { return {}; }
+protected:
+    // Available from on_start through on_stop; constructors run before attachment.
+    bus::Client& bus();
+private:
+    std::string module_name_; // Runtime may replace it once, after registration approval.
+    MID mid_ = 0; // Set after construction, before on_name.
+    std::shared_ptr<bus::Client> bus_;
+};
+namespace detail {
+using ModuleFactory = std::function<std::unique_ptr<BaseModule>(std::string)>;
+bool register_compiled_module_type(std::string, ModuleFactory);
+}
+int run_module_process(const std::vector<std::string>& arguments);
+}
 
 #define VINC_CONCAT_INTERNAL(a, b) a##b
 #define VINC_CONCAT(a, b) VINC_CONCAT_INTERNAL(a, b)
-
-#define REGISTER_MODULE(ClassType, ModuleName) \
-    static_assert(std::is_same_v<decltype(&ClassType::module_interface), int32_t (*)(std::vector<std::string>)>, \
-                  "\n\n[vinc Error] " #ClassType " must implement: \n" \
-                  "static int32_t module_interface(std::vector<std::string> arg)\n"); \
-    \
-    static struct VINC_CONCAT(ModuleRegistrar_, __LINE__) { \
-        VINC_CONCAT(ModuleRegistrar_, __LINE__)() { \
-            auto& manager = vinc::ModuleManager::get(); \
-            \
-            /* 1. 註冊主要工廠介面 */ \
-            manager.register_module_factory(ModuleName, &ClassType::module_interface); \
-            \
-            /* 2. 匿名模板 Lambda：將成員檢查推遲到實例化階段 */ \
-            []<typename T>(vinc::ModuleManager& m, const std::string& name) { \
-                if constexpr (requires { { T::module_autoComplete(std::declval<std::vector<std::string>>()) } -> std::same_as<std::vector<std::string>>; }) { \
-                    /* 只有在 T 真的有 module_autoComplete 且型別正確時，這行才會被編譯 */ \
-                    m.register_module_autoComplete(name, &T::module_autoComplete); \
-                } \
-            }.template operator()<ClassType>(manager, ModuleName); \
-        } \
-    } VINC_CONCAT(_instance_, __LINE__);
-
-namespace vinc
-{
-
-class BaseModule
-{
-public:
-    BaseModule(std::string node_name);
-
-    virtual ~BaseModule();
-
-    virtual int32_t node_interface(std::vector<std::string> arg) = 0;
-
-    virtual std::vector<std::string> node_autoComplete(std::vector<std::string> arg)
-    {
-        (void)arg;
-        return {};
-    }
-
-    //Although this is an annotation, 
-    //you must implement this function, 
-    //otherwise, the compiler will report an error.
-    //virtual static int32_t module_interface(std::vector<std::string> arg) = 0;
-
-    //To complete this function, 
-    //users can press Tab to use the auto complete feature.
-    //virtual static std::vector<std::string> module_autoComplete(std::vector<std::string> arg);
-
-    std::string get_node_name() const
-    {
-        return _node_name;
-    }
-
-private:
-
-    std::string _node_name;
-
-};
-
-
-} //namespace vinc
+// Registration happens only in the module executable. No user factory runs in the central process.
+#define REGISTER_MODULE(ClassType, ModuleTypeName) \
+    namespace { const bool VINC_CONCAT(vinc_registered_, __LINE__) = \
+        ::vinc::detail::register_compiled_module_type(ModuleTypeName, [](std::string name) { \
+            return std::make_unique<ClassType>(std::move(name)); \
+        }); }

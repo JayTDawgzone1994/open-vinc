@@ -1,3 +1,6 @@
+// Cross-process Pipe tests: explicit endpoint handoff, partial transfers, cancellation
+// and cleanup. Helpers deliberately exercise failure paths as well as round trips.
+
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>
 #include <array>

@@ -1,4 +1,8 @@
 #pragma once
+
+// Move-only nonblocking sockets with optional deadline-based convenience calls.
+// Stream operations may transfer only part of a buffer; higher layers assemble messages.
+
 #include <vinc/osal/socket_address.hpp>
 #include <concepts>
 #include <cstddef>
@@ -62,6 +66,7 @@ public:
     explicit operator bool() const noexcept;
     [[nodiscard]] Result<void> bind(const SocketAddress&);
     [[nodiscard]] Result<void> listen(int backlog);
+    // try_* never wait for readiness: WouldBlock asks the caller to poll and retry.
     [[nodiscard]] Result<Socket> try_accept();
     [[nodiscard]] Result<ConnectProgress> try_connect(const SocketAddress&);
     [[nodiscard]] Result<ConnectProgress> finish_connect();

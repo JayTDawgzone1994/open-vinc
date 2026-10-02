@@ -1,3 +1,6 @@
+// macOS readiness and wakeup backend for the single Pipe I/O worker.
+// kqueue filters follow each transfer direction and are removed when the transfer ends.
+
 #include "../posix/pipe_platform.hpp"
 #include <cerrno>
 #include <fcntl.h>

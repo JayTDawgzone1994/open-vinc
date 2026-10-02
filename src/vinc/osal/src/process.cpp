@@ -1,3 +1,6 @@
+// Shared process-service state machine. The service retains children and exit records
+// while a monitor observes native exits; dropping a public view does not stop a child.
+
 #include "native.hpp"
 #include "process_pipe_native.hpp"
 
@@ -10,6 +13,8 @@
 
 namespace vinc::osal::detail {
 
+// One record per service identity, retained even after the native process is reaped.
+// Lock order is ServiceState::mutex before ProcessRecord::mutex when both are needed.
 struct ProcessRecord {
     ProcessId id;
     std::uint64_t pid = 0;
@@ -56,6 +61,12 @@ bool valid_utf8(const std::string& text) noexcept {
 }
 
 Result<void> validate_options(const SpawnOptions& options) {
+    const auto valid_stdio = [](StdioMode mode) {
+        return mode == StdioMode::Inherit || mode == StdioMode::Null || mode == StdioMode::Capture;
+    };
+    if (!valid_stdio(options.stdin_mode) || options.stdin_mode == StdioMode::Capture ||
+        !valid_stdio(options.stdout_mode) || !valid_stdio(options.stderr_mode))
+        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
     const auto valid_path = [](const std::filesystem::path& path) {
         return path.is_absolute() && path.native().find(typename std::filesystem::path::value_type{}) == path.native().npos;
     };
@@ -209,6 +220,11 @@ Result<Process> ProcessService::spawn_impl(const SpawnOptions& options, const de
     if (!state_) return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Spawn});
     auto valid = detail::validate_options(options);
     if (!valid) return std::unexpected(valid.error());
+    // Plain spawn and generic endpoint handoff cannot return captured readers.
+    const StdioMode outputs[]{options.stdout_mode, options.stderr_mode};
+    for (std::size_t i = 0; i < 2; ++i)
+        if ((outputs[i] == StdioMode::Capture) != (child_pipe && child_pipe->output(i) != -1))
+            return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
     auto id = detail::next_id();
     if (!id) return std::unexpected(id.error());
     auto record = std::make_shared<detail::ProcessRecord>();

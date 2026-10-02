@@ -1,3 +1,6 @@
+// Encode, validate and consume the one-time inherited-endpoint manifest.
+// Reject malformed or duplicate entries before exposing endpoints through PipeService.
+
 #include "process_pipe_native.hpp"
 #include <algorithm>
 #include <atomic>
@@ -6,7 +9,8 @@
 #include <string_view>
 
 namespace vinc::osal::detail {
-Result<ChildPipe> ChildPipe::prepare(std::span<const NativePipeBinding> bindings) {
+Result<ChildPipe> ChildPipe::prepare(std::span<const NativePipeBinding> bindings,
+    const std::array<NativePipe*, 2>& outputs) {
     ChildPipe result;
     result.transfers_.reserve(bindings.size());
     result.handles_.reserve(bindings.size());
@@ -17,6 +21,12 @@ Result<ChildPipe> ChildPipe::prepare(std::span<const NativePipeBinding> bindings
         transfer.handle = *duplicate; transfer.slot = binding.slot; transfer.direction = binding.direction;
         result.handles_.push_back(transfer.handle);
         result.transfers_.push_back(std::move(transfer));
+    }
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        if (!outputs[i]) continue;
+        auto duplicate = duplicate_pipe_transfer(outputs[i]->handle());
+        if (!duplicate) return std::unexpected(duplicate.error());
+        result.outputs_[i].handle = *duplicate;
     }
     return result;
 }

@@ -1,4 +1,8 @@
 #pragma once
+
+// Wait for readiness across multiple sockets without creating a thread per socket.
+// A registration identifies one watch, so a reused OS handle cannot impersonate an old watch.
+
 #include <vinc/osal/socket.hpp>
 #include <cstdint>
 

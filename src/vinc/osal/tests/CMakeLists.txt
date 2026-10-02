@@ -1,3 +1,6 @@
+# Use helper executables to test native process, Pipe and shared-memory lifetimes.
+# CTest timeouts bound fault scenarios that would otherwise leave a hanging test run.
+
 add_executable(osal_process_helper process_helper.cpp)
 target_link_libraries(osal_process_helper PRIVATE Threads::Threads)
 set_target_properties(osal_process_helper PROPERTIES
@@ -32,6 +35,18 @@ endforeach()
 add_test(NAME osal.pipe COMMAND osal_pipe_tests "$<TARGET_FILE:osal_pipe_helper>")
 set_tests_properties(osal.pipe PROPERTIES TIMEOUT 90)
 
+add_executable(osal_process_output_tests process_output_tests.cpp)
+target_link_libraries(osal_process_output_tests PRIVATE vinc::osal Threads::Threads)
+add_dependencies(osal_process_output_tests osal_process_helper osal_pipe_helper)
+if(MSVC)
+    target_compile_options(osal_process_output_tests PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(osal_process_output_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME osal.process_output COMMAND osal_process_output_tests
+    "$<TARGET_FILE:osal_process_helper>" "$<TARGET_FILE:osal_pipe_helper>")
+set_tests_properties(osal.process_output PROPERTIES TIMEOUT 90)
+
 add_executable(osal_pipe_stream_tests pipe_stream_tests.cpp)
 target_link_libraries(osal_pipe_stream_tests PRIVATE vinc::osal Threads::Threads)
 if(MSVC)
@@ -51,3 +66,23 @@ else()
 endif()
 add_test(NAME osal.socket COMMAND osal_socket_tests)
 set_tests_properties(osal.socket PROPERTIES TIMEOUT 90 WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+add_executable(osal_shared_memory_tests shared_memory_tests.cpp)
+target_link_libraries(osal_shared_memory_tests PRIVATE vinc::osal Threads::Threads)
+if(MSVC)
+    target_compile_options(osal_shared_memory_tests PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(osal_shared_memory_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME osal.shared_memory COMMAND osal_shared_memory_tests "$<TARGET_FILE:osal_shared_memory_tests>")
+set_tests_properties(osal.shared_memory PROPERTIES TIMEOUT 90)
+
+add_executable(osal_file_lock_tests file_lock_tests.cpp)
+target_link_libraries(osal_file_lock_tests PRIVATE vinc::osal Threads::Threads)
+if(MSVC)
+    target_compile_options(osal_file_lock_tests PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(osal_file_lock_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME osal.file_lock COMMAND osal_file_lock_tests)
+set_tests_properties(osal.file_lock PROPERTIES TIMEOUT 90)

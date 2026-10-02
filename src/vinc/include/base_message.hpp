@@ -1,5 +1,9 @@
 #pragma once
 
+// Common message interface and framework-owned delivery metadata.
+// Generated classes keep their C++ facade local and encode only their described payload for transport.
+
+
 #include <iostream>
 #include <cstdint>
 #include <string>
@@ -12,27 +16,33 @@
 
 namespace vinc
 {
+namespace bus::detail { class MessageAccess; }
 
 class BaseMessage
 {
 friend class AxonBus;
+friend class bus::detail::MessageAccess;
 public:
 
     BaseMessage() = default;
     BaseMessage(const BaseMessage& msg) = default;
     virtual ~BaseMessage() = default;
 
-    BaseMessage& operator =(const BaseMessage& msg) = default;
 
+    // Read-only delivery information supplied by the framework. These values describe
+    // the received publication and are separate from the generated payload fields.
     const std::string& topic_name() const
     {
         return _topic_name;
     }
 
+    // Same-host monotonic publication time in nanoseconds, not a UTC wall-clock date.
     uint64_t get_message_timestamp() const
     {
         return _message_timestamp;
     }
+    uint64_t get_topic_count() const noexcept { return _topic_count; }
+    uint64_t publisher_instance() const noexcept { return _publisher_instance; }
 
     const std::string& publisher_name() const
     {
@@ -54,15 +64,18 @@ public:
     virtual int8_t deserialize(const std::vector<uint8_t>& buffer, size_t& offset) = 0;
 
 protected:
-
-    std::string _topic_name = "unknown";
+    BaseMessage& operator =(const BaseMessage& msg) = default;
 
 private:
-
+    std::string _topic_name = "unknown";
     std::string _publisher_name = "unknown";
     uint64_t _message_timestamp = 0;
+    uint64_t _topic_count = 0;
+    uint64_t _publisher_instance = 0;
 };
 
+// Legacy native-layout helpers retained for older message code. They do not provide
+// the relocatable, endian-defined format used by the new generated message storage.
 template<typename T>
 inline int8_t push_raw(std::vector<uint8_t>& buffer, const T& value) 
 {
@@ -85,19 +98,19 @@ inline int8_t push_raw(std::vector<uint8_t>& buffer, const T& value)
 template<typename T>
 inline int8_t pop_raw(const std::vector<uint8_t>& buffer, size_t& offset, T& value) 
 {
-    // 1. 偏執檢查：確保型別可以被安全地 memcpy
+    // Raw copying is valid only for trivially copyable local representations.
     static_assert(std::is_trivially_copyable<T>::value, "Type must be trivially copyable for pop_raw");
 
-    // 2. 邊界檢查：剩下的 buffer 長度夠不夠讀取一個 T？
+    // Check that one complete value remains before reading it.
     if (offset + sizeof(T) > buffer.size()) 
     {
-        return -1; // 沒肉了，讀失敗
+        return -1; // Not enough bytes for this value.
     }
 
-    // 3. 暴力解包：直接搬運記憶體
+    // Copy the native representation; this helper performs no endian conversion.
     std::memcpy(&value, &buffer[offset], sizeof(T));
 
-    // 4. 指標移動：更新 offset 到下一個讀取點
+    // Advance only after the value has been copied successfully.
     offset += sizeof(T);
 
     return 0;
@@ -107,7 +120,7 @@ inline int8_t push_string(std::vector<uint8_t>& buffer, const std::string& s)
 {
     size_t current_size = buffer.size();
     size_t string_size = s.size();
-    // 4 bytes 長度頭 + 字串本體
+    // A native uint32 length prefix followed by the string bytes.
     size_t total_needed = current_size + sizeof(uint32_t) + string_size;
 
     if (total_needed > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) 

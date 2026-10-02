@@ -1,4 +1,8 @@
 #pragma once
+
+// Private Pipe ownership graph shared by the scheduler and process-handoff adapter.
+// Keep records alive while operations or an in-progress spawn still refer to their native endpoints.
+
 #include "pipe_native.hpp"
 #include <condition_variable>
 #include <mutex>

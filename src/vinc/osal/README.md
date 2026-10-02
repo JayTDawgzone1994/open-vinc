@@ -4,9 +4,18 @@ OSAL 提供同一份 C++23 程序操作介面。框架只使用
 `<vinc/osal/process.hpp>` 並連結 `vinc::osal`；CMake 依目標 OS 選擇後端。
 公開標頭不包含原生程序型別或平台條件編譯。
 
-目前提供程序管理、[通用 OSAL Socket](SOCKET.md) 及 [通用 OSAL Pipe](PIPE.md)；既有 Module 尚未改為獨立
-程序。IPC 訊息協定、共享記憶體 ABI、模組就緒握手、heartbeat、自動重啟與
-核心崩潰後的子程序政策均不在此版本內。
+目前提供程序管理、[通用 OSAL Socket](SOCKET.md)、[通用 OSAL Pipe](PIPE.md)
+及 [OSAL Shared Memory](SHARED_MEMORY.md)，另有通用
+[OSAL FileLock](FILE_LOCK.md)。跨程序 Mutex 由上層[共用同步庫](../sync/README.md)
+組合 FileLock 實作，OSAL 不依賴該庫。`<vinc/osal/terminal.hpp>` 另提供 Shell 所需的
+終端模式、具期限的文字／按鍵／EOF 事件，以及 Windows／POSIX 模式還原；使用邊界見
+[Shell 說明](../stem_shell/README.md)。
+`<vinc/osal/random.hpp>` 提供通用 `random_bytes(span<byte>)`：以 OS 隨機來源填入呼叫端緩衝區，
+Windows 使用 BCrypt、Linux／macOS 使用 getentropy；不包含框架 Session 或憑證格式。
+失敗保留原生錯誤；緩衝區可能已部分寫入，不可將失敗結果當成有效 token。
+上層的 [Module 執行環境](../module/README.md) 已接入獨立程序、就緒握手、雙向 heartbeat
+與重啟政策；這些行為由 Module／共用通訊層處理，不屬於 OSAL 的程序原語。
+Shared Memory 提供原始 bytes 的映射與資源生命週期；訊息布局 ABI、同步協定與容器尚未實作。
 
 ## 統一操作契約
 
@@ -56,6 +65,13 @@ OSAL 提供同一份 C++23 程序操作介面。框架只使用
 
 ## 啟動參數與錯誤
 
+- `SpawnOptions::new_process_group` 預設 `false`；ModuleManager 啟動模組時設為 `true`。
+  Windows 建立新群組並停用子程序的 CTRL_C_EVENT；POSIX 使用子程序 PID 建立新程序群組，
+  與父程序的終端前景群組分離。目的為讓中央協調關閉；不建立新 console／session，
+  `terminate()` 仍只處理直接管理的程序。Windows CTRL_BREAK_EVENT 及對子程序個別送出訊號不在此隔離保證內。
+  平台語意見 [Windows 建立旗標](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)
+  與 [POSIX spawn](https://man7.org/linux/man-pages/man3/posix_spawn.3.html)。
+
 - 執行檔及可選工作目錄使用絕對 `std::filesystem::path`，不搜尋 `PATH`，
   不經 shell。參數不含 `argv[0]`，使用 UTF-8，拒絕 NUL 與無效 UTF-8。
   Windows 轉為 UTF-16，依 Microsoft CRT／`wmain` 規則組合參數；自行解析
@@ -68,7 +84,9 @@ OSAL 提供同一份 C++23 程序操作介面。框架只使用
 - 標準輸入預設接空裝置；標準輸出／錯誤預設繼承。每條皆可選 `Inherit`
   或 `Null`；未配置的繼承標準串流改接空裝置。額外的可繼承 handle／fd
   不會自動傳入。`spawn_with_pipes()` 可明確交付指定的單向 Pipe 端點；
-  `spawn_with_pipe()` 是雙向便利組合。尚不提供 stdout／stderr capture。
+  `spawn_with_pipe()` 是雙向便利組合。stdout／stderr 另可選 `Capture`，透過
+  [`spawn_with_output()`](OUTPUT.md) 取得獨立 `PipeReader`；一般 `spawn()` 不接受
+  `Capture`，stdin 也不接受此模式。
 - `OsError` 包含統一分類、失敗操作與原生 `std::error_code`；沒有原生錯誤
   的契約檢查使用空 error code。OSAL 不自行印日誌。
 - 記憶體配置等 C++ 例外仍可向呼叫端傳播，API 並非全面 `noexcept`。

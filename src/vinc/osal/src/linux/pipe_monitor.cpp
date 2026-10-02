@@ -1,3 +1,6 @@
+// Linux readiness and wakeup backend for the single Pipe I/O worker.
+// epoll events trigger another nonblocking transfer attempt; they are not byte counts.
+
 #include "../posix/pipe_platform.hpp"
 #include <cerrno>
 #include <sys/epoll.h>

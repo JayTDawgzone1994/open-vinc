@@ -1,4 +1,8 @@
 #pragma once
+
+// Private bootstrap manifest for explicit child endpoint inheritance.
+// Slots are application identities; native handles are temporary launch details.
+
 #include "pipe_native.hpp"
 #include <utility>
 
@@ -27,15 +31,20 @@ struct NativePipeBinding { std::uint32_t slot; IoKind direction; NativePipe* pip
 struct NativeInheritedPipe { std::uint32_t slot; IoKind direction; std::unique_ptr<NativePipe> pipe; };
 class ChildPipe {
 public:
-    static Result<ChildPipe> prepare(std::span<const NativePipeBinding>);
+    static Result<ChildPipe> prepare(std::span<const NativePipeBinding>,
+        const std::array<NativePipe*, 2>& outputs = {});
     ChildPipe(ChildPipe&&) noexcept = default;
     ChildPipe(const ChildPipe&) = delete;
     std::span<const std::intptr_t> inheritance() const noexcept { return handles_; }
     std::string bootstrap() const;
+    // Separate from the bootstrap: arbitrary executables use standard streams
+    // without knowing about OSAL or consuming an inherited-endpoint manifest.
+    std::intptr_t output(std::size_t index) const noexcept { return outputs_[index].handle; }
 private:
     ChildPipe() = default;
     std::vector<PipeTransfer> transfers_;
     std::vector<std::intptr_t> handles_;
+    std::array<PipeTransfer, 2> outputs_;
 };
 Result<std::vector<NativeInheritedPipe>> take_native_inherited_pipes();
 } // namespace vinc::osal::detail

@@ -1,3 +1,6 @@
+// macOS process wakeup backend: kqueue NOTE_EXIT plus a user event for service work.
+// Exit notifications do not reap children; the common observer still calls waitpid.
+
 #include "../posix/platform.hpp"
 
 #include <cerrno>

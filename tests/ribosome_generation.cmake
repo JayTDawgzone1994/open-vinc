@@ -1,3 +1,6 @@
+# Isolated build-regression fixture. Copy sources into a new directory before
+# removing inputs/templates, then verify failure does not leave usable stale headers.
+
 # Run in a compiler environment, using a new TEST_ROOT for each invocation:
 # cmake -DTEST_ROOT=<absolute-new-directory> -P tests/ribosome_generation.cmake
 # Optional: -DTEST_GENERATOR=Ninja -DTEST_CXX_COMPILER=cl
@@ -8,6 +11,7 @@ endif()
 get_filename_component(repo "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 file(MAKE_DIRECTORY "${TEST_ROOT}")
 file(COPY "${repo}/src" DESTINATION "${TEST_ROOT}")
+file(COPY "${repo}/library" DESTINATION "${TEST_ROOT}" PATTERN ".git" EXCLUDE)
 file(COPY "${repo}/tests/header_smoke" DESTINATION "${TEST_ROOT}/src/vinc")
 file(APPEND "${TEST_ROOT}/src/vinc/CMakeLists.txt" "\nadd_subdirectory(header_smoke)\n")
 set(source "${TEST_ROOT}/src")
@@ -100,7 +104,7 @@ file(RENAME "${source}/messages.saved" "${source}/messages")
 build_case(recover_after_missing_input TRUE "")
 
 file(WRITE "${source}/messages/broken.msg" "unknown_type value\n")
-build_case(invalid_message FALSE "Failed to parse message file")
+build_case(invalid_message FALSE "Unknown type")
 file(REMOVE "${source}/messages/broken.msg")
 build_case(recover_after_invalid_message TRUE "")
 
@@ -112,19 +116,8 @@ if(NOT result STREQUAL "0")
 endif()
 message(STATUS "PASS: full build")
 
-# Isolate nested include routing from the known production deserialize defect.
+# Exercise nested messages using the production template.
 file(WRITE "${source}/messages/nested.msg" "float3 position;\nint3 index;\n")
-file(WRITE "${template}" [=[
-#pragma once
-#include <vector>
-${DO_INCLUDE_DEPENDENT_MESSAGES}
-namespace vinc {
-class ${MESSAGE_NAME} {
-public:
-${DO_ADD_MESSAGE_FIELDS}
-};
-}
-]=])
 build_case(nested_header_compilation TRUE "" nested_header_smoke)
 file(REMOVE "${source}/messages/nested.msg")
 file(WRITE "${template}" "${template_contents}")

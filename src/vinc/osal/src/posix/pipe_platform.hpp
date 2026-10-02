@@ -1,4 +1,7 @@
 #pragma once
+
+// Internal POSIX Pipe readiness bridge implemented separately by epoll and kqueue.
+
 #include "../pipe_native.hpp"
 namespace vinc::osal::detail {
 struct PipeMonitorImpl {

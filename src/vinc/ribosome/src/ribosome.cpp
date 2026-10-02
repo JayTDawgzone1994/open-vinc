@@ -1,846 +1,337 @@
-#include <ribosome/ribosome.hpp>
+// Ribosome pipeline: validate .msg syntax, canonicalize types, resolve dependencies,
+// fingerprint schemas, and publish a complete set of generated headers from a staging directory.
 
+#include <ribosome/ribosome.hpp>
+#include <ribosome/sha256.hpp>
 #include <generated/ribosome_config.hpp>
+#include <algorithm>
+#include <charconv>
+#include <cmath>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 
-namespace vinc
-{
-
-int8_t Ribosome::set_text_message_path(const std::filesystem::path& in_path)
-{
-    // Validate during generation, after invalidating the previous output.
-    _in_path = in_path;
-    return 0;
+namespace vinc {
+namespace {
+namespace fs = std::filesystem;
+std::string read_file(const fs::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error("Failed to open file: " + path.string());
+    std::string text((std::istreambuf_iterator<char>(file)), {});
+    if (file.bad()) throw std::runtime_error("Failed to read file: " + path.string());
+    return text;
+}
+void write_file(const fs::path& path, const std::string& text) {
+    std::ofstream file(path, std::ios::binary); file << text; file.close();
+    if (!file) throw std::runtime_error("Failed to write generated header: " + path.string());
+}
+std::string trim(std::string text) {
+    const auto start = text.find_first_not_of(" \r\n\t");
+    if (start == std::string::npos) return {};
+    return text.substr(start, text.find_last_not_of(" \r\n\t") - start + 1);
+}
+bool identifier(const std::string& name) {
+    static const std::regex pattern("[A-Za-z][A-Za-z0-9_]*");
+    static const std::set<std::string> reserved{
+        "alignas","alignof","and","and_eq","asm","auto","bitand","bitor","bool","break","case","catch","char","char8_t","char16_t","char32_t",
+        "class","compl","concept","const","consteval","constexpr","constinit","const_cast","continue","co_await","co_return","co_yield",
+        "decltype","default","delete","do","double","dynamic_cast","else","enum","explicit","export","extern","false","float","for","friend",
+        "goto","if","inline","int","long","mutable","namespace","new","noexcept","not","not_eq","nullptr","operator","or","or_eq",
+        "private","protected","public","register","reinterpret_cast","requires","return","short","signed","sizeof","static","static_assert",
+        "static_cast","struct","switch","template","this","thread_local","throw","true","try","typedef","typeid","typename","union","unsigned",
+        "using","virtual","void","volatile","wchar_t","while","xor","xor_eq","all_messages",
+        "schema","data","snapshot","usage","compact","serialize","deserialize","assign","from_bytes","to_string","type_hash","msg_name_str",
+        "get_type_hash_static","message_name","binding","binding_","data_","topic_name","publisher_name","get_message_timestamp","get_topic_count","publisher_instance",
+        "message","BaseMessage","MessageArray","MessageArrayView","Ribosome"
+    };
+    return std::regex_match(name, pattern) && name.find("__") == std::string::npos && !name.starts_with("ribosome_") && !reserved.contains(name);
+}
+// Resolve source aliases to explicit widths before hashing or emitting C++.
+// For example, the schema meaning of long is int64 even on an OS where native long is 32-bit.
+std::string builtin(std::string type) {
+    if (type.starts_with("std::")) type.erase(0, 5);
+    static const std::map<std::string, std::string> aliases{
+        {"int","std::int32_t"},{"short","std::int16_t"},{"long","std::int64_t"},{"char","std::int8_t"},{"size_t","std::uint64_t"},
+        {"int8","std::int8_t"},{"uint8","std::uint8_t"},{"int16","std::int16_t"},{"uint16","std::uint16_t"},
+        {"int32","std::int32_t"},{"uint32","std::uint32_t"},{"int64","std::int64_t"},{"uint64","std::uint64_t"},
+        {"int8_t","std::int8_t"},{"uint8_t","std::uint8_t"},{"int16_t","std::int16_t"},{"uint16_t","std::uint16_t"},
+        {"int32_t","std::int32_t"},{"uint32_t","std::uint32_t"},{"int64_t","std::int64_t"},{"uint64_t","std::uint64_t"},
+        {"float","float"},{"double","double"},{"bool","bool"},{"string","message::MessageString"}
+    };
+    const auto found = aliases.find(type); return found == aliases.end() ? "" : found->second;
+}
+[[noreturn]] void error(const MessageInfo& m, std::uint32_t line, const std::string& reason) {
+    throw std::runtime_error(m.path.string() + ":" + std::to_string(line) + ": error: " + reason);
+}
+// Validate constants as data in the declared type's range. Never paste unchecked
+// .msg text into a C++ initializer, where it could become arbitrary source code.
+std::string constant(const MessageInfo& m, const VariableInfo& f, std::string text) {
+    if (!f.builtin || f.dimensions) error(m, f.line, "constants require a scalar or string type");
+    if (f.type == "message::MessageString") {
+        static const std::regex literal(R"rx("([^"\\\r\n]|\\[nrt0"\\])*")rx");
+        if (!std::regex_match(text, literal)) error(m, f.line, "invalid string constant");
+        return text;
+    }
+    if (f.type == "bool") {
+        if (text != "true" && text != "false") error(m, f.line, "bool constant must be true or false");
+        return text;
+    }
+    if (f.type == "float" || f.type == "double") {
+        if (text == "nan") return "std::numeric_limits<" + f.type + ">::quiet_NaN()";
+        if (!text.empty() && (text.back() == 'f' || text.back() == 'F')) text.pop_back();
+        double value = 0;
+        auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !std::isfinite(value) ||
+            (f.type == "float" && !std::isfinite(static_cast<float>(value)))) error(m, f.line, "invalid or out-of-range floating constant");
+        return "static_cast<" + f.type + ">(" + text + ")";
+    }
+    bool negative = false;
+    if (!text.empty() && (text[0] == '-' || text[0] == '+')) { negative = text[0] == '-'; text.erase(0, 1); }
+    int radix = 10;
+    if (text.starts_with("0x") || text.starts_with("0X")) { radix = 16; text.erase(0, 2); }
+    std::uint64_t value = 0;
+    auto parsed = std::from_chars(text.data(), text.data() + text.size(), value, radix);
+    if (text.empty() || parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size()) error(m, f.line, "invalid integer constant");
+    const bool unsign = f.type.starts_with("std::uint");
+    const unsigned bits = f.type.find("8_t") != std::string::npos ? 8 : f.type.find("16_t") != std::string::npos ? 16 : f.type.find("32_t") != std::string::npos ? 32 : 64;
+    const auto maximum = unsign ? (bits == 64 ? UINT64_MAX : (std::uint64_t{1} << bits) - 1) : (std::uint64_t{1} << (bits - 1)) - (negative ? 0 : 1);
+    if ((negative && unsign) || value > maximum) error(m, f.line, "integer constant out of range");
+    if (negative && bits == 64 && value == (std::uint64_t{1} << 63)) return "(-9223372036854775807LL - 1)";
+    return (negative ? "-" : "") + std::to_string(value) + (unsign ? "ULL" : "LL");
+}
+std::string strip_comment(std::string line) {
+    bool quoted = false, escape = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        if (escape) { escape = false; continue; }
+        if (quoted && line[i] == '\\') { escape = true; continue; }
+        if (line[i] == '"') quoted = !quoted;
+        if (!quoted && (line[i] == '#' || (line[i] == '/' && i + 1 < line.size() && line[i + 1] == '/'))) return line.substr(0, i);
+    }
+    return line;
+}
+std::string array_type(const VariableInfo& f) {
+    auto type = f.type;
+    for (unsigned i = 0; i < f.dimensions; ++i) type = "message::MessageArray<" + type + ">";
+    return type;
+}
+std::string member_type(const VariableInfo& f) {
+    if (f.dimensions || !f.builtin || f.type == "message::MessageString") return array_type(f);
+    return "message::Scalar<" + f.type + ">";
+}
+std::string field_type(const VariableInfo& f) {
+    if (f.dimensions) {
+        auto element = f; --element.dimensions;
+        return "message::detail::type<" + array_type(element) + ">()";
+    }
+    if (!f.builtin) return "message::detail::record_type<" + f.type + ">()";
+    if (f.type == "message::MessageString") return "message::detail::type<std::uint8_t>()";
+    return "message::detail::type<" + f.type + ">()";
+}
+void replace_all(std::string& text, const std::string& from, const std::string& to) {
+    std::size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos) { text.replace(pos, from.size(), to); pos += to.size(); }
+}
 }
 
-int8_t Ribosome::set_cpp_message_path(const std::filesystem::path& out_path)
-{
-    _out_path = out_path;
-    return 0;
-}
-
-int8_t Ribosome::make_ligand()
-{
-    namespace fs = std::filesystem;
-    // A fixed sibling directory also excludes concurrent generators sharing
-    // this output. A leftover directory after a process crash requires cleanup.
-    struct StagingDirectory {
-        fs::path path;
-        bool owned = false;
-        ~StagingDirectory() {
-            if (!owned) return;
-            std::error_code ec;
-            fs::remove_all(path, ec);
-            if (ec) std::cerr << "Failed to clean staging directory " << path << ": " << ec.message() << '\n';
+// Sort input paths for reproducible output and reject names that collide on
+// case-insensitive filesystems, even when generation runs on a case-sensitive OS.
+std::vector<MessageInfo> Ribosome::load() {
+    if (!fs::is_directory(input_)) throw std::runtime_error("Input path does not exist or is not a directory: " + input_.string());
+    std::vector<fs::path> paths;
+    for (const auto& entry : fs::directory_iterator(input_)) if (entry.is_regular_file() && entry.path().extension() == ".msg") paths.push_back(entry.path());
+    std::sort(paths.begin(), paths.end());
+    if (paths.empty()) throw std::runtime_error("No .msg inputs found");
+    std::vector<MessageInfo> messages;
+    std::set<std::string> file_names;
+    static const std::regex declaration(R"(^([A-Za-z_][A-Za-z0-9_:]*)(\[\])*[ \t]+([A-Za-z_][A-Za-z0-9_]*)(\[\])*[ \t]*(=.*)?$)");
+    for (const auto& path : paths) {
+        MessageInfo m; m.path = path; m.name = path.stem().string();
+        if (!identifier(m.name) || !builtin(m.name).empty()) error(m, 1, "invalid or reserved message name");
+        auto lower = m.name; for (auto& c : lower) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (!file_names.insert(lower).second) error(m, 1, "message names collide on case-insensitive filesystems");
+        if (fs::file_size(path) > 1024 * 1024) error(m, 1, "message definition exceeds 1 MiB");
+        const auto input = read_file(path);
+        std::istringstream lines(input); std::string line; std::uint32_t number = 0;
+        std::set<std::string> names;
+        while (std::getline(lines, line)) {
+            ++number; line = trim(strip_comment(line)); if (line.empty()) continue;
+            if (line.size() > 4096) error(m, number, "field declaration exceeds 4096 bytes");
+            if (line.back() == ';') line = trim(line.substr(0, line.size() - 1));
+            std::smatch match;
+            if (!std::regex_match(line, match, declaration)) error(m, number, "invalid field declaration");
+            VariableInfo f; f.line = number; f.type = match[1].str(); f.name = match[3].str();
+            if (!identifier(f.name) || f.name == m.name || f.name == m.name + "Data_t" || !names.insert(f.name).second) error(m, number, "invalid, reserved or duplicate field name: " + f.name);
+            const auto name_at = static_cast<std::size_t>(match.position(3));
+            const auto value_at = match[5].matched ? static_cast<std::size_t>(match.position(5)) : line.size();
+            f.dimensions = static_cast<unsigned>(std::count(line.begin(), line.begin() + static_cast<std::ptrdiff_t>(value_at), '['));
+            if (f.dimensions > 64) error(m, number, "array nesting exceeds 64");
+            if (line.substr(0, name_at).find('[') != std::string::npos && line.substr(name_at, value_at - name_at).find('[') != std::string::npos)
+                error(m, number, "place array brackets on either the type or the field name");
+            const auto canonical = builtin(f.type);
+            f.builtin = !canonical.empty(); if (f.builtin) f.type = canonical;
+            if (match[5].matched) f.constant = constant(m, f, trim(match[5].str().substr(1)));
+            m.variables.push_back(std::move(f));
+            if (m.variables.size() > 4096) error(m, number, "message exceeds 4096 fields/constants");
         }
-    } staging;
+        messages.push_back(std::move(m));
+    }
+    return messages;
+}
 
+// Depth-first dependency resolution rejects cycles before emission. Parent hashes
+// include dependent hashes, so changing a nested message also changes its containing schema.
+void Ribosome::resolve(std::vector<MessageInfo>& messages) {
+    std::map<std::string, std::size_t> index;
+    std::set<std::string> symbols;
+    for (std::size_t i = 0; i < messages.size(); ++i) {
+        const auto& m = messages[i];
+        for (const auto& name : {m.name, m.name + "Data_t", "ribosome_schema_" + m.name})
+            if (!symbols.insert(name).second) error(m, 1, "generated symbol collision: " + name);
+        index.emplace(m.name, i);
+    }
+    std::vector<unsigned> state(messages.size());
+    std::function<void(std::size_t, unsigned)> visit = [&](std::size_t id, unsigned depth) {
+        auto& m = messages[id];
+        if (state[id] == 2) return;
+        if (state[id] == 1) error(m, 1, "cyclic message dependency");
+        if (depth > 64) error(m, 1, "message dependency nesting exceeds 64");
+        state[id] = 1;
+        crypto::SHA256 sha;
+        // Length-prefix hash inputs to distinguish different field/token boundaries.
+        // Whitespace and comments never participate in the canonical schema fingerprint.
+        auto token = [&](const std::string& s) { sha.update(std::to_string(s.size()) + ":" + s); };
+        token("vinc-record-wire-v2"); token(m.name);
+        for (const auto& f : m.variables) {
+            token(f.type); token(f.name); token(std::to_string(f.dimensions)); token(f.constant.value_or("<field>"));
+            if (!f.builtin) {
+                const auto found = index.find(f.type);
+                if (found == index.end()) error(m, f.line, "Unknown type: " + f.type);
+                visit(found->second, depth + 1); token(std::to_string(messages[found->second].hash));
+            }
+        }
+        const auto digest = sha.digest();
+        for (unsigned i = 0; i < 8; ++i) m.hash = (m.hash << 8) | digest[i];
+        if (!m.hash) error(m, 1, "reserved zero schema hash");
+        state[id] = 2;
+    };
+    std::set<std::uint64_t> hashes;
+    for (std::size_t i = 0; i < messages.size(); ++i) {
+        visit(i, 0);
+        if (!hashes.insert(messages[i].hash).second) error(messages[i], 1, "schema hash collision");
+    }
+}
+
+// Emit a local class facade and bound Data_t fields from the validated schema.
+// Field constructors bind into one arena; no C++ object layout is used as the wire format.
+std::string Ribosome::generate(const MessageInfo& m, const std::string& source) {
+    std::ostringstream out, includes;
+    std::set<std::string> dependencies;
+    for (const auto& f : m.variables) if (!f.builtin) dependencies.insert(f.type);
+    for (const auto& name : dependencies) includes << "#include <vinc_messages/" << name << ".hpp>\n";
+    const auto schema_name = "ribosome_schema_" + m.name;
+    const auto data = m.name + "Data_t";
+    out << "inline const message::detail::Schema& " << schema_name << "() {\n"
+        << "    static const message::detail::Schema value{" << m.hash << "ULL, {\n";
+    for (const auto& f : m.variables) if (!f.constant)
+        out << "        {\"" << f.name << "\", " << field_type(f) << ", " << (f.builtin && !f.dimensions && f.type != "message::MessageString" ? "true" : "false") << "},\n";
+    out << "    }};\n    return value;\n}\n\n"
+        << "class " << m.name << ";\nstruct " << data << " {\nprivate:\n"
+        << "    friend class " << m.name << ";\n    message::detail::Binding binding_;\npublic:\n";
+    for (const auto& f : m.variables) if (!f.constant) out << "    " << member_type(f) << " " << f.name << ";\n";
+    out << "    explicit " << data << "(message::detail::Binding b) : binding_(b)";
+    std::size_t index = 0;
+    for (const auto& f : m.variables) if (!f.constant)
+        out << ",\n        " << f.name << "(message::detail::RecordAccess::bind<" << member_type(f) << ">(message::detail::field(b, " << index++ << ")))";
+    out << " {}\n    " << data << "() : " << data << "(message::detail::checked(message::detail::create_record(" << schema_name << "()))) {}\n"
+        << "    " << data << "(const " << data << "& o) : " << data << "(message::detail::checked(message::detail::clone(o.binding_))) {}\n"
+        << "    " << data << "& operator=(const " << data << "& o) { message::detail::checked(message::detail::replace(binding_, o.binding_)); return *this; }\n"
+        << "};\n\nclass " << m.name << " : public message::GeneratedMessage<" << m.name << "> {\n"
+        << "    using Base = message::GeneratedMessage<" << m.name << ">;\n"
+        << "    friend class message::detail::RecordAccess;\npublic:\n"
+        << "    static constexpr std::string_view message_name = \"" << m.name << "\";\n"
+        << "    static const message::detail::Schema& schema() { return " << schema_name << "(); }\n";
+    for (const auto& f : m.variables) if (f.constant)
+        out << "    static constexpr " << (f.type == "message::MessageString" ? "std::string_view" : f.type) << " " << f.name << " = " << *f.constant << ";\n";
+    out << "    " << m.name << "() : " << m.name << "(message::detail::BindTag{}, message::detail::checked(message::detail::create_record(schema()))) {}\n"
+        << "    " << m.name << "(const " << m.name << "& o) : " << m.name << "(message::detail::BindTag{}, Base::copy_binding(o)) { BaseMessage::operator=(o); }\n"
+        << "    " << m.name << "(" << m.name << "&& o) : " << m.name << "(message::detail::BindTag{}, Base::move_binding(o)) { BaseMessage::operator=(o); if (!o.binding_.state) o.data_.reset(); }\n"
+        << "    " << m.name << "& operator=(const " << m.name << "& o) { message::detail::checked(this->assign(o)); return *this; }\n"
+        << "    " << m.name << "& operator=(" << m.name << "&& o) { return *this = static_cast<const " << m.name << "&>(o); }\n"
+        << "    explicit " << m.name << "(const " << data << "& d) : " << m.name << "() { message::detail::checked(message::detail::replace(binding_, d.binding_)); }\n"
+        << "    " << data << "& data() { (void)message::detail::epoch(binding_.state); return *data_; }\n"
+        << "    const " << data << "& data() const { (void)message::detail::epoch(binding_.state); return *data_; }\n"
+        << "    static std::string to_string(const " << data << "& d) {\n        (void)d; std::ostringstream out; out << std::boolalpha << \"" << m.name << " {\";\n";
+    bool first = true;
+    for (const auto& f : m.variables) if (!f.constant) {
+        out << "        out << \"" << (first ? "" : ", ") << f.name << ": \"; message::detail::print(out, d." << f.name << ");\n"; first = false;
+    }
+    out << "        out << '}'; return out.str();\n    }\n    std::string to_string() const override { return to_string(data()); }\n"
+        << "private:\n    " << m.name << "(message::detail::BindTag, message::detail::Binding b) : Base(std::move(b)), data_(std::make_unique<" << data << ">(binding_)) {}\n"
+        << "    std::unique_ptr<" << data << "> data_;\n};\n";
+    auto text = source;
+    replace_all(text, "${DO_INCLUDE_DEPENDENT_MESSAGES}", includes.str());
+    replace_all(text, "${DO_MESSAGE_CLASS}", out.str());
+    if (text.find("${") != std::string::npos) throw std::runtime_error("Unknown template placeholder");
+    return text;
+}
+
+// Fail closed: remove the old output and generate the complete new set in staging.
+// An error must not leave stale headers that make a later build appear successful.
+std::int8_t Ribosome::make_ligand() {
+    struct Staging {
+        fs::path path; bool owned = false;
+        ~Staging() { if (owned) { std::error_code ec; fs::remove_all(path, ec); } }
+    } stage;
     try {
-        if (_out_path.empty() || _out_path.filename().empty() ||
-            _out_path.filename() == "." || _out_path.filename() == "..") {
-            throw std::runtime_error("Invalid generated-header output directory.");
-        }
-        const auto output = fs::absolute(_out_path).lexically_normal();
-        // Never follow a symlink when deleting the previous generated headers.
-        if (fs::is_symlink(fs::symlink_status(output))) {
-            throw std::runtime_error("Output directory must not be a symlink: " + output.string());
+        if (output_.empty() || output_.filename().empty() || output_.filename() == "." || output_.filename() == "..") throw std::runtime_error("Invalid output directory");
+        const auto output = fs::absolute(output_).lexically_normal();
+        if (fs::is_symlink(fs::symlink_status(output))) throw std::runtime_error("Output directory must not be a symlink");
+        const auto path = template_.empty() ? fs::path(kDefaultTemplatePath) : template_;
+        const auto resolved_output = fs::weakly_canonical(output);
+        for (const auto& protected_path : {input_, path}) {
+            const auto resolved = fs::weakly_canonical(fs::absolute(protected_path));
+            const auto relative = resolved.lexically_relative(resolved_output);
+            if (resolved == resolved_output || (!relative.empty() && *relative.begin() != ".."))
+                throw std::runtime_error("Output directory contains an input or template path");
         }
         fs::create_directories(output.parent_path());
-        staging.path = output.parent_path() / (output.filename().string() + ".ribosome-stage");
-        if (!fs::create_directory(staging.path)) {
-            throw std::runtime_error("Staging directory already exists (another generator or an interrupted run): " + staging.path.string());
-        }
-        staging.owned = true;
-
-        // Fail closed: old headers must not survive a failed generation attempt.
+        stage.path = output.parent_path() / (output.filename().string() + ".ribosome-stage");
+        if (!fs::create_directory(stage.path)) throw std::runtime_error("Staging directory already exists");
+        stage.owned = true;
         fs::remove_all(output);
-
-        const fs::path template_path(kDefaultTemplatePath);
-        std::ifstream template_file(template_path);
-        if (!template_file.is_open()) {
-            throw std::runtime_error("Failed to open message template: " + template_path.string());
+        if (!fs::exists(path)) throw std::runtime_error("Failed to open message template: " + path.string());
+        auto source = read_file(path);
+        if (trim(source).empty()) throw std::runtime_error("Message template is empty");
+        if (source.find("${DO_MESSAGE_CLASS}") == std::string::npos || source.find("${DO_INCLUDE_DEPENDENT_MESSAGES}") == std::string::npos) throw std::runtime_error("Missing required template placeholder");
+        auto messages = load(); resolve(messages);
+        std::ostringstream umbrella; umbrella << "#pragma once\n";
+        for (const auto& m : messages) {
+            write_file(stage.path / (m.name + ".hpp"), generate(m, source));
+            umbrella << "#include <vinc_messages/" << m.name << ".hpp>\n";
         }
-        std::string template_text;
-        std::string template_line;
-        while (std::getline(template_file, template_line)) {
-            template_text += template_line + '\n';
-        }
-        if (template_file.bad() || !template_file.eof()) {
-            throw std::runtime_error("Failed to read message template: " + template_path.string());
-        }
-        if (template_text.find_first_not_of(" \t\r\n") == std::string::npos) {
-            throw std::runtime_error("Message template is empty: " + template_path.string());
-        }
-
-        if(load_all_msg_files() != 0)
-        {
-            std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << _last_error_str << std::endl;
-            return -1;
-        }
-
-        printf("Found %zu message files.\n", _raw_message_files.size());
-
-        std::vector<MessageInfo> vars;
-        for(const auto& msg : _raw_message_files)
-        {
-            MessageInfo msg_info;
-            if(parse_message_file(msg.path, msg_info))
-            {
-                printf("Failed to parse message file: %s\n", msg.path.string().c_str());
-                printf("%s\n", _last_error_str.c_str());
-                return -1;
-            }
-            printf("Parsed message [%s]: with %zu variables.\n", msg_info.name.c_str(), msg_info.variables.size());
-            update_message_sha(msg_info);
-            vars.push_back(msg_info);
-        }
-
-        std::cout << "Checking for hash collisions... ";
-        if (check_global_collisions(vars) != 0) {
-            std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << std::endl;
-            std::cerr << _last_error_str << std::endl;
-            return -1;
-        }
-        std::cout << ANSI_GRN << "[OK]" << ANSI_RES << std::endl;
-
-        for(const auto& msg : vars)
-        {
-            const auto output_path = staging.path / (msg.name + ".hpp");
-            if (build_from_template(msg, template_text, output_path) != 0) {
-                std::cerr << "[FAILED] " << _last_error_str << '\n';
-                return -1;
-            }
-        }
-
-        // =================================================================
-        // 🎯【重構後調用】呼叫獨立打包函式
-        // =================================================================
-        if (generate_all_messages_header(vars, staging.path) != 0)
-        {
-            std::cout << ANSI_RED << "[FAILED] " << ANSI_RES << _last_error_str << std::endl;
-            return -1;
-        }
-
-        fs::rename(staging.path, output);
-        staging.owned = false;
-        std::cout << "Generated " << vars.size() << " message headers and all_messages.hpp at: " << output << '\n';
-        return 0;
-    } catch (const std::exception& error) {
-        _last_error_str = error.what();
-        std::cerr << "[FAILED] " << _last_error_str << '\n';
-        return -1;
-    }
+        write_file(stage.path / "all_messages.hpp", umbrella.str());
+        fs::rename(stage.path, output); stage.owned = false;
+        std::cout << "Generated " << messages.size() << " message classes at " << output << '\n'; return 0;
+    } catch (const std::exception& e) { std::cerr << "[FAILED] " << e.what() << '\n'; return -1; }
+}
 }
 
-int8_t Ribosome::load_all_msg_files()
-{
-    _raw_message_files.clear();
-    std::error_code ec; // 用來接收錯誤狀態，不拋出異常
-
-    // 1. 檢查路徑是否存在
-    bool exists = std::filesystem::exists(_in_path, ec);
-    if (ec || !exists) {
-        _last_error_str = "Input path does not exist: " + (ec ? ec.message() : "Unknown error");
-        return -1;
+int main(int argc, char** argv) {
+    vinc::Ribosome generator;
+    generator.set_text_message_path(vinc::kDefaultInputPath);
+    generator.set_cpp_message_path(vinc::kDefaultOutputPath);
+    for (int i = 1; i < argc; i += 2) {
+        if (i + 1 >= argc) { std::cerr << "Expected --input/--output/--template PATH\n"; return 1; }
+        const std::string option = argv[i];
+        if (option == "--input") generator.set_text_message_path(argv[i + 1]);
+        else if (option == "--output") generator.set_cpp_message_path(argv[i + 1]);
+        else if (option == "--template") generator.set_template_path(argv[i + 1]);
+        else { std::cerr << "Unknown option: " << option << '\n'; return 1; }
     }
-
-    // 2. 檢查是否為目錄
-    bool is_dir = std::filesystem::is_directory(_in_path, ec);
-    if (ec || !is_dir) {
-        _last_error_str = "Input path is not a directory: " + (ec ? ec.message() : "Unknown error");
-        return -2;
-    }
-
-    // 3. 掃描目錄
-    auto it = std::filesystem::directory_iterator(_in_path, ec);
-    if (ec) {
-        _last_error_str = "Failed to open directory iterator: " + ec.message();
-        return -3;
-    }
-
-    // Iteration failures are caught by make_ligand().
-    for (const auto& entry : it) 
-    {
-        const auto& path = entry.path();
-
-        std::cout << "Scanning file: " << path.string() << std::endl;
-        
-        // 檢查是否為一般檔案
-        bool is_reg = std::filesystem::is_regular_file(path, ec);
-        if (ec) {
-            _last_error_str = "Failed to inspect message file " + path.string() + ": " + ec.message();
-            return -1;
-        }
-        if (is_reg && path.extension() == ".msg") {
-            RawMessage msg;
-            msg.name = path.stem().string();
-            msg.path = path;
-            _raw_message_files.push_back(msg);
-        }
-    }
-
-    return 0;
-}
-
-int8_t Ribosome::parse_message_file(const std::filesystem::path& path, MessageInfo& out_msg)
-{
-    out_msg.variables.clear();
-    out_msg.name = path.stem().string();
-
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        _last_error_str = "Could not open message file: " + path.string();
-        return -1;
-    }
-
-    std::string msg_name = path.stem().string();
-
-    auto trim = [](std::string& s) {
-        s.erase(0, s.find_first_not_of(" \t"));
-        size_t last = s.find_last_not_of(" \t");
-        if (last != std::string::npos) s.erase(last + 1);
-    };
-
-    std::string line;
-    uint32_t line_count = 0;
-
-    while (std::getline(file, line)) {
-
-        line_count++;
-        std::string raw_line = line;
-
-        // 1. 基本清理
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        if (line.empty() || line.starts_with("//") || line.starts_with("#")) continue;
-
-        std::stringstream ss(line);
-        VariableInfo var;
-
-        // 2. 抓取型別
-        std::string raw_type;
-        if (!(ss >> raw_type)) continue;
-
-        // 檢查型別字串裡有沒有 [] (例如 float[])
-        if (raw_type.find("[]") != std::string::npos) {
-            var.is_array = true;
-            // 移除型別中的 []
-            size_t pos = raw_type.find('[');
-            var.type = raw_type.substr(0, pos);
-        } else {
-            var.type = raw_type;
-        }
-
-        if(check_type_validity(var.type, var.is_func) != 0) 
-        {
-            report_error(path, line_count, raw_line, var.type, 
-             "Unknown type '" + var.type + "'. It is neither a fundamental type nor a defined message.", 
-             "Make sure to define the message type or use a valid fundamental type.");
-            return -1;
-        }
-
-        if (var.type == msg_name) 
-        {
-            report_error(path, line_count, raw_line, var.type, 
-             "Unknown type '" + var.type + "'. It is neither a fundamental type nor a defined message.", 
-             "Make sure to define the message type or use a valid fundamental type.");
-            return -1;
-        }
-
-        // 3. 處理剩餘部分 (名稱、陣列標誌、賦值)
-        std::string remainder;
-        std::getline(ss, remainder);
-
-        // 移除分號
-        size_t semi_pos = remainder.find(';');
-        if (semi_pos != std::string::npos) remainder.erase(semi_pos);
-
-        // 檢查名稱中是否帶有 [] (例如 float x[])
-        if (remainder.find("[]") != std::string::npos) {
-            var.is_array = true;
-            // 移除剩餘字串中的 []
-            size_t pos = remainder.find('[');
-            size_t end_pos = remainder.find(']', pos);
-            if (end_pos != std::string::npos) {
-                remainder.erase(pos, end_pos - pos + 1);
-            }
-        }
-
-        // 4. 分離名稱與賦值
-        size_t equal_pos = remainder.find('=');
-        if (equal_pos != std::string::npos) {
-            var.name = remainder.substr(0, equal_pos);
-            var.const_value = remainder.substr(equal_pos + 1);
-        } else {
-            var.name = remainder;
-        }
-
-        trim(var.name);
-        trim(var.const_value);
-
-        std::string error_reason;
-        if (is_valid_identifier(var.name, error_reason) != 0)
-        {
-            report_error(path, line_count, raw_line, var.name, 
-             "Invalid identifier '" + var.name + "'. " + error_reason, 
-             "Make sure the variable name is a valid C++ identifier and not a reserved keyword.");
-            return -1;
-        }
-
-        if (!var.name.empty()) {
-            out_msg.variables.push_back(var);
-        }
-    }
-
-    if (file.bad() || !file.eof()) {
-        _last_error_str = "Failed to read message file: " + path.string();
-        return -1;
-    }
-    file.close();
-    return 0;
-}
-
-int8_t Ribosome::build_from_template(const MessageInfo& msg, const std::string& template_text, const std::filesystem::path& output_path)
-{
-    std::istringstream t_file(template_text);
-    std::ofstream o_file(output_path);
-
-    if (!o_file.is_open()) {
-        _last_error_str = "Failed to open generated header for writing: " + output_path.string();
-        return -1;
-    }
-
-    std::map<std::string, std::string> block_macros = 
-    {
-        {"${DO_INCLUDE_DEPENDENT_MESSAGES}", generate_includes_code(msg)},
-        {"${DO_ADD_MESSAGE_FIELDS}",         generate_fields_code(msg)},
-        {"${DO_MESSAGE_SERIALIZE_FIELDS}",   generate_serialize_code(msg)},
-        {"${DO_MESSAGE_DESERIALIZE_FIELDS}", generate_deserialize_code(msg)},
-        {"${DO_MESSAGE_TO_STRING_FIELDS}",   generate_data_to_string_code(msg)},
-        {"${DO_DATA_STRUCT_TO_STRING}",      generate_data_struct_to_string_code(msg)},
-        {"${DO_ADD_CONSTANTS_DEFINITIONS}",  generate_constants_code(msg)}
-    };
-
-    std::stringstream hash_ss;
-    hash_ss << "0x" << std::hex << msg.hash << "ULL";
-
-    std::map<std::string, std::string> inline_macros = {
-        {"${MESSAGE_NAME}",      msg.name},
-        {"${MESSAGE_TYPE_HASH}", hash_ss.str()}
-    };
-
-    // B. 開始「讀一行、噴一行」
-    std::string line;
-    while (std::getline(t_file, line)) 
-    {
-        bool processed = false;
-
-        // 首先檢查是不是「區塊標籤」
-        for (const auto& [tag, content] : block_macros) {
-            if (line.find(tag) != std::string::npos) {
-                o_file << content; // 噴出預先產生好的區塊
-                processed = true;
-                break;
-            }
-        }
-
-        if (processed) continue;
-
-        // 如果不是區塊標籤，檢查有沒有「嵌入型標籤」需要替換
-        for (const auto& [tag, value] : inline_macros) {
-            if (line.find(tag) != std::string::npos) {
-                replace_all(line, tag, value);
-            }
-        }
-
-        // 最後把處理完（或沒變）的一行噴出去
-        o_file << line << "\n";
-    }
-
-    o_file.close();
-    if (!o_file) {
-        _last_error_str = "Failed to write generated header: " + output_path.string();
-        return -1;
-    }
-    return 0;
-}
-
-
-
-bool Ribosome::is_fundamental_type(const std::string& type) {
-    static const std::unordered_set<std::string> fundamentals = {
-        "bool", "char", "int", "float", "double",
-        "long", "short",
-        "int8_t", "uint8_t", "int16_t", "uint16_t",
-        "int32_t", "uint32_t", "int64_t", "uint64_t",
-        "int8", "uint8", "int16", "uint16",
-        "int32", "uint32", "int64", "uint64",
-        "size_t", "string"
-    };
-    return fundamentals.find(type) != fundamentals.end();
-}
-
-
-int8_t Ribosome::check_type_validity(const std::string& type, bool& out_is_func)
-{
-// 1. 首先檢查是否為 C++ 基礎型別
-    if (is_fundamental_type(type)) 
-    {
-        out_is_func = true;
-        return 0; // 沒問題
-    }
-
-    // 2. 如果不是基礎型別，檢查是否在我們掃描到的訊息清單中
-    // 假設 _raw_message_files 已經在 load_all_msg_files() 填好了
-    for (const auto& msg : _raw_message_files) 
-    {
-        if (msg.name == type) 
-        {
-            out_is_func = false; // 找到了，是自定義訊息型別
-            return 0; // 沒問題
-        }
-    }
-
-    // 3. 都找不到，噴錯
-    _last_error_str = "Error: Unknown type '" + type + "'. It is neither a fundamental type nor a defined message.";
-    return -1;
-}
-
-int8_t Ribosome::is_valid_identifier(const std::string& name, std::string& out_error_reason) {
-    if (name.empty()) {
-        out_error_reason = "identifier is empty";
-        return -1;
-    }
-
-    // 1. 檢查開頭字元：只能是英文字母或下底線，不能是數字
-    if (!std::isalpha(name[0]) && name[0] != '_') {
-        out_error_reason = "identifier must start with a letter or underscore";
-        return -1;
-    }
-
-    // 2. 檢查後續字元：只能是字母、數字、下底線
-    for (char c : name) {
-        if (!std::isalnum(c) && c != '_') {
-            out_error_reason = "identifier contains invalid character '" + std::string(1, c) + "'";
-            return -1;
-        }
-    }
-
-    // 3. 檢查是否為 C++ 關鍵字 (保留字)
-    static const std::unordered_set<std::string> keywords = {
-        "alignas", "alignof", "and", "and_eq", "asm", "atomic_cancel", "atomic_commit",
-        "atomic_noexcept", "auto", "bitand", "bitor", "bool", "break", "case", "catch",
-        "char", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "const",
-        "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await",
-        "co_return", "co_yield", "decltype", "default", "delete", "do", "double",
-        "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float",
-        "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace",
-        "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or", "or_eq",
-        "private", "protected", "public", "reflexpr", "register", "reinterpret_cast",
-        "requires", "return", "short", "signed", "sizeof", "static", "static_assert",
-        "static_cast", "struct", "switch", "template", "this", "thread_local", "throw",
-        "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using",
-        "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq"
-    };
-
-    if (keywords.find(name) != keywords.end()) {
-        out_error_reason = "'" + name + "' is a C++ reserved keyword";
-        return -1;
-    }
-
-    return 0;
-}
-
-void Ribosome::report_error(const std::filesystem::path& path, 
-                            uint32_t line_num, 
-                            const std::string& raw_line, 
-                            const std::string& token, 
-                            const std::string& message, 
-                            const std::string& note)
-{
-    std::stringstream err;
-    size_t pos = raw_line.find(token);
-    if (pos == std::string::npos) pos = 0; // 防呆
-
-    // 1. 標題列 [路徑]:[行號]:[字元偏移]: error: [訊息]
-    err << ANSI_BOLD << path.string() << ":" << line_num << ":" << (pos + 1) << ": "
-        << ANSI_RED << "error: " << ANSI_RES
-        << ANSI_BOLD << message << ANSI_RES << "\n";
-    
-    // 2. 原始碼視覺化
-    // 這裡用 std::setw 或是手動空格對齊行號
-    err << "    " << line_num << " | " << raw_line << "\n";
-    err << "      | " << ANSI_RED << ANSI_BOLD;
-    
-    // 3. 自動畫波浪線 (長度與 token 一致)
-    for (size_t i = 0; i < pos; ++i) err << " ";
-    err << "^";
-    if (token.length() > 1) {
-        for (size_t i = 1; i < token.length(); ++i) err << "~";
-    }
-    err << ANSI_RES << "\n";
-
-    // 4. 選配 Note
-    if (!note.empty()) {
-        err << ANSI_YEL << "note: " << ANSI_RES << note << "\n";
-    }
-
-    _last_error_str = err.str();
-}
-
-
-void Ribosome::update_message_sha(MessageInfo& msg) {
-    crypto::SHA256 sha;
-
-    sha.update(msg.name);
-
-    for (const auto& var : msg.variables) {
-        sha.update(var.type);
-        sha.update(var.name);
-        sha.update(var.is_array ? "arr:1" : "arr:0");
-        sha.update(var.const_value);
-    }
-
-    auto digest = sha.digest();
-    
-    msg.hash = 0;
-    for(int i=0; i<8; ++i) {
-        msg.hash |= (static_cast<uint64_t>(digest[i]) << (56 - i * 8));
-    }
-
-    std::cout << "SHA-256: " << crypto::SHA256::to_hex(digest) << std::endl;
-}
-
-int8_t Ribosome::check_global_collisions(const std::vector<MessageInfo>& all_msgs)
-{
-    // hash -> message_name
-    std::unordered_map<uint64_t, std::string> seen_hashes;
-
-    for (const auto& msg : all_msgs) 
-    {
-        auto it = seen_hashes.find(msg.hash);
-        
-        if (it != seen_hashes.end()) 
-        {
-            std::stringstream err;
-            err << ANSI_RED << ANSI_BOLD << "fatal error: " << ANSI_RES
-                << "hash collision detected in global scope!\n"
-                << "--------------------------------------------------\n"
-                << ANSI_WHT << "Message A: " << ANSI_RES << ANSI_YEL << it->second << ANSI_RES << "\n"
-                << ANSI_WHT << "Message B: " << ANSI_RES << ANSI_YEL << msg.name << ANSI_RES << "\n"
-                << ANSI_WHT << "Common Fingerprint: " << ANSI_RES << ANSI_BOLD << "0x" 
-                << std::hex << std::setw(16) << std::setfill('0') << msg.hash << ANSI_RES << "\n"
-                << "--------------------------------------------------\n"
-                << ANSI_YEL << "note: " << ANSI_RES 
-                << "This is extremely rare. Try renaming a variable or changing member order to resolve.\n";
-
-            _last_error_str = err.str();
-            return -1;
-        }
-        
-        // 沒事，記錄下來繼續跑
-        seen_hashes[msg.hash] = msg.name;
-    }
-    return 0; // 全部檢查完沒問題
-}
-
-void Ribosome::replace_all(std::string& str, const std::string& from, const std::string& to)
-{
-    if(from.empty()) return;
-    size_t start_pos = 0;
-    while((start_pos = str.find(from, start_pos)) != std::string::npos) {
-        str.replace(start_pos, from.length(), to);
-        start_pos += to.length();
-    }
-}
-
-int8_t Ribosome::generate_all_messages_header(const std::vector<MessageInfo>& all_msgs, const std::filesystem::path& output_dir)
-{
-    std::filesystem::path all_msg_path = output_dir / "all_messages.hpp";
-    std::ofstream all_msg_file(all_msg_path);
-    if (!all_msg_file.is_open())
-    {
-        _last_error_str = "Failed to open all_messages.hpp for writing.";
-        return -1;
-    }
-
-    // 寫入 Umbrella Header 標準防護外殼
-    all_msg_file << "#pragma once\n\n";
-    all_msg_file << "/* ===================================================================== */\n";
-    all_msg_file << "/* 🧬 AUTOMATICALLY GENERATED BY RIBOSOME - DO NOT EDIT DIRECTLY         */\n";
-    all_msg_file << "/* ===================================================================== */\n\n";
-
-    // 點名所有解析成功的 message，吐出對應的 include 程式碼
-    for (const auto& msg : all_msgs)
-    {
-        all_msg_file << "#include <vinc_messages/" << msg.name << ".hpp>\n";
-    }
-    all_msg_file.close();
-    if (!all_msg_file) {
-        _last_error_str = "Failed to write master message header: " + all_msg_path.string();
-        return -1;
-    }
-    return 0;
-}
-
-std::string Ribosome::generate_includes_code(const MessageInfo& msg)
-{
-    std::stringstream ss;
-    std::unordered_set<std::string> includes;
-
-    for (const auto& var : msg.variables) 
-    {
-        if (var.is_func == false)
-        {
-            ss << "#include <vinc_messages/" << var.type << ".hpp>\n";
-        }
-    }
-
-    return ss.str();
-}
-
-std::string Ribosome::generate_fields_code(const MessageInfo& msg)
-{
-    std::stringstream ss;
-    for (const auto& var : msg.variables)
-    {
-        // 偏執檢查：常量不應該出現在 Data_t 裡，因為它們不需要被序列化
-        if (var.const_value != "nan") continue;
-
-        if (var.is_array) 
-        {
-            // 如果是陣列，就用我們心愛的 vector
-            ss << "    std::vector<" << var.type << "> " << var.name << ";\n";
-        } 
-        else 
-        {
-            // 普通型別
-            ss << "    " << var.type << " " << var.name << ";\n";
-        }
-    }
-    return ss.str();
-}
-
-std::string Ribosome::generate_serialize_code(const MessageInfo& msg)
-{
-    std::stringstream ss;
-    for (const auto& var : msg.variables)
-    {
-        // 偏執檢查：常量不參與傳輸
-        if (var.const_value != "nan") continue;
-
-        if (var.is_array) 
-        {
-            ss << "        {\n";
-            ss << "            uint32_t sz = static_cast<uint32_t>(_message_data." << var.name << ".size());\n";
-            ss << "            push_raw(buffer, sz);\n";
-            
-            if (var.is_func) { 
-                // A. 原生型別 (int, float...)：直接整塊記憶體塞進去，效率最高
-                ss << "            if (sz > 0) {\n";
-                ss << "                const uint8_t* p = reinterpret_cast<const uint8_t*>(_message_data." << var.name << ".data());\n";
-                ss << "                buffer.insert(buffer.end(), p, p + (sz * sizeof(" << var.type << ")));\n";
-                ss << "            }\n";
-            } else {
-                // B. 自定義訊息：必須逐一呼叫成員的 serialize (因為成員可能也帶 vector)
-                ss << "            for (const auto& item : _message_data." << var.name << ") {\n";
-                ss << "                item.serialize(buffer);\n";
-                ss << "            }\n";
-            }
-            ss << "        }\n";
-        } 
-        else 
-        {
-            if (var.is_func) {
-                // 單一原生型別
-                ss << "        push_raw(buffer, _message_data." << var.name << ");\n";
-            } else {
-                // 單一自定義訊息
-                ss << "        _message_data." << var.name << ".serialize(buffer);\n";
-            }
-        }
-    }
-    return ss.str();
-}
-
-std::string Ribosome::generate_deserialize_code(const MessageInfo& msg)
-{
-std::stringstream ss;
-    for (const auto& var : msg.variables)
-    {
-        if (var.const_value != "nan") continue;
-
-        if (var.is_array) 
-        {
-            ss << "        {\n";
-            ss << "            uint32_t sz = 0;\n";
-            // 使用你的 pop_raw 檢查長度
-            ss << "            if (!pop_raw(buffer, offset, sz)) return false;\n";
-            ss << "            _message_data." << var.name << ".resize(sz);\n";
-            
-            if (var.is_func) {
-                ss << "            if (sz > 0) {\n";
-                ss << "                size_t byte_count = sz * sizeof(" << var.type << ");\n";
-                ss << "                if (offset + byte_count > buffer.size()) return false;\n";
-                // 偏執優化：原生型別直接用 memcpy (或 std::copy) 搬整塊
-                ss << "                std::memcpy(_message_data." << var.name << ".data(), &buffer[offset], byte_count);\n";
-                ss << "                offset += byte_count;\n";
-                ss << "            }\n";
-            } else {
-                ss << "            for (uint32_t i = 0; i < sz; ++i) {\n";
-                // 遞迴呼叫巢狀訊息的反序列化
-                ss << "                if (!_message_data." << var.name << "[i].deserialize(buffer, offset)) return false;\n";
-                ss << "            }\n";
-            }
-            ss << "        }\n";
-        } 
-        else 
-        {
-            if (var.is_func) {
-                ss << "        if (!pop_raw(buffer, offset, _message_data." << var.name << ")) return false;\n";
-            } else {
-                // 單一自定義訊息同樣使用帶 offset 的版本
-                ss << "        if (!_message_data." << var.name << ".deserialize(buffer, offset)) return false;\n";
-            }
-        }
-    }
-    return ss.str();
-}
-
-std::string Ribosome::generate_data_to_string_code(const MessageInfo& msg)
-{
-    std::stringstream ss;
-    ss << "        ss << \"" << msg.name << " { \";\n";
-
-    bool first = true;
-    for (const auto& var : msg.variables)
-    {
-        if (var.const_value != "nan") continue;
-
-        if (!first) ss << "        ss << \", \";\n";
-        first = false;
-
-        ss << "        ss << \"" << var.name << ": \";\n";
-
-        if (var.is_array) 
-        {
-            ss << "        ss << \"[\";\n";
-            ss << "        for (size_t i = 0; i < _message_data." << var.name << ".size(); ++i) {\n";
-            ss << "            if (i > 0) ss << \", \";\n";
-            
-            if (var.is_func) {
-                ss << "            ss << _message_data." << var.name << "[i];\n";
-            } else {
-                // 關鍵：呼叫該型別 Class 的 Static 函式
-                ss << "            ss << " << var.type << "::to_string(_message_data." << var.name << "[i]);\n";
-            }
-            ss << "        }\n";
-            ss << "        ss << \"]\";\n";
-        } 
-        else 
-        {
-            if (var.is_func) {
-                ss << "        ss << _message_data." << var.name << ";\n";
-            } else {
-                // 關鍵：呼叫該型別 Class 的 Static 函式
-                ss << "        ss << " << var.type << "::to_string(_message_data." << var.name << ");\n";
-            }
-        }
-    }
-    ss << "        ss << \" }\";\n";
-    return ss.str();
-}
-
-std::string Ribosome::generate_data_struct_to_string_code(const MessageInfo& msg)
-{
-    std::stringstream ss;
-    ss << "        ss << \"" << msg.name << " { \";\n";
-
-    bool first = true;
-    for (const auto& var : msg.variables)
-    {
-        if (var.const_value != "nan") continue;
-
-        if (!first) ss << "        ss << \", \";\n";
-        first = false;
-
-        ss << "        ss << \"" << var.name << ": \";\n";
-
-        if (var.is_array) 
-        {
-            ss << "        ss << \"[\";\n";
-            ss << "        for (size_t i = 0; i < data." << var.name << ".size(); ++i) {\n";
-            ss << "            if (i > 0) ss << \", \";\n";
-            
-            if (var.is_func) {
-                ss << "            ss << data." << var.name << "[i];\n";
-            } else {
-                // 關鍵：呼叫該型別 Class 的 Static 函式
-                ss << "            ss << " << var.type << "::to_string(data." << var.name << "[i]);\n";
-            }
-            ss << "        }\n";
-            ss << "        ss << \"]\";\n";
-        } 
-        else 
-        {
-            if (var.is_func) {
-                ss << "        ss << data." << var.name << ";\n";
-            } else {
-                // 關鍵：呼叫該型別 Class 的 Static 函式
-                ss << "        ss << " << var.type << "::to_string(data." << var.name << ");\n";
-            }
-        }
-    }
-    ss << "        ss << \" }\";\n";
-    return ss.str();
-}
-
-std::string Ribosome::generate_constants_code(const MessageInfo& msg)
-{
-    std::stringstream ss;
-    bool has_const = false;
-
-    for (const auto& var : msg.variables)
-    {
-        // 只有 const_value 不是 "nan" 的變數才視為常量
-        if (var.const_value == "nan") continue;
-
-        if (!has_const) {
-            ss << "    // --- Constants Definitions ---\n";
-            has_const = true;
-        }
-
-        // 根據型別做一點小小的優化處理
-        if (var.type == "float" && var.const_value.find('f') == std::string::npos) {
-            // 如果是 float 且沒加 f，幫它補上，避免編譯器抱怨 double 轉 float
-            ss << "    static constexpr " << var.type << " " << var.name 
-               << " = " << var.const_value << "f;\n";
-        } 
-        else {
-            ss << "    static constexpr " << var.type << " " << var.name 
-               << " = " << var.const_value << ";\n";
-        }
-    }
-
-    if (has_const) ss << "\n";
-    return ss.str();
-}
-
-}
-
-int main()
-{
-    vinc::Ribosome ribosome;
-    std::cout << "Starting Ribosome...\n";
-    if(ribosome.set_text_message_path(vinc::kDefaultInputPath) != 0)
-    {
-        std::cout << ANSI_RED << "[FAILED]" << ANSI_RES << std::endl;
-        return -1;
-    }
-    if (ribosome.set_cpp_message_path(vinc::kDefaultOutputPath) != 0) {
-        std::cerr << "[FAILED] Could not set generated-header output path.\n";
-        return -1;
-    }
-
-    return ribosome.make_ligand();
-
+    return generator.make_ligand();
 }

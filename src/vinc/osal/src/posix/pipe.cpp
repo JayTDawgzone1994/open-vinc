@@ -1,3 +1,6 @@
+// POSIX Pipe backend using nonblocking descriptors and readiness notification.
+// Only the dedicated Pipe worker performs I/O; SIGPIPE handling stays local to that thread.
+
 #include "pipe_platform.hpp"
 #include <atomic>
 #include <cerrno>
@@ -72,9 +75,17 @@ Result<void> PipeMonitor::initialize_worker() noexcept {
 struct NativePipeImpl { Fd endpoint; };
 NativePipe::NativePipe(std::unique_ptr<NativePipeImpl> impl) : impl_(std::move(impl)) {}
 NativePipe::~NativePipe() = default;
-Result<NativePipePair> NativePipe::create_pair() {
+Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
     auto ends = make_pipe();
     if (!ends) return std::unexpected(ends.error());
+    // This fresh writer has not been duplicated or exposed. Its open-file
+    // description must be blocking for ordinary child stdio implementations.
+    if (blocking_writer) {
+        const int fd = (*ends)[1].value;
+        const int flags = fcntl(fd, F_GETFL);
+        if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0)
+            return std::unexpected(native_error(Operation::CreatePipe, errno));
+    }
     auto reader = std::make_unique<NativePipeImpl>();
     auto writer = std::make_unique<NativePipeImpl>();
     reader->endpoint = std::move((*ends)[0]); writer->endpoint = std::move((*ends)[1]);

@@ -1,4 +1,8 @@
 #pragma once
+
+// Private Pipe backend contract. Native transfers borrow scheduler-owned buffers
+// until completion, including when cancellation has already been requested.
+
 #include <vinc/osal/pipe.hpp>
 #include <array>
 #include <string>
@@ -22,7 +26,8 @@ struct NativePipeImpl;
 struct NativePipePair;
 class NativePipe {
 public:
-    static Result<NativePipePair> create_pair();
+    // A blocking writer is private to stdio launch; never submit it to PipeService.
+    static Result<NativePipePair> create_pair(bool blocking_writer = false);
     // Binding to an event monitor is lazy; pristine ends can be handed off.
     Result<void> attach(PipeMonitor&);
     std::intptr_t handle() const noexcept;

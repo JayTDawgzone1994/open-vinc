@@ -1,3 +1,6 @@
+// Manage stable watch identities above the platform readiness backend.
+// Check that a watch is still live before delivering events from an OS wait batch.
+
 #include "socket_native.hpp"
 #include <algorithm>
 #include <atomic>

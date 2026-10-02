@@ -1,3 +1,6 @@
+// Linux socket readiness backend using epoll and an eventfd wake source.
+// Return registration identities to the common layer, which filters stale watches.
+
 #include "../socket_native.hpp"
 #include <sys/epoll.h>
 #include <sys/eventfd.h>

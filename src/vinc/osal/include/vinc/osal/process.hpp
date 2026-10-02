@@ -1,4 +1,8 @@
 #pragma once
+
+// Process ownership and exit observation, independent of module policy.
+// Use ProcessService to spawn and retain children; use Process to wait or request termination.
+
 #include <vinc/osal/error.hpp>
 
 #include <chrono>
@@ -26,7 +30,8 @@ struct EnvironmentEntry {
     std::string name;  // UTF-8, without '=' or NUL
     std::optional<std::string> value; // nullopt removes an inherited variable
 };
-enum class StdioMode { Inherit, Null };
+// Capture is output-only and requires spawn_with_output (process_pipe.hpp).
+enum class StdioMode { Inherit, Null, Capture };
 struct SpawnOptions {
     std::filesystem::path executable; // absolute; no shell or PATH lookup
     std::vector<std::string> arguments; // UTF-8; excludes argv[0]
@@ -36,6 +41,10 @@ struct SpawnOptions {
     StdioMode stdin_mode = StdioMode::Null;
     StdioMode stdout_mode = StdioMode::Inherit;
     StdioMode stderr_mode = StdioMode::Inherit;
+    // Isolate terminal Ctrl+C: Windows creates a group with CTRL_C disabled;
+    // POSIX creates a process group with the child's PID. No new console/session.
+    // terminate() still targets only this process, not its descendants.
+    bool new_process_group = false;
 };
 
 enum class ExitKind { Code, Signal };
@@ -66,8 +75,11 @@ public:
     explicit operator bool() const noexcept;
     ProcessId id() const noexcept;
     std::uint64_t pid() const noexcept; // diagnostic only
+    // An empty optional means still running; an error means observation failed.
+    // Repeated waits return the retained exit result. A timeout does not stop the process.
     [[nodiscard]] Result<std::optional<ExitStatus>> try_wait();
     [[nodiscard]] Result<ExitStatus> wait_until(Deadline, std::stop_token = {});
+    // Requested only means the OS accepted termination; wait again to confirm exit.
     [[nodiscard]] Result<TerminateResult> terminate();
 
 private:
@@ -90,6 +102,8 @@ public:
     [[nodiscard]] Result<Process> find(ProcessId) const;
     [[nodiscard]] Result<TerminateResult> terminate(ProcessId);
     [[nodiscard]] Result<void> forget(ProcessId); // only after observation completes
+    // Close spawn admission and wait for reaping. This does not terminate children;
+    // the caller must arrange their exit or request termination separately.
     [[nodiscard]] Result<void> shutdown_until(Deadline, std::stop_token = {});
     // Rare native event-monitor failure: reaping continues with bounded polling.
     std::optional<OsError> monitor_error() const;
