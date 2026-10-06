@@ -1,7 +1,9 @@
 // Manage stable watch identities above the platform readiness backend.
 // Check that a watch is still live before delivering events from an OS wait batch.
 
-#include "socket_native.hpp"
+#include <vinc/osal/detail/operation_error.hpp>
+#include <vinc/time.hpp>
+#include <vinc/osal/detail/socket_native.hpp>
 #include <algorithm>
 #include <atomic>
 #include <limits>
@@ -41,12 +43,13 @@ bool valid_interests(SocketEvents interests) {
     return interests != SocketEvents::None && (static_cast<unsigned>(interests) & ~3u) == 0;
 }
 
-Result<SocketRegistration> next_registration() {
+vinc::Result<SocketRegistration> next_registration() {
     static std::atomic<std::uint64_t> sequence{1};
     auto value = sequence.load(std::memory_order_relaxed);
     do {
         if (value == std::numeric_limits<std::uint64_t>::max()) {
-            return std::unexpected(OsError{ErrorCode::ResourceExhausted, Operation::RegisterSocket});
+            return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ResourceExhausted,
+                                               vinc::osal::ErrorOperation::RegisterSocket});
         }
     } while (!sequence.compare_exchange_weak(value, value + 1, std::memory_order_relaxed));
     return SocketRegistration{value};
@@ -60,17 +63,21 @@ SocketPoller::~SocketPoller() = default;
 SocketPoller::SocketPoller(SocketPoller&&) noexcept = default;
 SocketPoller& SocketPoller::operator=(SocketPoller&&) noexcept = default;
 
-Result<SocketPoller> SocketPoller::create(std::size_t maximum, Deadline deadline, std::stop_token token) {
+vinc::Result<SocketPoller> SocketPoller::create(std::size_t maximum, vinc::Deadline deadline,
+                                                std::stop_token token) {
     if (token.stop_requested()) {
-        return std::unexpected(OsError{ErrorCode::Cancelled, Operation::InitializeService});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Cancelled, vinc::osal::ErrorOperation::InitializeService});
     }
 
     if (std::chrono::steady_clock::now() >= deadline) {
-        return std::unexpected(OsError{ErrorCode::Timeout, Operation::InitializeService});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Timeout, vinc::osal::ErrorOperation::InitializeService});
     }
 
     if (!maximum || maximum > static_cast<std::size_t>(INT_MAX - 1)) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::InitializeService});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument,
+                                           vinc::osal::ErrorOperation::InitializeService});
     }
 
     auto state = std::make_unique<detail::SocketPollerState>();
@@ -79,29 +86,34 @@ Result<SocketPoller> SocketPoller::create(std::size_t maximum, Deadline deadline
     state->maximum = maximum;
     auto native = detail::NativeSocketPoller::create(maximum, deadline, token);
     if (!native) {
-        return std::unexpected(native.error());
+        return std::unexpected(detail::operation_error(ErrorOperation::InitializeService, native.error()));
     }
     state->native = std::move(*native);
     return SocketPoller(std::move(state));
 }
 
-Result<SocketRegistration> SocketPoller::add(Socket& socket, SocketEvents interests, std::uint64_t tag) {
+vinc::Result<SocketRegistration> SocketPoller::add(Socket& socket, SocketEvents interests,
+                                                   std::uint64_t tag) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::Closed, Operation::RegisterSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::RegisterSocket});
     }
 
     if (!socket || !valid_interests(interests)) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::RegisterSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::RegisterSocket});
     }
     state_->prune();
     for (const auto& entry : state_->entries) {
         if (entry.socket.lock() == socket.state_) {
-            return std::unexpected(OsError{ErrorCode::Busy, Operation::RegisterSocket});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::Busy, vinc::osal::ErrorOperation::RegisterSocket});
         }
     }
 
     if (state_->entries.size() == state_->maximum) {
-        return std::unexpected(OsError{ErrorCode::ResourceExhausted, Operation::RegisterSocket});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ResourceExhausted,
+                                           vinc::osal::ErrorOperation::RegisterSocket});
     }
 
     auto registration = next_registration();
@@ -117,13 +129,15 @@ Result<SocketRegistration> SocketPoller::add(Socket& socket, SocketEvents intere
     return *registration;
 }
 
-Result<void> SocketPoller::modify(SocketRegistration registration, SocketEvents interests) {
+vinc::Result<void> SocketPoller::modify(SocketRegistration registration, SocketEvents interests) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::Closed, Operation::RegisterSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::RegisterSocket});
     }
 
     if (!valid_interests(interests)) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::RegisterSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::RegisterSocket});
     }
     state_->prune();
     for (auto it = state_->entries.begin(); it != state_->entries.end(); ++it) {
@@ -140,33 +154,38 @@ Result<void> SocketPoller::modify(SocketRegistration registration, SocketEvents 
         }
     }
 
-    return std::unexpected(OsError{ErrorCode::NotFound, Operation::RegisterSocket});
+    return std::unexpected(
+        vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::RegisterSocket});
 }
 
-Result<void> SocketPoller::remove(SocketRegistration registration) {
+vinc::Result<void> SocketPoller::remove(SocketRegistration registration) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::Closed, Operation::RegisterSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::RegisterSocket});
     }
     state_->prune();
     const auto it = std::find_if(state_->entries.begin(), state_->entries.end(), [&](const auto& entry) {
         return entry.registration == registration;
     });
     if (it == state_->entries.end()) {
-        return std::unexpected(OsError{ErrorCode::NotFound, Operation::RegisterSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::RegisterSocket});
     }
     state_->native->remove(it->handle, registration.value);
     state_->entries.erase(it);
     return {};
 }
 
-Result<std::size_t> SocketPoller::wait_until(std::span<SocketReadyEvent> output, Deadline deadline,
-                                             std::stop_token token) {
+vinc::Result<std::size_t> SocketPoller::wait_until(std::span<SocketReadyEvent> output,
+                                                   vinc::Deadline deadline, std::stop_token token) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::Closed, Operation::WaitSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::WaitSocket});
     }
 
     if (output.empty()) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::WaitSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::WaitSocket});
     }
     state_->prune();
     std::stop_callback stopped(token, [this] {
@@ -174,12 +193,13 @@ Result<std::size_t> SocketPoller::wait_until(std::span<SocketReadyEvent> output,
     });
     for (;;) {
         if (token.stop_requested()) {
-            return std::unexpected(OsError{ErrorCode::Cancelled, Operation::WaitSocket});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::Cancelled, vinc::osal::ErrorOperation::WaitSocket});
         }
 
         const auto now = std::chrono::steady_clock::now();
         int milliseconds = -1;
-        if (deadline != Deadline::max()) {
+        if (deadline != vinc::Deadline::max()) {
             // Clamp before subtraction to avoid duration overflow for arbitrary deadlines.
             if (deadline <= now) {
                 milliseconds = 0;
@@ -194,15 +214,17 @@ Result<std::size_t> SocketPoller::wait_until(std::span<SocketReadyEvent> output,
         auto count = state_->native->wait(
             std::span(state_->events).first(std::min(output.size(), state_->events.size())), milliseconds);
         if (token.stop_requested()) {
-            return std::unexpected(OsError{ErrorCode::Cancelled, Operation::WaitSocket});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::Cancelled, vinc::osal::ErrorOperation::WaitSocket});
         }
 
         if (!count) {
-            if (count.error().code == ErrorCode::WouldBlock) {
+            if (count.error().is(vinc::osal::ErrorCode::WouldBlock)) {
                 continue; // interrupted native wait
             }
 
-            if (count.error().code == ErrorCode::Timeout && std::chrono::steady_clock::now() < deadline) {
+            if (count.error().is(vinc::osal::ErrorCode::Timeout) &&
+                std::chrono::steady_clock::now() < deadline) {
                 continue;
             }
 
@@ -236,9 +258,10 @@ Result<std::size_t> SocketPoller::wait_until(std::span<SocketReadyEvent> output,
     }
 }
 
-Result<void> SocketPoller::wake() noexcept {
+vinc::Result<void> SocketPoller::wake() noexcept {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::Closed, Operation::WakeSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::WakeSocket});
     }
 
     return state_->native->wake();

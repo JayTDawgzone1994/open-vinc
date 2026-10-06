@@ -1,8 +1,11 @@
+#include <vinc/osal/detail/utf8.hpp>
+#include <vinc/osal/detail/native_error.hpp>
 // Shared process-service state machine. The service retains children and exit records
 // while a monitor observes native exits; dropping a public view does not stop a child.
 
-#include "native.hpp"
-#include "process_pipe_native.hpp"
+#include <vinc/time.hpp>
+#include <vinc/osal/detail/native.hpp>
+#include <vinc/osal/detail/process_pipe_native.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -26,7 +29,7 @@ struct ProcessRecord {
     std::condition_variable_any changed;
     std::unique_ptr<NativeProcess> native;
     std::optional<ExitStatus> exit;
-    std::optional<OsError> error;
+    std::optional<vinc::Error> error;
     bool starting = true;
 };
 
@@ -38,64 +41,21 @@ struct ServiceState {
     std::size_t capacity;
     bool accepting = true;
     bool worker_done = false;
-    std::optional<OsError> monitor_error;
+    std::optional<vinc::Error> monitor_error;
 };
 
 bool valid_utf8(const std::string& text) noexcept {
-    for (std::size_t i = 0; i < text.size();) {
-        const auto first = static_cast<unsigned char>(text[i++]);
-        if (first == 0) {
-            return false;
-        }
-
-        if (first < 0x80) {
-            continue;
-        }
-        unsigned count;
-        std::uint32_t code;
-        std::uint32_t minimum;
-        if (first >= 0xc2 && first <= 0xdf) {
-            count = 1;
-            code = first & 0x1f;
-            minimum = 0x80;
-        } else if (first >= 0xe0 && first <= 0xef) {
-            count = 2;
-            code = first & 0x0f;
-            minimum = 0x800;
-        } else if (first >= 0xf0 && first <= 0xf4) {
-            count = 3;
-            code = first & 7;
-            minimum = 0x10000;
-        } else {
-            return false;
-        }
-
-        if (text.size() - i < count) {
-            return false;
-        }
-        while (count-- != 0) {
-            const auto next = static_cast<unsigned char>(text[i++]);
-            if ((next & 0xc0) != 0x80) {
-                return false;
-            }
-            code = (code << 6) | (next & 0x3f);
-        }
-
-        if (code < minimum || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
-            return false;
-        }
-    }
-
-    return true;
+    return text.find('\0') == std::string::npos && valid_utf8_encoding(text);
 }
 
-Result<void> validate_options(const SpawnOptions& options) {
+vinc::Result<void> validate_options(const SpawnOptions& options) {
     const auto valid_stdio = [](StdioMode mode) {
         return mode == StdioMode::Inherit || mode == StdioMode::Null || mode == StdioMode::Capture;
     };
     if (!valid_stdio(options.stdin_mode) || options.stdin_mode == StdioMode::Capture ||
         !valid_stdio(options.stdout_mode) || !valid_stdio(options.stderr_mode)) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
     }
 
     const auto valid_path = [](const std::filesystem::path& path) {
@@ -104,12 +64,14 @@ Result<void> validate_options(const SpawnOptions& options) {
     };
     if (!valid_path(options.executable) ||
         (options.working_directory && !valid_path(*options.working_directory))) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
     }
 
     for (const auto& argument : options.arguments) {
         if (!valid_utf8(argument)) {
-            return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
         }
     }
 
@@ -123,12 +85,14 @@ Result<void> validate_options(const SpawnOptions& options) {
         }
 
         if (name == pipe_bootstrap_name) {
-            return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
         }
 
         if (entry.name.empty() || entry.name.find('=') != std::string::npos || !valid_utf8(entry.name) ||
             (entry.value && !valid_utf8(*entry.value))) {
-            return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
         }
     }
 
@@ -137,25 +101,33 @@ Result<void> validate_options(const SpawnOptions& options) {
 
 // Requires record.mutex. This is the only native observation/reaping path.
 void observe(ProcessRecord& record) noexcept {
-    if (!record.native || record.exit || record.error) {
+    if (!record.native || record.exit) {
         return;
     }
 
     auto result = record.native->poll();
     if (!result) {
-        record.error = result.error();
+        if (!record.error) {
+            record.error = result.error();
+        }
+        // ECHILD revokes exclusive child ownership. Never signal a possibly
+        // reused PID. Other observation failures retain the native owner.
+        if (result.error().is(vinc::osal::ErrorCode::ObservationLost)) {
+            record.native.reset();
+        }
     } else if (*result) {
         record.exit = **result;
+        record.native.reset();
     } else {
         return;
     }
-    record.native.reset();
     record.changed.notify_all();
 }
 
 void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
     bool polling = false;
     for (;;) {
+        bool observation_failed = false;
         {
             std::lock_guard lock(state->mutex);
             bool active = false;
@@ -165,7 +137,8 @@ void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
                 observe(*record);
                 active |= record->starting || static_cast<bool>(record->native);
                 if (record->native) {
-                    polling |= !record->native->event_driven();
+                    observation_failed |= record->error.has_value();
+                    polling |= !record->native->event_driven() || record->error.has_value();
                 }
             }
             state->changed.notify_all();
@@ -176,6 +149,11 @@ void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
             }
         }
 
+        // A signalled native watch may stay ready after poll fails. Back off
+        // outside all locks; public control calls remain available meanwhile.
+        if (observation_failed) {
+            std::this_thread::sleep_for(monitor_failure_retry_interval);
+        }
         auto result = state->monitor->wait(polling);
         if (!result) {
             {
@@ -189,12 +167,13 @@ void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
     }
 }
 
-Result<ProcessId> next_id() noexcept {
+vinc::Result<ProcessId> next_id() noexcept {
     static std::atomic<std::uint64_t> sequence{1};
     auto value = sequence.load(std::memory_order_relaxed);
     do {
         if (value == std::numeric_limits<std::uint64_t>::max()) {
-            return std::unexpected(OsError{ErrorCode::ResourceExhausted, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::ResourceExhausted, vinc::osal::ErrorOperation::Spawn});
         }
     } while (!sequence.compare_exchange_weak(value, value + 1, std::memory_order_relaxed));
     return ProcessId{value};
@@ -220,24 +199,26 @@ std::uint64_t Process::pid() const noexcept {
     return record_ ? record_->pid : 0;
 }
 
-Result<std::optional<ExitStatus>> Process::try_wait() {
+vinc::Result<std::optional<ExitStatus>> Process::try_wait() {
     if (!record_) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Observe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Observe});
     }
 
     std::lock_guard lock(record_->mutex);
     detail::observe(*record_);
     service_->monitor->wake();
-    if (record_->error) {
+    if (record_->error && !record_->exit) {
         return std::unexpected(*record_->error);
     }
 
     return record_->exit;
 }
 
-Result<ExitStatus> Process::wait_until(Deadline deadline, std::stop_token cancellation) {
+vinc::Result<ExitStatus> Process::wait_until(vinc::Deadline deadline, std::stop_token cancellation) {
     if (!record_) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Wait});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Wait});
     }
 
     std::unique_lock lock(record_->mutex);
@@ -247,30 +228,42 @@ Result<ExitStatus> Process::wait_until(Deadline deadline, std::stop_token cancel
         return record_->exit || record_->error;
     };
     if (!record_->changed.wait_until(lock, cancellation, deadline, finished)) {
-        return std::unexpected(OsError{
-            cancellation.stop_requested() ? ErrorCode::Cancelled : ErrorCode::Timeout, Operation::Wait});
+        return std::unexpected(vinc::Error{cancellation.stop_requested() ? vinc::osal::ErrorCode::Cancelled
+                                                                         : vinc::osal::ErrorCode::Timeout,
+                                           vinc::osal::ErrorOperation::Wait});
     }
 
-    if (record_->error) {
+    if (record_->error && !record_->exit) {
         return std::unexpected(*record_->error);
     }
 
     return *record_->exit;
 }
 
-Result<TerminateResult> Process::terminate() {
+std::optional<vinc::Error> Process::observation_error() const {
     if (!record_) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Terminate});
+        return std::nullopt;
+    }
+
+    std::lock_guard lock(record_->mutex);
+    return record_->error;
+}
+
+vinc::Result<TerminateResult> Process::terminate() {
+    if (!record_) {
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Terminate});
     }
 
     std::lock_guard lock(record_->mutex);
     detail::observe(*record_);
-    if (record_->error) {
-        return std::unexpected(*record_->error);
-    }
-
     if (record_->exit) {
         return TerminateResult::AlreadyExited;
+    }
+
+    if (!record_->native) {
+        return std::unexpected(wrap_error(vinc::osal::ErrorCode::ObservationLost,
+                                         vinc::osal::ErrorOperation::Terminate, *record_->error));
     }
 
     auto result = record_->native->terminate();
@@ -307,9 +300,10 @@ void ProcessService::close_admission() noexcept {
     state_->monitor->wake();
 }
 
-Result<ProcessService> ProcessService::create(ServiceOptions options) {
+vinc::Result<ProcessService> ProcessService::create(ServiceOptions options) {
     if (options.max_records == 0) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::InitializeService});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument,
+                                           vinc::osal::ErrorOperation::InitializeService});
     }
 
     auto monitor = detail::NativeMonitor::create();
@@ -328,20 +322,23 @@ Result<ProcessService> ProcessService::create(ServiceOptions options) {
             detail::run_monitor(state);
         }).detach();
     } catch (const std::system_error& error) {
-        return std::unexpected(
-            OsError{ErrorCode::ResourceExhausted, Operation::InitializeService, error.code()});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ResourceExhausted,
+                                           vinc::osal::ErrorOperation::InitializeService,
+                                           detail::native_error(error.code())});
     }
 
     return ProcessService(std::move(state));
 }
 
-Result<Process> ProcessService::spawn(const SpawnOptions& options) {
+vinc::Result<Process> ProcessService::spawn(const SpawnOptions& options) {
     return spawn_impl(options, nullptr);
 }
 
-Result<Process> ProcessService::spawn_impl(const SpawnOptions& options, const detail::ChildPipe* child_pipe) {
+vinc::Result<Process> ProcessService::spawn_impl(const SpawnOptions& options,
+                                                 const detail::ChildPipe* child_pipe) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Spawn});
     }
 
     auto valid = detail::validate_options(options);
@@ -352,7 +349,8 @@ Result<Process> ProcessService::spawn_impl(const SpawnOptions& options, const de
     const StdioMode outputs[]{options.stdout_mode, options.stderr_mode};
     for (std::size_t i = 0; i < 2; ++i) {
         if ((outputs[i] == StdioMode::Capture) != (child_pipe && child_pipe->output(i) != -1)) {
-            return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
         }
     }
 
@@ -366,17 +364,19 @@ Result<Process> ProcessService::spawn_impl(const SpawnOptions& options, const de
     {
         std::lock_guard lock(state_->mutex);
         if (!state_->accepting) {
-            return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Spawn});
         }
 
         if (state_->records.size() == state_->capacity) {
-            return std::unexpected(OsError{ErrorCode::ResourceExhausted, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::ResourceExhausted, vinc::osal::ErrorOperation::Spawn});
         }
         state_->records.push_back(record); // reserve ownership before OS creation
     }
     // Never hold the service lock across native spawn: existing children must
     // remain controllable while another executable is being launched.
-    Result<std::unique_ptr<detail::NativeProcess>> native;
+    vinc::Result<std::unique_ptr<detail::NativeProcess>> native;
     try {
         native = detail::NativeProcess::spawn(options, *state_->monitor, child_pipe);
     } catch (...) {
@@ -406,9 +406,10 @@ Result<Process> ProcessService::spawn_impl(const SpawnOptions& options, const de
     return Process(state_, std::move(record));
 }
 
-Result<Process> ProcessService::find(ProcessId id) const {
+vinc::Result<Process> ProcessService::find(ProcessId id) const {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Observe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Observe});
     }
 
     std::lock_guard lock(state_->mutex);
@@ -418,10 +419,10 @@ Result<Process> ProcessService::find(ProcessId id) const {
         }
     }
 
-    return std::unexpected(OsError{ErrorCode::NotFound, Operation::Observe});
+    return std::unexpected(vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::Observe});
 }
 
-Result<TerminateResult> ProcessService::terminate(ProcessId id) {
+vinc::Result<TerminateResult> ProcessService::terminate(ProcessId id) {
     auto process = find(id);
     if (!process) {
         return std::unexpected(process.error());
@@ -430,9 +431,10 @@ Result<TerminateResult> ProcessService::terminate(ProcessId id) {
     return process->terminate();
 }
 
-Result<void> ProcessService::forget(ProcessId id) {
+vinc::Result<void> ProcessService::forget(ProcessId id) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Forget});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Forget});
     }
 
     std::lock_guard lock(state_->mutex);
@@ -440,7 +442,8 @@ Result<void> ProcessService::forget(ProcessId id) {
         return record->id == id;
     });
     if (it == state_->records.end()) {
-        return std::unexpected(OsError{ErrorCode::NotFound, Operation::Forget});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::Forget});
     }
 
     auto record = *it;
@@ -448,7 +451,8 @@ Result<void> ProcessService::forget(ProcessId id) {
         std::lock_guard record_lock(record->mutex);
         detail::observe(*record);
         if (record->starting || record->native) {
-            return std::unexpected(OsError{ErrorCode::Busy, Operation::Forget});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::Busy, vinc::osal::ErrorOperation::Forget});
         }
     }
     state_->records.erase(it);
@@ -456,17 +460,19 @@ Result<void> ProcessService::forget(ProcessId id) {
     return {};
 }
 
-Result<void> ProcessService::shutdown_until(Deadline deadline, std::stop_token cancellation) {
+vinc::Result<void> ProcessService::shutdown_until(vinc::Deadline deadline, std::stop_token cancellation) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Shutdown});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Shutdown});
     }
     close_admission();
     std::unique_lock lock(state_->mutex);
     if (!state_->changed.wait_until(lock, cancellation, deadline, [&] {
             return state_->worker_done;
         })) {
-        return std::unexpected(OsError{
-            cancellation.stop_requested() ? ErrorCode::Cancelled : ErrorCode::Timeout, Operation::Shutdown});
+        return std::unexpected(vinc::Error{cancellation.stop_requested() ? vinc::osal::ErrorCode::Cancelled
+                                                                         : vinc::osal::ErrorCode::Timeout,
+                                           vinc::osal::ErrorOperation::Shutdown});
     }
 
     for (const auto& record : state_->records) {
@@ -479,7 +485,7 @@ Result<void> ProcessService::shutdown_until(Deadline deadline, std::stop_token c
     return {};
 }
 
-std::optional<OsError> ProcessService::monitor_error() const {
+std::optional<vinc::Error> ProcessService::monitor_error() const {
     if (!state_) {
         return std::nullopt;
     }

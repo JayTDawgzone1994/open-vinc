@@ -1,5 +1,6 @@
 // Real child stdio, independent of framework modules, logging and shell policy.
 // Every read/wait is bounded; the harness terminates children on test failure.
+#include <vinc/time.hpp>
 #include <vinc/osal/process_pipe.hpp>
 #include <array>
 #include <iostream>
@@ -9,6 +10,19 @@
 
 using namespace vinc::osal;
 using namespace std::chrono_literals;
+
+namespace {
+constexpr auto operation_timeout = 10s;
+constexpr auto read_timeout_probe = 30ms;
+constexpr std::size_t capture_endpoint_limit = 8;
+constexpr std::size_t process_record_limit = 32;
+// A non-power-of-two chunk exercises stream assembly across native write boundaries.
+constexpr std::size_t capture_chunk_bytes = 997;
+constexpr std::size_t maximum_captured_bytes = 2 * 1024 * 1024;
+constexpr std::size_t pending_read_bytes = 8;
+constexpr int failed_spawn_attempts = 12;
+} // namespace
+
 static_assert(std::is_nothrow_move_constructible_v<ProcessWithOutput>);
 static_assert(!std::is_copy_constructible_v<ProcessWithOutput>);
 
@@ -18,17 +32,16 @@ void require(bool condition, const char* message) {
     }
 }
 
-template <class T> T take(Result<T> result) {
+template <class T> T take(vinc::Result<T> result) {
     if (!result) {
-        throw std::runtime_error("OSAL " + std::to_string(static_cast<int>(result.error().code)) + ": " +
-                                 result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 
     return std::move(*result);
 }
 
-Deadline soon() {
-    return std::chrono::steady_clock::now() + 10s;
+vinc::Deadline soon() {
+    return std::chrono::steady_clock::now() + operation_timeout;
 }
 
 struct Harness {
@@ -37,7 +50,8 @@ struct Harness {
     std::filesystem::path helper;
     std::vector<ProcessId> children;
 
-    Harness(const std::filesystem::path& path, std::size_t endpoints = 8, std::size_t records = 32)
+    Harness(const std::filesystem::path& path, std::size_t endpoints = capture_endpoint_limit,
+            std::size_t records = process_record_limit)
         : processes(take(ProcessService::create(ServiceOptions{records}))),
           pipes(take(PipeService::create(PipeServiceOptions{endpoints}))), helper(path) {
         children.reserve(records);
@@ -59,7 +73,8 @@ struct Harness {
         SpawnOptions result;
         result.executable = helper;
         result.arguments = {mode};
-        result.stdout_mode = result.stderr_mode = StdioMode::Capture;
+        result.stderr_mode = StdioMode::Capture;
+        result.stdout_mode = StdioMode::Capture;
         return result;
     }
 
@@ -83,7 +98,7 @@ struct Harness {
         std::vector<bool> ended(readers.size(), false);
         std::size_t remaining = readers.size();
         for (auto* reader : readers) {
-            take(pipes.submit_read(*reader, IoBuffer(997), deadline));
+            take(pipes.submit_read(*reader, IoBuffer(capture_chunk_bytes), deadline));
         }
         while (remaining) {
             auto item = next();
@@ -98,9 +113,12 @@ struct Harness {
                 continue;
             }
             require(item.status == IoStatus::Completed && item.transferred > 0, "capture read failed");
-            require(bytes[i].size() + item.transferred <= 2 * 1024 * 1024, "unexpected unbounded output");
+            require(bytes[i].size() + item.transferred <= maximum_captured_bytes,
+                    "unexpected unbounded output");
+            // char may inspect byte storage; append copies the completion's valid byte count
+            // before its owning buffer is released, preserving binary data including NUL bytes.
             bytes[i].append(reinterpret_cast<const char*>(item.buffer.bytes().data()), item.transferred);
-            take(pipes.submit_read(*readers[i], IoBuffer(997), deadline));
+            take(pipes.submit_read(*readers[i], IoBuffer(capture_chunk_bytes), deadline));
         }
 
         return bytes;
@@ -193,23 +211,23 @@ int main(int argc, char** argv) {
             Harness test(helper, 2, 1);
             auto options = test.options("stdio-small");
             auto plain = test.processes.spawn(options);
-            require(!plain && plain.error().code == ErrorCode::InvalidArgument,
+            require(!plain && plain.error().is(vinc::osal::ErrorCode::InvalidArgument),
                     "plain spawn accepted capture");
             auto invalid = options;
             invalid.stdin_mode = StdioMode::Capture;
             auto rejected = spawn_with_output(test.processes, test.pipes, invalid);
-            require(!rejected && rejected.error().code == ErrorCode::InvalidArgument,
+            require(!rejected && rejected.error().is(vinc::osal::ErrorCode::InvalidArgument),
                     "stdin capture accepted");
             invalid = options;
             invalid.stderr_mode = static_cast<StdioMode>(99);
             rejected = spawn_with_output(test.processes, test.pipes, invalid);
-            require(!rejected && rejected.error().code == ErrorCode::InvalidArgument,
+            require(!rejected && rejected.error().is(vinc::osal::ErrorCode::InvalidArgument),
                     "invalid mode accepted");
             auto missing = options;
             missing.executable = helper.parent_path() / "missing-stdio-helper";
-            for (int i = 0; i < 12; ++i) {
+            for (int i = 0; i < failed_spawn_attempts; ++i) {
                 rejected = spawn_with_output(test.processes, test.pipes, missing);
-                require(!rejected && rejected.error().code == ErrorCode::NotFound,
+                require(!rejected && rejected.error().is(vinc::osal::ErrorCode::NotFound),
                         "spawn failure leaked capacity");
             }
 
@@ -220,7 +238,7 @@ int main(int argc, char** argv) {
         {
             Harness test(helper, 1);
             auto rejected = spawn_with_output(test.processes, test.pipes, test.options("stdio-small"));
-            require(!rejected && rejected.error().code == ErrorCode::ResourceExhausted,
+            require(!rejected && rejected.error().is(vinc::osal::ErrorCode::ResourceExhausted),
                     "capture exceeded capacity");
         }
 
@@ -230,17 +248,18 @@ int main(int argc, char** argv) {
             auto options = test.options("sleep");
             options.arguments.push_back("30000");
             auto child = test.spawn(options);
-            take(test.pipes.submit_read(*child.stdout_reader, IoBuffer(8),
-                                        std::chrono::steady_clock::now() + 30ms));
+            take(test.pipes.submit_read(*child.stdout_reader, IoBuffer(pending_read_bytes),
+                                        std::chrono::steady_clock::now() + read_timeout_probe));
             require(test.next().status == IoStatus::TimedOut, "read deadline ignored");
-            auto id = take(test.pipes.submit_read(*child.stdout_reader, IoBuffer(8), soon()));
+            auto id =
+                take(test.pipes.submit_read(*child.stdout_reader, IoBuffer(pending_read_bytes), soon()));
             take(test.pipes.cancel(id));
             require(test.next().status == IoStatus::Cancelled, "read cancel ignored");
-            take(test.pipes.submit_read(*child.stderr_reader, IoBuffer(8), soon()));
+            take(test.pipes.submit_read(*child.stderr_reader, IoBuffer(pending_read_bytes), soon()));
             child.stderr_reader->close();
             require(test.next().status == IoStatus::Closed, "reader close did not finish pending I/O");
             require(!take(child.process.try_wait()), "reader close terminated sleeping child");
-            take(test.pipes.submit_read(*child.stdout_reader, IoBuffer(8), soon()));
+            take(test.pipes.submit_read(*child.stdout_reader, IoBuffer(pending_read_bytes), soon()));
             take(child.process.terminate());
             take(child.process.wait_until(soon()));
             require(test.next().status == IoStatus::EndOfStream, "terminated child retained writer");
@@ -269,14 +288,16 @@ int main(int argc, char** argv) {
             auto options = test.options("single-source");
             auto missing = options;
             missing.executable = pipe_helper.parent_path() / "missing-stdio-helper";
-            for (int i = 0; i < 4; ++i) {
+            constexpr int failed_handoff_attempts = 4;
+            for (int i = 0; i < failed_handoff_attempts; ++i) {
                 require(!spawn_with_output(test.processes, test.pipes, missing, bindings),
                         "missing helper started");
             }
 
             auto child = test.spawn(options, bindings);
             auto write = test.pipes.submit_write(pipe.writer, IoBuffer(1), soon());
-            require(!write && write.error().code == ErrorCode::Closed, "handed-off writer stayed usable");
+            require(!write && write.error().is(vinc::osal::ErrorCode::Closed),
+                    "handed-off writer stayed usable");
             std::array<PipeReader*, 3> readers{&*child.stdout_reader, &*child.stderr_reader, &pipe.reader};
             const auto bytes = test.drain(readers);
             require(bytes[0].empty() && bytes[1].empty() && bytes[2] == "*",

@@ -26,6 +26,10 @@ constexpr auto nanoseconds_per_second_fractional = 1000000000.0L;
 static_assert(sizeof(void*) == 8, "IPC atomics require a 64-bit target");
 #ifdef _WIN32
 static volatile long long* native(const SharedWord& word) noexcept {
+    // MSVC's intrinsic takes signed 64-bit storage; uint64_t is its unsigned
+    // counterpart on this backend. SharedWord guarantees eight-byte alignment.
+    // Even load uses a read-modify-write intrinsic: callers must supply a live,
+    // writable mapping, never an actually const object or a read-only view.
     return reinterpret_cast<volatile long long*>(const_cast<std::uint64_t*>(&word.value));
 }
 

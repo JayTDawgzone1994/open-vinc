@@ -1,6 +1,7 @@
 // Cross-process Pipe tests: explicit endpoint handoff, partial transfers, cancellation
 // and cleanup. Helpers deliberately exercise failure paths as well as round trips.
 
+#include <vinc/time.hpp>
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>
 #include <array>
@@ -17,6 +18,30 @@
 
 using namespace vinc::osal;
 using namespace std::chrono_literals;
+
+namespace {
+// General waits allow helper startup; short probes intentionally observe no progress.
+constexpr auto operation_timeout = 10s;
+constexpr auto timeout_probe = 20ms;
+constexpr auto backpressure_write_timeout = 30ms;
+// Unequal chunks force the receiver to assemble partial writes.
+constexpr std::size_t write_chunk_bytes = 32768;
+constexpr std::size_t read_chunk_bytes = 997;
+constexpr std::size_t backpressure_chunk_bytes = 65536;
+constexpr int maximum_backpressure_writes = 64;
+constexpr int cancellation_race_iterations = 24;
+constexpr int lifecycle_iterations = 20;
+constexpr int failed_spawn_attempts = 4;
+constexpr int shutdown_spawn_race_iterations = 12;
+constexpr std::uint32_t inherited_endpoint_limit = 64;
+constexpr std::size_t pending_read_bytes = 16;
+constexpr std::size_t cancelled_read_bytes = 4;
+constexpr std::size_t concurrent_child_count = 8;
+#ifdef _WIN32
+constexpr DWORD handle_count_allowance = 4;
+#endif
+} // namespace
+
 static_assert(!std::is_copy_constructible_v<PipeReader>);
 static_assert(!std::is_copy_constructible_v<IoBuffer>);
 static_assert(std::is_nothrow_move_constructible_v<PipeReader>);
@@ -28,25 +53,22 @@ void require(bool condition, const char* message) {
     }
 }
 
-template <class T> T take(Result<T> result) {
+template <class T> T take(vinc::Result<T> result) {
     if (!result) {
-        throw std::runtime_error("OSAL " + std::to_string(static_cast<int>(result.error().code)) + " op " +
-                                 std::to_string(static_cast<int>(result.error().operation)) + ": " +
-                                 result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 
     return std::move(*result);
 }
 
-void ok(Result<void> result) {
+void ok(vinc::Result<void> result) {
     if (!result) {
-        throw std::runtime_error("OSAL " + std::to_string(static_cast<int>(result.error().code)) + ": " +
-                                 result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 }
 
-Deadline soon() {
-    return std::chrono::steady_clock::now() + 10s;
+vinc::Deadline soon() {
+    return std::chrono::steady_clock::now() + operation_timeout;
 }
 
 struct Harness {
@@ -74,7 +96,8 @@ struct Harness {
         SpawnOptions result;
         result.executable = helper;
         result.arguments = {mode};
-        result.stdout_mode = result.stderr_mode = StdioMode::Null;
+        result.stderr_mode = StdioMode::Null;
+        result.stdout_mode = StdioMode::Null;
         return result;
     }
 
@@ -109,7 +132,7 @@ void round_trip(Harness& test, ProcessWithPipe& child, std::size_t size) {
     bool reading = false;
     while (received < size || sent < size) {
         if (!writing && sent < size) {
-            const auto count = std::min<std::size_t>(32768, size - sent);
+            const auto count = std::min<std::size_t>(write_chunk_bytes, size - sent);
             IoBuffer buffer(count);
             std::copy_n(expected.begin() + static_cast<std::ptrdiff_t>(sent), count, buffer.bytes().begin());
             take(test.pipes.submit_write(child.pipe.writer, std::move(buffer), soon()));
@@ -117,7 +140,7 @@ void round_trip(Harness& test, ProcessWithPipe& child, std::size_t size) {
         }
 
         if (!reading && received < size) {
-            IoBuffer buffer(std::min<std::size_t>(997, size - received));
+            IoBuffer buffer(std::min<std::size_t>(read_chunk_bytes, size - received));
             take(test.pipes.submit_read(child.pipe.reader, std::move(buffer), soon()));
             reading = true;
         }
@@ -161,7 +184,7 @@ int tests(const std::filesystem::path& helper) {
         auto child = take(spawn_with_pipes(test.processes, test.pipes, test.options("multi"), bindings));
         test.ids.push_back(child.id());
         auto closed = test.pipes.submit_read(first_in.reader, IoBuffer(1), soon());
-        require(!closed && closed.error().code == ErrorCode::Closed, "handoff kept local end usable");
+        require(!closed && closed.error().is(vinc::osal::ErrorCode::Closed), "handoff kept local end usable");
         for (auto ends :
              {std::pair{&first_in.writer, &first_out.reader}, {&second_in.writer, &second_out.reader}}) {
             IoBuffer byte(1);
@@ -194,21 +217,22 @@ int tests(const std::filesystem::path& helper) {
         const std::array<PipeBinding, 1> binding{{{42, &pipe.reader}}};
         auto missing = test.options("single-sink");
         missing.executable = helper.parent_path() / "missing-generic-pipe-helper";
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < failed_spawn_attempts; ++i) {
             require(!spawn_with_pipes(test.processes, test.pipes, missing, binding),
                     "missing generic helper started");
         }
 
         const std::array<PipeBinding, 2> duplicate_slot{{{42, &pipe.reader}, {42, &pipe.writer}}};
         auto duplicate = spawn_with_pipes(test.processes, test.pipes, missing, duplicate_slot);
-        require(!duplicate && duplicate.error().code == ErrorCode::InvalidArgument,
+        require(!duplicate && duplicate.error().is(vinc::osal::ErrorCode::InvalidArgument),
                 "duplicate slot admitted");
         const std::array<PipeBinding, 2> duplicate_end{{{1, &pipe.reader}, {2, &pipe.reader}}};
         duplicate = spawn_with_pipes(test.processes, test.pipes, missing, duplicate_end);
-        require(!duplicate && duplicate.error().code == ErrorCode::InvalidArgument, "duplicate end admitted");
+        require(!duplicate && duplicate.error().is(vinc::osal::ErrorCode::InvalidArgument),
+                "duplicate end admitted");
         auto foreign = take(PipeService::create());
         auto wrong = spawn_with_pipes(test.processes, foreign, missing, binding);
-        require(!wrong && wrong.error().code == ErrorCode::InvalidArgument,
+        require(!wrong && wrong.error().is(vinc::osal::ErrorCode::InvalidArgument),
                 "foreign service binding accepted");
         // The untouched read end remains exportable despite buffered data.
         IoBuffer byte(1);
@@ -229,14 +253,14 @@ int tests(const std::filesystem::path& helper) {
         auto read = take(test.pipes.submit_read(pipe.reader, IoBuffer(1), soon()));
         const std::array<PipeBinding, 1> binding{{{42, &pipe.reader}}};
         auto busy = spawn_with_pipes(test.processes, test.pipes, test.options("single-sink"), binding);
-        require(!busy && busy.error().code == ErrorCode::Busy, "active endpoint handed off");
+        require(!busy && busy.error().is(vinc::osal::ErrorCode::Busy), "active endpoint handed off");
         take(test.pipes.cancel(read));
         require(test.next().status == IoStatus::Cancelled, "cancel handoff probe");
         busy = spawn_with_pipes(test.processes, test.pipes, test.options("single-sink"), binding);
-        require(!busy && busy.error().code == ErrorCode::Busy, "used endpoint handed off");
+        require(!busy && busy.error().is(vinc::osal::ErrorCode::Busy), "used endpoint handed off");
         pipe.reader.close();
         auto closed = spawn_with_pipes(test.processes, test.pipes, test.options("single-sink"), binding);
-        require(!closed && closed.error().code == ErrorCode::Closed, "closed end handed off");
+        require(!closed && closed.error().is(vinc::osal::ErrorCode::Closed), "closed end handed off");
     }
 
     std::cout << "PASS: active/previously used/closed end handoff rejection\n";
@@ -244,15 +268,15 @@ int tests(const std::filesystem::path& helper) {
         Harness test(helper);
         std::vector<Pipe> pipes;
         std::vector<PipeBinding> bindings;
-        pipes.reserve(64);
-        bindings.reserve(65);
-        for (std::uint32_t i = 0; i < 64; ++i) {
+        pipes.reserve(inherited_endpoint_limit);
+        bindings.reserve(inherited_endpoint_limit + 1);
+        for (std::uint32_t i = 0; i < inherited_endpoint_limit; ++i) {
             pipes.push_back(take(test.pipes.create_pipe()));
             bindings.push_back({1000 + i, &pipes.back().writer});
         }
         bindings.push_back({5000, &pipes[0].reader});
         auto overflow = spawn_with_pipes(test.processes, test.pipes, test.options("many"), bindings);
-        require(!overflow && overflow.error().code == ErrorCode::InvalidArgument,
+        require(!overflow && overflow.error().is(vinc::osal::ErrorCode::InvalidArgument),
                 "binding count not bounded");
         bindings.pop_back();
         auto child = take(spawn_with_pipes(test.processes, test.pipes, test.options("many"), bindings));
@@ -300,12 +324,12 @@ int tests(const std::filesystem::path& helper) {
     std::cout << "PASS: unrelated pipe ends do not leak into spawned children\n";
     {
         Harness test(helper);
-        for (int i = 0; i < 12; ++i) {
+        for (int i = 0; i < shutdown_spawn_race_iterations; ++i) {
             auto service = take(PipeService::create());
             auto pipe = take(service.create_pipe());
             const std::array<PipeBinding, 1> binding{{{42, &pipe.writer}}};
             std::latch start(2);
-            std::optional<Result<Process>> launched;
+            std::optional<vinc::Result<Process>> launched;
             std::jthread starter([&] {
                 start.arrive_and_wait();
                 launched = spawn_with_pipes(test.processes, service, test.options("single-source"), binding);
@@ -319,8 +343,8 @@ int tests(const std::filesystem::path& helper) {
                 take(child.terminate());
                 take(child.wait_until(soon()));
             } else {
-                require(launched->error().code == ErrorCode::ServiceClosed ||
-                            launched->error().code == ErrorCode::Closed,
+                require(launched->error().is(vinc::osal::ErrorCode::ServiceClosed) ||
+                            launched->error().is(vinc::osal::ErrorCode::Closed),
                         "unexpected handoff/shutdown result");
             }
             ok(stopped);
@@ -357,30 +381,33 @@ int tests(const std::filesystem::path& helper) {
     {
         Harness test(helper);
         auto child = test.spawn("hold");
-        IoBuffer buffer(16);
+        IoBuffer buffer(pending_read_bytes);
         auto id = take(test.pipes.submit_read(child.pipe.reader, std::move(buffer), soon()));
         require(buffer.size() == 0, "accepted buffer not transferred");
-        IoBuffer rejected(16);
+        IoBuffer rejected(pending_read_bytes);
         auto busy = test.pipes.submit_read(child.pipe.reader, std::move(rejected), soon());
-        require(!busy && busy.error().code == ErrorCode::Busy && rejected.size() == 16,
+        require(!busy && busy.error().is(vinc::osal::ErrorCode::Busy) &&
+                    rejected.size() == pending_read_bytes,
                 "busy consumed buffer");
         std::array<IoCompletion, 1> output;
-        auto timed = test.pipes.wait_completions(output, std::chrono::steady_clock::now() + 20ms);
-        require(!timed && timed.error().code == ErrorCode::Timeout, "completion wait timeout");
+        auto timed = test.pipes.wait_completions(output, std::chrono::steady_clock::now() + timeout_probe);
+        require(!timed && timed.error().is(vinc::osal::ErrorCode::Timeout), "completion wait timeout");
         std::stop_source cancel_wait;
         cancel_wait.request_stop();
         auto cancelled = test.pipes.wait_completions(output, soon(), cancel_wait.get_token());
-        require(!cancelled && cancelled.error().code == ErrorCode::Cancelled, "completion wait cancellation");
+        require(!cancelled && cancelled.error().is(vinc::osal::ErrorCode::Cancelled),
+                "completion wait cancellation");
         require(take(test.pipes.cancel(id)) == CancelResult::Requested, "wait cancellation changed I/O");
         auto result = test.next();
-        require(result.id == id && result.status == IoStatus::Cancelled && result.buffer.size() == 16,
+        require(result.id == id && result.status == IoStatus::Cancelled &&
+                    result.buffer.size() == pending_read_bytes,
                 "cancel did not return storage");
         auto expired = take(test.pipes.submit_read(child.pipe.reader, std::move(result.buffer),
-                                                   std::chrono::steady_clock::now() + 20ms));
+                                                   std::chrono::steady_clock::now() + timeout_probe));
         result = test.next();
         require(result.id == expired && result.status == IoStatus::TimedOut, "I/O deadline");
         auto past =
-            take(test.pipes.submit_read(child.pipe.reader, std::move(result.buffer), Deadline::min()));
+            take(test.pipes.submit_read(child.pipe.reader, std::move(result.buffer), vinc::Deadline::min()));
         result = test.next();
         require(result.id == past && result.status == IoStatus::TimedOut, "past deadline");
         auto pending = take(test.pipes.submit_read(child.pipe.reader, std::move(result.buffer), soon()));
@@ -419,6 +446,9 @@ int tests(const std::filesystem::path& helper) {
 
     std::cout << "PASS: killed peer, no inherited endpoint retained in parent\n";
     {
+        constexpr std::size_t oversized_transfer_bytes = 17;
+        constexpr std::size_t over_budget_bytes = 9;
+        constexpr std::size_t admitted_buffer_bytes = 8;
         PipeServiceOptions limits;
         limits.max_endpoints = 4;
         limits.max_operations = 1;
@@ -427,34 +457,36 @@ int tests(const std::filesystem::path& helper) {
         Harness test(helper, limits);
         auto missing = test.options("hold");
         missing.executable = helper.parent_path() / "vinc-no-such-helper";
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < failed_spawn_attempts; ++i) {
             require(!spawn_with_pipe(test.processes, test.pipes, missing), "missing executable created");
         }
 
         auto child = test.spawn("hold"); // failed starts must release capacity immediately
         auto full = spawn_with_pipe(test.processes, test.pipes, test.options("hold"));
-        require(!full && full.error().code == ErrorCode::ResourceExhausted, "endpoint bound");
-        IoBuffer too_large(17);
+        require(!full && full.error().is(vinc::osal::ErrorCode::ResourceExhausted), "endpoint bound");
+        IoBuffer too_large(oversized_transfer_bytes);
         auto invalid = test.pipes.submit_read(child.pipe.reader, std::move(too_large), soon());
-        require(!invalid && invalid.error().code == ErrorCode::InvalidArgument && too_large.size() == 17,
+        require(!invalid && invalid.error().is(vinc::osal::ErrorCode::InvalidArgument) &&
+                    too_large.size() == oversized_transfer_bytes,
                 "transfer size bound");
-        IoBuffer over_budget(9);
+        IoBuffer over_budget(over_budget_bytes);
         auto budget = test.pipes.submit_read(child.pipe.reader, std::move(over_budget), soon());
-        require(!budget && budget.error().code == ErrorCode::ResourceExhausted && over_budget.size() == 9,
+        require(!budget && budget.error().is(vinc::osal::ErrorCode::ResourceExhausted) &&
+                    over_budget.size() == over_budget_bytes,
                 "byte budget");
-        IoBuffer buffer(8);
-        auto id = take(test.pipes.submit_read(child.pipe.reader, std::move(buffer), Deadline::min()));
+        IoBuffer buffer(admitted_buffer_bytes);
+        auto id = take(test.pipes.submit_read(child.pipe.reader, std::move(buffer), vinc::Deadline::min()));
         IoBuffer write(1);
         auto no_slot = test.pipes.submit_write(child.pipe.writer, std::move(write), soon());
-        require(!no_slot && no_slot.error().code == ErrorCode::ResourceExhausted,
+        require(!no_slot && no_slot.error().is(vinc::osal::ErrorCode::ResourceExhausted),
                 "completion credit not reserved");
         require(test.next().id == id, "completion lost at capacity");
-        take(test.pipes.submit_read(child.pipe.reader, IoBuffer(8), soon()));
+        take(test.pipes.submit_read(child.pipe.reader, IoBuffer(admitted_buffer_bytes), soon()));
         ok(test.pipes.shutdown_until(soon()));
         require(test.next().status == IoStatus::Closed, "shutdown discarded completion");
         buffer = IoBuffer(1);
         auto closed = test.pipes.submit_read(child.pipe.reader, std::move(buffer), soon());
-        require(!closed && closed.error().code == ErrorCode::ServiceClosed && buffer.size() == 1,
+        require(!closed && closed.error().is(vinc::osal::ErrorCode::ServiceClosed) && buffer.size() == 1,
                 "closed admission");
         test.stop(child);
     }
@@ -476,7 +508,7 @@ int tests(const std::filesystem::path& helper) {
     std::cout << "PASS: one-time child adoption, descendants and plain spawn have no bootstrap\n";
     {
         Harness test(helper);
-        std::vector<std::optional<Result<ProcessWithPipe>>> children(8);
+        std::vector<std::optional<vinc::Result<ProcessWithPipe>>> children(concurrent_child_count);
         std::vector<std::jthread> starters;
         for (std::size_t i = 0; i < children.size(); ++i) {
             starters.emplace_back([&, i] {
@@ -492,7 +524,8 @@ int tests(const std::filesystem::path& helper) {
 
         std::vector<IoId> operations;
         for (auto& child : live) {
-            operations.push_back(take(test.pipes.submit_read(child.pipe.reader, IoBuffer(4), soon())));
+            operations.push_back(
+                take(test.pipes.submit_read(child.pipe.reader, IoBuffer(cancelled_read_bytes), soon())));
         }
 
         std::vector<std::jthread> cancellers;
@@ -504,7 +537,7 @@ int tests(const std::filesystem::path& helper) {
         }
         cancellers.clear();
         std::vector<IoId> completed;
-        std::array<IoCompletion, 8> batch;
+        std::array<IoCompletion, concurrent_child_count> batch;
         while (completed.size() != live.size()) {
             auto count = take(test.pipes.wait_completions(batch, soon()));
             for (std::size_t i = 0; i < count; ++i) {
@@ -525,7 +558,7 @@ int tests(const std::filesystem::path& helper) {
     {
         Harness test(helper);
         auto child = test.spawn("hold");
-        for (int i = 0; i < 24; ++i) {
+        for (int i = 0; i < cancellation_race_iterations; ++i) {
             auto id = take(test.pipes.submit_write(child.pipe.writer, IoBuffer(1), soon()));
             std::jthread canceller([&] {
                 auto ignored = test.pipes.cancel(id);
@@ -538,11 +571,12 @@ int tests(const std::filesystem::path& helper) {
         }
 
         std::array<IoCompletion, 1> output;
-        auto empty = test.pipes.wait_completions(output, std::chrono::steady_clock::now() + 20ms);
-        require(!empty && empty.error().code == ErrorCode::Timeout, "race produced duplicate completion");
+        auto empty = test.pipes.wait_completions(output, std::chrono::steady_clock::now() + timeout_probe);
+        require(!empty && empty.error().is(vinc::osal::ErrorCode::Timeout),
+                "race produced duplicate completion");
         auto moved = std::move(child.pipe.reader);
         require(!child.pipe.reader && moved, "endpoint move");
-        auto id = take(test.pipes.submit_read(moved, IoBuffer(16), soon()));
+        auto id = take(test.pipes.submit_read(moved, IoBuffer(pending_read_bytes), soon()));
         moved = PipeReader{};
         auto result = test.next();
         require(result.id == id && result.status == IoStatus::Closed,
@@ -556,10 +590,10 @@ int tests(const std::filesystem::path& helper) {
         auto child = test.spawn("hold");
         std::size_t total = 0;
         bool stalled = false;
-        for (int i = 0; i < 64 && !stalled; ++i) {
-            IoBuffer buffer(65536);
+        for (int i = 0; i < maximum_backpressure_writes && !stalled; ++i) {
+            IoBuffer buffer(backpressure_chunk_bytes);
             take(test.pipes.submit_write(child.pipe.writer, std::move(buffer),
-                                         std::chrono::steady_clock::now() + 30ms));
+                                         std::chrono::steady_clock::now() + backpressure_write_timeout));
             auto result = test.next();
             total += result.transferred;
             if (result.status == IoStatus::TimedOut) {
@@ -581,7 +615,7 @@ int tests(const std::filesystem::path& helper) {
             auto transient = take(PipeService::create());
             child = take(spawn_with_pipe(test.processes, transient, test.options("hold")));
             test.ids.push_back(child.process.id());
-            take(transient.submit_read(child.pipe.reader, IoBuffer(16), soon()));
+            take(transient.submit_read(child.pipe.reader, IoBuffer(pending_read_bytes), soon()));
         }
         child.pipe.close();
         test.stop(child);
@@ -598,7 +632,7 @@ int tests(const std::filesystem::path& helper) {
         DWORD before = 0;
         require(GetProcessHandleCount(GetCurrentProcess(), &before) != 0, "handle count before churn");
 #endif
-        for (int i = 0; i < 20; ++i) {
+        for (int i = 0; i < lifecycle_iterations; ++i) {
             auto child = test.spawn("echo");
             round_trip(test, child, 31);
             ok(test.processes.forget(child.process.id()));
@@ -609,7 +643,8 @@ int tests(const std::filesystem::path& helper) {
         require(GetProcessHandleCount(GetCurrentProcess(), &after) != 0, "handle count after churn");
         // Allow small thread-pool bookkeeping changes; a per-launch handle leak
         // would exceed this allowance after twenty complete lifecycles.
-        require(after <= before + 4, "native handles leaked across repeated pipe lifecycles");
+        require(after <= before + handle_count_allowance,
+                "native handles leaked across repeated pipe lifecycles");
 #endif
     }
 

@@ -3,6 +3,7 @@
 // A connected Socket becomes a versioned session with a handshake and two-way heartbeat.
 // This layer reports connection health; ModuleManager decides whether to stop or restart a module.
 
+#include <vinc/time.hpp>
 #include <vinc/control/protocol.hpp>
 #include <vinc/osal/socket_poller.hpp>
 #include <chrono>
@@ -11,7 +12,6 @@
 
 namespace vinc::control {
 using Clock = std::chrono::steady_clock;
-using Deadline = Clock::time_point;
 enum class Role : std::uint32_t {
     Central = 1,
     Module = 2
@@ -21,23 +21,11 @@ enum class State {
     Open,
     Closed
 };
-enum class ErrorCode {
-    Timeout,
-    Closed,
-    Protocol,
-    Io,
-    Backpressure,
-    InvalidArgument
-};
-
-struct Error {
-    ErrorCode code;
-    std::string message;
-    std::optional<osal::OsError> os_error;
-};
-template <class T> using Result = std::expected<T, Error>;
 
 struct Options {
+    // Fixed for this session; peers must explicitly agree during Hello.
+    // Disabling expiry retains heartbeat validation, bounded queues and transport failures.
+    bool heartbeat_timeout_enabled = true;
     Role role = Role::Central;
     std::uint64_t generation = 0;
     std::string token;
@@ -59,12 +47,14 @@ public:
     State state() const;
     std::optional<Error> error() const;
     // A waiting timeout does not itself close the session or cancel its handshake.
-    Result<void> wait_open(Deadline deadline);
-    Result<void> send(Frame frame); // accepted into a bounded queue, not remotely acknowledged
+    Result<void> wait_open(vinc::Deadline deadline);
+    // Accepted into a bounded queue, not remotely acknowledged. Closed/Send keeps
+    // a stored session fault as its cause; explicit close adds no redundant cause.
+    Result<void> send(Frame frame);
     // Drain already received frames before reporting a closed session.
     // A successful empty optional means there is no queued frame yet.
     Result<std::optional<Frame>> try_receive();
-    Result<Frame> receive_until(Deadline deadline);
+    Result<Frame> receive_until(vinc::Deadline deadline);
     // Request asynchronous socket cleanup by the I/O worker.
     void close();
 

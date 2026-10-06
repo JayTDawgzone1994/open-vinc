@@ -1,5 +1,7 @@
+#include <vinc/osal/path.hpp>
 // OSAL-only tests: handle-owned file locks, cross-thread guard transfer, pending
 // acquisition, independent opens and OS cleanup after actual process death.
+#include <vinc/time.hpp>
 #include <vinc/osal/file_lock.hpp>
 #include <vinc/osal/process_pipe.hpp>
 #include <array>
@@ -17,42 +19,49 @@
 using namespace vinc::osal;
 using namespace std::chrono_literals;
 
+namespace {
+constexpr auto operation_timeout = 10s;
+constexpr auto lock_timeout_probe = 30ms;
+constexpr auto blocked_wait_probe = 20ms;
+constexpr auto cancellation_wait_timeout = 2s;
+} // namespace
+
 void check(bool value, const char* text) {
     if (!value) {
         throw std::runtime_error(text);
     }
 }
 
-template <class T> T take(Result<T> result) {
+template <class T> T take(vinc::Result<T> result) {
     if (!result) {
-        throw std::runtime_error("OSAL code=" + std::to_string(static_cast<int>(result.error().code)) + " " +
-                                 result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 
     return std::move(*result);
 }
 
-void ok(Result<void> result) {
+void ok(vinc::Result<void> result) {
     if (!result) {
-        throw std::runtime_error(result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 }
 
-template <class T> void fails(const Result<T>& result, ErrorCode code, const char* text) {
-    check(!result && result.error().code == code, text);
+template <class T> void fails(const vinc::Result<T>& result, vinc::osal::ErrorCode code, const char* text) {
+    check(!result && result.error().is(code), text);
 }
 
-Deadline soon() {
-    return std::chrono::steady_clock::now() + 10s;
+vinc::Deadline soon() {
+    return std::chrono::steady_clock::now() + operation_timeout;
 }
 
 std::string utf8(const std::filesystem::path& path) {
     auto s = path.u8string();
+    // char may inspect char8_t object bytes; the sized copy completes while the UTF-8 owner is alive.
     return {reinterpret_cast<const char*>(s.data()), s.size()};
 }
 
 std::filesystem::path path_from(const std::string& text) {
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
+    return take(vinc::osal::path_from_utf8(text));
 }
 
 void send(PipeService& pipes, PipeWriter& writer, std::byte token) {
@@ -134,7 +143,7 @@ int child(const std::vector<std::string>& args) {
     auto file = take(FileLock::open(path_from(args.at(2))));
     const auto& mode = args.at(3);
     if (mode == "contend") {
-        fails(file.try_lock(), ErrorCode::WouldBlock, "child bypassed parent file lock");
+        fails(file.try_lock(), vinc::osal::ErrorCode::WouldBlock, "child bypassed parent file lock");
         send(pipes, pipe.writer, std::byte{1});
         receive(pipes, pipe.reader, std::byte{2});
         auto guard = take(file.lock_until(soon()));
@@ -162,37 +171,39 @@ int application(const std::vector<std::string>& args) {
         }
         Workspace files;
         const auto path = files.path / std::filesystem::path(u8"檔案 lock.lck");
-        fails(FileLock::create("relative"), ErrorCode::InvalidArgument, "absolute path required");
-        fails(FileLock::open(path), ErrorCode::NotFound, "open created file");
+        fails(FileLock::create("relative"), vinc::osal::ErrorCode::InvalidArgument, "absolute path required");
+        fails(FileLock::open(path), vinc::osal::ErrorCode::NotFound, "open created file");
         auto file = take(FileLock::create(path));
-        fails(FileLock::create(path), ErrorCode::AlreadyExists, "exclusive create failed");
+        fails(FileLock::create(path), vinc::osal::ErrorCode::AlreadyExists, "exclusive create failed");
         auto peer = take(FileLock::open(path));
         FileLock empty;
-        fails(empty.try_lock(), ErrorCode::Closed, "closed file handle");
+        fails(empty.try_lock(), vinc::osal::ErrorCode::Closed, "closed file handle");
         {
             auto guard = take(file.try_lock());
-            fails(file.try_lock(), ErrorCode::Busy, "second guard allowed on same handle");
+            fails(file.try_lock(), vinc::osal::ErrorCode::Busy, "second guard allowed on same handle");
             // Busy is handle ownership, independent of the caller's thread.
             auto same = std::async(std::launch::async, [&] {
                 return file.try_lock();
             });
-            fails(same.get(), ErrorCode::Busy, "file lock imposed mutex thread rules");
-            fails(peer.try_lock(), ErrorCode::WouldBlock, "independent open bypassed lock");
+            fails(same.get(), vinc::osal::ErrorCode::Busy, "file lock imposed mutex thread rules");
+            fails(peer.try_lock(), vinc::osal::ErrorCode::WouldBlock, "independent open bypassed lock");
             auto unrelated = take(FileLock::open(path));
             unrelated.close();
-            fails(peer.try_lock(), ErrorCode::WouldBlock, "unrelated close released lock");
-            fails(peer.lock_until(std::chrono::steady_clock::now() + 30ms), ErrorCode::Timeout,
-                  "deadline ignored");
+            fails(peer.try_lock(), vinc::osal::ErrorCode::WouldBlock, "unrelated close released lock");
+            fails(peer.lock_until(std::chrono::steady_clock::now() + lock_timeout_probe),
+                  vinc::osal::ErrorCode::Timeout, "deadline ignored");
             std::stop_source stop;
             auto waiter = std::async(std::launch::async, [&] {
                 return peer.lock_until(soon(), stop.get_token());
             });
-            check(waiter.wait_for(20ms) == std::future_status::timeout, "wait did not block");
-            fails(peer.try_lock(), ErrorCode::Busy, "pending acquisition did not reserve handle");
+            check(waiter.wait_for(blocked_wait_probe) == std::future_status::timeout, "wait did not block");
+            fails(peer.try_lock(), vinc::osal::ErrorCode::Busy, "pending acquisition did not reserve handle");
             stop.request_stop();
-            check(waiter.wait_for(2s) == std::future_status::ready, "cancel did not wake");
-            fails(waiter.get(), ErrorCode::Cancelled, "cancellation result");
-            fails(peer.try_lock(), ErrorCode::WouldBlock, "cancel stole lock or leaked reservation");
+            check(waiter.wait_for(cancellation_wait_timeout) == std::future_status::ready,
+                  "cancel did not wake");
+            fails(waiter.get(), vinc::osal::ErrorCode::Cancelled, "cancellation result");
+            fails(peer.try_lock(), vinc::osal::ErrorCode::WouldBlock,
+                  "cancel stole lock or leaked reservation");
             // A FileLockGuard is intentionally transferable across threads.
             auto handoff = std::async(std::launch::async, [g = std::move(guard)]() mutable {
                 return g.unlock();
@@ -206,7 +217,7 @@ int application(const std::vector<std::string>& args) {
         {
             auto guard = take(peer.try_lock());
             peer.close();
-            fails(file.try_lock(), ErrorCode::WouldBlock, "guard failed to retain closed handle");
+            fails(file.try_lock(), vinc::osal::ErrorCode::WouldBlock, "guard failed to retain closed handle");
             auto handoff = std::async(std::launch::async, [g = std::move(guard)]() mutable {
                 auto local = std::move(g);
             });
@@ -219,11 +230,12 @@ int application(const std::vector<std::string>& args) {
 
             auto acquired = take(file.try_lock());
         }
-        fails(file.lock_until(std::chrono::steady_clock::now()), ErrorCode::Timeout,
+        fails(file.lock_until(std::chrono::steady_clock::now()), vinc::osal::ErrorCode::Timeout,
               "expired deadline acquired");
         std::stop_source canceled;
         canceled.request_stop();
-        fails(file.lock_until(soon(), canceled.get_token()), ErrorCode::Cancelled, "pre-canceled acquired");
+        fails(file.lock_until(soon(), canceled.get_token()), vinc::osal::ErrorCode::Cancelled,
+              "pre-canceled acquired");
         Harness h(std::filesystem::absolute(path_from(args.at(0))));
         {
             auto guard = take(file.try_lock());
@@ -232,7 +244,7 @@ int application(const std::vector<std::string>& args) {
             ok(guard.unlock());
             send(h.pipes, c.pipe.writer, std::byte{2});
             receive(h.pipes, c.pipe.reader, std::byte{3});
-            fails(file.try_lock(), ErrorCode::WouldBlock, "child guard failed to exclude parent");
+            fails(file.try_lock(), vinc::osal::ErrorCode::WouldBlock, "child guard failed to exclude parent");
             send(h.pipes, c.pipe.writer, std::byte{4});
             check(h.wait(c).value == 0, "contender failed");
         }
@@ -240,7 +252,7 @@ int application(const std::vector<std::string>& args) {
         for (const auto* mode : {"abrupt", "kill"}) {
             auto c = h.spawn(path, mode);
             receive(h.pipes, c.pipe.reader, std::byte{1});
-            fails(file.try_lock(), ErrorCode::WouldBlock, "child guard failed");
+            fails(file.try_lock(), vinc::osal::ErrorCode::WouldBlock, "child guard failed");
             if (std::string_view(mode) == "abrupt") {
                 send(h.pipes, c.pipe.writer, std::byte{2});
             } else {

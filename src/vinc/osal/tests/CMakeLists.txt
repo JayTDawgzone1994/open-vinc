@@ -1,6 +1,45 @@
 # Use helper executables to test native process, Pipe and shared-memory lifetimes.
 # CTest timeouts bound fault scenarios that would otherwise leave a hanging test run.
 
+# Link only the public OSAL target: common headers and formatter must propagate transitively.
+add_executable(osal_process_fault_tests process_fault_tests.cpp)
+target_link_libraries(osal_process_fault_tests PRIVATE vinc::osal)
+add_test(NAME osal.process_faults COMMAND osal_process_fault_tests)
+set_tests_properties(osal.process_faults PROPERTIES TIMEOUT 15)
+
+add_executable(osal_operation_error_tests operation_error_tests.cpp)
+target_link_libraries(osal_operation_error_tests PRIVATE vinc::osal)
+add_test(NAME osal.operation_error COMMAND osal_operation_error_tests)
+set_tests_properties(osal.operation_error PROPERTIES TIMEOUT 30)
+
+if(WIN32)
+    # Link-time replacement exercises the real Pipe creation/rollback path.
+    add_executable(osal_pipe_random_failure_tests pipe_random_failure_tests.cpp)
+    target_link_libraries(osal_pipe_random_failure_tests PRIVATE vinc::osal)
+    add_test(NAME osal.pipe_random_failure COMMAND osal_pipe_random_failure_tests)
+    set_tests_properties(osal.pipe_random_failure PROPERTIES TIMEOUT 15)
+else()
+    add_executable(osal_descriptor_tests descriptor_tests.cpp)
+    target_link_libraries(osal_descriptor_tests PRIVATE vinc::osal)
+    add_test(NAME osal.descriptor COMMAND osal_descriptor_tests)
+    set_tests_properties(osal.descriptor PROPERTIES TIMEOUT 45)
+endif()
+
+add_executable(osal_path_tests path_tests.cpp)
+target_link_libraries(osal_path_tests PRIVATE vinc::osal)
+add_test(NAME osal.path COMMAND osal_path_tests)
+set_tests_properties(osal.path PROPERTIES TIMEOUT 10)
+
+add_executable(osal_error_tests error_tests.cpp)
+target_link_libraries(osal_error_tests PRIVATE vinc::osal)
+add_test(NAME osal.error COMMAND osal_error_tests)
+set_tests_properties(osal.error PROPERTIES TIMEOUT 10)
+
+add_executable(osal_error_process_tests error_process_tests.cpp)
+target_link_libraries(osal_error_process_tests PRIVATE vinc::osal)
+add_test(NAME osal.error_process COMMAND osal_error_process_tests "$<TARGET_FILE:osal_error_process_tests>")
+set_tests_properties(osal.error_process PROPERTIES TIMEOUT 40)
+
 add_executable(osal_process_helper process_helper.cpp)
 target_link_libraries(osal_process_helper PRIVATE Threads::Threads)
 set_target_properties(osal_process_helper PROPERTIES

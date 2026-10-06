@@ -1,11 +1,33 @@
 # TODO
 
+## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
+
+- [ ] 定義原生 unlock 失敗後的鎖狀態、資料存取限制及清理／重試／故障政策。
+
+**狀態（2026-10-05）：使用者決定先記錄，暫不處理。** 保留 guard 與本地 occupied
+不等於已確認 native lock 仍被持有；目前是契約證據缺口，尚未重現失敗後已解鎖的情境。
+Concurrency 的原生解鎖移出簿記鎖方案一併暫緩；try_lock 內部競爭回報 WouldBlock
+已另行修正（見 [Concurrency 驗證](src/vinc/components/concurrency/README.md#驗證)），
+不代表此問題已修復。詳細分析及後續決策統一維護於
+[OSAL README 待處理事項](src/vinc/osal/README.md#待處理事項)。
+
+## OSAL：POSIX fd 建立與 spawn 的並行競爭窗口
+
+- [ ] 修復標準串流關閉時，內部 fd 建立／搬移與 spawn 繼承取樣之間的競爭。
+
+**狀態（2026-10-05）：使用者決定暫緩處理。** 已確認程式交錯路徑，尚未以受控排程
+重現或修復；既有 fd 搬移及 Windows 測試不能證明此窗口已排除。
+共用 mutex＋標準串流快照仍為未核准提案，鎖成本及宿主／第三方責任邊界尚待決策。
+後續須在 Linux、macOS 分別建置並執行受控競爭與回收測試；Windows 僅作回歸驗證。
+詳細問題、提案、待決策與驗證需求統一維護於
+[OSAL README 待處理事項](src/vinc/osal/README.md#待處理事項)。恢復工作須另行確認範圍及取得開工授權。
+
 ## Socket Shell：背景輸出期間的遠端輸入列重繪
 
 - [ ] 改善遠端輸入尚未送出時，OutputHub 背景輸出與輸入列交錯的顯示問題。
 
 **狀態：** 已確認延後處理。Socket Shell 第一版採簡單的整行輸入，不支援遠端自動完成；
-使用者接受背景輸出可能打亂輸入列顯示。Socket Shell 第一版見 [操作文件](src/vinc/stem_shell/SOCKET.md)。
+使用者接受背景輸出可能打亂輸入列顯示。Socket Shell 第一版見 [操作文件](src/vinc/shell/SOCKET.md)。
 本項重繪尚未實作，亦不構成後續動工授權。
 
 - [ ] Socket Shell 密碼登入；目前依已確認範圍免登入，後續另行設計。
@@ -38,7 +60,7 @@
 
 ### 問題與影響
 
-`src/vinc/include/base_message.hpp` 的 `BaseMessage` 將帶有 `offset` 的雙參數版本宣告為純虛擬函式，並提供單參數版本，從 `offset = 0` 開始轉呼叫雙參數版本。
+`src/vinc/components/message_storage/include/vinc/message/base_message.hpp` 的 `BaseMessage` 將帶有 `offset` 的雙參數版本宣告為純虛擬函式，並提供單參數版本，從 `offset = 0` 開始轉呼叫雙參數版本。
 
 正式模板 `src/vinc/ribosome/data/message_sample.txt` 目前只覆寫單參數版本。因此生成的訊息類別仍是抽象類別，無法直接建立物件；其他訊息以值成員包含這些類別時，也會遇到編譯問題。巢狀訊息的反序列化需要共用並更新讀取位置，必須補齊介面後才能完整驗證。
 

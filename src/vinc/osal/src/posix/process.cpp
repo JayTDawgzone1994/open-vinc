@@ -1,8 +1,9 @@
+#include <vinc/osal/detail/native_error.hpp>
 // POSIX process backend using posix_spawn and waitpid for OSAL-owned children.
 // Native readiness wakes the observer; waitpid remains the authority for the final exit result.
 
-#include "platform.hpp"
-#include "../process_pipe_native.hpp"
+#include <vinc/osal/detail/posix/platform.hpp>
+#include <vinc/osal/detail/process_pipe_native.hpp>
 
 #include <cerrno>
 #include <cstdlib>
@@ -29,58 +30,59 @@ void close_pipe_transfer(std::intptr_t handle) noexcept {
     ::close(static_cast<int>(handle));
 }
 
-Result<std::intptr_t> duplicate_pipe_transfer(std::intptr_t source) {
+vinc::Result<std::intptr_t> duplicate_pipe_transfer(std::intptr_t source) {
     const int duplicate = fcntl(static_cast<int>(source), F_DUPFD_CLOEXEC, first_pipe_source_fd);
     if (duplicate < 0) {
-        return std::unexpected(native_error(Operation::Spawn, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, errno));
     }
 
     return static_cast<std::intptr_t>(duplicate);
 }
 
-Result<std::string> read_pipe_bootstrap() {
+vinc::Result<std::string> read_pipe_bootstrap() {
     const char* value = std::getenv(pipe_bootstrap_name);
     if (!value) {
-        return std::unexpected(OsError{ErrorCode::NotFound, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     return std::string(value);
 }
 
-OsError native_error(Operation operation, int value) noexcept {
-    ErrorCode code = ErrorCode::SystemError;
+vinc::Error native_error(vinc::osal::ErrorOperation operation, int value) noexcept {
+    vinc::osal::ErrorCode code = vinc::osal::ErrorCode::SystemError;
     switch (value) {
     case ENOENT:
     case ENOTDIR:
-        code = ErrorCode::NotFound;
+        code = vinc::osal::ErrorCode::NotFound;
         break;
     case EACCES:
     case EPERM:
-        code = ErrorCode::PermissionDenied;
+        code = vinc::osal::ErrorCode::PermissionDenied;
         break;
     case ENOMEM:
     case EMFILE:
     case ENFILE:
     case EAGAIN:
-        code = ErrorCode::ResourceExhausted;
+        code = vinc::osal::ErrorCode::ResourceExhausted;
         break;
     case ENOSYS:
     case ENOTSUP:
-        code = ErrorCode::Unsupported;
+        code = vinc::osal::ErrorCode::Unsupported;
         break;
     case EINVAL:
     case E2BIG:
     case ENOEXEC:
-        code = ErrorCode::InvalidArgument;
+        code = vinc::osal::ErrorCode::InvalidArgument;
         break;
     case ECHILD:
-        code = ErrorCode::ObservationLost;
+        code = vinc::osal::ErrorCode::ObservationLost;
         break;
     default:
         break;
     }
 
-    return {code, operation, {value, std::generic_category()}};
+    return {code, operation, {detail::errno_source, value}};
 }
 
 struct ProcessImpl {
@@ -108,17 +110,18 @@ bool NativeProcess::event_driven() const noexcept {
     return impl_->monitored;
 }
 
-Result<std::unique_ptr<NativeProcess>>
+vinc::Result<std::unique_ptr<NativeProcess>>
 NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const ChildPipe* child_pipe) {
     // The embedding application must not auto-reap or independently wait for
     // OSAL-owned children. Do not replace a host's global SIGCHLD disposition.
     struct sigaction disposition{};
     if (sigaction(SIGCHLD, nullptr, &disposition) != 0) {
-        return std::unexpected(native_error(Operation::Spawn, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, errno));
     }
 
     if (disposition.sa_handler == SIG_IGN || (disposition.sa_flags & SA_NOCLDWAIT)) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
     }
 
     std::map<std::string, std::string> environment;
@@ -196,12 +199,12 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
 
     int error = posix_spawn_file_actions_init(&actions.value);
     if (error) {
-        return std::unexpected(native_error(Operation::Spawn, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
     actions.initialized = true;
     error = posix_spawnattr_init(&attributes.value);
     if (error) {
-        return std::unexpected(native_error(Operation::Spawn, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
     attributes.initialized = true;
 
@@ -213,14 +216,14 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
             error = posix_spawn_file_actions_adddup2(
                 &actions.value, static_cast<int>(child_pipe->output(static_cast<std::size_t>(fd - 1))), fd);
             if (error) {
-                return std::unexpected(native_error(Operation::Spawn, error));
+                return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
             }
             continue;
         }
         bool inherit = modes[fd] == StdioMode::Inherit;
         if (inherit && fcntl(fd, F_GETFD) == -1) {
             if (errno != EBADF) {
-                return std::unexpected(native_error(Operation::Spawn, errno));
+                return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, errno));
             }
             inherit = false; // missing standard streams explicitly become /dev/null
         }
@@ -228,7 +231,7 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
                         : posix_spawn_file_actions_addopen(&actions.value, fd, "/dev/null",
                                                            fd == 0 ? O_RDONLY : O_WRONLY, 0);
         if (error) {
-            return std::unexpected(native_error(Operation::Spawn, error));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
         }
     }
 
@@ -236,10 +239,11 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
 #if defined(VINC_OSAL_HAS_SPAWN_CHDIR)
         error = posix_spawn_file_actions_addchdir_np(&actions.value, options.working_directory->c_str());
         if (error) {
-            return std::unexpected(native_error(Operation::Spawn, error));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
         }
 #else
-        return std::unexpected(OsError{ErrorCode::Unsupported, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Unsupported, vinc::osal::ErrorOperation::Spawn});
 #endif
     }
 
@@ -249,7 +253,7 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
             error = posix_spawn_file_actions_adddup2(&actions.value, static_cast<int>(inherited[i]),
                                                      3 + static_cast<int>(i));
             if (error) {
-                return std::unexpected(native_error(Operation::Spawn, error));
+                return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
             }
         }
     }
@@ -258,7 +262,7 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
         flags |= POSIX_SPAWN_SETPGROUP;
         error = posix_spawnattr_setpgroup(&attributes.value, 0);
         if (error) {
-            return std::unexpected(native_error(Operation::Spawn, error));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
         }
     }
 #if defined(VINC_OSAL_MACOS)
@@ -269,32 +273,32 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
     error = posix_spawn_file_actions_addclosefrom_np(
         &actions.value, child_pipe ? 3 + static_cast<int>(child_pipe->inheritance().size()) : 3);
     if (error) {
-        return std::unexpected(native_error(Operation::Spawn, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
 #endif
     sigset_t mask;
     sigemptyset(&mask);
     error = posix_spawnattr_setsigmask(&attributes.value, &mask);
     if (error) {
-        return std::unexpected(native_error(Operation::Spawn, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
     sigset_t defaults;
     sigemptyset(&defaults);
     sigaddset(&defaults, SIGPIPE);
     error = posix_spawnattr_setsigdefault(&attributes.value, &defaults);
     if (error) {
-        return std::unexpected(native_error(Operation::Spawn, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
     error = posix_spawnattr_setflags(&attributes.value, flags);
     if (error) {
-        return std::unexpected(native_error(Operation::Spawn, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
 
     auto native = std::unique_ptr<NativeProcess>(new NativeProcess(std::make_unique<ProcessImpl>()));
     error = posix_spawn(&native->impl_->pid, options.executable.c_str(), &actions.value, &attributes.value,
                         argv.data(), envp.data());
     if (error) {
-        return std::unexpected(native_error(Operation::Spawn, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
     // No allocations after spawning. If event registration fails (including a
     // very fast exit on macOS), retain ownership and use waitpid/WNOHANG polling.
@@ -308,7 +312,7 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
     return native;
 }
 
-Result<std::optional<ExitStatus>> NativeProcess::poll() noexcept {
+vinc::Result<std::optional<ExitStatus>> NativeProcess::poll() noexcept {
     int status = 0;
     pid_t result;
     do {
@@ -319,7 +323,7 @@ Result<std::optional<ExitStatus>> NativeProcess::poll() noexcept {
     }
 
     if (result < 0) {
-        return std::unexpected(native_error(Operation::Observe, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Observe, errno));
     }
 
     if (WIFEXITED(status)) {
@@ -338,7 +342,7 @@ Result<std::optional<ExitStatus>> NativeProcess::poll() noexcept {
     return std::optional<ExitStatus>{};
 }
 
-Result<TerminateResult> NativeProcess::terminate() noexcept {
+vinc::Result<TerminateResult> NativeProcess::terminate() noexcept {
     return kill_process(impl_->pid, impl_->watch);
 }
 

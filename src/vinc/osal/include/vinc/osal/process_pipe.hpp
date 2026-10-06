@@ -3,6 +3,7 @@
 // Optional child-process handoff for already-created Pipe endpoints.
 // This adapter connects Process and Pipe without making either depend on module commands.
 
+#include <vinc/osal/error.hpp>
 #include <vinc/osal/process.hpp>
 #include <vinc/osal/pipe.hpp>
 #include <variant>
@@ -33,17 +34,17 @@ struct ProcessWithOutput {
 // Process exit does not imply EOF (descendants may retain writers); read until
 // EOF to retain buffered tail bytes. Closing a reader can break child writes,
 // but never explicitly terminates the process. No text/flush/order policy here.
-[[nodiscard]] Result<ProcessWithOutput> spawn_with_output(ProcessService&, PipeService&, const SpawnOptions&,
-                                                          std::span<const PipeBinding> = {});
+[[nodiscard]] vinc::Result<ProcessWithOutput>
+spawn_with_output(ProcessService&, PipeService&, const SpawnOptions&, std::span<const PipeBinding> = {});
 // Explicit ownership handoff. Endpoints must belong to pipes and have never
 // accepted I/O. Success closes the parent's handed-off ends; failure preserves
 // them. No concurrent move/destruction of binding objects or referenced ends.
 // These async endpoints do not redirect arbitrary child stdio.
-[[nodiscard]] Result<Process> spawn_with_pipes(ProcessService&, PipeService&, const SpawnOptions&,
-                                               std::span<const PipeBinding>);
+[[nodiscard]] vinc::Result<Process> spawn_with_pipes(ProcessService&, PipeService&, const SpawnOptions&,
+                                                     std::span<const PipeBinding>);
 // Consume the private manifest once during child initialization. Failure after
 // claiming native resources closes them; this is not a retryable adopt API.
-[[nodiscard]] Result<std::vector<InheritedPipe>> take_inherited_pipes(PipeService&);
+[[nodiscard]] vinc::Result<std::vector<InheritedPipe>> take_inherited_pipes(PipeService&);
 
 // Two independent one-way pipes, slots 0 (child reader) and 1 (child writer).
 struct DuplexPipe {
@@ -65,6 +66,7 @@ struct ProcessWithPipe {
     DuplexPipe pipe;
 };
 
-[[nodiscard]] Result<ProcessWithPipe> spawn_with_pipe(ProcessService&, PipeService&, const SpawnOptions&);
-[[nodiscard]] Result<DuplexPipe> take_inherited_pipe(PipeService&);
+[[nodiscard]] vinc::Result<ProcessWithPipe> spawn_with_pipe(ProcessService&, PipeService&,
+                                                            const SpawnOptions&);
+[[nodiscard]] vinc::Result<DuplexPipe> take_inherited_pipe(PipeService&);
 } // namespace vinc::osal

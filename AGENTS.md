@@ -1,12 +1,33 @@
 # Open-VINC 專案長期指引
 
-每次在本儲存庫開始工作前，先讀取本文件與 [NAMING.md](NAMING.md)。使用者最新的明確決策優先；文件更新須取得授權。區分已確認決策、提案與實作現況。
+每次在本儲存庫開始工作前，依下列清單讀取必要文件。文件更新須取得授權；區分已確認決策、提案與實作現況。
+
+## 必讀文件與分工
+
+| 文件 | 職責 | 閱讀時機 |
+| --- | --- | --- |
+| [AGENTS.md](AGENTS.md) | 工作流程、授權邊界、必讀清單、優先級與專案共通規則 | 每次開始工作前 |
+| [WORKING_STYLE.md](WORKING_STYLE.md) | 設計哲學、審美、取捨方式與對 AI 產出的要求 | 每次開始工作前 |
+| [NAMING.md](NAMING.md) | 已確認的名稱、含義與命名決策狀態 | 每次開始工作前 |
+| 當次涉及元件的 README | 元件 API、責任邊界、生命週期、錯誤與同步契約，以及驗證現況和待處理事項 | 討論、審查或修改該元件前；跨元件工作須讀取相關各方契約 |
+
+元件 README 入口見下方「元件文件索引」；若 README 指向與當次工作相關的 DESIGN、協定或專題文件，須一併閱讀。只讀 AGENTS.md 不代表已掌握元件契約。
+
+每條規則依上述分工指定一個主要維護位置；其他文件以簡短摘要及連結引用，不另行維護完整副本。更新決策時同步檢查引用摘要，避免內容分歧。跨元件共同契約保留於本文件，元件專屬的 API 與實作細節由元件文件維護。
+
+## 專案文件優先級
+
+- 使用者最新的明確決策優先於既有專案文件；文件中的提案、候選方案與待辦不視為已核准決策。
+- 工作流程與授權依 AGENTS.md；設計取捨依 WORKING_STYLE.md；名稱依 NAMING.md；元件行為依其已確認契約。明確契約優先於一般設計偏好，不因偏好而自行改變既有行為。
+- 文件之間有實質衝突且無法由使用者最新決策判定時，指出衝突並確認後再修改受影響部分；不自行猜測哪份較新或以目前實作反推契約。
+- 文件內容不構成當次實作授權；仍須遵守下列「開工／動工」規則。
 
 ## 合作規則：先討論，明確「開工」或「動工」才改程式
 
 - **預設只討論與唯讀檢查。** 修改程式碼、建置設定、測試或其他實作檔案前，必須確認當次範圍，並收到使用者明確說「開工」或「動工」。直接提出新增或修改需求，本身不構成開工授權。
 - 「你覺得呢」、「怎麼改」、「可以嗎」、同意方向、引用授權詞或說「先不要開工／動工」均不構成授權；沉默也不視為同意。
 - 授權在當次已確認工作範圍內持續有效，不必逐步重問；遇到範圍不明或需要擴大範圍，先詢問。完成後不得將授權延伸到下一件工作，也不順便刪除或重構無關功能。
+- 已授權範圍內的局部 helper 可簡述用途後實作，不必逐一重問；涉及尚未確認的責任邊界、相依或生命週期取捨時，先討論取得共識。
 - 使用者明確要求撰寫或更新記憶、規格等文件時，可完成該文件工作；這不授權修改實作。
 - **架構品質優先。** 發現使用者或助手的假設、推理、設計有明顯錯誤或重大衝突，須直接且尊重地指出，說明證據、影響及替代方案，區分錯誤、疑慮與設計取捨。
 - 即使已獲開工授權，新發現的重大架構問題仍須暫停受影響部分，取得明確共識後再實作；必要的唯讀調查可繼續。
@@ -20,27 +41,40 @@ Open-VINC 是可在不同專案與作業系統重複使用的通用軟體框架�
 
 - 採用 **C++23**；CMake 要求標準等級 23、禁止降級、關閉語言擴充。最低 CMake 宣告為 **3.20**；工具鏈若需要更高版本，依驗證結果調整並同步文件。
 - 主要目標平台為 Windows、macOS、Linux。Linux 最低目標 **Ubuntu 22.04**，允許安裝較新工具鏈，不以預設 GCC 11 作為 C++23 支援基準。確切編譯器／標準庫最低版本及 Windows／macOS 最低 OS 仍待驗證確認。
-- **OSAL 保持通用且可獨立使用**，封裝標準函式庫未滿足的 OS 能力，不依賴 Module、Bus 或 Shell，也不為外觀一致而重包所有 API。框架的跨程序 mutex 由同步層使用 OSAL FileLock 實作。
+- **OSAL 保持通用且可獨立使用**，封裝標準函式庫未滿足的 OS 能力；允許依賴只使用標準函式庫的 `common`，搬移或獨立建置時一併提供。OSAL 不依賴 Module、Message Bus 或 Shell，也不為外觀一致而重包所有 API。框架的跨程序 mutex 由同步層使用 OSAL FileLock 實作。
 - **Module 以獨立程序執行**，使用 OSAL 管理生命週期；中央與 Module 共用 Socket 控制通道及雙向 heartbeat。失聯與退出依模組政策處理；heartbeat 不代表所有應用功能正常。
-- **控制與資料分工：** Socket 承載命令、生命週期及 Bus 註冊／拓樸等控制資訊；Bus 的訊息資料使用共享記憶體。每個 Publisher 管理自己的 Ring，同一 topic 可有多個 Publisher。
+- **控制與資料分工：** Socket 承載命令、生命週期及 Message Bus 註冊／拓樸等控制資訊；Message Bus 的訊息資料使用共享記憶體。每個 Publisher 管理自己的 RingBuffer，同一 topic 可有多個 Publisher。
 - 共享訊息布局須可跨程序映射，不依賴程序本地 pointer。既有布局與協定已有實作，但不因此承諾跨版本、編譯器或架構的穩定 ABI；同步、權限及故障回收仍需依用途驗證。
 
 ## 統一錯誤回傳
 
-- 可回報失敗的框架 C++ API 使用 `template<class T> using Result = std::expected<T, Error>;`。成功回傳 `T`，無結果資料使用 `Result<void>`，失敗回傳 `std::unexpected(Error{...})`；不會失敗的 getter 不必包成 Result。
-- 使用 `vinc::Error` 與底層型別為 `std::int32_t` 的 `vinc::ErrorCode`，集中維護錯誤碼及文字對照；成功由 Result 的 value 狀態表示。新框架 API 不另造錯誤型別或用裸 `int`、`bool`、特殊 ID 代替錯誤；既有介面及外部協定另依授權範圍轉接。
+- **先分類失敗，再選擇回報方式：** 可預期、可恢復的執行期失敗使用 Result；違反已明定前置條件的 programmer error，不作為可恢復錯誤回傳。需要攔截時，使用 `vinc::contract_violation()` 終止當前程序，不新增 framework exception。外部輸入與資源不足仍須依 API 契約驗證、回報，不可任意歸類為契約違反。
+- 具有上述可恢復失敗的框架 C++ API 使用 `template<class T> using Result = std::expected<T, Error>;`。成功回傳 `T`，無結果資料使用 `Result<void>`，失敗回傳 `std::unexpected(Error{...})`；不會失敗的 getter 不必包成 Result。
+- 使用 `vinc::Error`；common 集中維護 `ErrorDomain` 與共用契約，各元件以 C++ 維護底層為 `std::int32_t` 的錯誤／操作 enum 與靜態文字表。代碼身分為 domain＋code，明確指定編號且不依建置順序、不重用已發布編號；成功由 Result 的 value 狀態表示。新框架 API 不另造錯誤 payload 或用裸 `int`、`bool`、特殊 ID 代替錯誤；既有介面及外部協定依授權範圍轉接。
+- 跨元件失敗先由本層判斷能否復原；無法復原時使用 `wrap_error()` 轉成本層的錯誤碼與操作，保留下層原因及原生診斷，不把下層分類直接當成自己的公開契約。原因鏈使用固定容量，滿載時保留目前層與最底層原因，剩餘容量優先保留最近原因，並標記中間省略；直接傳遞既有 Error 不增加層數。既有元件依授權逐步遷移。程式判斷只比對目前層，使用包含 domain 的型別安全比對，不只比較裸數字。
 - 文字查詢只有 `std::string vinc::error_to_string(const Error& error)`，不需 `<T>` 或另設整數查詢 API。程式判斷使用錯誤碼，文字供診斷顯示；未知代碼須保留數值。
 - 預期失敗透過 Result 傳遞，不以 `throw`／`catch` 作為一般控制流程。先檢查結果再存取值或 `.error()`，不依賴 `.value()` 拋例外處理失敗。
-- Result 不消除標準函式庫或第三方例外；不可一律加上 `noexcept`。`error_to_string()` 可能配置記憶體，不標記 `noexcept`。第三方例外、配置失敗的邊界處理及停用編譯器例外仍須另行確認，不自行全面增刪 catch。
-- 介面位於 `src/vinc/common/`，target 為 `vinc::common`，只依賴標準函式庫。OSAL 維持獨立；上層轉接須保留必要的原生診斷資訊。規則不代表既有元件已遷移，現況見 [common README](src/vinc/common/README.md)。
+- Result 不消除標準函式庫、配置器、第三方 library 或使用者自訂型別的例外；不可一律加上 `noexcept`。`error_to_string()` 可能配置記憶體，不標記 `noexcept`。這些例外及配置失敗的邊界處理、停用編譯器例外仍須另行確認，未獲授權時維持既有政策，不自行全面增刪 catch。
+- 介面位於 `src/vinc/common/`，`vinc::common` 只依賴標準函式庫。`Error` 及其原因紀錄保存 domain、code、operation 與原生來源／數值，不保存程序本地 pointer 或 `std::error_code` category 身分；原因鏈的複製與包裝不配置記憶體。跨程序須明確編碼欄位、筆數及省略狀態並驗證協定，不直接傳送 C++ 物件布局；未知代碼保留數值，外來原生來源不冒充成本機分類。
+- 元件以 C++ 定義錯誤表，建置時整合成每個最終程式的一份靜態 catalog，不使用執行期註冊。錯誤表與元件 runtime 分離，common 不反向依賴元件或查詢整合層。CMake 接線、target 與遷移現況見 [common README](src/vinc/common/README.md)。
+
+## 運算子與訊息容器契約
+
+- **運算子維持可理解的 C++ 語意：** `operator=` 不回傳 Result。操作若可能因容量等正常條件失敗，提供 `assign()`／`copy_from()` 等具名 Result 介面；是否保留運算子依型別契約決定，不一概套用。
+- **MessageArray 存取契約：** `[]` 為 contract-based access，呼叫端保證索引合法，不因首次存取配置資源或深複製；巢狀元素可回傳輕量 proxy，不為保留 `auto&` 引入 wrapper cache。`at()` 提供 checked access 與獨立副本，`set()`／`assign()` 回傳 Result。純量元素賦值保留，整筆 copy／move assignment 禁用。
+- **Proxy 語意必須明確：** 複製 proxy 保持借用關係，唯讀權限不可因複製而提升；明確記錄其失效條件。詳細 API、生命週期與驗證結果見 [Message Storage README](src/vinc/components/message_storage/README.md)。
 
 ## 暫時的系統設定位置
 
 `src/vinc/common/include/vinc/config.hpp`（`vinc::config`）暫時集中系統設定，未來交由 Param 管理。依當次授權逐步加入或移入設定；現況見 [common README](src/vinc/common/README.md)。
 
+影響型別布局的設定維持編譯期常數，不交給執行期 Param。變更後所有相連的 C++ 元件與使用者程式須使用同一值並重新建置；各設定的預設值、限制與用途由所屬元件 README 維護。
+
 ## 共用工具的目錄分類
 
 `src/vinc/components/` 放置供其他框架元件使用的工具與基礎設施，各工具保留獨立建置 target，生命週期由使用它的元件管理。`concurrency` 放並行控制工具，目前提供跨程序互斥鎖；可依賴 OSAL。`common` 維持只依賴標準函式庫的基礎型別與契約，不混入需要 OSAL 的工具。
+
+`message_storage` 亦歸入 components，提供訊息儲存與容器。此分類不代表 API 皆為私有；正式 API 與 detail 邊界由各元件契約決定，分類入口見 [Components README](src/vinc/components/README.md)。
 
 ## 元件相依與介面邊界
 
@@ -49,6 +83,12 @@ Open-VINC 是可在不同專案與作業系統重複使用的通用軟體框架�
 1. **透過 target 宣告相依：** 元件透過 CMake target 宣告相依，由所屬 target 提供標頭路徑與使用需求，不直接把其他元件的 `src` 加進 include 路徑。
 2. **依契約使用介面：** 一般使用者依賴正式 API；框架元件需要接線時，只使用對方指定的 `detail` 介面，不任意操作其內部結構。標頭可見不代表其中所有內容都是可依賴的介面。
 3. **目錄與 target 不必一對一：** 同一元件可依責任提供多個 target，例如 Module 的子程序 Runtime 與中央 Manager；檔案仍由同一元件維護。
+
+## 元件目錄與 SDK 入口
+
+- 採 component-oriented layout；元件自己維護標頭、實作、測試、CMake 與文件。正式 `.hpp` 放 `include/`，`.cpp` 放 `src/`；內部標頭放 `include/.../detail/`，不另設 public/private/integration 目錄。測試專用 helper 留在 tests，生成標頭留在建置目錄。
+- 對外便利入口為 `<vinc/vinc.hpp>` 與 `vinc::sdk`，仍可使用個別元件 API／target。整合入口不加入內部 detail 或使用者生成訊息；模板必要的 detail 由所屬標頭引用。
+- 具體目錄、target 與指定接線契約見 [SDK README](src/vinc/sdk/README.md)。Context／pump 的模式、派送與生命週期依 Module System README；一般 Module 服務經繼承的 Context 使用。
 
 ## 程式碼可讀性
 
@@ -70,7 +110,7 @@ Open-VINC 是可在不同專案與作業系統重複使用的通用軟體框架�
 - **契約與邊界：** 先定義行為、責任、所有權、生命週期、並行／阻塞與失敗語意，再定公開介面。跨程序協定須定義版本、資料邊界、排序、交付、逾時與重試語意；重要取捨留下紀錄。
 - **用實際用途驗證抽象：** 通用核心與應用邏輯分離，先完成最小完整流程，再以不同應用檢驗。控制相依、體積、CPU 與記憶體成本；不預堆功能、不為新技術增加無證據的複雜度，也不留下未說明的長期限制。
 - **容量與等待：** 佇列、緩衝區、訊息及待處理請求須有合理上限，明確定義滿載行為。等待須定義逾時、取消或經確認的無限等待政策；無限等待須說明阻塞條件、診斷與故障回收，不自行改成逾時失敗。
-- **Bus 的已確認等待政策：** Writer 等待受保護的 Reader 複製完成時允許無限等待，記錄碰撞次數與等待時間。Heartbeat timeout 不足以安全清除占用；須確認讀者已釋放，或其所屬程序已退出，才能依協定回收。細節見 [Bus 設計](src/vinc/bus/DESIGN.md)。
+- **Message Bus 的已確認等待政策：** Writer 等待受保護的 Reader 複製完成時允許無限等待，記錄碰撞次數與等待時間。Heartbeat timeout 不足以安全清除占用；須確認讀者已釋放，或其所屬程序已退出，才能依協定回收。細節見 [Message Bus 設計](src/vinc/message_bus/DESIGN.md)。
 - **故障隔離與診斷：** 特別審查共享記憶體、ABI、同步與復原；程序存活不等於功能正常。定義失聯後的相依行為、過期資料、重啟上限與舊資源／請求失效。保留模組身分、操作、退出原因及 OS 錯誤；日誌成本須可控，避免阻塞重要流程或洩漏憑證。
 - **建置與驗證：** 記錄 OS、CPU、編譯器、標準庫及相依版本，保留生成檔重建方法，逐步建立三平台 CI。程序／通訊驗證須含啟動失敗、異常退出、無回應、逾時、重複啟停及回收；故障測試有時間上限與子程序清理。平台支援須有實機建置及行為證據，Linux 部署另驗 glibc／libstdc++ 相容性；未執行的檢查明確標註。
 - **效能與相容性：** 效能主張保留環境和負載，依用途量測吞吐量、尾端延遲、閒置成本、記憶體、啟停及過載。區分 API、ABI 與協定相容性；破壞性變更提供版本辨識、拒絕或遷移方式。不把效能、程序隔離、安全沙箱與硬即時混為一談；硬即時支援範圍尚未定案。
@@ -81,12 +121,13 @@ Open-VINC 是可在不同專案與作業系統重複使用的通用軟體框架�
 
 - [名稱與含義](NAMING.md)：ModuleType、Module、MID、Context／pump 與鎖的命名及決策狀態。
 - [OSAL](src/vinc/osal/README.md)、[Components](src/vinc/components/README.md)、[Concurrency](src/vinc/components/concurrency/README.md)：OS 能力、共用工具與跨程序 mutex。
-- [Module](src/vinc/module/README.md)、[控制通道](src/vinc/control_channel/README.md)：啟停、heartbeat、停止／重啟政策與控制協定。
-- [Bus](src/vinc/bus/README.md)、[Bus 設計](src/vinc/bus/DESIGN.md)：共享記憶體交換、排序、占用與回收。
-- [訊息儲存](src/vinc/message_storage/README.md)、[Ribosome](src/vinc/ribosome/README.md)：訊息布局、容器與產生器。
-- [Shell](src/vinc/stem_shell/README.md)、[Socket Shell](src/vinc/stem_shell/SOCKET.md)、[OutputHub](src/vinc/output/README.md)：腳本、遠端操作與輸出管理。
+- [Module System](src/vinc/module_system/README.md)、[控制通道](src/vinc/control_channel/README.md)：啟停、heartbeat、停止／重啟政策與控制協定。
+- [Message Bus](src/vinc/message_bus/README.md)、[Message Bus 設計](src/vinc/message_bus/DESIGN.md)：共享記憶體交換、排序、占用與回收。
+- [訊息儲存](src/vinc/components/message_storage/README.md)、[Ribosome](src/vinc/ribosome/README.md)：訊息布局、容器與產生器。
+- [Shell](src/vinc/shell/README.md)、[Socket Shell](src/vinc/shell/SOCKET.md)、[OutputHub](src/vinc/output_hub/README.md)：腳本、遠端操作與輸出管理。
+- [SDK 與元件目錄](src/vinc/sdk/README.md)：整合入口、target 與框架接線契約。
 - [Common](src/vinc/common/README.md)：錯誤介面與暫時設定標頭的實作現況。
 
 ## 過時內容提醒
 
-- 發現 `AGENTS.md` 的內容過時、與已確認決策或實作現況不符時，須主動向使用者指出具體條目、依據及建議修正方式；取得文件更新授權後再修改。
+- 發現 `AGENTS.md`、`WORKING_STYLE.md`、`NAMING.md` 或相關元件文件過時、互相矛盾，或與已確認決策／實作現況不符時，須主動指出具體條目、依據與建議修正。依本文件的文件更新授權規則處理；不自行以實作取代已確認契約。未解決疑慮的 README 留存依上方既有規則辦理。

@@ -1,7 +1,9 @@
+#include <vinc/osal/detail/native_error.hpp>
 // Common Pipe scheduler: accept owned buffers, advance native I/O, then return completions.
 // Endpoint close requests cancellation; native completion determines when storage is safe to free.
 
-#include "pipe_state.hpp"
+#include <vinc/time.hpp>
+#include <vinc/osal/detail/pipe_state.hpp>
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -16,12 +18,12 @@ namespace {
 constexpr auto monitor_failure_retry_interval = std::chrono::milliseconds(50);
 }
 
-Result<std::uint64_t> pipe_identity(Operation operation) noexcept {
+vinc::Result<std::uint64_t> pipe_identity(vinc::osal::ErrorOperation operation) noexcept {
     static std::atomic<std::uint64_t> sequence{1};
     auto value = sequence.load(std::memory_order_relaxed);
     do {
         if (value == std::numeric_limits<std::uint64_t>::max()) {
-            return std::unexpected(OsError{ErrorCode::ResourceExhausted, operation});
+            return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ResourceExhausted, operation});
         }
     } while (!sequence.compare_exchange_weak(value, value + 1, std::memory_order_relaxed));
     return value;
@@ -79,7 +81,7 @@ void pipe_worker(const std::shared_ptr<PipeState>& state) noexcept {
         {
             std::lock_guard lock(state->mutex);
             const auto now = std::chrono::steady_clock::now();
-            Deadline next = Deadline::max();
+            vinc::Deadline next = vinc::Deadline::max();
             bool pending = false;
             for (auto& entry : state->operations) {
                 auto& operation = *entry;
@@ -166,7 +168,7 @@ void pipe_worker(const std::shared_ptr<PipeState>& state) noexcept {
                 return;
             }
 
-            if (next != Deadline::max()) {
+            if (next != vinc::Deadline::max()) {
                 const auto remaining =
                     std::chrono::ceil<std::chrono::milliseconds>(next - std::chrono::steady_clock::now())
                         .count();
@@ -193,25 +195,28 @@ void pipe_worker(const std::shared_ptr<PipeState>& state) noexcept {
     }
 }
 
-Result<std::vector<std::shared_ptr<PipeRecord>>> PipeAccess::reserve(PipeService& service,
-                                                                     std::size_t count) {
+vinc::Result<std::vector<std::shared_ptr<PipeRecord>>> PipeAccess::reserve(PipeService& service,
+                                                                           std::size_t count) {
     if (!service.state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::CreatePipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::CreatePipe});
     }
 
     std::lock_guard lock(service.state_->mutex);
     if (!service.state_->accepting) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::CreatePipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::CreatePipe});
     }
 
     if (count > service.state_->options.max_endpoints - service.state_->pipes.size()) {
-        return std::unexpected(OsError{ErrorCode::ResourceExhausted, Operation::CreatePipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ResourceExhausted, vinc::osal::ErrorOperation::CreatePipe});
     }
 
     std::vector<std::shared_ptr<PipeRecord>> records;
     records.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
-        auto id = pipe_identity(Operation::CreatePipe);
+        auto id = pipe_identity(vinc::osal::ErrorOperation::CreatePipe);
         if (!id) {
             return std::unexpected(id.error());
         }
@@ -331,11 +336,12 @@ void PipeService::close() noexcept {
     detail::request_shutdown(state_, true);
 }
 
-Result<PipeService> PipeService::create(PipeServiceOptions options) {
+vinc::Result<PipeService> PipeService::create(PipeServiceOptions options) {
     if (!options.max_endpoints || !options.max_operations || !options.max_buffered_bytes ||
         !options.max_transfer_bytes ||
         options.max_transfer_bytes > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::InitializeService});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument,
+                                           vinc::osal::ErrorOperation::InitializeService});
     }
 
     auto monitor = detail::PipeMonitor::create();
@@ -354,14 +360,15 @@ Result<PipeService> PipeService::create(PipeServiceOptions options) {
             detail::pipe_worker(state);
         });
     } catch (const std::system_error& error) {
-        return std::unexpected(
-            OsError{ErrorCode::ResourceExhausted, Operation::InitializeService, error.code()});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ResourceExhausted,
+                                           vinc::osal::ErrorOperation::InitializeService,
+                                           detail::native_error(error.code())});
     }
 
     return PipeService(std::move(state), std::move(worker));
 }
 
-Result<Pipe> PipeService::create_pipe() {
+vinc::Result<Pipe> PipeService::create_pipe() {
     auto records = detail::PipeAccess::reserve(*this, 2);
     if (!records) {
         return std::unexpected(records.error());
@@ -386,43 +393,45 @@ Result<Pipe> PipeService::create_pipe() {
 
 // Admission checks precede ownership transfer: rejection leaves the caller buffer intact.
 // An uncollected completion still occupies this endpoint and its resource credits.
-Result<IoId> PipeService::submit(detail::PipeEnd& pipe, IoBuffer&& buffer, Deadline deadline, IoKind kind) {
-    const auto operation_code = kind == IoKind::Read ? Operation::ReadPipe : Operation::WritePipe;
+vinc::Result<IoId> PipeService::submit(detail::PipeEnd& pipe, IoBuffer&& buffer, vinc::Deadline deadline,
+                                       IoKind kind) {
+    const auto operation_code =
+        kind == IoKind::Read ? vinc::osal::ErrorOperation::ReadPipe : vinc::osal::ErrorOperation::WritePipe;
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, operation_code});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ServiceClosed, operation_code});
     }
 
     if (!pipe.record_ || pipe.state_ != state_ || buffer.size() == 0 ||
         buffer.size() > state_->options.max_transfer_bytes) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, operation_code});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument, operation_code});
     }
 
     std::lock_guard lock(state_->mutex);
     if (!state_->accepting) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, operation_code});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ServiceClosed, operation_code});
     }
 
     if (pipe.record_->direction != kind) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, operation_code});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument, operation_code});
     }
 
     if (pipe.record_->transferring) {
-        return std::unexpected(OsError{ErrorCode::Busy, operation_code});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::Busy, operation_code});
     }
 
     if (pipe.record_->closing) {
-        return std::unexpected(OsError{ErrorCode::Closed, operation_code});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::Closed, operation_code});
     }
 
     for (const auto& operation : state_->operations) {
         if (operation->pipe == pipe.record_ && operation->kind == kind) {
-            return std::unexpected(OsError{ErrorCode::Busy, operation_code});
+            return std::unexpected(vinc::Error{vinc::osal::ErrorCode::Busy, operation_code});
         }
     }
 
     if (state_->operations.size() == state_->options.max_operations ||
         buffer.capacity() > state_->options.max_buffered_bytes - state_->buffered_bytes) {
-        return std::unexpected(OsError{ErrorCode::ResourceExhausted, operation_code});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::ResourceExhausted, operation_code});
     }
 
     auto id = detail::pipe_identity(operation_code);
@@ -447,17 +456,18 @@ Result<IoId> PipeService::submit(detail::PipeEnd& pipe, IoBuffer&& buffer, Deadl
     return IoId{*id};
 }
 
-Result<IoId> PipeService::submit_read(PipeReader& pipe, IoBuffer&& buffer, Deadline deadline) {
+vinc::Result<IoId> PipeService::submit_read(PipeReader& pipe, IoBuffer&& buffer, vinc::Deadline deadline) {
     return submit(pipe.end_, std::move(buffer), deadline, IoKind::Read);
 }
 
-Result<IoId> PipeService::submit_write(PipeWriter& pipe, IoBuffer&& buffer, Deadline deadline) {
+vinc::Result<IoId> PipeService::submit_write(PipeWriter& pipe, IoBuffer&& buffer, vinc::Deadline deadline) {
     return submit(pipe.end_, std::move(buffer), deadline, IoKind::Write);
 }
 
-Result<CancelResult> PipeService::cancel(IoId id) {
+vinc::Result<CancelResult> PipeService::cancel(IoId id) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::CancelIo});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::CancelIo});
     }
 
     std::lock_guard lock(state_->mutex);
@@ -475,17 +485,20 @@ Result<CancelResult> PipeService::cancel(IoId id) {
         }
     }
 
-    return std::unexpected(OsError{ErrorCode::NotFound, Operation::CancelIo});
+    return std::unexpected(
+        vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::CancelIo});
 }
 
-Result<std::size_t> PipeService::wait_completions(std::span<IoCompletion> output, Deadline deadline,
-                                                  std::stop_token token) {
+vinc::Result<std::size_t> PipeService::wait_completions(std::span<IoCompletion> output,
+                                                        vinc::Deadline deadline, std::stop_token token) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::WaitIo});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::WaitIo});
     }
 
     if (output.empty()) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::WaitIo});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::WaitIo});
     }
 
     std::unique_lock lock(state_->mutex);
@@ -496,8 +509,9 @@ Result<std::size_t> PipeService::wait_completions(std::span<IoCompletion> output
                });
     };
     if (!state_->changed.wait_until(lock, token, deadline, ready)) {
-        return std::unexpected(
-            OsError{token.stop_requested() ? ErrorCode::Cancelled : ErrorCode::Timeout, Operation::WaitIo});
+        return std::unexpected(vinc::Error{token.stop_requested() ? vinc::osal::ErrorCode::Cancelled
+                                                                  : vinc::osal::ErrorCode::Timeout,
+                                           vinc::osal::ErrorOperation::WaitIo});
     }
 
     std::size_t count = 0;
@@ -519,23 +533,26 @@ Result<std::size_t> PipeService::wait_completions(std::span<IoCompletion> output
     }
 
     if (count == 0) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::WaitIo});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::WaitIo});
     }
 
     return count;
 }
 
-Result<void> PipeService::shutdown_until(Deadline deadline, std::stop_token token) {
+vinc::Result<void> PipeService::shutdown_until(vinc::Deadline deadline, std::stop_token token) {
     if (!state_) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Shutdown});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Shutdown});
     }
     detail::request_shutdown(state_, false);
     std::unique_lock lock(state_->mutex);
     if (!state_->changed.wait_until(lock, token, deadline, [&] {
             return state_->worker_done;
         })) {
-        return std::unexpected(
-            OsError{token.stop_requested() ? ErrorCode::Cancelled : ErrorCode::Timeout, Operation::Shutdown});
+        return std::unexpected(vinc::Error{token.stop_requested() ? vinc::osal::ErrorCode::Cancelled
+                                                                  : vinc::osal::ErrorCode::Timeout,
+                                           vinc::osal::ErrorOperation::Shutdown});
     }
 
     auto error = state_->monitor_error;
@@ -554,7 +571,7 @@ Result<void> PipeService::shutdown_until(Deadline deadline, std::stop_token toke
     return {};
 }
 
-std::optional<OsError> PipeService::monitor_error() const {
+std::optional<vinc::Error> PipeService::monitor_error() const {
     if (!state_) {
         return std::nullopt;
     }

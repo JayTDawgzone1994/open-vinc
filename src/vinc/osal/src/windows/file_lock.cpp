@@ -1,6 +1,7 @@
+#include <vinc/osal/detail/native_error.hpp>
 // One-byte kernel lock: OS cleans it up after process exit. Handles are private
 // and non-inheritable; omitting FILE_SHARE_DELETE prevents live path replacement.
-#include "../file_lock_state.hpp"
+#include <vinc/osal/detail/file_lock_state.hpp>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -9,41 +10,41 @@
 
 namespace vinc::osal::detail {
 namespace {
-OsError error(Operation operation, DWORD value = GetLastError()) {
-    auto code = ErrorCode::SystemError;
+vinc::Error error(vinc::osal::ErrorOperation operation, DWORD value = GetLastError()) {
+    auto code = vinc::osal::ErrorCode::SystemError;
     switch (value) {
     case ERROR_FILE_EXISTS:
     case ERROR_ALREADY_EXISTS:
-        code = ErrorCode::AlreadyExists;
+        code = vinc::osal::ErrorCode::AlreadyExists;
         break;
     case ERROR_FILE_NOT_FOUND:
     case ERROR_PATH_NOT_FOUND:
-        code = ErrorCode::NotFound;
+        code = vinc::osal::ErrorCode::NotFound;
         break;
     case ERROR_ACCESS_DENIED:
-        code = ErrorCode::PermissionDenied;
+        code = vinc::osal::ErrorCode::PermissionDenied;
         break;
     case ERROR_LOCK_VIOLATION:
     case ERROR_SHARING_VIOLATION:
-        code = ErrorCode::WouldBlock;
+        code = vinc::osal::ErrorCode::WouldBlock;
         break;
     case ERROR_NOT_ENOUGH_MEMORY:
     case ERROR_OUTOFMEMORY:
     case ERROR_TOO_MANY_OPEN_FILES:
     case ERROR_DISK_FULL:
-        code = ErrorCode::ResourceExhausted;
+        code = vinc::osal::ErrorCode::ResourceExhausted;
         break;
     case ERROR_INVALID_PARAMETER:
     case ERROR_INVALID_NAME:
     case ERROR_FILENAME_EXCED_RANGE:
-        code = ErrorCode::InvalidArgument;
+        code = vinc::osal::ErrorCode::InvalidArgument;
         break;
     case ERROR_NOT_SUPPORTED:
-        code = ErrorCode::Unsupported;
+        code = vinc::osal::ErrorCode::Unsupported;
         break;
     }
 
-    return {code, operation, std::error_code(static_cast<int>(value), std::system_category())};
+    return {code, operation, vinc::NativeError{vinc::NativeErrorSource::Win32, value}};
 }
 
 struct Handle {
@@ -69,12 +70,15 @@ struct Local {
 
 FileLockState::~FileLockState() {
     if (handle != -1) {
+        // Windows HANDLE is an opaque pointer-sized token. intptr_t preserves
+        // its value for this native boundary; no pointed-to object is accessed.
         (void)CloseHandle(reinterpret_cast<HANDLE>(handle));
     }
 }
 
-Result<void> open_file_lock(FileLockState& state, const std::filesystem::path& path, bool create) {
-    const auto operation = create ? Operation::CreateFileLock : Operation::OpenFileLock;
+vinc::Result<void> open_file_lock(FileLockState& state, const std::filesystem::path& path, bool create) {
+    const auto operation =
+        create ? vinc::osal::ErrorOperation::CreateFileLock : vinc::osal::ErrorOperation::OpenFileLock;
     Local descriptor;
     if (create) {
         Handle token;
@@ -92,6 +96,9 @@ Result<void> open_file_lock(FileLockState& state, const std::filesystem::path& p
             return std::unexpected(error(operation));
         }
         LPWSTR sid = nullptr;
+        // GetTokenInformation filled a buffer sized by its length query. The
+        // default allocator meets TOKEN_USER alignment on Windows; its embedded
+        // SID points into this live buffer and is consumed before it is freed.
         if (!ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(bytes.data())->User.Sid, &sid)) {
             return std::unexpected(error(operation));
         }
@@ -119,28 +126,34 @@ Result<void> open_file_lock(FileLockState& state, const std::filesystem::path& p
     if (GetFileType(handle) != FILE_TYPE_DISK ||
         (info.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
         CloseHandle(handle);
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, operation});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument, operation});
     }
+    // Windows HANDLE is an opaque pointer-sized token. intptr_t preserves
+    // its value for this native boundary; no pointed-to object is accessed.
     state.handle = reinterpret_cast<std::intptr_t>(handle);
     return {};
 }
 
-Result<void> try_lock_file_lock(FileLockState& state) {
+vinc::Result<void> try_lock_file_lock(FileLockState& state) {
     OVERLAPPED range{};
+    // Windows HANDLE is an opaque pointer-sized token. intptr_t preserves
+    // its value for this native boundary; no pointed-to object is accessed.
     if (LockFileEx(reinterpret_cast<HANDLE>(state.handle),
                    LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &range)) {
         return {};
     }
 
-    return std::unexpected(error(Operation::LockFileLock));
+    return std::unexpected(error(vinc::osal::ErrorOperation::LockFileLock));
 }
 
-Result<void> unlock_file_lock(FileLockState& state) {
+vinc::Result<void> unlock_file_lock(FileLockState& state) {
     OVERLAPPED range{};
+    // Windows HANDLE is an opaque pointer-sized token. intptr_t preserves
+    // its value for this native boundary; no pointed-to object is accessed.
     if (UnlockFileEx(reinterpret_cast<HANDLE>(state.handle), 0, 1, 0, &range)) {
         return {};
     }
 
-    return std::unexpected(error(Operation::UnlockFileLock));
+    return std::unexpected(error(vinc::osal::ErrorOperation::UnlockFileLock));
 }
 } // namespace vinc::osal::detail

@@ -3,6 +3,7 @@
 // Translate console events or redirected bytes into portable Shell input events.
 // Terminal owns temporary OS settings; Shell decides what cancel, interrupt and EOF mean.
 
+#include <vinc/time.hpp>
 #include <vinc/osal/error.hpp>
 #include <memory>
 #include <string>
@@ -32,11 +33,11 @@ struct TerminalEvent {
 // Raw console settings are restored by destruction. Redirected input is also supported.
 class Terminal {
 public:
-    static Result<std::unique_ptr<Terminal>> open();
+    static vinc::Result<std::unique_ptr<Terminal>> open();
     ~Terminal();
     Terminal(const Terminal&) = delete;
     Terminal& operator=(const Terminal&) = delete;
-    Result<TerminalEvent> read_until(Deadline);
+    vinc::Result<TerminalEvent> read_until(vinc::Deadline);
     bool interactive() const noexcept;
     bool ansi_output() const noexcept;
     std::size_t columns() const noexcept;

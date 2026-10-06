@@ -1,6 +1,7 @@
 // Named-memory lifetime, access and real cross-process visibility tests.
 // Pipe tokens synchronize test steps; SharedMemory itself supplies no message synchronization.
 
+#include <vinc/time.hpp>
 #include <vinc/osal/shared_memory.hpp>
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>
@@ -23,6 +24,16 @@
 
 using namespace vinc::osal;
 using namespace std::chrono_literals;
+
+namespace {
+constexpr auto operation_timeout = 10s;
+constexpr int lifecycle_iterations = 64;
+#ifdef _WIN32
+// Allow one incidental process handle, not one leaked handle per mapping.
+constexpr DWORD handle_count_allowance = 1;
+#endif
+} // namespace
+
 static_assert(!std::is_copy_constructible_v<SharedMemory>);
 static_assert(!std::is_copy_constructible_v<SharedMemoryMapping>);
 static_assert(std::is_nothrow_move_constructible_v<SharedMemory>);
@@ -34,28 +45,27 @@ void require(bool condition, const char* text) {
     }
 }
 
-template <class T> T take(Result<T> result) {
+template <class T> T take(vinc::Result<T> result) {
     if (!result) {
-        throw std::runtime_error("OSAL code=" + std::to_string(static_cast<int>(result.error().code)) +
-                                 " operation=" + std::to_string(static_cast<int>(result.error().operation)) +
-                                 " " + result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 
     return std::move(*result);
 }
 
-void ok(Result<void> result) {
+void ok(vinc::Result<void> result) {
     if (!result) {
-        throw std::runtime_error("OSAL " + result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 }
 
-template <class T> void fails(const Result<T>& result, ErrorCode code, const char* message) {
-    require(!result && result.error().code == code, message);
+template <class T>
+void fails(const vinc::Result<T>& result, vinc::osal::ErrorCode code, const char* message) {
+    require(!result && result.error().is(code), message);
 }
 
-Deadline soon() {
-    return std::chrono::steady_clock::now() + 10s;
+vinc::Deadline soon() {
+    return std::chrono::steady_clock::now() + operation_timeout;
 }
 
 std::string unique_name() {
@@ -181,6 +191,8 @@ struct Harness {
                           const std::byte* address) {
         SpawnOptions options;
         options.executable = executable;
+        // uintptr_t preserves the native address for numeric comparison with the child mapping.
+        // The child never dereferences this parent-process address.
         options.arguments = {"--helper", name, std::to_string(size), mode,
                              std::to_string(reinterpret_cast<std::uintptr_t>(address))};
         auto child = take(spawn_with_pipe(processes, pipes, options));
@@ -200,27 +212,33 @@ void basic_tests() {
     const auto invalid_access = static_cast<SharedMemoryAccess>(99);
     for (const auto& name : {std::string{}, std::string("a/b"), std::string("a\\b"), std::string("a\0b", 3),
                              std::string(25, 'x')}) {
-        fails(SharedMemory::create(name, 1), ErrorCode::InvalidArgument, "invalid create name");
-        fails(SharedMemory::open(name, SharedMemoryAccess::ReadOnly), ErrorCode::InvalidArgument,
+        fails(SharedMemory::create(name, 1), vinc::osal::ErrorCode::InvalidArgument, "invalid create name");
+        fails(SharedMemory::open(name, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::InvalidArgument,
               "invalid open name");
-        fails(SharedMemory::unlink_name(name), ErrorCode::InvalidArgument, "invalid unlink name");
+        fails(SharedMemory::unlink_name(name), vinc::osal::ErrorCode::InvalidArgument, "invalid unlink name");
     }
     NameCleanup cleanup(unique_name());
-    fails(SharedMemory::create(cleanup.name, 0), ErrorCode::InvalidArgument, "zero size");
-    fails(SharedMemory::create(cleanup.name, UINT64_MAX), ErrorCode::InvalidArgument, "size overflow");
+    fails(SharedMemory::create(cleanup.name, 0), vinc::osal::ErrorCode::InvalidArgument, "zero size");
+    fails(SharedMemory::create(cleanup.name, UINT64_MAX), vinc::osal::ErrorCode::InvalidArgument,
+          "size overflow");
     auto absent = SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly);
-    fails(absent, ErrorCode::NotFound, "missing name");
-    require(absent.error().native.value() != 0 && absent.error().operation == Operation::OpenSharedMemory,
+    fails(absent, vinc::osal::ErrorCode::NotFound, "missing name");
+    require(absent.error().native.value() != 0 &&
+                absent.error().is_operation(vinc::osal::ErrorOperation::OpenSharedMemory),
             "native error missing");
-    fails(SharedMemory::open(cleanup.name, invalid_access), ErrorCode::InvalidArgument, "invalid access");
+    fails(SharedMemory::open(cleanup.name, invalid_access), vinc::osal::ErrorCode::InvalidArgument,
+          "invalid access");
     auto memory = take(SharedMemory::create(cleanup.name, 8192));
     auto duplicate = SharedMemory::create(cleanup.name, 4096);
-    fails(duplicate, ErrorCode::AlreadyExists, "duplicate not rejected");
+    fails(duplicate, vinc::osal::ErrorCode::AlreadyExists, "duplicate not rejected");
     require(duplicate.error().native.value() != 0, "duplicate native error missing");
-    fails(memory.map(0, SharedMemoryAccess::ReadOnly), ErrorCode::InvalidArgument, "zero mapping");
-    fails(memory.map(UINT64_MAX, SharedMemoryAccess::ReadOnly), ErrorCode::InvalidArgument, "map overflow");
-    fails(memory.map(8193, SharedMemoryAccess::ReadOnly), ErrorCode::InvalidArgument, "creator size bound");
-    fails(memory.map(1, invalid_access), ErrorCode::InvalidArgument, "map invalid access");
+    fails(memory.map(0, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::InvalidArgument,
+          "zero mapping");
+    fails(memory.map(UINT64_MAX, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::InvalidArgument,
+          "map overflow");
+    fails(memory.map(8193, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::InvalidArgument,
+          "creator size bound");
+    fails(memory.map(1, invalid_access), vinc::osal::ErrorCode::InvalidArgument, "map invalid access");
     auto writer = take(memory.map(8192, SharedMemoryAccess::ReadWrite));
     require(std::all_of(writer.bytes().begin(), writer.bytes().end(),
                         [](auto b) {
@@ -228,10 +246,11 @@ void basic_tests() {
                         }),
             "not zero initialized");
     auto ro = take(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly));
-    fails(ro.map(1, SharedMemoryAccess::ReadWrite), ErrorCode::PermissionDenied, "readonly handle upgraded");
+    fails(ro.map(1, SharedMemoryAccess::ReadWrite), vinc::osal::ErrorCode::PermissionDenied,
+          "readonly handle upgraded");
     require(!ro.map(1024 * 1024, SharedMemoryAccess::ReadOnly), "oversized native mapping accepted");
     auto reader = take(ro.map(8192, SharedMemoryAccess::ReadOnly));
-    fails(reader.writable_bytes(), ErrorCode::PermissionDenied, "readonly view upgraded");
+    fails(reader.writable_bytes(), vinc::osal::ErrorCode::PermissionDenied, "readonly view upgraded");
     take(writer.writable_bytes())[8191] = std::byte{73};
     require(reader.bytes()[8191] == std::byte{73}, "views do not share storage");
     auto prefix = take(memory.map(3, SharedMemoryAccess::ReadOnly));
@@ -242,17 +261,18 @@ void basic_tests() {
     ok(moved.close());
     ok(ro.close());
     require(reader.bytes()[8191] == std::byte{73}, "close invalidated view");
-    fails(moved.map(1, SharedMemoryAccess::ReadOnly), ErrorCode::Closed, "map closed handle");
+    fails(moved.map(1, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::Closed, "map closed handle");
     auto moved_view = std::move(reader);
     require(!reader && moved_view, "mapping move");
-    fails(reader.writable_bytes(), ErrorCode::Closed, "moved view still writable");
+    fails(reader.writable_bytes(), vinc::osal::ErrorCode::Closed, "moved view still writable");
 #ifdef _WIN32
-    fails(SharedMemory::unlink_name(cleanup.name), ErrorCode::Unsupported, "Windows unlink contract");
+    fails(SharedMemory::unlink_name(cleanup.name), vinc::osal::ErrorCode::Unsupported,
+          "Windows unlink contract");
 #else
     ok(SharedMemory::unlink_name(cleanup.name));
-    fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), ErrorCode::NotFound,
+    fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::NotFound,
           "unlinked name opens");
-    fails(SharedMemory::unlink_name(cleanup.name), ErrorCode::NotFound, "repeat unlink contract");
+    fails(SharedMemory::unlink_name(cleanup.name), vinc::osal::ErrorCode::NotFound, "repeat unlink contract");
     // A recreated name is a new object; existing mappings must retain the old one.
     auto replacement = take(SharedMemory::create(cleanup.name, 8192));
     auto replacement_view = take(replacement.map(8192, SharedMemoryAccess::ReadOnly));
@@ -265,7 +285,7 @@ void basic_tests() {
     ok(moved_view.unmap());
     require(moved_view.bytes().empty(), "unmapped view exposes bytes");
 #ifdef _WIN32
-    fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), ErrorCode::NotFound,
+    fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::NotFound,
           "last reference did not release name");
 #endif
     std::cout << "PASS: validation, exclusive creation, permissions, mapping lifetime, names\n";
@@ -324,7 +344,7 @@ void process_tests(const std::filesystem::path& executable) {
                 "child exit invalidated parent data");
         ok(view.unmap());
 #ifdef _WIN32
-        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), ErrorCode::NotFound,
+        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::NotFound,
               "child leaked mapping reference");
 #endif
     }
@@ -346,7 +366,7 @@ void process_tests(const std::filesystem::path& executable) {
         }
         ok(view.unmap());
 #ifdef _WIN32
-        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), ErrorCode::NotFound,
+        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::NotFound,
               "creator exit retained object");
 #else
         auto retained = take(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly));
@@ -362,7 +382,7 @@ void churn_tests() {
     DWORD before = 0;
     require(GetProcessHandleCount(GetCurrentProcess(), &before) != 0, "handle count");
 #endif
-    for (int i = 0; i < 64; ++i) {
+    for (int i = 0; i < lifecycle_iterations; ++i) {
         NameCleanup cleanup(unique_name());
         {
             auto first = take(SharedMemory::create(cleanup.name, 4096));
@@ -374,17 +394,19 @@ void churn_tests() {
             require(!second && !b && first && a, "move assignment ownership");
         } // exercise destructor-only cleanup
 #ifdef _WIN32
-        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), ErrorCode::NotFound,
+        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::NotFound,
               "RAII did not release object");
 #else
         ok(SharedMemory::unlink_name(cleanup.name));
-        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), ErrorCode::NotFound,
+        fails(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly), vinc::osal::ErrorCode::NotFound,
               "POSIX name cleanup");
 #endif
     }
 #ifdef _WIN32
     DWORD after = 0;
-    require(GetProcessHandleCount(GetCurrentProcess(), &after) != 0 && after <= before + 1, "handle leak");
+    require(GetProcessHandleCount(GetCurrentProcess(), &after) != 0 &&
+                after <= before + handle_count_allowance,
+            "handle leak");
 #endif
     std::cout << "PASS: move assignment, repeated RAII cleanup\n";
 }

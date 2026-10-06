@@ -1,5 +1,0 @@
-#pragma once
-
-#include <axon_bus/axon_bus.hpp>
-#include <module/base_module.hpp>
-#include <module/module_manager.hpp>

@@ -1,6 +1,7 @@
 // Portable exclusive lock-file handle lifetime and cancellable acquisition.
 // Native backends alone know how a file lock is represented by the OS.
-#include "file_lock_state.hpp"
+#include <vinc/time.hpp>
+#include <vinc/osal/detail/file_lock_state.hpp>
 #include <algorithm>
 #include <condition_variable>
 #include <exception>
@@ -13,7 +14,8 @@ using State = detail::FileLockState;
 // Retry native nonblocking acquisition while keeping deadline/cancellation checks responsive.
 constexpr auto lock_retry_interval = std::chrono::milliseconds(5);
 
-OsError error(ErrorCode code, Operation operation = Operation::LockFileLock) {
+vinc::Error error(vinc::osal::ErrorCode code,
+                  vinc::osal::ErrorOperation operation = vinc::osal::ErrorOperation::LockFileLock) {
     return {code, operation};
 }
 
@@ -37,10 +39,10 @@ struct Pending {
     }
 };
 
-Result<void> reserve(State& state) {
+vinc::Result<void> reserve(State& state) {
     std::lock_guard lock(state.gate);
     if (state.occupied) {
-        return std::unexpected(error(ErrorCode::Busy));
+        return std::unexpected(error(vinc::osal::ErrorCode::Busy));
     }
     state.occupied = true;
     return {};
@@ -59,9 +61,10 @@ FileLock::operator bool() const noexcept {
     return bool(state_);
 }
 
-Result<FileLock> FileLock::create(const std::filesystem::path& path) {
+vinc::Result<FileLock> FileLock::create(const std::filesystem::path& path) {
     if (!valid_path(path)) {
-        return std::unexpected(error(ErrorCode::InvalidArgument, Operation::CreateFileLock));
+        return std::unexpected(
+            error(vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::CreateFileLock));
     }
 
     auto state = std::make_shared<State>();
@@ -73,9 +76,10 @@ Result<FileLock> FileLock::create(const std::filesystem::path& path) {
     return FileLock(std::move(state));
 }
 
-Result<FileLock> FileLock::open(const std::filesystem::path& path) {
+vinc::Result<FileLock> FileLock::open(const std::filesystem::path& path) {
     if (!valid_path(path)) {
-        return std::unexpected(error(ErrorCode::InvalidArgument, Operation::OpenFileLock));
+        return std::unexpected(
+            error(vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::OpenFileLock));
     }
 
     auto state = std::make_shared<State>();
@@ -91,10 +95,10 @@ void FileLock::close() noexcept {
     state_.reset();
 }
 
-Result<FileLockGuard> FileLock::try_lock() const {
+vinc::Result<FileLockGuard> FileLock::try_lock() const {
     auto state = state_;
     if (!state) {
-        return std::unexpected(error(ErrorCode::Closed));
+        return std::unexpected(error(vinc::osal::ErrorCode::Closed));
     }
 
     auto reserved = reserve(*state);
@@ -112,18 +116,18 @@ Result<FileLockGuard> FileLock::try_lock() const {
     return FileLockGuard(std::move(state));
 }
 
-Result<FileLockGuard> FileLock::lock_until(Deadline deadline, std::stop_token stop) const {
+vinc::Result<FileLockGuard> FileLock::lock_until(vinc::Deadline deadline, std::stop_token stop) const {
     auto state = state_;
     if (!state) {
-        return std::unexpected(error(ErrorCode::Closed));
+        return std::unexpected(error(vinc::osal::ErrorCode::Closed));
     }
 
     if (stop.stop_requested()) {
-        return std::unexpected(error(ErrorCode::Cancelled));
+        return std::unexpected(error(vinc::osal::ErrorCode::Cancelled));
     }
 
     if (std::chrono::steady_clock::now() >= deadline) {
-        return std::unexpected(error(ErrorCode::Timeout));
+        return std::unexpected(error(vinc::osal::ErrorCode::Timeout));
     }
 
     auto reserved = reserve(*state);
@@ -138,12 +142,12 @@ Result<FileLockGuard> FileLock::lock_until(Deadline deadline, std::stop_token st
     std::unique_lock lock(wait_mutex);
     for (;;) {
         if (stop.stop_requested()) {
-            return std::unexpected(error(ErrorCode::Cancelled));
+            return std::unexpected(error(vinc::osal::ErrorCode::Cancelled));
         }
 
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) {
-            return std::unexpected(error(ErrorCode::Timeout));
+            return std::unexpected(error(vinc::osal::ErrorCode::Timeout));
         }
 
         auto result = detail::try_lock_file_lock(*state);
@@ -152,7 +156,7 @@ Result<FileLockGuard> FileLock::lock_until(Deadline deadline, std::stop_token st
             return FileLockGuard(std::move(state));
         }
 
-        if (result.error().code != ErrorCode::WouldBlock) {
+        if (!(result.error().is(vinc::osal::ErrorCode::WouldBlock))) {
             return std::unexpected(result.error());
         }
         wake.wait_until(lock, stop, (std::min)(deadline, now + lock_retry_interval), [] {
@@ -186,7 +190,7 @@ FileLockGuard::operator bool() const noexcept {
     return bool(state_);
 }
 
-Result<void> FileLockGuard::unlock() noexcept {
+vinc::Result<void> FileLockGuard::unlock() noexcept {
     if (!state_) {
         return {};
     }

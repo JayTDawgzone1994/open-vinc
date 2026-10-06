@@ -1,7 +1,8 @@
 // Linux socket readiness backend using epoll and an eventfd wake source.
 // Return registration identities to the common layer, which filters stale watches.
 
-#include "../socket_native.hpp"
+#include <vinc/time.hpp>
+#include <vinc/osal/detail/socket_native.hpp>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 
@@ -28,24 +29,24 @@ NativeSocketPoller::NativeSocketPoller(std::unique_ptr<NativeSocketPollerImpl> i
 
 NativeSocketPoller::~NativeSocketPoller() = default;
 
-Result<std::unique_ptr<NativeSocketPoller>> NativeSocketPoller::create(std::size_t maximum, Deadline,
-                                                                       std::stop_token) {
+vinc::Result<std::unique_ptr<NativeSocketPoller>>
+NativeSocketPoller::create(std::size_t maximum, vinc::Deadline, std::stop_token) {
     auto impl = std::make_unique<NativeSocketPollerImpl>();
     impl->events.resize(maximum + 1);
     impl->queue = epoll_create1(EPOLL_CLOEXEC);
     if (impl->queue < 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
     }
 
-    auto isolated = isolate_socket_handle(impl->queue, Operation::InitializeService);
+    auto isolated = isolate_socket_handle(impl->queue, vinc::osal::ErrorOperation::InitializeService);
     if (!isolated) {
         return std::unexpected(isolated.error());
     }
     impl->wake = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     if (impl->wake < 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
     }
-    isolated = isolate_socket_handle(impl->wake, Operation::InitializeService);
+    isolated = isolate_socket_handle(impl->wake, vinc::osal::ErrorOperation::InitializeService);
     if (!isolated) {
         return std::unexpected(isolated.error());
     }
@@ -53,14 +54,15 @@ Result<std::unique_ptr<NativeSocketPoller>> NativeSocketPoller::create(std::size
     event.events = EPOLLIN;
     event.data.u64 = 0;
     if (epoll_ctl(impl->queue, EPOLL_CTL_ADD, impl->wake, &event) < 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
     }
 
     return std::unique_ptr<NativeSocketPoller>(new NativeSocketPoller(std::move(impl)));
 }
 
 namespace {
-Result<void> watch(int queue, int action, SocketHandle handle, std::uint64_t id, SocketEvents interests) {
+vinc::Result<void> watch(int queue, int action, SocketHandle handle, std::uint64_t id,
+                         SocketEvents interests) {
     epoll_event event{};
     event.data.u64 = id;
     event.events = EPOLLRDHUP;
@@ -73,18 +75,18 @@ Result<void> watch(int queue, int action, SocketHandle handle, std::uint64_t id,
     }
 
     if (epoll_ctl(queue, action, handle, &event) < 0) {
-        return std::unexpected(socket_error(Operation::RegisterSocket));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::RegisterSocket));
     }
 
     return {};
 }
 }
 
-Result<void> NativeSocketPoller::add(SocketHandle handle, std::uint64_t id, SocketEvents interests) {
+vinc::Result<void> NativeSocketPoller::add(SocketHandle handle, std::uint64_t id, SocketEvents interests) {
     return watch(impl_->queue, EPOLL_CTL_ADD, handle, id, interests);
 }
 
-Result<void> NativeSocketPoller::modify(SocketHandle handle, std::uint64_t id, SocketEvents interests) {
+vinc::Result<void> NativeSocketPoller::modify(SocketHandle handle, std::uint64_t id, SocketEvents interests) {
     return watch(impl_->queue, EPOLL_CTL_MOD, handle, id, interests);
 }
 
@@ -94,20 +96,22 @@ void NativeSocketPoller::remove(SocketHandle handle, std::uint64_t) noexcept {
     }
 }
 
-Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output, int milliseconds) {
+vinc::Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output, int milliseconds) {
     // Asking only for the output capacity preserves epoll's round-robin fairness.
     const int ready =
         epoll_wait(impl_->queue, impl_->events.data(), static_cast<int>(output.size()), milliseconds);
     if (ready < 0) {
         if (errno == EINTR) {
-            return std::unexpected(OsError{ErrorCode::WouldBlock, Operation::WaitSocket});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::WouldBlock, vinc::osal::ErrorOperation::WaitSocket});
         }
 
-        return std::unexpected(socket_error(Operation::WaitSocket));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::WaitSocket));
     }
 
     if (!ready) {
-        return std::unexpected(OsError{ErrorCode::Timeout, Operation::WaitSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Timeout, vinc::osal::ErrorOperation::WaitSocket});
     }
 
     std::size_t count = 0;
@@ -120,7 +124,7 @@ Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output
                 read = ::read(impl_->wake, &value, sizeof(value));
             } while (read < 0 && errno == EINTR);
             if (read < 0 && errno != EAGAIN) {
-                return std::unexpected(socket_error(Operation::WaitSocket));
+                return std::unexpected(socket_error(vinc::osal::ErrorOperation::WaitSocket));
             }
             continue;
         }
@@ -147,14 +151,14 @@ Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output
     return count;
 }
 
-Result<void> NativeSocketPoller::wake() noexcept {
+vinc::Result<void> NativeSocketPoller::wake() noexcept {
     const std::uint64_t value = 1;
     ssize_t written;
     do {
         written = ::write(impl_->wake, &value, sizeof(value));
     } while (written < 0 && errno == EINTR);
     if (written < 0 && errno != EAGAIN) {
-        return std::unexpected(socket_error(Operation::WakeSocket));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::WakeSocket));
     }
 
     return {};

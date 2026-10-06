@@ -3,7 +3,7 @@
 
 # Included only by the isolated ribosome_generation.cmake test checkout.
 # Each production header must compile as the first include in its own TU.
-file(GLOB message_files "${CMAKE_SOURCE_DIR}/messages/*.msg")
+file(GLOB message_files "${VINC_MESSAGE_INPUT_DIR}/*.msg")
 set(header_names all_messages)
 foreach(message_file IN LISTS message_files)
     get_filename_component(message_name "${message_file}" NAME_WE)

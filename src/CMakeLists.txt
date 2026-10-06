@@ -1,15 +1,39 @@
-# Top-level entry point. CTest is enabled here and the vinc subtree defines
-# the C++ targets, generated messages, process examples and central executable.
-
+# Root composition: libraries first, then examples and the central application.
 cmake_minimum_required(VERSION 3.20)
 project(vinc_root LANGUAGES CXX)
 
+# Shared Plugin consumers require PIC and image-local implementation symbols.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+if(MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
+endif()
 include(CTest)
+option(VINC_BUILD_APPS "Build the Vinc central executable" ON)
+option(VINC_BUILD_EXAMPLES "Build and register example Modules" ON)
+get_filename_component(VINC_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+set(VINC_BUILD_ROOT "${CMAKE_CURRENT_BINARY_DIR}")
+set(VINC_MESSAGE_INPUT_DIR "${VINC_REPOSITORY_ROOT}/vinc_messages/messages")
+if(CMAKE_CONFIGURATION_TYPES)
+    set(VINC_GENERATED_INCLUDE_DIR "${VINC_BUILD_ROOT}/$<CONFIG>/generated/include")
+else()
+    set(VINC_GENERATED_INCLUDE_DIR "${VINC_BUILD_ROOT}/generated/include")
+endif()
+set(VINC_MESSAGE_OUTPUT_DIR "${VINC_GENERATED_INCLUDE_DIR}/vinc_messages")
 
 add_subdirectory(vinc)
-
-
-# Windows command-line build (from an x64 MSVC developer environment):
-# cmake -S src -B build/windows-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release
-# cmake --build build/windows-ninja
-# Alternatively, from this directory: cmake --preset windows-msvc-release
+add_subdirectory("${VINC_REPOSITORY_ROOT}/vinc_messages" "vinc_messages")
+if(VINC_BUILD_EXAMPLES)
+    add_subdirectory("${VINC_REPOSITORY_ROOT}/examples/module" "examples/module")
+    add_subdirectory("${VINC_REPOSITORY_ROOT}/examples/message_bus" "examples/message_bus")
+endif()
+if(VINC_BUILD_APPS)
+    add_subdirectory("${VINC_REPOSITORY_ROOT}/apps/vinc" "apps/vinc")
+endif()

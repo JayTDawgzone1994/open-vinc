@@ -1,6 +1,8 @@
+#include <vinc/osal/detail/native_error.hpp>
 // Own terminal modes and decode input without running framework shutdown in an OS handler.
 // Control handlers record an event; the Shell loop performs cancellation and cleanup.
 
+#include <vinc/time.hpp>
 #include <vinc/osal/terminal.hpp>
 #include <algorithm>
 #include <atomic>
@@ -43,8 +45,8 @@ BOOL WINAPI control_handler(DWORD type) {
     return TRUE;
 }
 
-OsError native_error(Operation operation) {
-    return {ErrorCode::SystemError, operation, {static_cast<int>(GetLastError()), std::system_category()}};
+vinc::Error native_error(vinc::osal::ErrorOperation operation) {
+    return {vinc::osal::ErrorCode::SystemError, operation, {vinc::NativeErrorSource::Win32, GetLastError()}};
 }
 #else
 volatile std::sig_atomic_t interrupted = 0;
@@ -53,8 +55,8 @@ void control_handler(int) {
     interrupted = 1;
 }
 
-OsError native_error(Operation operation) {
-    return {ErrorCode::SystemError, operation, {errno, std::generic_category()}};
+vinc::Error native_error(vinc::osal::ErrorOperation operation) {
+    return {vinc::osal::ErrorCode::SystemError, operation, {detail::errno_source, errno}};
 }
 #endif
 std::string utf8(std::uint32_t value) {
@@ -86,7 +88,7 @@ struct Terminal::Impl {
     bool handler = false;
     bool previous_cr = false;
     std::string bytes;
-    Deadline escape_deadline{};
+    vinc::Deadline escape_deadline{};
 #ifdef _WIN32
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -149,7 +151,7 @@ struct Terminal::Impl {
 
         // Escape sequences and control keys are handled before UTF-8 text.
         if (leading_byte == 27) {
-            if (escape_deadline == Deadline{}) {
+            if (escape_deadline == vinc::Deadline{}) {
                 escape_deadline = Clock::now() + escape_sequence_timeout;
             }
 
@@ -242,9 +244,10 @@ Terminal::Terminal(std::unique_ptr<Impl> state) : impl_(std::move(state)) {
 
 Terminal::~Terminal() = default;
 
-Result<std::unique_ptr<Terminal>> Terminal::open() {
+vinc::Result<std::unique_ptr<Terminal>> Terminal::open() {
     if (acquired.exchange(true)) {
-        return std::unexpected(OsError{ErrorCode::Busy, Operation::OpenTerminal});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Busy, vinc::osal::ErrorOperation::OpenTerminal});
     }
 
     // Allocation failure must release the process-wide terminal reservation.
@@ -258,7 +261,7 @@ Result<std::unique_ptr<Terminal>> Terminal::open() {
 #ifdef _WIN32
     InterlockedExchange(&interrupted, 0);
     if (!SetConsoleCtrlHandler(control_handler, TRUE)) {
-        return std::unexpected(native_error(Operation::OpenTerminal));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
     }
     state->handler = true;
     state->console = GetConsoleMode(state->input, &state->input_mode) != 0;
@@ -267,7 +270,7 @@ Result<std::unique_ptr<Terminal>> Terminal::open() {
                           ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT |
                             ENABLE_QUICK_EDIT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT);
         if (!SetConsoleMode(state->input, mode)) {
-            return std::unexpected(native_error(Operation::OpenTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
         }
         state->input_changed = true;
     } else {
@@ -280,11 +283,11 @@ Result<std::unique_ptr<Terminal>> Terminal::open() {
     if (GetConsoleMode(state->output, &state->output_mode)) {
         state->old_output_cp = GetConsoleOutputCP();
         if (!SetConsoleOutputCP(CP_UTF8)) {
-            return std::unexpected(native_error(Operation::OpenTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
         }
 
         if (!SetConsoleMode(state->output, state->output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
-            return std::unexpected(native_error(Operation::OpenTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
         }
         state->output_changed = true;
         state->ansi = true;
@@ -295,14 +298,14 @@ Result<std::unique_ptr<Terminal>> Terminal::open() {
     action.sa_handler = control_handler;
     sigemptyset(&action.sa_mask);
     if (sigaction(SIGINT, &action, &state->original_signal)) {
-        return std::unexpected(native_error(Operation::OpenTerminal));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
     }
     state->handler = true;
     state->console = isatty(STDIN_FILENO) != 0;
     state->ansi = isatty(STDOUT_FILENO) != 0;
     if (state->console) {
         if (tcgetattr(STDIN_FILENO, &state->original)) {
-            return std::unexpected(native_error(Operation::OpenTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
         }
 
         auto mode = state->original;
@@ -310,7 +313,7 @@ Result<std::unique_ptr<Terminal>> Terminal::open() {
         mode.c_cc[VMIN] = 1;
         mode.c_cc[VTIME] = 0;
         if (tcsetattr(STDIN_FILENO, TCSANOW, &mode)) {
-            return std::unexpected(native_error(Operation::OpenTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
         }
         state->input_changed = true;
     }
@@ -341,7 +344,7 @@ std::size_t Terminal::columns() const noexcept {
     return fallback_terminal_columns;
 }
 
-Result<TerminalEvent> Terminal::read_until(Deadline deadline) {
+vinc::Result<TerminalEvent> Terminal::read_until(vinc::Deadline deadline) {
     auto& state = *impl_;
     for (;;) {
 #ifdef _WIN32
@@ -383,12 +386,12 @@ Result<TerminalEvent> Terminal::read_until(Deadline deadline) {
             }
 
             if (wait != WAIT_OBJECT_0) {
-                return std::unexpected(native_error(Operation::ReadTerminal));
+                return std::unexpected(native_error(vinc::osal::ErrorOperation::ReadTerminal));
             }
             INPUT_RECORD record{};
             DWORD read = 0;
             if (!ReadConsoleInputW(state.input, &record, 1, &read)) {
-                return std::unexpected(native_error(Operation::ReadTerminal));
+                return std::unexpected(native_error(vinc::osal::ErrorOperation::ReadTerminal));
             }
 
             if (!read || record.EventType != KEY_EVENT || !record.Event.KeyEvent.bKeyDown) {
@@ -453,7 +456,7 @@ Result<TerminalEvent> Terminal::read_until(Deadline deadline) {
                     continue;
                 }
 
-                return std::unexpected(native_error(Operation::ReadTerminal));
+                return std::unexpected(native_error(vinc::osal::ErrorOperation::ReadTerminal));
             }
 
             if (!available) {
@@ -469,7 +472,7 @@ Result<TerminalEvent> Terminal::read_until(Deadline deadline) {
                 continue;
             }
 
-            return std::unexpected(native_error(Operation::ReadTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::ReadTerminal));
         }
 #else
         pollfd fd{STDIN_FILENO, POLLIN, 0};
@@ -479,7 +482,7 @@ Result<TerminalEvent> Terminal::read_until(Deadline deadline) {
                 continue;
             }
 
-            return std::unexpected(native_error(Operation::ReadTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::ReadTerminal));
         }
 
         if (!status) {
@@ -492,7 +495,7 @@ Result<TerminalEvent> Terminal::read_until(Deadline deadline) {
                 continue;
             }
 
-            return std::unexpected(native_error(Operation::ReadTerminal));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::ReadTerminal));
         }
 #endif
         if (!count) {

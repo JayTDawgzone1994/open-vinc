@@ -15,7 +15,8 @@ Windows 已實際驗證；Linux／macOS 已更新後端，但仍待目標平台�
 | --- | --- |
 | `<vinc/osal/pipe.hpp>` | `Pipe`、`PipeReader`、`PipeWriter`、`PipeService`、buffer 與完成事件 |
 | `<vinc/osal/process_pipe.hpp>` | 程序 stdout／stderr 擷取、端點交付、取得繼承端點、雙向便利組合 |
-| `<vinc/osal/error.hpp>` | 共用的 `Result`、`OsError`、`Deadline` |
+| `<vinc/result.hpp>` | 共用 `vinc::Result`／`vinc::Error` 契約 |
+| `<vinc/time.hpp>` | 共用的 `vinc::Deadline` 等待截止時間 |
 
 消費者連結 `vinc::osal`；只使用 Pipe 時不必引入 Process 公開標頭。
 基本關係是 `writer → reader`。`Pipe` 是兩個方向不同的擁有型端點，不是一個
@@ -75,7 +76,7 @@ auto write = service->submit_write(pipe->writer, std::move(data), deadline);
 | `Cancelled` | 操作已完成取消 |
 | `TimedOut` | 操作尚未開始即過期，或到期發出的取消已完成 |
 | `Closed` | 本端／服務關閉造成操作結束 |
-| `Failed` | 其他原生錯誤，保留 `OsError` |
+| `Failed` | 其他原生錯誤，保留 `vinc::Error` 的操作與原生原因 |
 
 所有寫入端副本都關閉，且已送入的資料讀完後，讀取才得到 EOF。
 程序退出與 EOF 不等價：程序可先關閉端點而繼續執行，其他程序的副本也可能
@@ -91,7 +92,7 @@ auto write = service->submit_write(pipe->writer, std::move(data), deadline);
 這是獨立端點的生命週期，不另造 Pipe 的 socket-style shutdown 模式。
 
 `cancel(id)` 是要求取消，成功完成仍可能贏得競爭。已完成但未收集時為
-`AlreadyCompleted`，已收集或未知 ID 為 `NotFound`。`Deadline` 使用 `steady_clock`；
+`AlreadyCompleted`，已收集或未知 ID 為 `NotFound`。`vinc::Deadline` 使用 `steady_clock`；
 到期觸發取消，不是清理完成時間的硬即時保證。取消、逾時或失敗不能證明對方收到
 零個位元組，尤其 Windows 原生取消未必能回報全部已送出資料；OSAL 不會自動重送。
 

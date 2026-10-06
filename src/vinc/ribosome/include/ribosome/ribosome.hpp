@@ -11,28 +11,45 @@
 
 namespace vinc {
 struct VariableInfo {
-    std::string name, type;
+    std::string name;
+    std::string type;
     unsigned dimensions = 0;
     bool builtin = false;
     std::optional<std::string> constant;
     std::uint32_t line = 0;
 };
+
 struct MessageInfo {
     std::string name;
     std::filesystem::path path;
     std::vector<VariableInfo> variables;
     std::uint64_t hash = 0;
 };
+
 class Ribosome {
 public:
-    std::int8_t set_text_message_path(const std::filesystem::path& path) { input_ = path; return 0; }
-    std::int8_t set_cpp_message_path(const std::filesystem::path& path) { output_ = path; return 0; }
-    void set_template_path(const std::filesystem::path& path) { template_ = path; }
+    std::int8_t set_text_message_path(const std::filesystem::path& path) {
+        input_ = path;
+        return 0;
+    }
+
+    std::int8_t set_cpp_message_path(const std::filesystem::path& path) {
+        output_ = path;
+        return 0;
+    }
+
+    void set_template_path(const std::filesystem::path& path) {
+        template_ = path;
+    }
+
     std::int8_t make_ligand();
+
 private:
     std::vector<MessageInfo> load();
     void resolve(std::vector<MessageInfo>& messages);
     std::string generate(const MessageInfo& message, const std::string& source);
-    std::filesystem::path input_, output_, template_;
+    std::filesystem::path input_;
+    std::filesystem::path output_;
+    std::filesystem::path template_;
 };
 }

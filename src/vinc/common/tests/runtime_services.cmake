@@ -1,0 +1,15 @@
+foreach(mode IN ITEMS validation unbound returned cleared bound-no-allocation)
+    execute_process(COMMAND "${PROBE}" "${mode}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 10)
+    if(mode STREQUAL "validation")
+        set(expected 0)
+    elseif(mode STREQUAL "bound-no-allocation")
+        set(expected 80)
+    else()
+        # Dedicated Common fallback status; ordinary crashes/terminate are failures.
+        set(expected 77)
+    endif()
+    if(NOT "${result}" STREQUAL "${expected}")
+        message(FATAL_ERROR "${mode}: expected ${expected}, got ${result}\n${output}\n${error}")
+    endif()
+endforeach()

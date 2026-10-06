@@ -1,7 +1,8 @@
 // Windows socket readiness backend using WSAPoll.
 // A private connected loopback pair wakes the same wait for cancellation or cross-thread work.
 
-#include "../socket_native.hpp"
+#include <vinc/time.hpp>
+#include <vinc/osal/detail/socket_native.hpp>
 #include <algorithm>
 #include <mutex>
 
@@ -39,8 +40,170 @@ NativeSocketPoller::NativeSocketPoller(std::unique_ptr<NativeSocketPollerImpl> i
 
 NativeSocketPoller::~NativeSocketPoller() = default;
 
-Result<std::unique_ptr<NativeSocketPoller>>
-NativeSocketPoller::create(std::size_t maximum, Deadline setup_deadline, std::stop_token token) {
+namespace {
+// Setup has no wake socket yet, so cancellable waits use a short polling interval.
+constexpr auto maximum_wake_setup_time = std::chrono::seconds(5);
+constexpr int setup_cancel_poll_interval_ms = 10;
+constexpr int wake_listener_backlog = 1;
+
+// Owners are supplied by create(); partial success is cleaned up there.
+vinc::Result<void> open_wake_sockets(SocketState& listener, NativeSocketPollerImpl& impl) {
+    listener.handle = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    impl.writer = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    if (listener.handle == invalid_socket || impl.writer == invalid_socket) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+    }
+
+    for (auto* handle : {&listener.handle, &impl.writer}) {
+        auto configured = configure_socket(*handle);
+        if (!configured) {
+            return std::unexpected(configured.error());
+        }
+    }
+
+    return {};
+}
+
+vinc::Result<void> begin_wake_connection(SocketState& listener, SocketHandle writer) {
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    const int enabled = 1;
+    // These IPv4 calls use a live, aligned sockaddr_in. WinSock's sockaddr*
+    // is a generic API view; sizeof(address) bounds access to the concrete layout.
+    if (set_native_option(listener.handle, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, &enabled, sizeof(enabled)) != 0 ||
+        ::bind(listener.handle, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+        ::listen(listener.handle, wake_listener_backlog) != 0) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+    }
+
+    int size = sizeof(address);
+    if (getsockname(listener.handle, reinterpret_cast<sockaddr*>(&address), &size) != 0) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+    }
+
+    // getsockname returned this IPv4 endpoint and its native byte length.
+    const int connected = ::connect(writer, reinterpret_cast<sockaddr*>(&address), size);
+    if (connected != 0 && last_socket_error() != WSAEWOULDBLOCK) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+    }
+
+    return {};
+}
+
+vinc::Result<void> wait_for_setup(SocketHandle handle, short interests, vinc::Deadline deadline,
+                                  std::stop_token token) {
+    for (;;) {
+        if (token.stop_requested()) {
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::Cancelled, vinc::osal::ErrorOperation::InitializeService});
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::Timeout, vinc::osal::ErrorOperation::InitializeService});
+        }
+
+        PollFd descriptor{handle, interests, 0};
+        int timeout = static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(deadline - now).count());
+        // Only during wake-pair construction, before the wake primitive
+        // exists. Normal waits use an event-driven stop callback.
+        if (token.stop_possible()) {
+            timeout = std::min(timeout, setup_cancel_poll_interval_ms);
+        }
+        int ready = poll_sockets(&descriptor, 1, timeout);
+        if (ready > 0) {
+            return {};
+        }
+
+        if (ready == 0) {
+            continue;
+        }
+
+        if (last_socket_error() != WSAEINTR) {
+            return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+        }
+    }
+}
+
+vinc::Result<sockaddr_in> finish_wake_connection(SocketHandle writer, vinc::Deadline deadline,
+                                                 std::stop_token token) {
+    auto writable = wait_for_setup(writer, POLLWRNORM, deadline, token);
+    if (!writable) {
+        return std::unexpected(writable.error());
+    }
+
+    int error = 0;
+    int size = sizeof(error);
+    if (get_native_option(writer, SOL_SOCKET, SO_ERROR, &error, &size) != 0) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+    }
+
+    if (error) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService, error));
+    }
+
+    sockaddr_in own_address{};
+    size = sizeof(own_address);
+    // The IPv4 writer returns sockaddr_in into this aligned object; size is its capacity.
+    if (getsockname(writer, reinterpret_cast<sockaddr*>(&own_address), &size) != 0) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+    }
+
+    return own_address;
+}
+
+// Each accepted handle is immediately owned by impl. Unrelated connections are
+// closed here; the matching reader stays owned by impl even if later setup fails.
+vinc::Result<void> accept_wake_reader(SocketHandle listener, NativeSocketPollerImpl& impl,
+                                      const sockaddr_in& own_address, vinc::Deadline deadline,
+                                      std::stop_token token) {
+    for (;;) {
+        auto readable = wait_for_setup(listener, POLLRDNORM, deadline, token);
+        if (!readable) {
+            return std::unexpected(readable.error());
+        }
+
+        sockaddr_in peer{};
+        int size = sizeof(peer);
+        // The listener is IPv4; peer is a live sockaddr_in with its full capacity supplied.
+        impl.reader = ::accept(listener, reinterpret_cast<sockaddr*>(&peer), &size);
+        if (impl.reader == invalid_socket) {
+            if (last_socket_error() == WSAEWOULDBLOCK || last_socket_error() == WSAEINTR) {
+                continue;
+            }
+
+            return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+        }
+
+        if (peer.sin_port == own_address.sin_port && peer.sin_addr.s_addr == own_address.sin_addr.s_addr) {
+            break;
+        }
+        close_socket(impl.reader);
+        impl.reader = invalid_socket;
+    }
+
+    return {};
+}
+
+vinc::Result<void> configure_wake_pair(NativeSocketPollerImpl& impl) {
+    const int enabled = 1;
+    auto configured = configure_socket(impl.reader);
+    if (!configured) {
+        return std::unexpected(configured.error());
+    }
+
+    if (set_native_option(impl.writer, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) != 0) {
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService));
+    }
+
+    return {};
+}
+} // namespace
+
+vinc::Result<std::unique_ptr<NativeSocketPoller>>
+NativeSocketPoller::create(std::size_t maximum, vinc::Deadline setup_deadline, std::stop_token token) {
     auto runtime = socket_runtime();
     if (!runtime) {
         return std::unexpected(runtime.error());
@@ -50,125 +213,36 @@ NativeSocketPoller::create(std::size_t maximum, Deadline setup_deadline, std::st
     impl->runtime = std::move(*runtime);
     impl->entries.reserve(maximum);
     impl->descriptors.resize(maximum + 1);
-    // A connected loopback TCP pair is only a readiness wake primitive. Unlike
-    // a datagram wake, its delivery is not allowed to disappear silently. This
-    // temporary listener is closed before create returns; no worker is created.
+
+    // A connected loopback TCP pair is a reliable readiness wake primitive.
+    // Keep the temporary listener alive until the final poller is constructed.
     SocketState listener;
     listener.runtime = impl->runtime;
-    listener.handle = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
-    impl->writer = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
-    if (listener.handle == invalid_socket || impl->writer == invalid_socket) {
-        return std::unexpected(socket_error(Operation::InitializeService));
+    auto opened = open_wake_sockets(listener, *impl);
+    if (!opened) {
+        return std::unexpected(opened.error());
     }
 
-    for (auto* handle : {&listener.handle, &impl->writer}) {
-        auto configured = configure_socket(*handle);
-        if (!configured) {
-            return std::unexpected(configured.error());
-        }
-    }
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    const int one = 1;
-    if (set_native_option(listener.handle, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, &one, sizeof(one)) != 0 ||
-        ::bind(listener.handle, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
-        ::listen(listener.handle, 1) != 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
-    }
-    int size = sizeof(address);
-    if (getsockname(listener.handle, reinterpret_cast<sockaddr*>(&address), &size) != 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
-    }
-
-    const int connected = ::connect(impl->writer, reinterpret_cast<sockaddr*>(&address), size);
-    if (connected != 0 && last_socket_error() != WSAEWOULDBLOCK) {
-        return std::unexpected(socket_error(Operation::InitializeService));
+    auto connecting = begin_wake_connection(listener, impl->writer);
+    if (!connecting) {
+        return std::unexpected(connecting.error());
     }
 
     const auto deadline =
-        std::min(setup_deadline, std::chrono::steady_clock::now() + std::chrono::seconds(5));
-    const auto wait_ready = [&](SocketHandle handle, short interests) -> Result<void> {
-        for (;;) {
-            if (token.stop_requested()) {
-                return std::unexpected(OsError{ErrorCode::Cancelled, Operation::InitializeService});
-            }
-
-            auto now = std::chrono::steady_clock::now();
-            if (now >= deadline) {
-                return std::unexpected(OsError{ErrorCode::Timeout, Operation::InitializeService});
-            }
-            PollFd descriptor{handle, interests, 0};
-            int timeout =
-                static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(deadline - now).count());
-            // Only during wake-pair construction, before the wake primitive
-            // exists. Normal waits use an event-driven stop callback.
-            if (token.stop_possible()) {
-                timeout = std::min(timeout, 10);
-            }
-            int ready = poll_sockets(&descriptor, 1, timeout);
-            if (ready > 0) {
-                return {};
-            }
-
-            if (ready == 0) {
-                continue;
-            }
-
-            if (last_socket_error() != WSAEINTR) {
-                return std::unexpected(socket_error(Operation::InitializeService));
-            }
-        }
-    };
-    auto writable = wait_ready(impl->writer, POLLWRNORM);
-    if (!writable) {
-        return std::unexpected(writable.error());
-    }
-    int error = 0;
-    size = sizeof(error);
-    if (get_native_option(impl->writer, SOL_SOCKET, SO_ERROR, &error, &size) != 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
+        std::min(setup_deadline, std::chrono::steady_clock::now() + maximum_wake_setup_time);
+    auto own_address = finish_wake_connection(impl->writer, deadline, token);
+    if (!own_address) {
+        return std::unexpected(own_address.error());
     }
 
-    if (error) {
-        return std::unexpected(socket_error(Operation::InitializeService, error));
-    }
-    sockaddr_in own_address{};
-    size = sizeof(own_address);
-    if (getsockname(impl->writer, reinterpret_cast<sockaddr*>(&own_address), &size) != 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
+    auto accepted = accept_wake_reader(listener.handle, *impl, *own_address, deadline, token);
+    if (!accepted) {
+        return std::unexpected(accepted.error());
     }
 
-    for (;;) {
-        auto readable = wait_ready(listener.handle, POLLRDNORM);
-        if (!readable) {
-            return std::unexpected(readable.error());
-        }
-        sockaddr_in peer{};
-        size = sizeof(peer);
-        impl->reader = ::accept(listener.handle, reinterpret_cast<sockaddr*>(&peer), &size);
-        if (impl->reader == invalid_socket) {
-            if (last_socket_error() == WSAEWOULDBLOCK || last_socket_error() == WSAEINTR) {
-                continue;
-            }
-
-            return std::unexpected(socket_error(Operation::InitializeService));
-        }
-
-        if (peer.sin_port == own_address.sin_port && peer.sin_addr.s_addr == own_address.sin_addr.s_addr) {
-            break;
-        }
-        close_socket(impl->reader);
-        impl->reader = invalid_socket;
-    }
-
-    auto configured = configure_socket(impl->reader);
+    auto configured = configure_wake_pair(*impl);
     if (!configured) {
         return std::unexpected(configured.error());
-    }
-
-    if (set_native_option(impl->writer, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) != 0) {
-        return std::unexpected(socket_error(Operation::InitializeService));
     }
 
     return std::unique_ptr<NativeSocketPoller>(new NativeSocketPoller(std::move(impl)));
@@ -181,12 +255,12 @@ short native_interests(SocketEvents value) {
 }
 }
 
-Result<void> NativeSocketPoller::add(SocketHandle handle, std::uint64_t id, SocketEvents interests) {
+vinc::Result<void> NativeSocketPoller::add(SocketHandle handle, std::uint64_t id, SocketEvents interests) {
     impl_->entries.push_back({handle, id, native_interests(interests)});
     return {};
 }
 
-Result<void> NativeSocketPoller::modify(SocketHandle, std::uint64_t id, SocketEvents interests) {
+vinc::Result<void> NativeSocketPoller::modify(SocketHandle, std::uint64_t id, SocketEvents interests) {
     for (auto& entry : impl_->entries) {
         if (entry.id == id) {
             entry.interests = native_interests(interests);
@@ -194,7 +268,8 @@ Result<void> NativeSocketPoller::modify(SocketHandle, std::uint64_t id, SocketEv
         }
     }
 
-    return std::unexpected(OsError{ErrorCode::NotFound, Operation::RegisterSocket});
+    return std::unexpected(
+        vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::RegisterSocket});
 }
 
 void NativeSocketPoller::remove(SocketHandle, std::uint64_t id) noexcept {
@@ -203,7 +278,7 @@ void NativeSocketPoller::remove(SocketHandle, std::uint64_t id) noexcept {
     });
 }
 
-Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output, int milliseconds) {
+vinc::Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output, int milliseconds) {
     auto& impl = *impl_;
     impl.descriptors[0] = {impl.reader, POLLRDNORM, 0};
     for (std::size_t i = 0; i < impl.entries.size(); ++i) {
@@ -214,18 +289,21 @@ Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output
     if (ready < 0) {
         const int error = last_socket_error();
         if (error == WSAEINTR) {
-            return std::unexpected(OsError{ErrorCode::WouldBlock, Operation::WaitSocket});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::WouldBlock, vinc::osal::ErrorOperation::WaitSocket});
         }
 
-        return std::unexpected(socket_error(Operation::WaitSocket, error));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::WaitSocket, error));
     }
 
     if (!ready) {
-        return std::unexpected(OsError{ErrorCode::Timeout, Operation::WaitSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Timeout, vinc::osal::ErrorOperation::WaitSocket});
     }
 
     if (impl.descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-        return std::unexpected(OsError{ErrorCode::SystemError, Operation::WaitSocket});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::SystemError, vinc::osal::ErrorOperation::WaitSocket});
     }
 
     if (impl.descriptors[0].revents & POLLRDNORM) {
@@ -233,11 +311,12 @@ Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output
         char byte;
         const int received = ::recv(impl.reader, &byte, 1, 0);
         if (received < 0) {
-            return std::unexpected(socket_error(Operation::WaitSocket));
+            return std::unexpected(socket_error(vinc::osal::ErrorOperation::WaitSocket));
         }
 
         if (!received) {
-            return std::unexpected(OsError{ErrorCode::Closed, Operation::WaitSocket});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::WaitSocket});
         }
         impl.wake_pending = false;
     }
@@ -275,7 +354,7 @@ Result<std::size_t> NativeSocketPoller::wait(std::span<NativeSocketEvent> output
     return count;
 }
 
-Result<void> NativeSocketPoller::wake() noexcept {
+vinc::Result<void> NativeSocketPoller::wake() noexcept {
     std::lock_guard lock(impl_->wake_mutex);
     if (impl_->wake_pending) {
         return {};
@@ -283,7 +362,7 @@ Result<void> NativeSocketPoller::wake() noexcept {
 
     const char byte = 1;
     if (::send(impl_->writer, &byte, 1, 0) != 1) {
-        return std::unexpected(socket_error(Operation::WakeSocket));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::WakeSocket));
     }
     impl_->wake_pending = true;
     return {};

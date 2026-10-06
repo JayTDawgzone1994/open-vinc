@@ -1,8 +1,9 @@
 #pragma once
 
 // Small framed control messages shared by the framework and module runtimes.
-// Commands, lifecycle and Bus registration use this envelope; large message payloads do not.
+// Commands, lifecycle and Message Bus registration use this envelope; large message payloads do not.
 
+#include <vinc/control/error.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -13,6 +14,7 @@
 
 namespace vinc::control {
 // Wire integers are big endian. Never transmit C++ object representations.
+constexpr std::uint32_t hello_version = 2;
 constexpr std::size_t header_size = 24;
 constexpr std::size_t max_payload = 16 * 1024;
 enum class Kind : std::uint16_t {
@@ -26,7 +28,7 @@ enum class Domain : std::uint16_t {
     Session = 0,
     Lifecycle = 1,
     Command = 2,
-    Bus = 3
+    MessageBus = 3
 };
 
 // request correlates a response with one request; events use zero.
@@ -40,15 +42,14 @@ struct Frame {
 };
 
 using Bytes = std::vector<std::byte>;
-// Existing encoding APIs throw std::length_error when a wire limit is exceeded.
-// Error-interface migration is separate from the wire format and readability work.
-Bytes encode(const Frame& frame);
+// Size and format failures use the common Result contract; allocation may still throw.
+Result<Bytes> encode(const Frame& frame);
 
 class Decoder {
 public:
     // Retain at most one incomplete frame; returned frames own their payloads.
     // After a decoding error, discard the decoder along with the failed connection.
-    std::expected<std::vector<Frame>, std::string> feed(std::span<const std::byte> bytes);
+    Result<std::vector<Frame>> feed(std::span<const std::byte> bytes);
 
 private:
     Bytes buffer_;
@@ -56,7 +57,7 @@ private:
 
 void put_u32(Bytes& output, std::uint32_t value);
 void put_u64(Bytes& output, std::uint64_t value);
-void put_string(Bytes& output, std::string_view value);
+Result<void> put_string(Bytes& output, std::string_view value);
 
 // A failed read latches an invalid state. Always check done() after decoding
 // the expected fields; it rejects both truncation and unexpected trailing bytes.
@@ -80,6 +81,6 @@ private:
     bool valid_ = true;
 };
 
-Bytes encode_arguments(const std::vector<std::string>& args);
-std::expected<std::vector<std::string>, std::string> decode_arguments(std::span<const std::byte> data);
+Result<Bytes> encode_arguments(const std::vector<std::string>& args);
+Result<std::vector<std::string>> decode_arguments(std::span<const std::byte> data);
 } // namespace vinc::control

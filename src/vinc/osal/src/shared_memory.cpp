@@ -1,7 +1,7 @@
 // Common name, size and access checks for all shared-memory backends.
 // Mappings retain ownership independently, so closing a handle does not invalidate a live view.
 
-#include "shared_memory_state.hpp"
+#include <vinc/osal/detail/shared_memory_state.hpp>
 #include <limits>
 #include <utility>
 
@@ -9,8 +9,8 @@ namespace vinc::osal {
 namespace {
 static_assert(sizeof(void*) == 8, "OSAL Shared Memory currently targets 64-bit processes");
 
-OsError invalid(Operation operation) {
-    return {ErrorCode::InvalidArgument, operation};
+vinc::Error invalid(vinc::osal::ErrorOperation operation) {
+    return {vinc::osal::ErrorCode::InvalidArgument, operation};
 }
 
 bool valid_access(SharedMemoryAccess access) {
@@ -49,9 +49,9 @@ SharedMemory::operator bool() const noexcept {
     return state_ && state_->handle != -1;
 }
 
-Result<SharedMemory> SharedMemory::create(std::string_view name, std::uint64_t size) {
+vinc::Result<SharedMemory> SharedMemory::create(std::string_view name, std::uint64_t size) {
     if (!valid_name(name) || !valid_size(size)) {
-        return std::unexpected(invalid(Operation::CreateSharedMemory));
+        return std::unexpected(invalid(vinc::osal::ErrorOperation::CreateSharedMemory));
     }
 
     auto state = std::make_shared<detail::SharedMemoryState>();
@@ -64,9 +64,9 @@ Result<SharedMemory> SharedMemory::create(std::string_view name, std::uint64_t s
     return SharedMemory(std::move(state));
 }
 
-Result<SharedMemory> SharedMemory::open(std::string_view name, SharedMemoryAccess access) {
+vinc::Result<SharedMemory> SharedMemory::open(std::string_view name, SharedMemoryAccess access) {
     if (!valid_name(name) || !valid_access(access)) {
-        return std::unexpected(invalid(Operation::OpenSharedMemory));
+        return std::unexpected(invalid(vinc::osal::ErrorOperation::OpenSharedMemory));
     }
 
     auto state = std::make_shared<detail::SharedMemoryState>();
@@ -80,10 +80,10 @@ Result<SharedMemory> SharedMemory::open(std::string_view name, SharedMemoryAcces
 
 // Validate local permissions before asking the backend to map. The mapping holds
 // a shared owner reference but its virtual address is meaningful only in this process.
-Result<SharedMemoryMapping> SharedMemory::map(std::uint64_t size, SharedMemoryAccess access) const {
-    constexpr auto operation = Operation::MapSharedMemory;
+vinc::Result<SharedMemoryMapping> SharedMemory::map(std::uint64_t size, SharedMemoryAccess access) const {
+    constexpr auto operation = vinc::osal::ErrorOperation::MapSharedMemory;
     if (!*this) {
-        return std::unexpected(OsError{ErrorCode::Closed, operation});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::Closed, operation});
     }
 
     if (!valid_size(size) || !valid_access(access)) {
@@ -91,7 +91,7 @@ Result<SharedMemoryMapping> SharedMemory::map(std::uint64_t size, SharedMemoryAc
     }
 
     if (state_->access == SharedMemoryAccess::ReadOnly && access == SharedMemoryAccess::ReadWrite) {
-        return std::unexpected(OsError{ErrorCode::PermissionDenied, operation});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::PermissionDenied, operation});
     }
 
     if (state_->created_size && size > state_->created_size) {
@@ -110,7 +110,7 @@ Result<SharedMemoryMapping> SharedMemory::map(std::uint64_t size, SharedMemoryAc
     return SharedMemoryMapping(std::move(mapping));
 }
 
-Result<void> SharedMemory::close() noexcept {
+vinc::Result<void> SharedMemory::close() noexcept {
     if (state_ && state_.use_count() == 1) {
         auto result = state_->close_native();
         if (!result) {
@@ -121,9 +121,9 @@ Result<void> SharedMemory::close() noexcept {
     return {};
 }
 
-Result<void> SharedMemory::unlink_name(std::string_view name) {
+vinc::Result<void> SharedMemory::unlink_name(std::string_view name) {
     if (!valid_name(name)) {
-        return std::unexpected(invalid(Operation::UnlinkSharedMemory));
+        return std::unexpected(invalid(vinc::osal::ErrorOperation::UnlinkSharedMemory));
     }
 
     return detail::unlink_memory(std::string(name));
@@ -146,19 +146,21 @@ std::span<const std::byte> SharedMemoryMapping::bytes() const noexcept {
     return *this ? std::span<const std::byte>(state_->address, state_->length) : std::span<const std::byte>{};
 }
 
-Result<std::span<std::byte>> SharedMemoryMapping::writable_bytes() noexcept {
+vinc::Result<std::span<std::byte>> SharedMemoryMapping::writable_bytes() noexcept {
     if (!*this) {
-        return std::unexpected(OsError{ErrorCode::Closed, Operation::MapSharedMemory});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::MapSharedMemory});
     }
 
     if (state_->access != SharedMemoryAccess::ReadWrite) {
-        return std::unexpected(OsError{ErrorCode::PermissionDenied, Operation::MapSharedMemory});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::PermissionDenied,
+                                           vinc::osal::ErrorOperation::MapSharedMemory});
     }
 
     return std::span<std::byte>(state_->address, state_->length);
 }
 
-Result<void> SharedMemoryMapping::unmap() noexcept {
+vinc::Result<void> SharedMemoryMapping::unmap() noexcept {
     if (state_) {
         auto result = state_->unmap_native();
         if (!result) {

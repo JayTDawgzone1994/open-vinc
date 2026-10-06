@@ -1,7 +1,7 @@
 // macOS readiness and wakeup backend for the single Pipe I/O worker.
 // kqueue filters follow each transfer direction and are removed when the transfer ends.
 
-#include "../posix/pipe_platform.hpp"
+#include <vinc/osal/detail/posix/pipe_platform.hpp>
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/event.h>
@@ -12,25 +12,25 @@ namespace {
 constexpr int max_events_per_wait = 32;
 }
 
-Result<std::unique_ptr<PipeMonitor>> PipeMonitor::create() {
+vinc::Result<std::unique_ptr<PipeMonitor>> PipeMonitor::create() {
     auto impl = std::make_unique<PipeMonitorImpl>();
     impl->queue = kqueue();
     if (impl->queue < 0) {
-        return std::unexpected(native_error(Operation::InitializeService, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
     }
 
-    auto isolated = isolate_pipe_descriptor(impl->queue, Operation::InitializeService);
+    auto isolated = isolate_pipe_descriptor(impl->queue, vinc::osal::ErrorOperation::InitializeService);
     if (!isolated) {
         return std::unexpected(isolated.error());
     }
 
     if (fcntl(impl->queue, F_SETFD, FD_CLOEXEC) < 0) {
-        return std::unexpected(native_error(Operation::InitializeService, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
     }
     struct kevent event;
     EV_SET(&event, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
     if (kevent(impl->queue, &event, 1, nullptr, 0, nullptr) < 0) {
-        return std::unexpected(native_error(Operation::InitializeService, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
     }
 
     return std::unique_ptr<PipeMonitor>(new PipeMonitor(std::move(impl)));
@@ -45,7 +45,7 @@ void PipeMonitor::wake() noexcept {
     } while (result < 0 && errno == EINTR);
 }
 
-Result<void> PipeMonitor::wait(int milliseconds) noexcept {
+vinc::Result<void> PipeMonitor::wait(int milliseconds) noexcept {
     struct kevent events[max_events_per_wait];
     const timespec timeout{milliseconds < 0 ? 0 : milliseconds / 1000,
                            milliseconds < 0 ? 0 : (milliseconds % 1000) * 1000000L};
@@ -56,19 +56,20 @@ Result<void> PipeMonitor::wait(int milliseconds) noexcept {
             return {};
         }
 
-        return std::unexpected(native_error(Operation::WaitIo, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::WaitIo, errno));
     }
 
     for (int i = 0; i < count; ++i) {
         if ((events[i].flags & EV_ERROR) && events[i].data) {
-            return std::unexpected(native_error(Operation::WaitIo, static_cast<int>(events[i].data)));
+            return std::unexpected(
+                native_error(vinc::osal::ErrorOperation::WaitIo, static_cast<int>(events[i].data)));
         }
     }
 
     return {};
 }
 
-Result<void> arm_pipe(PipeMonitorImpl& monitor, int fd, IoKind kind) noexcept {
+vinc::Result<void> arm_pipe(PipeMonitorImpl& monitor, int fd, IoKind kind) noexcept {
     struct kevent event;
     EV_SET(&event, static_cast<uintptr_t>(fd), kind == IoKind::Read ? EVFILT_READ : EVFILT_WRITE, EV_ADD, 0,
            0, nullptr);
@@ -77,8 +78,9 @@ Result<void> arm_pipe(PipeMonitorImpl& monitor, int fd, IoKind kind) noexcept {
         result = kevent(monitor.queue, &event, 1, nullptr, 0, nullptr);
     } while (result < 0 && errno == EINTR);
     if (result < 0) {
-        return std::unexpected(
-            native_error(kind == IoKind::Read ? Operation::ReadPipe : Operation::WritePipe, errno));
+        return std::unexpected(native_error(kind == IoKind::Read ? vinc::osal::ErrorOperation::ReadPipe
+                                                                 : vinc::osal::ErrorOperation::WritePipe,
+                                            errno));
     }
 
     return {};

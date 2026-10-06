@@ -3,6 +3,8 @@
 // Wait for readiness across multiple sockets without creating a thread per socket.
 // A registration identifies one watch, so a reused OS handle cannot impersonate an old watch.
 
+#include <vinc/osal/error.hpp>
+#include <vinc/time.hpp>
 #include <vinc/osal/socket.hpp>
 #include <cstdint>
 
@@ -42,20 +44,21 @@ class SocketPoller {
 public:
     // Windows wake-pair setup is bounded by the earlier of this deadline and
     // five seconds. The token also cancels setup, not just subsequent waits.
-    static Result<SocketPoller> create(std::size_t max_sockets = 1024,
-                                       Deadline setup_deadline = (Deadline::max)(), std::stop_token = {});
+    static vinc::Result<SocketPoller> create(std::size_t max_sockets = 1024,
+                                             vinc::Deadline setup_deadline = (vinc::Deadline::max)(),
+                                             std::stop_token = {});
     ~SocketPoller();
     SocketPoller(SocketPoller&&) noexcept;
     SocketPoller& operator=(SocketPoller&&) noexcept;
     SocketPoller(const SocketPoller&) = delete;
     SocketPoller& operator=(const SocketPoller&) = delete;
-    Result<SocketRegistration> add(Socket&, SocketEvents interests, std::uint64_t user_tag = 0);
-    Result<void> modify(SocketRegistration, SocketEvents interests);
-    Result<void> remove(SocketRegistration);
+    vinc::Result<SocketRegistration> add(Socket&, SocketEvents interests, std::uint64_t user_tag = 0);
+    vinc::Result<void> modify(SocketRegistration, SocketEvents interests);
+    vinc::Result<void> remove(SocketRegistration);
     // Level-triggered readiness, not completed I/O. Zero means explicit wake;
     // timeout and stop are distinct errors. One waiter; no concurrent mutations.
-    Result<std::size_t> wait_until(std::span<SocketReadyEvent>, Deadline, std::stop_token = {});
-    Result<void> wake() noexcept; // cross-thread safe; lifetime must be synchronized
+    vinc::Result<std::size_t> wait_until(std::span<SocketReadyEvent>, vinc::Deadline, std::stop_token = {});
+    vinc::Result<void> wake() noexcept; // cross-thread safe; lifetime must be synchronized
 private:
     explicit SocketPoller(std::unique_ptr<detail::SocketPollerState>);
     std::unique_ptr<detail::SocketPollerState> state_;

@@ -25,7 +25,7 @@ enum class SocketType {
 
 struct IPv4Address {
     std::array<std::uint8_t, 4> bytes{};
-    static Result<IPv4Address> parse(std::string_view);
+    static vinc::Result<IPv4Address> parse(std::string_view);
     std::string to_string() const;
 
     static constexpr IPv4Address loopback() noexcept {
@@ -39,7 +39,7 @@ struct IPv6Address {
     std::array<std::uint8_t, 16> bytes{};
     std::uint32_t scope_id = 0;
     // Numeric address only; scope is an explicit numeric argument, not DNS.
-    static Result<IPv6Address> parse(std::string_view, std::uint32_t scope_id = 0);
+    static vinc::Result<IPv6Address> parse(std::string_view, std::uint32_t scope_id = 0);
     std::string to_string() const;
 
     static constexpr IPv6Address loopback() noexcept {
@@ -66,7 +66,7 @@ using SocketAddress = std::variant<IpEndpoint, LocalEndpoint>;
 AddressFamily address_family(const SocketAddress&) noexcept;
 // Explicit, synchronous OS resolver. No deadline/cancellation guarantee and no
 // automatic fallback/racing between returned addresses. Never resolves Local.
-Result<std::vector<IpEndpoint>> resolve_host(std::string_view host, std::uint16_t port,
-                                             SocketType type = SocketType::Stream,
-                                             std::optional<AddressFamily> family = {});
+vinc::Result<std::vector<IpEndpoint>> resolve_host(std::string_view host, std::uint16_t port,
+                                                   SocketType type = SocketType::Stream,
+                                                   std::optional<AddressFamily> family = {});
 } // namespace vinc::osal

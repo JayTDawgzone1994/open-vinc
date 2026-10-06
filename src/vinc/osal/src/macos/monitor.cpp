@@ -1,7 +1,8 @@
 // macOS process wakeup backend: kqueue NOTE_EXIT plus a user event for service work.
 // Exit notifications do not reap children; the common observer still calls waitpid.
 
-#include "../posix/platform.hpp"
+#include <vinc/osal/detail/posix/platform.hpp>
+#include <vinc/osal/detail/posix/descriptor.hpp>
 
 #include <cerrno>
 #include <csignal>
@@ -32,20 +33,24 @@ NativeMonitor::NativeMonitor(std::unique_ptr<MonitorImpl> impl) : impl_(std::mov
 
 NativeMonitor::~NativeMonitor() = default;
 
-Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
+vinc::Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
     auto impl = std::make_unique<MonitorImpl>();
     impl->queue = kqueue();
     if (impl->queue < 0) {
-        return std::unexpected(native_error(Operation::InitializeService, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
+    }
+    auto isolated = isolate_descriptor(impl->queue, ErrorOperation::InitializeService);
+    if (!isolated) {
+        return std::unexpected(isolated.error());
     }
 
     if (fcntl(impl->queue, F_SETFD, FD_CLOEXEC) < 0) {
-        return std::unexpected(native_error(Operation::InitializeService, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
     }
     struct kevent event;
     EV_SET(&event, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
     if (kevent(impl->queue, &event, 1, nullptr, 0, nullptr) < 0) {
-        return std::unexpected(native_error(Operation::InitializeService, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
     }
 
     return std::unique_ptr<NativeMonitor>(new NativeMonitor(std::move(impl)));
@@ -60,7 +65,7 @@ void NativeMonitor::wake() noexcept {
     } while (result < 0 && errno == EINTR);
 }
 
-Result<void> NativeMonitor::wait(bool polling) noexcept {
+vinc::Result<void> NativeMonitor::wait(bool polling) noexcept {
     struct kevent events[max_events_per_wait];
     const timespec timeout{0, fallback_poll_interval_ns};
     const int count =
@@ -70,23 +75,24 @@ Result<void> NativeMonitor::wait(bool polling) noexcept {
             return {};
         }
 
-        return std::unexpected(native_error(Operation::Observe, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Observe, errno));
     }
 
     for (int i = 0; i < count; ++i) {
         if (events[i].flags & EV_ERROR) {
-            return std::unexpected(native_error(Operation::Observe, static_cast<int>(events[i].data)));
+            return std::unexpected(
+                native_error(vinc::osal::ErrorOperation::Observe, static_cast<int>(events[i].data)));
         }
     }
 
     return {};
 }
 
-Result<int> watch_process(MonitorImpl& monitor, pid_t pid) noexcept {
+vinc::Result<int> watch_process(MonitorImpl& monitor, pid_t pid) noexcept {
     struct kevent event;
     EV_SET(&event, static_cast<uintptr_t>(pid), EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, nullptr);
     if (kevent(monitor.queue, &event, 1, nullptr, 0, nullptr) < 0) {
-        return std::unexpected(native_error(Operation::Observe, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::Observe, errno));
     }
 
     return 0;
@@ -97,7 +103,7 @@ void release_watch(int) noexcept {
     // has reaped it: that PID may already belong to a newly registered child.
 }
 
-Result<TerminateResult> kill_process(pid_t pid, int) noexcept {
+vinc::Result<TerminateResult> kill_process(pid_t pid, int) noexcept {
     if (kill(pid, SIGKILL) == 0) {
         return TerminateResult::Requested;
     }
@@ -106,6 +112,6 @@ Result<TerminateResult> kill_process(pid_t pid, int) noexcept {
         return TerminateResult::AlreadyExited;
     }
 
-    return std::unexpected(native_error(Operation::Terminate, errno));
+    return std::unexpected(native_error(vinc::osal::ErrorOperation::Terminate, errno));
 }
 } // namespace vinc::osal::detail

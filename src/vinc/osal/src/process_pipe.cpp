@@ -1,17 +1,18 @@
 // Transactional endpoint handoff: validate and pin first, spawn second, release parent ends last.
 // The duplex convenience API is two independent one-way streams, not a different transport.
 
-#include "pipe_state.hpp"
-#include "native.hpp"
-#include "process_pipe_native.hpp"
+#include <vinc/osal/detail/operation_error.hpp>
+#include <vinc/osal/detail/pipe_state.hpp>
+#include <vinc/osal/detail/native.hpp>
+#include <vinc/osal/detail/process_pipe_native.hpp>
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>
 #include <array>
 
 namespace vinc::osal::detail {
 struct ProcessAccess {
-    static Result<Process> spawn(ProcessService& service, const SpawnOptions& options,
-                                 const ChildPipe& child) {
+    static vinc::Result<Process> spawn(ProcessService& service, const SpawnOptions& options,
+                                       const ChildPipe& child) {
         return service.spawn_impl(options, &child);
     }
 };
@@ -44,24 +45,27 @@ struct PipeHandoff {
 
 namespace vinc::osal {
 namespace {
-Result<Process> spawn_bound(ProcessService& processes, PipeService& pipes, const SpawnOptions& options,
-                            std::span<const PipeBinding> bindings,
-                            const std::array<detail::NativePipe*, 2>& outputs = {}) {
+vinc::Result<Process> spawn_bound(ProcessService& processes, PipeService& pipes, const SpawnOptions& options,
+                                  std::span<const PipeBinding> bindings,
+                                  const std::array<detail::NativePipe*, 2>& outputs = {}) {
     if (bindings.size() > detail::max_pipe_bindings) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
     }
     detail::PipeHandoff handoff;
     handoff.state = detail::PipeAccess::state(pipes);
     if (!handoff.state) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Spawn});
     }
     handoff.records.reserve(bindings.size());
     std::vector<detail::NativePipeBinding> native;
     native.reserve(bindings.size());
-    auto prepared = [&]() -> Result<detail::ChildPipe> {
+    auto prepared = [&]() -> vinc::Result<detail::ChildPipe> {
         std::lock_guard lock(handoff.state->mutex);
         if (!handoff.state->accepting) {
-            return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::Spawn});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::Spawn});
         }
 
         for (const auto& binding : bindings) {
@@ -72,23 +76,27 @@ Result<Process> spawn_bound(ProcessService& processes, PipeService& pipes, const
                 binding.endpoint);
             if (!end || detail::PipeAccess::state(*end) != handoff.state ||
                 !detail::PipeAccess::record(*end)) {
-                return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+                return std::unexpected(
+                    vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
             }
 
             auto record = detail::PipeAccess::record(*end);
             if (record->closing) {
-                return std::unexpected(OsError{ErrorCode::Closed, Operation::Spawn});
+                return std::unexpected(
+                    vinc::Error{vinc::osal::ErrorCode::Closed, vinc::osal::ErrorOperation::Spawn});
             }
 
             if (record->used || record->transferring) {
-                return std::unexpected(OsError{ErrorCode::Busy, Operation::Spawn});
+                return std::unexpected(
+                    vinc::Error{vinc::osal::ErrorCode::Busy, vinc::osal::ErrorOperation::Spawn});
             }
 
             if (std::any_of(native.begin(), native.end(), [&](const auto& existing_binding) {
                     return existing_binding.slot == binding.slot ||
                            existing_binding.pipe == record->native.get();
                 })) {
-                return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+                return std::unexpected(
+                    vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
             }
             native.push_back({binding.slot, record->direction, record->native.get()});
         }
@@ -112,7 +120,7 @@ Result<Process> spawn_bound(ProcessService& processes, PipeService& pipes, const
         return result;
     }();
     if (!prepared) {
-        return std::unexpected(prepared.error());
+        return std::unexpected(detail::operation_error(ErrorOperation::Spawn, prepared.error()));
     }
 
     auto process = detail::ProcessAccess::spawn(processes, options, *prepared);
@@ -124,18 +132,19 @@ Result<Process> spawn_bound(ProcessService& processes, PipeService& pipes, const
 }
 }
 
-Result<Process> spawn_with_pipes(ProcessService& processes, PipeService& pipes, const SpawnOptions& options,
-                                 std::span<const PipeBinding> bindings) {
+vinc::Result<Process> spawn_with_pipes(ProcessService& processes, PipeService& pipes,
+                                       const SpawnOptions& options, std::span<const PipeBinding> bindings) {
     if (bindings.empty()) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
     }
 
     return spawn_bound(processes, pipes, options, bindings);
 }
 
-Result<ProcessWithOutput> spawn_with_output(ProcessService& processes, PipeService& pipes,
-                                            const SpawnOptions& options,
-                                            std::span<const PipeBinding> bindings) {
+vinc::Result<ProcessWithOutput> spawn_with_output(ProcessService& processes, PipeService& pipes,
+                                                  const SpawnOptions& options,
+                                                  std::span<const PipeBinding> bindings) {
     auto valid = detail::validate_options(options);
     if (!valid) {
         return std::unexpected(valid.error());
@@ -146,7 +155,7 @@ Result<ProcessWithOutput> spawn_with_output(ProcessService& processes, PipeServi
     const auto count = static_cast<std::size_t>(capture[0]) + static_cast<std::size_t>(capture[1]);
     auto records = detail::PipeAccess::reserve(pipes, count);
     if (!records) {
-        return std::unexpected(records.error());
+        return std::unexpected(detail::operation_error(ErrorOperation::Spawn, records.error()));
     }
 
     struct Reservation {
@@ -170,7 +179,7 @@ Result<ProcessWithOutput> spawn_with_output(ProcessService& processes, PipeServi
 
         auto pair = detail::NativePipe::create_pair(true);
         if (!pair) {
-            return std::unexpected(pair.error());
+            return std::unexpected(detail::operation_error(ErrorOperation::Spawn, pair.error()));
         }
         pairs[i] = std::move(*pair);
         outputs[i] = pairs[i].writer.get();
@@ -178,7 +187,7 @@ Result<ProcessWithOutput> spawn_with_output(ProcessService& processes, PipeServi
 
     auto child = spawn_bound(processes, pipes, options, bindings, outputs);
     if (!child) {
-        return std::unexpected(child.error());
+        return std::unexpected(detail::operation_error(ErrorOperation::Spawn, child.error()));
     }
     // All allocations and capacity checks preceded spawn. Publish only moves;
     // closing every parent writer copy here lets readers eventually observe EOF.
@@ -197,15 +206,17 @@ Result<ProcessWithOutput> spawn_with_output(ProcessService& processes, PipeServi
     return result;
 }
 
-Result<std::vector<InheritedPipe>> take_inherited_pipes(PipeService& pipes) {
+vinc::Result<std::vector<InheritedPipe>> take_inherited_pipes(PipeService& pipes) {
     auto state = detail::PipeAccess::state(pipes);
     if (!state) {
-        return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::AdoptPipe});
     }
     {
         std::lock_guard lock(state->mutex);
         if (!state->accepting) {
-            return std::unexpected(OsError{ErrorCode::ServiceClosed, Operation::AdoptPipe});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorOperation::AdoptPipe});
         }
     }
 
@@ -218,7 +229,7 @@ Result<std::vector<InheritedPipe>> take_inherited_pipes(PipeService& pipes) {
     result.reserve(native->size());
     auto records = detail::PipeAccess::reserve(pipes, native->size());
     if (!records) {
-        return std::unexpected(records.error());
+        return std::unexpected(detail::operation_error(ErrorOperation::AdoptPipe, records.error()));
     }
     // Everything below is move-only publication; it cannot allocate.
     for (std::size_t i = 0; i < native->size(); ++i) {
@@ -234,11 +245,11 @@ Result<std::vector<InheritedPipe>> take_inherited_pipes(PipeService& pipes) {
     return result;
 }
 
-Result<ProcessWithPipe> spawn_with_pipe(ProcessService& processes, PipeService& pipes,
-                                        const SpawnOptions& options) {
+vinc::Result<ProcessWithPipe> spawn_with_pipe(ProcessService& processes, PipeService& pipes,
+                                              const SpawnOptions& options) {
     auto forward = pipes.create_pipe();
     if (!forward) {
-        return std::unexpected(forward.error());
+        return std::unexpected(detail::operation_error(ErrorOperation::Spawn, forward.error()));
     }
 
     auto discard = [&] {
@@ -249,7 +260,7 @@ Result<ProcessWithPipe> spawn_with_pipe(ProcessService& processes, PipeService& 
         auto reverse = pipes.create_pipe();
         if (!reverse) {
             discard();
-            return std::unexpected(reverse.error());
+            return std::unexpected(detail::operation_error(ErrorOperation::Spawn, reverse.error()));
         }
         try {
             const std::array<PipeBinding, 2> bindings{{{0, &forward->reader}, {1, &reverse->writer}}};
@@ -261,7 +272,7 @@ Result<ProcessWithPipe> spawn_with_pipe(ProcessService& processes, PipeService& 
             detail::PipeAccess::discard(detail::PipeAccess::end(reverse->reader));
             detail::PipeAccess::discard(detail::PipeAccess::end(reverse->writer));
             discard();
-            return std::unexpected(process.error());
+            return std::unexpected(detail::operation_error(ErrorOperation::Spawn, process.error()));
         } catch (...) {
             detail::PipeAccess::discard(detail::PipeAccess::end(reverse->reader));
             detail::PipeAccess::discard(detail::PipeAccess::end(reverse->writer));
@@ -273,7 +284,7 @@ Result<ProcessWithPipe> spawn_with_pipe(ProcessService& processes, PipeService& 
     }
 }
 
-Result<DuplexPipe> take_inherited_pipe(PipeService& pipes) {
+vinc::Result<DuplexPipe> take_inherited_pipe(PipeService& pipes) {
     auto inherited = take_inherited_pipes(pipes);
     if (!inherited) {
         return std::unexpected(inherited.error());
@@ -285,12 +296,14 @@ Result<DuplexPipe> take_inherited_pipe(PipeService& pipes) {
         } else if (item.slot == 1 && std::holds_alternative<PipeWriter>(item.endpoint)) {
             result.writer = std::get<PipeWriter>(std::move(item.endpoint));
         } else {
-            return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::AdoptPipe});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AdoptPipe});
         }
     }
 
     if (!result) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     return result;

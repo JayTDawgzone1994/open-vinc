@@ -1,54 +1,16 @@
+#include <vinc/osal/detail/utf8.hpp>
+#include <vinc/osal/detail/native_error.hpp>
 // Convert portable IPv4, IPv6 and local endpoints to and from native addresses.
 // Explicit hostname resolution is kept separate from nonblocking socket I/O.
 
-#include "socket_native.hpp"
+#include <vinc/osal/detail/operation_error.hpp>
+#include <vinc/osal/detail/socket_native.hpp>
 #include <algorithm>
 #include <charconv>
 #include <mutex>
 #include <new>
 
 namespace vinc::osal::detail {
-namespace {
-bool valid_utf8(std::string_view text) noexcept {
-    std::uint32_t value = 0;
-    std::uint32_t minimum = 0;
-    unsigned remaining = 0;
-    for (const unsigned char byte : text) {
-        if (!remaining) {
-            if (byte < 0x80) {
-                continue;
-            }
-
-            if (byte >= 0xc2 && byte <= 0xdf) {
-                value = byte & 0x1f;
-                minimum = 0x80;
-                remaining = 1;
-            } else if (byte >= 0xe0 && byte <= 0xef) {
-                value = byte & 0x0f;
-                minimum = 0x800;
-                remaining = 2;
-            } else if (byte >= 0xf0 && byte <= 0xf4) {
-                value = byte & 7;
-                minimum = 0x10000;
-                remaining = 3;
-            } else {
-                return false;
-            }
-        } else {
-            if ((byte & 0xc0) != 0x80) {
-                return false;
-            }
-            value = (value << 6) | (byte & 0x3f);
-            if (--remaining == 0 &&
-                (value < minimum || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff))) {
-                return false;
-            }
-        }
-    }
-
-    return remaining == 0;
-}
-}
 
 SocketRuntime::~SocketRuntime() {
 #if defined(_WIN32)
@@ -56,7 +18,7 @@ SocketRuntime::~SocketRuntime() {
 #endif
 }
 
-Result<std::shared_ptr<SocketRuntime>> socket_runtime() {
+vinc::Result<std::shared_ptr<SocketRuntime>> socket_runtime() {
     static std::mutex mutex;
     static std::weak_ptr<SocketRuntime> current;
     std::lock_guard lock(mutex);
@@ -70,7 +32,7 @@ Result<std::shared_ptr<SocketRuntime>> socket_runtime() {
     const int error = WSAStartup(MAKEWORD(2, 2), &data);
     if (error) {
         ::operator delete(storage);
-        return std::unexpected(socket_error(Operation::InitializeService, error));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::InitializeService, error));
     }
 #endif
     auto runtime = std::shared_ptr<SocketRuntime>(new (storage) SocketRuntime);
@@ -78,144 +40,144 @@ Result<std::shared_ptr<SocketRuntime>> socket_runtime() {
     return runtime;
 }
 
-OsError socket_error(Operation operation, int error) noexcept {
-    ErrorCode code = ErrorCode::SystemError;
+vinc::Error socket_error(vinc::osal::ErrorOperation operation, int error) noexcept {
+    vinc::osal::ErrorCode code = vinc::osal::ErrorCode::SystemError;
 #if defined(_WIN32)
     switch (error) {
     case WSAEWOULDBLOCK:
-        code = ErrorCode::WouldBlock;
+        code = vinc::osal::ErrorCode::WouldBlock;
         break;
     case WSAEADDRINUSE:
-        code = ErrorCode::AddressInUse;
+        code = vinc::osal::ErrorCode::AddressInUse;
         break;
     case WSAEADDRNOTAVAIL:
-        code = ErrorCode::AddressNotAvailable;
+        code = vinc::osal::ErrorCode::AddressNotAvailable;
         break;
     case WSAECONNREFUSED:
-        code = ErrorCode::ConnectionRefused;
+        code = vinc::osal::ErrorCode::ConnectionRefused;
         break;
     case WSAECONNRESET:
     case WSAECONNABORTED:
-        code = ErrorCode::ConnectionReset;
+        code = vinc::osal::ErrorCode::ConnectionReset;
         break;
     case WSAENOTCONN:
     case WSAEDESTADDRREQ:
-        code = ErrorCode::NotConnected;
+        code = vinc::osal::ErrorCode::NotConnected;
         break;
     case WSAESHUTDOWN:
-        code = ErrorCode::PeerClosed;
+        code = vinc::osal::ErrorCode::PeerClosed;
         break;
     case WSAEMSGSIZE:
-        code = ErrorCode::MessageTooLarge;
+        code = vinc::osal::ErrorCode::MessageTooLarge;
         break;
     case WSAENETUNREACH:
     case WSAEHOSTUNREACH:
     case WSAENETDOWN:
-        code = ErrorCode::NetworkUnreachable;
+        code = vinc::osal::ErrorCode::NetworkUnreachable;
         break;
     case WSAEAFNOSUPPORT:
     case WSAEPROTONOSUPPORT:
     case WSAESOCKTNOSUPPORT:
     case WSAEOPNOTSUPP:
     case WSAENOPROTOOPT:
-        code = ErrorCode::Unsupported;
+        code = vinc::osal::ErrorCode::Unsupported;
         break;
     case WSAEACCES:
-        code = ErrorCode::PermissionDenied;
+        code = vinc::osal::ErrorCode::PermissionDenied;
         break;
     case WSAEINVAL:
     case WSAEFAULT:
-        code = ErrorCode::InvalidArgument;
+        code = vinc::osal::ErrorCode::InvalidArgument;
         break;
     case WSAENOTSOCK:
-        code = ErrorCode::Closed;
+        code = vinc::osal::ErrorCode::Closed;
         break;
     case WSAENOBUFS:
     case WSAEMFILE:
-        code = ErrorCode::ResourceExhausted;
+        code = vinc::osal::ErrorCode::ResourceExhausted;
         break;
     case WSAETIMEDOUT:
-        code = ErrorCode::Timeout;
+        code = vinc::osal::ErrorCode::Timeout;
         break;
     case WSAHOST_NOT_FOUND:
     case WSANO_DATA:
-        code = ErrorCode::NotFound;
+        code = vinc::osal::ErrorCode::NotFound;
         break;
     }
 
-    return {code, operation, {error, std::system_category()}};
+    return {code, operation, {vinc::NativeErrorSource::Winsock, static_cast<std::uint32_t>(error)}};
 #else
     switch (error) {
     case EAGAIN:
-        code = ErrorCode::WouldBlock;
+        code = vinc::osal::ErrorCode::WouldBlock;
         break;
 #if EWOULDBLOCK != EAGAIN
     case EWOULDBLOCK:
-        code = ErrorCode::WouldBlock;
+        code = vinc::osal::ErrorCode::WouldBlock;
         break;
 #endif
     case EADDRINUSE:
-        code = ErrorCode::AddressInUse;
+        code = vinc::osal::ErrorCode::AddressInUse;
         break;
     case EADDRNOTAVAIL:
-        code = ErrorCode::AddressNotAvailable;
+        code = vinc::osal::ErrorCode::AddressNotAvailable;
         break;
     case ECONNREFUSED:
-        code = ErrorCode::ConnectionRefused;
+        code = vinc::osal::ErrorCode::ConnectionRefused;
         break;
     case ECONNRESET:
     case ECONNABORTED:
-        code = ErrorCode::ConnectionReset;
+        code = vinc::osal::ErrorCode::ConnectionReset;
         break;
     case ENOTCONN:
     case EDESTADDRREQ:
-        code = ErrorCode::NotConnected;
+        code = vinc::osal::ErrorCode::NotConnected;
         break;
     case EPIPE:
-        code = ErrorCode::PeerClosed;
+        code = vinc::osal::ErrorCode::PeerClosed;
         break;
     case EMSGSIZE:
-        code = ErrorCode::MessageTooLarge;
+        code = vinc::osal::ErrorCode::MessageTooLarge;
         break;
     case ENETUNREACH:
     case EHOSTUNREACH:
     case ENETDOWN:
-        code = ErrorCode::NetworkUnreachable;
+        code = vinc::osal::ErrorCode::NetworkUnreachable;
         break;
     case EAFNOSUPPORT:
     case EPROTONOSUPPORT:
     case EOPNOTSUPP:
     case ENOPROTOOPT:
-        code = ErrorCode::Unsupported;
+        code = vinc::osal::ErrorCode::Unsupported;
         break;
     case EACCES:
     case EPERM:
-        code = ErrorCode::PermissionDenied;
+        code = vinc::osal::ErrorCode::PermissionDenied;
         break;
     case EINVAL:
     case EFAULT:
     case ENAMETOOLONG:
-        code = ErrorCode::InvalidArgument;
+        code = vinc::osal::ErrorCode::InvalidArgument;
         break;
     case EBADF:
     case ENOTSOCK:
-        code = ErrorCode::Closed;
+        code = vinc::osal::ErrorCode::Closed;
         break;
     case ENOBUFS:
     case ENOMEM:
     case EMFILE:
     case ENFILE:
-        code = ErrorCode::ResourceExhausted;
+        code = vinc::osal::ErrorCode::ResourceExhausted;
         break;
     case ETIMEDOUT:
-        code = ErrorCode::Timeout;
+        code = vinc::osal::ErrorCode::Timeout;
         break;
     case ENOENT:
-        code = ErrorCode::NotFound;
+        code = vinc::osal::ErrorCode::NotFound;
         break;
     }
 
-    return {code, operation, {error, std::generic_category()}};
+    return {code, operation, {detail::errno_source, error}};
 #endif
 }
 
@@ -236,7 +198,7 @@ int native_type(SocketType type) noexcept {
     return type == SocketType::Stream ? SOCK_STREAM : SOCK_DGRAM;
 }
 
-Result<void> isolate_socket_handle(SocketHandle& handle, Operation operation) {
+vinc::Result<void> isolate_socket_handle(SocketHandle& handle, vinc::osal::ErrorOperation operation) {
 #if !defined(_WIN32)
     if (handle >= 0 && handle < 3) {
         const int replacement = fcntl(handle, F_DUPFD_CLOEXEC, 3);
@@ -253,39 +215,42 @@ Result<void> isolate_socket_handle(SocketHandle& handle, Operation operation) {
     return {};
 }
 
-Result<void> configure_socket(SocketHandle& socket) {
-    auto isolated = isolate_socket_handle(socket, Operation::CreateSocket);
+vinc::Result<void> configure_socket(SocketHandle& socket) {
+    auto isolated = isolate_socket_handle(socket, vinc::osal::ErrorOperation::CreateSocket);
     if (!isolated) {
         return isolated;
     }
 #if defined(_WIN32)
     u_long nonblocking = 1;
     if (ioctlsocket(socket, FIONBIO, &nonblocking) != 0) {
-        return std::unexpected(socket_error(Operation::CreateSocket));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::CreateSocket));
     }
 
+    // Windows socket handles are pointer-sized kernel tokens accepted by
+    // SetHandleInformation. This conversion does not access a C++ object.
     if (!SetHandleInformation(reinterpret_cast<HANDLE>(socket), HANDLE_FLAG_INHERIT, 0)) {
-        return std::unexpected(OsError{ErrorCode::SystemError,
-                                       Operation::CreateSocket,
-                                       {static_cast<int>(GetLastError()), std::system_category()}});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::SystemError,
+                                           vinc::osal::ErrorOperation::CreateSocket,
+                                           {vinc::NativeErrorSource::Win32, GetLastError()}});
     }
 #else
     const int flags = fcntl(socket, F_GETFL);
     if (flags < 0 || fcntl(socket, F_SETFL, flags | O_NONBLOCK) < 0 ||
         fcntl(socket, F_SETFD, FD_CLOEXEC) < 0) {
-        return std::unexpected(socket_error(Operation::CreateSocket));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::CreateSocket));
     }
 #if defined(VINC_OSAL_MACOS)
     const int one = 1;
     if (setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)) < 0) {
-        return std::unexpected(socket_error(Operation::CreateSocket));
+        return std::unexpected(socket_error(vinc::osal::ErrorOperation::CreateSocket));
     }
 #endif
 #endif
     return {};
 }
 
-Result<NativeAddress> encode_address(const SocketAddress& address, Operation operation) {
+vinc::Result<NativeAddress> encode_address(const SocketAddress& address,
+                                           vinc::osal::ErrorOperation operation) {
     NativeAddress native;
     if (auto ip = std::get_if<IpEndpoint>(&address)) {
         if (auto v4 = std::get_if<IPv4Address>(&ip->address)) {
@@ -309,8 +274,8 @@ Result<NativeAddress> encode_address(const SocketAddress& address, Operation ope
         const auto& path = std::get<LocalEndpoint>(address).path;
         sockaddr_un value{};
         if (path.empty() || path.find('\0') != std::string::npos || path.size() >= sizeof(value.sun_path) ||
-            !valid_utf8(path)) {
-            return std::unexpected(OsError{ErrorCode::InvalidArgument, operation});
+            !valid_utf8_encoding(path)) {
+            return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument, operation});
         }
         value.sun_family = AF_UNIX;
         std::memcpy(value.sun_path, path.c_str(), path.size() + 1);
@@ -324,12 +289,15 @@ Result<NativeAddress> encode_address(const SocketAddress& address, Operation ope
     return native;
 }
 
-Result<SocketAddress> decode_address(const sockaddr* address, AddressLength length, Operation operation) {
+vinc::Result<SocketAddress> decode_address(const sockaddr* address, AddressLength length,
+                                           vinc::osal::ErrorOperation operation) {
     if (length < static_cast<AddressLength>(sizeof(address->sa_family))) {
-        return std::unexpected(OsError{ErrorCode::SystemError, operation});
+        return std::unexpected(vinc::Error{vinc::osal::ErrorCode::SystemError, operation});
     }
 
     if (address->sa_family == AF_INET && length >= static_cast<AddressLength>(sizeof(sockaddr_in))) {
+        // Native socket ABI boundary: the caller supplies sockaddr_storage
+        // alignment; family and length above select a complete IPv4 layout.
         const auto* value = reinterpret_cast<const sockaddr_in*>(address);
         IPv4Address ip;
         std::memcpy(ip.bytes.data(), &value->sin_addr, 4);
@@ -337,6 +305,8 @@ Result<SocketAddress> decode_address(const sockaddr* address, AddressLength leng
     }
 
     if (address->sa_family == AF_INET6 && length >= static_cast<AddressLength>(sizeof(sockaddr_in6))) {
+        // The caller supplies aligned native storage; family and length above
+        // select the complete IPv6 layout populated by the socket API.
         const auto* value = reinterpret_cast<const sockaddr_in6*>(address);
         IPv6Address ip;
         std::memcpy(ip.bytes.data(), &value->sin6_addr, 16);
@@ -345,6 +315,9 @@ Result<SocketAddress> decode_address(const sockaddr* address, AddressLength leng
     }
 
     if (address->sa_family == AF_UNIX) {
+        // The native family selects sockaddr_un in aligned sockaddr_storage.
+        // Local addresses can be shorter than the full struct; count below limits
+        // path access to the returned bytes and the native sun_path capacity.
         const auto* value = reinterpret_cast<const sockaddr_un*>(address);
         const auto count =
             length > static_cast<AddressLength>(offsetof(sockaddr_un, sun_path))
@@ -355,35 +328,39 @@ Result<SocketAddress> decode_address(const sockaddr* address, AddressLength leng
         return SocketAddress{LocalEndpoint{std::string(value->sun_path, end)}};
     }
 
-    return std::unexpected(OsError{ErrorCode::Unsupported, operation});
+    return std::unexpected(vinc::Error{vinc::osal::ErrorCode::Unsupported, operation});
 }
 } // namespace vinc::osal::detail
 
 namespace vinc::osal {
-Result<IPv4Address> IPv4Address::parse(std::string_view text) {
+vinc::Result<IPv4Address> IPv4Address::parse(std::string_view text) {
     if (text.empty() || text.size() >= INET_ADDRSTRLEN || text.find('\0') != std::string_view::npos) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::ParseAddress});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::ParseAddress});
     }
     char buffer[INET_ADDRSTRLEN]{};
     std::memcpy(buffer, text.data(), text.size());
     IPv4Address result;
     if (inet_pton(AF_INET, buffer, result.bytes.data()) != 1) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::ParseAddress});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::ParseAddress});
     }
 
     return result;
 }
 
-Result<IPv6Address> IPv6Address::parse(std::string_view text, std::uint32_t scope) {
+vinc::Result<IPv6Address> IPv6Address::parse(std::string_view text, std::uint32_t scope) {
     if (text.empty() || text.size() >= INET6_ADDRSTRLEN || text.find('\0') != std::string_view::npos) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::ParseAddress});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::ParseAddress});
     }
     char buffer[INET6_ADDRSTRLEN]{};
     std::memcpy(buffer, text.data(), text.size());
     IPv6Address result;
     result.scope_id = scope;
     if (inet_pton(AF_INET6, buffer, result.bytes.data()) != 1) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::ParseAddress});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::ParseAddress});
     }
 
     return result;
@@ -409,17 +386,18 @@ AddressFamily address_family(const SocketAddress& value) noexcept {
     return AddressFamily::Local;
 }
 
-Result<std::vector<IpEndpoint>> resolve_host(std::string_view host, std::uint16_t port, SocketType type,
-                                             std::optional<AddressFamily> family) {
+vinc::Result<std::vector<IpEndpoint>> resolve_host(std::string_view host, std::uint16_t port, SocketType type,
+                                                   std::optional<AddressFamily> family) {
     if (host.empty() || host.find('\0') != std::string_view::npos ||
         (family && *family != AddressFamily::IPv4 && *family != AddressFamily::IPv6) ||
         (type != SocketType::Stream && type != SocketType::Datagram)) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::ResolveAddress});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::ResolveAddress});
     }
 
     auto runtime = detail::socket_runtime();
     if (!runtime) {
-        return std::unexpected(runtime.error());
+        return std::unexpected(detail::operation_error(ErrorOperation::ResolveAddress, runtime.error()));
     }
     addrinfo hints{};
     hints.ai_family = family ? detail::native_family(*family) : AF_UNSPEC;
@@ -431,35 +409,26 @@ Result<std::vector<IpEndpoint>> resolve_host(std::string_view host, std::uint16_
     const int error = getaddrinfo(name.c_str(), service.c_str(), &hints, &raw);
     if (error) {
 #if defined(_WIN32)
-        return std::unexpected(detail::socket_error(Operation::ResolveAddress, error));
+        return std::unexpected(detail::socket_error(vinc::osal::ErrorOperation::ResolveAddress, error));
 #else
         if (error == EAI_SYSTEM) {
-            return std::unexpected(detail::socket_error(Operation::ResolveAddress));
+            return std::unexpected(detail::socket_error(vinc::osal::ErrorOperation::ResolveAddress));
         }
 
-        class ResolverCategory final : public std::error_category {
-            const char* name() const noexcept override {
-                return "getaddrinfo";
-            }
-
-            std::string message(int code) const override {
-                return gai_strerror(code);
-            }
-        };
-
-        static ResolverCategory category;
-        const auto code = error == EAI_NONAME   ? ErrorCode::NotFound
-                          : error == EAI_MEMORY ? ErrorCode::ResourceExhausted
-                                                : ErrorCode::SystemError;
-        return std::unexpected(OsError{code, Operation::ResolveAddress, {error, category}});
+        const auto code = error == EAI_NONAME   ? vinc::osal::ErrorCode::NotFound
+                          : error == EAI_MEMORY ? vinc::osal::ErrorCode::ResourceExhausted
+                                                : vinc::osal::ErrorCode::SystemError;
+        return std::unexpected(
+            vinc::Error{code, vinc::osal::ErrorOperation::ResolveAddress, {detail::resolver_source, error}});
 #endif
     }
 
     std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> owner(raw, freeaddrinfo);
     std::vector<IpEndpoint> result;
     for (auto* entry = raw; entry; entry = entry->ai_next) {
-        auto value = detail::decode_address(
-            entry->ai_addr, static_cast<detail::AddressLength>(entry->ai_addrlen), Operation::ResolveAddress);
+        auto value =
+            detail::decode_address(entry->ai_addr, static_cast<detail::AddressLength>(entry->ai_addrlen),
+                                   vinc::osal::ErrorOperation::ResolveAddress);
         if (!value || !std::holds_alternative<IpEndpoint>(*value)) {
             continue;
         }
@@ -471,7 +440,8 @@ Result<std::vector<IpEndpoint>> resolve_host(std::string_view host, std::uint16_
     }
 
     if (result.empty()) {
-        return std::unexpected(OsError{ErrorCode::NotFound, Operation::ResolveAddress});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::ResolveAddress});
     }
 
     return result;

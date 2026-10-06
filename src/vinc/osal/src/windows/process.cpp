@@ -1,8 +1,9 @@
+#include <vinc/osal/detail/native_error.hpp>
 // Windows process backend: UTF-16 launch data, explicit handle inheritance and exit observation.
 // Prepare ownership before CreateProcess so a successfully created child is never lost.
 
-#include "../native.hpp"
-#include "../process_pipe_native.hpp"
+#include <vinc/osal/detail/native.hpp>
+#include <vinc/osal/detail/process_pipe_native.hpp>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -51,25 +52,28 @@ private:
     HANDLE value_;
 };
 
-Result<std::wstring> widen(const std::string& text) {
+vinc::Result<std::wstring> widen(const std::string& text) {
     if (text.empty()) {
         return std::wstring{};
     }
 
     if (text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
     }
 
     const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
                                            static_cast<int>(text.size()), nullptr, 0);
     if (!length) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
     }
 
     std::wstring result(static_cast<std::size_t>(length), L'\0');
     if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
                              result.data(), length)) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
     }
 
     return result;
@@ -100,7 +104,8 @@ struct EnvironmentLess {
     }
 };
 
-Result<std::vector<wchar_t>> environment_block(const SpawnOptions& options, const ChildPipe* child_pipe) {
+vinc::Result<std::vector<wchar_t>> environment_block(const SpawnOptions& options,
+                                                     const ChildPipe* child_pipe) {
     std::map<std::wstring, std::wstring, EnvironmentLess> entries;
     if (options.environment_mode == EnvironmentMode::Inherit) {
         struct EnvironmentStrings {
@@ -114,7 +119,8 @@ Result<std::vector<wchar_t>> environment_block(const SpawnOptions& options, cons
         } inherited;
 
         if (!inherited.value) {
-            return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+            return std::unexpected(
+                native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
         }
 
         for (const wchar_t* cursor = inherited.value; *cursor;) {
@@ -168,12 +174,16 @@ Result<std::vector<wchar_t>> environment_block(const SpawnOptions& options, cons
     return block;
 }
 
-Result<Handle> standard_handle(StdioMode mode, DWORD standard, bool input, std::intptr_t captured = -1) {
+vinc::Result<Handle> standard_handle(StdioMode mode, DWORD standard, bool input,
+                                     std::intptr_t captured = -1) {
     if (mode == StdioMode::Capture) {
         HANDLE duplicate = nullptr;
+        // captured is a HANDLE encoded by the Pipe backend in intptr_t.
+        // Restore its pointer-sized token for Win32; do not dereference it.
         if (!DuplicateHandle(GetCurrentProcess(), reinterpret_cast<HANDLE>(captured), GetCurrentProcess(),
                              &duplicate, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
-            return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+            return std::unexpected(
+                native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
         }
 
         return Handle(duplicate);
@@ -185,7 +195,8 @@ Result<Handle> standard_handle(StdioMode mode, DWORD standard, bool input, std::
             HANDLE duplicate = nullptr;
             if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &duplicate, 0, TRUE,
                                  DUPLICATE_SAME_ACCESS)) {
-                return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+                return std::unexpected(
+                    native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
             }
 
             return Handle(duplicate);
@@ -196,7 +207,8 @@ Result<Handle> standard_handle(StdioMode mode, DWORD standard, bool input, std::
         CreateFileW(L"NUL", input ? GENERIC_READ : GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                     &attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (null_file == INVALID_HANDLE_VALUE) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
     }
 
     return Handle(null_file);
@@ -208,40 +220,48 @@ char pipe_platform_tag() noexcept {
 }
 
 void close_pipe_transfer(std::intptr_t handle) noexcept {
+    // This pointer-sized token came from the Windows Pipe backend.
     CloseHandle(reinterpret_cast<HANDLE>(handle));
 }
 
-Result<std::intptr_t> duplicate_pipe_transfer(std::intptr_t source) {
+vinc::Result<std::intptr_t> duplicate_pipe_transfer(std::intptr_t source) {
     HANDLE duplicate = nullptr;
+    // source stores an opaque HANDLE in intptr_t; only Win32 interprets it.
     if (!DuplicateHandle(GetCurrentProcess(), reinterpret_cast<HANDLE>(source), GetCurrentProcess(),
                          &duplicate, 0, TRUE, DUPLICATE_SAME_ACCESS)) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
     }
 
+    // Preserve the complete HANDLE token for the matching native close/adopt path.
     return reinterpret_cast<std::intptr_t>(duplicate);
 }
 
-Result<std::string> read_pipe_bootstrap() {
+vinc::Result<std::string> read_pipe_bootstrap() {
     const DWORD length = GetEnvironmentVariableW(L"VINC_OSAL_PIPE_BOOTSTRAP", nullptr, 0);
     if (!length) {
-        return std::unexpected(OsError{ErrorCode::NotFound, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::NotFound, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     if (length > max_pipe_bootstrap_bytes + 1) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     std::wstring text(length, L'\0');
     const DWORD count = GetEnvironmentVariableW(L"VINC_OSAL_PIPE_BOOTSTRAP", text.data(), length);
     if (!count || count >= length) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     std::string result;
     result.reserve(count);
     for (DWORD i = 0; i < count; ++i) {
         if (text[i] > 127) {
-            return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::AdoptPipe});
+            return std::unexpected(
+                vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AdoptPipe});
         }
         result.push_back(static_cast<char>(text[i]));
     }
@@ -249,37 +269,37 @@ Result<std::string> read_pipe_bootstrap() {
     return result;
 }
 
-OsError native_error(Operation operation, int value) noexcept {
-    ErrorCode code = ErrorCode::SystemError;
+vinc::Error native_error(vinc::osal::ErrorOperation operation, int value) noexcept {
+    vinc::osal::ErrorCode code = vinc::osal::ErrorCode::SystemError;
     switch (static_cast<DWORD>(value)) {
     case ERROR_FILE_NOT_FOUND:
     case ERROR_PATH_NOT_FOUND:
     case ERROR_DIRECTORY:
-        code = ErrorCode::NotFound;
+        code = vinc::osal::ErrorCode::NotFound;
         break;
     case ERROR_ACCESS_DENIED:
     case ERROR_PRIVILEGE_NOT_HELD:
-        code = ErrorCode::PermissionDenied;
+        code = vinc::osal::ErrorCode::PermissionDenied;
         break;
     case ERROR_NOT_ENOUGH_MEMORY:
     case ERROR_OUTOFMEMORY:
     case ERROR_TOO_MANY_OPEN_FILES:
-        code = ErrorCode::ResourceExhausted;
+        code = vinc::osal::ErrorCode::ResourceExhausted;
         break;
     case ERROR_NOT_SUPPORTED:
     case ERROR_CALL_NOT_IMPLEMENTED:
-        code = ErrorCode::Unsupported;
+        code = vinc::osal::ErrorCode::Unsupported;
         break;
     case ERROR_INVALID_PARAMETER:
     case ERROR_BAD_EXE_FORMAT:
     case ERROR_NO_UNICODE_TRANSLATION:
-        code = ErrorCode::InvalidArgument;
+        code = vinc::osal::ErrorCode::InvalidArgument;
         break;
     default:
         break;
     }
 
-    return {code, operation, {value, std::system_category()}};
+    return {code, operation, {vinc::NativeErrorSource::Win32, static_cast<std::uint32_t>(value)}};
 }
 
 struct MonitorImpl {
@@ -291,11 +311,12 @@ NativeMonitor::NativeMonitor(std::unique_ptr<MonitorImpl> impl) : impl_(std::mov
 
 NativeMonitor::~NativeMonitor() = default;
 
-Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
+vinc::Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
     auto impl = std::make_unique<MonitorImpl>();
     impl->wake_event = Handle(CreateEventW(nullptr, FALSE, FALSE, nullptr));
     if (!impl->wake_event.get()) {
-        return std::unexpected(native_error(Operation::InitializeService, static_cast<int>(GetLastError())));
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::InitializeService, static_cast<int>(GetLastError())));
     }
 
     return std::unique_ptr<NativeMonitor>(new NativeMonitor(std::move(impl)));
@@ -305,14 +326,15 @@ void NativeMonitor::wake() noexcept {
     SetEvent(impl_->wake_event.get());
 }
 
-Result<void> NativeMonitor::wait(bool polling) noexcept {
+vinc::Result<void> NativeMonitor::wait(bool polling) noexcept {
     const auto result =
         WaitForSingleObject(impl_->wake_event.get(), polling ? fallback_poll_interval_ms : INFINITE);
     if (result == WAIT_OBJECT_0 || result == WAIT_TIMEOUT) {
         return {};
     }
 
-    return std::unexpected(native_error(Operation::Observe, static_cast<int>(GetLastError())));
+    return std::unexpected(
+        native_error(vinc::osal::ErrorOperation::Observe, static_cast<int>(GetLastError())));
 }
 
 struct ProcessImpl {
@@ -347,20 +369,118 @@ bool NativeProcess::event_driven() const noexcept {
     return true;
 }
 
-Result<std::unique_ptr<NativeProcess>>
-NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const ChildPipe* child_pipe) {
+namespace {
+// CreateProcessW limits the command line to 32,767 UTF-16 characters, including NUL.
+constexpr std::size_t maximum_command_characters = 32767;
+
+vinc::Result<std::wstring> build_command_line(const SpawnOptions& options) {
     std::wstring command = quote(options.executable.native());
     for (const auto& argument : options.arguments) {
         auto wide = widen(argument);
         if (!wide) {
             return std::unexpected(wide.error());
         }
+
         command += L' ';
         command += quote(*wide);
     }
 
-    if (command.size() >= 32767) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::Spawn});
+    if (command.size() >= maximum_command_characters) {
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::Spawn});
+    }
+
+    return command;
+}
+
+// The caller owns the backing storage and destroys this guard before that storage.
+struct AttributeList {
+    LPPROC_THREAD_ATTRIBUTE_LIST value = nullptr;
+
+    ~AttributeList() {
+        if (value) {
+            DeleteProcThreadAttributeList(value);
+        }
+    }
+};
+
+// All buffers remain in spawn's scope through CreateProcessW. On failure, only
+// an initialized list is deleted; inherited handles remain owned by their callers.
+vinc::Result<void> prepare_inheritance(std::vector<std::byte>& storage, AttributeList& attributes,
+                                       std::vector<HANDLE>& handles, const Handle& input,
+                                       const Handle& output, const Handle& error,
+                                       const ChildPipe* child_pipe) {
+    SIZE_T bytes = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+    storage.resize(bytes);
+
+    // Win32 supplies the opaque layout and required byte count. The default
+    // allocator provides native heap alignment; only Win32 accesses the list.
+    // storage is never resized after initialization and outlives AttributeList.
+    auto* list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
+    if (!InitializeProcThreadAttributeList(list, 1, 0, &bytes)) {
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
+    }
+
+    attributes.value = list;
+    handles = {input.get(), output.get(), error.get()};
+    if (child_pipe) {
+        for (auto handle : child_pipe->inheritance()) {
+            // ChildPipe stores native HANDLE values in pointer-sized integers;
+            // restore the opaque Win32 token without dereferencing it.
+            handles.push_back(reinterpret_cast<HANDLE>(handle));
+        }
+    }
+
+    if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles.data(),
+                                   handles.size() * sizeof(HANDLE), nullptr, nullptr)) {
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
+    }
+
+    return {};
+}
+
+// ProcessImpl owns the registration, including rollback before any child exists.
+vinc::Result<void> register_exit_wait(ProcessImpl& process, HANDLE wake_event) {
+    process.wake_event = wake_event;
+    process.wait = CreateThreadpoolWait(ProcessImpl::on_exit, &process, nullptr);
+    if (!process.wait) {
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
+    }
+
+    return {};
+}
+
+vinc::Result<void> launch_process(ProcessImpl& owner, const SpawnOptions& options, std::wstring& command,
+                                  std::vector<wchar_t>& environment, STARTUPINFOEXW& startup) {
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(options.executable.c_str(), command.data(), nullptr, nullptr, TRUE,
+                        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
+                            (options.new_process_group ? CREATE_NEW_PROCESS_GROUP : 0),
+                        environment.data(),
+                        options.working_directory ? options.working_directory->c_str() : nullptr,
+                        &startup.StartupInfo, &process)) {
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
+    }
+
+    owner.process = Handle(process.hProcess);
+    owner.pid = process.dwProcessId;
+    CloseHandle(process.hThread);
+    SetThreadpoolWait(owner.wait, process.hProcess, nullptr);
+
+    return {};
+}
+} // namespace
+
+vinc::Result<std::unique_ptr<NativeProcess>>
+NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const ChildPipe* child_pipe) {
+    auto command = build_command_line(options);
+    if (!command) {
+        return std::unexpected(command.error());
     }
 
     auto environment = environment_block(options, child_pipe);
@@ -385,86 +505,62 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
         return std::unexpected(error.error());
     }
 
-    SIZE_T bytes = 0;
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
-    std::vector<std::byte> attribute_storage(bytes);
-
-    struct AttributeList {
-        LPPROC_THREAD_ATTRIBUTE_LIST value = nullptr;
-
-        ~AttributeList() {
-            if (value) {
-                DeleteProcThreadAttributeList(value);
-            }
-        }
-    } attributes;
-
-    auto* list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_storage.data());
-    if (!InitializeProcThreadAttributeList(list, 1, 0, &bytes)) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
-    }
-    attributes.value = list;
-    std::vector<HANDLE> handles{input->get(), output->get(), error->get()};
-    if (child_pipe) {
-        for (auto handle : child_pipe->inheritance()) {
-            handles.push_back(reinterpret_cast<HANDLE>(handle));
-        }
+    // Declaration order preserves cleanup: handle list, native attributes,
+    // backing bytes, then the three duplicated standard handles.
+    std::vector<std::byte> attribute_storage;
+    AttributeList attributes;
+    std::vector<HANDLE> handles;
+    auto inheritance =
+        prepare_inheritance(attribute_storage, attributes, handles, *input, *output, *error, child_pipe);
+    if (!inheritance) {
+        return std::unexpected(inheritance.error());
     }
 
-    if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles.data(),
-                                   handles.size() * sizeof(HANDLE), nullptr, nullptr)) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
-    }
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     startup.StartupInfo.hStdInput = input->get();
     startup.StartupInfo.hStdOutput = output->get();
     startup.StartupInfo.hStdError = error->get();
-    startup.lpAttributeList = list;
+    startup.lpAttributeList = attributes.value;
 
     // Allocate every owning object and callback registration before creating a
     // child. No fallible allocation is permitted after CreateProcess succeeds.
     auto native = std::unique_ptr<NativeProcess>(new NativeProcess(std::make_unique<ProcessImpl>()));
-    native->impl_->wake_event = monitor.implementation().wake_event.get();
-    native->impl_->wait = CreateThreadpoolWait(ProcessImpl::on_exit, native->impl_.get(), nullptr);
-    if (!native->impl_->wait) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+    auto registered = register_exit_wait(*native->impl_, monitor.implementation().wake_event.get());
+    if (!registered) {
+        return std::unexpected(registered.error());
     }
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(options.executable.c_str(), command.data(), nullptr, nullptr, TRUE,
-                        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
-                            (options.new_process_group ? CREATE_NEW_PROCESS_GROUP : 0),
-                        environment->data(),
-                        options.working_directory ? options.working_directory->c_str() : nullptr,
-                        &startup.StartupInfo, &process)) {
-        return std::unexpected(native_error(Operation::Spawn, static_cast<int>(GetLastError())));
+
+    auto launched = launch_process(*native->impl_, options, *command, *environment, startup);
+    if (!launched) {
+        return std::unexpected(launched.error());
     }
-    native->impl_->process = Handle(process.hProcess);
-    native->impl_->pid = process.dwProcessId;
-    CloseHandle(process.hThread);
-    SetThreadpoolWait(native->impl_->wait, process.hProcess, nullptr);
+
     return native;
 }
 
-Result<std::optional<ExitStatus>> NativeProcess::poll() noexcept {
+vinc::Result<std::optional<ExitStatus>> NativeProcess::poll() noexcept {
     const auto wait = WaitForSingleObject(impl_->process.get(), 0);
     if (wait == WAIT_TIMEOUT) {
         return std::optional<ExitStatus>{};
     }
 
     if (wait != WAIT_OBJECT_0) {
-        return std::unexpected(native_error(Operation::Observe, static_cast<int>(GetLastError())));
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Observe, static_cast<int>(GetLastError())));
     }
+
     DWORD code;
     if (!GetExitCodeProcess(impl_->process.get(), &code)) {
-        return std::unexpected(native_error(Operation::Observe, static_cast<int>(GetLastError())));
+        return std::unexpected(
+            native_error(vinc::osal::ErrorOperation::Observe, static_cast<int>(GetLastError())));
     }
 
     return std::optional(ExitStatus{ExitKind::Code, code});
 }
 
-Result<TerminateResult> NativeProcess::terminate() noexcept {
+vinc::Result<TerminateResult> NativeProcess::terminate() noexcept {
     // Conventional Windows STATUS_CONTROL_C_EXIT value; not a crash classifier.
     if (TerminateProcess(impl_->process.get(), 0xc000013aUL)) {
         return TerminateResult::Requested;
@@ -475,7 +571,7 @@ Result<TerminateResult> NativeProcess::terminate() noexcept {
         return TerminateResult::AlreadyExited;
     }
 
-    return std::unexpected(native_error(Operation::Terminate, error));
+    return std::unexpected(native_error(vinc::osal::ErrorOperation::Terminate, error));
 }
 
 } // namespace vinc::osal::detail

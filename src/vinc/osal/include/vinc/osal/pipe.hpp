@@ -3,6 +3,7 @@
 // Owned, asynchronous, one-way byte streams.
 // PipeService owns accepted buffers until completion; protocol framing belongs above OSAL.
 
+#include <vinc/time.hpp>
 #include <vinc/osal/error.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -82,7 +83,7 @@ struct IoCompletion {
     // Confirmed transfer count. Failure/cancellation does NOT prove zero
     // delivery; protocol framing must account for partially submitted writes.
     std::size_t transferred = 0;
-    std::optional<OsError> error;
+    std::optional<vinc::Error> error;
     IoBuffer buffer;
 };
 
@@ -180,29 +181,29 @@ struct Pipe {
 
 class PipeService {
 public:
-    [[nodiscard]] static Result<PipeService> create(PipeServiceOptions = {});
+    [[nodiscard]] static vinc::Result<PipeService> create(PipeServiceOptions = {});
     ~PipeService(); // closes endpoints; state outlives pending native I/O
     PipeService(PipeService&&) noexcept;
     PipeService& operator=(PipeService&&) noexcept;
     PipeService(const PipeService&) = delete;
     PipeService& operator=(const PipeService&) = delete;
     // One unidirectional byte stream. Two endpoint credits; no child process.
-    [[nodiscard]] Result<Pipe> create_pipe();
+    [[nodiscard]] vinc::Result<Pipe> create_pipe();
     // On rejection, buffer remains owned by the caller. On acceptance it moves
     // to OSAL, and is returned in exactly one completion. No borrowed storage.
-    [[nodiscard]] Result<IoId> submit_read(PipeReader&, IoBuffer&&, Deadline);
-    [[nodiscard]] Result<IoId> submit_write(PipeWriter&, IoBuffer&&, Deadline);
-    [[nodiscard]] Result<CancelResult> cancel(IoId);
+    [[nodiscard]] vinc::Result<IoId> submit_read(PipeReader&, IoBuffer&&, vinc::Deadline);
+    [[nodiscard]] vinc::Result<IoId> submit_write(PipeWriter&, IoBuffer&&, vinc::Deadline);
+    [[nodiscard]] vinc::Result<CancelResult> cancel(IoId);
     // Cancelling this wait does not cancel I/O. Output slots receive ownership.
-    [[nodiscard]] Result<std::size_t> wait_completions(std::span<IoCompletion>, Deadline,
-                                                       std::stop_token = {});
-    [[nodiscard]] Result<void> shutdown_until(Deadline, std::stop_token = {});
-    std::optional<OsError> monitor_error() const;
+    [[nodiscard]] vinc::Result<std::size_t> wait_completions(std::span<IoCompletion>, vinc::Deadline,
+                                                             std::stop_token = {});
+    [[nodiscard]] vinc::Result<void> shutdown_until(vinc::Deadline, std::stop_token = {});
+    std::optional<vinc::Error> monitor_error() const;
 
 private:
     friend struct detail::PipeAccess;
     PipeService(std::shared_ptr<detail::PipeState>, std::unique_ptr<detail::PipeWorker>);
-    Result<IoId> submit(detail::PipeEnd&, IoBuffer&&, Deadline, IoKind);
+    vinc::Result<IoId> submit(detail::PipeEnd&, IoBuffer&&, vinc::Deadline, IoKind);
     void close() noexcept;
     std::shared_ptr<detail::PipeState> state_;
     std::unique_ptr<detail::PipeWorker> worker_;

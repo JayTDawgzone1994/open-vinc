@@ -1,7 +1,7 @@
 // POSIX Pipe backend using nonblocking descriptors and readiness notification.
 // Only the dedicated Pipe worker performs I/O; SIGPIPE handling stays local to that thread.
 
-#include "pipe_platform.hpp"
+#include <vinc/osal/detail/posix/pipe_platform.hpp>
 #include <atomic>
 #include <cerrno>
 #include <csignal>
@@ -15,7 +15,7 @@
 #include <utility>
 
 namespace vinc::osal::detail {
-Result<void> isolate_pipe_descriptor(int& fd, Operation operation) noexcept {
+vinc::Result<void> isolate_pipe_descriptor(int& fd, vinc::osal::ErrorOperation operation) noexcept {
     if (fd >= 5) {
         return {};
     }
@@ -57,22 +57,22 @@ struct Fd {
     Fd& operator=(const Fd&) = delete;
 };
 
-Result<std::array<Fd, 2>> make_pipe() {
+vinc::Result<std::array<Fd, 2>> make_pipe() {
     int descriptors[2];
 #if defined(VINC_OSAL_MACOS)
     if (::pipe(descriptors) < 0) {
-        return std::unexpected(native_error(Operation::CreatePipe, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::CreatePipe, errno));
     }
 #else
     if (pipe2(descriptors, O_CLOEXEC | O_NONBLOCK) < 0) {
-        return std::unexpected(native_error(Operation::CreatePipe, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::CreatePipe, errno));
     }
 #endif
     std::array<Fd, 2> result{Fd(descriptors[0]), Fd(descriptors[1])};
     // Internal pipe ends must not accidentally become the parent's missing
     // stdin/stdout/stderr, which spawn would otherwise treat as inherited stdio.
     for (auto& fd : result) {
-        auto isolated = isolate_pipe_descriptor(fd.value, Operation::CreatePipe);
+        auto isolated = isolate_pipe_descriptor(fd.value, vinc::osal::ErrorOperation::CreatePipe);
         if (!isolated) {
             return std::unexpected(isolated.error());
         }
@@ -80,7 +80,7 @@ Result<std::array<Fd, 2>> make_pipe() {
 #if defined(VINC_OSAL_MACOS)
     for (auto& fd : result) {
         if (fcntl(fd.value, F_SETFD, FD_CLOEXEC) < 0 || fcntl(fd.value, F_SETFL, O_NONBLOCK) < 0) {
-            return std::unexpected(native_error(Operation::CreatePipe, errno));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::CreatePipe, errno));
         }
     }
 #endif
@@ -103,7 +103,7 @@ PipeMonitor::PipeMonitor(std::unique_ptr<PipeMonitorImpl> impl) : impl_(std::mov
 
 PipeMonitor::~PipeMonitor() = default;
 
-Result<void> PipeMonitor::initialize_worker() noexcept {
+vinc::Result<void> PipeMonitor::initialize_worker() noexcept {
     // Only this dedicated I/O thread writes pipes. Do not replace the host's
     // SIGPIPE disposition or alter the caller's signal mask.
     sigset_t mask;
@@ -111,7 +111,7 @@ Result<void> PipeMonitor::initialize_worker() noexcept {
     sigaddset(&mask, SIGPIPE);
     const int error = pthread_sigmask(SIG_BLOCK, &mask, nullptr);
     if (error) {
-        return std::unexpected(native_error(Operation::InitializeService, error));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, error));
     }
 
     return {};
@@ -126,7 +126,7 @@ NativePipe::NativePipe(std::unique_ptr<NativePipeImpl> impl) : impl_(std::move(i
 
 NativePipe::~NativePipe() = default;
 
-Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
+vinc::Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
     auto ends = make_pipe();
     if (!ends) {
         return std::unexpected(ends.error());
@@ -137,7 +137,7 @@ Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
         const int fd = (*ends)[1].value;
         const int flags = fcntl(fd, F_GETFL);
         if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0) {
-            return std::unexpected(native_error(Operation::CreatePipe, errno));
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::CreatePipe, errno));
         }
     }
 
@@ -149,7 +149,7 @@ Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
                           std::unique_ptr<NativePipe>(new NativePipe(std::move(writer)))};
 }
 
-Result<void> NativePipe::attach(PipeMonitor&) {
+vinc::Result<void> NativePipe::attach(PipeMonitor&) {
     return {};
 }
 
@@ -157,24 +157,25 @@ std::intptr_t NativePipe::handle() const noexcept {
     return impl_->endpoint.value;
 }
 
-Result<void> NativePipe::validate_handle(std::intptr_t value, IoKind kind) {
+vinc::Result<void> NativePipe::validate_handle(std::intptr_t value, IoKind kind) {
     const int fd = static_cast<int>(value);
     struct stat info{};
     const int flags = fcntl(fd, F_GETFL);
     if (value < 3 || value > std::numeric_limits<int>::max() || fstat(fd, &info) < 0 ||
         !S_ISFIFO(info.st_mode) || flags < 0 ||
         (flags & O_ACCMODE) != (kind == IoKind::Read ? O_RDONLY : O_WRONLY) || !(flags & O_NONBLOCK)) {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     return {};
 }
 
-Result<std::unique_ptr<NativePipe>> NativePipe::adopt_handle(std::intptr_t value, IoKind) {
+vinc::Result<std::unique_ptr<NativePipe>> NativePipe::adopt_handle(std::intptr_t value, IoKind) {
     auto native = std::unique_ptr<NativePipe>(new NativePipe(std::make_unique<NativePipeImpl>()));
     const int fd = static_cast<int>(value);
     if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
-        return std::unexpected(native_error(Operation::AdoptPipe, errno));
+        return std::unexpected(native_error(vinc::osal::ErrorOperation::AdoptPipe, errno));
     }
     native->impl_->endpoint = Fd(fd);
     return native;
@@ -220,7 +221,8 @@ std::optional<NativeIoResult> NativeTransfer::poll() noexcept {
                           ? ::read(impl_->fd, impl_->buffer.data(), impl_->buffer.size())
                           : ::write(impl_->fd, impl_->buffer.data(), impl_->buffer.size());
     } while (transferred < 0 && errno == EINTR);
-    const auto operation = impl_->kind == IoKind::Read ? Operation::ReadPipe : Operation::WritePipe;
+    const auto operation = impl_->kind == IoKind::Read ? vinc::osal::ErrorOperation::ReadPipe
+                                                       : vinc::osal::ErrorOperation::WritePipe;
     if (transferred >= 0) {
         impl_->complete(
             {transferred == 0 && impl_->kind == IoKind::Read ? IoStatus::EndOfStream : IoStatus::Completed,

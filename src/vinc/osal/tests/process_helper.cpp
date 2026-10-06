@@ -27,6 +27,7 @@
 
 std::string utf8_path(const std::filesystem::path& path) {
     const auto text = path.u8string();
+    // char may inspect char8_t object bytes; the sized copy completes while the UTF-8 owner is alive.
     return std::string(reinterpret_cast<const char*>(text.data()), text.size());
 }
 
@@ -84,7 +85,8 @@ int helper(const std::vector<std::string>& args) {
 #endif
         if (args[0] == "stdio-large") {
             const auto emit = [](FILE* stream, unsigned seed) {
-                std::vector<unsigned char> block(4093);
+                constexpr std::size_t write_chunk_bytes = 4093;
+                std::vector<unsigned char> block(write_chunk_bytes);
                 constexpr std::size_t total = 1024 * 1024 + 17;
                 for (std::size_t offset = 0; offset < total;) {
                     const auto count = std::min(block.size(), total - offset);
@@ -151,6 +153,8 @@ int helper(const std::vector<std::string>& args) {
 
     if (args[0] == "probe-resource") {
 #ifdef _WIN32
+        // Restore the parent's pointer-sized opaque HANDLE token for the Win32 inheritance probe.
+        // The handle may be invalid in this child by design; no C++ object is dereferenced.
         SetEvent(reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(std::stoull(args.at(1)))));
 #else
         const char byte = 'x';

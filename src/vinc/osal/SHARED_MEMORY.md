@@ -2,7 +2,7 @@
 
 `<vinc/osal/shared_memory.hpp>` 提供具名、固定大小的跨程序原始記憶體，連結 `vinc::osal`。
 目標為 Windows、Linux、macOS 的 64 位元程序。此元件沒有 Ring Buffer、物件池、
-atomic 協調、commit、訊息格式或 Bus 政策，也不啟動背景執行緒。
+atomic 協調、commit、訊息格式或 Message Bus 政策，也不啟動背景執行緒。
 
 ## API 與所有權
 
@@ -28,7 +28,7 @@ POSIX 的 `close()` 錯誤後不重試可能已被重用的 fd。原生清理失
 
 同一物件的使用、移動、關閉與析構由呼叫端同步。不同物件可以各自操作，但資料讀寫仍需
 呼叫端協調。OS 操作是同步呼叫，不提供硬即時期限或取消；C++ 記憶體配置失敗可能拋出
-`std::bad_alloc`。一般 OS 失敗以 `Result<T>`／`OsError` 回報，包含操作與原生錯誤碼。
+`std::bad_alloc`。一般 OS 失敗以 `vinc::Result<T>`／`vinc::Error` 回報，包含操作與原生錯誤碼。
 
 ## 名稱、大小與權限
 
@@ -75,16 +75,19 @@ Shared Memory 不等於同步：此元件沒有 lock、atomic、Ready／Publishe
 
 ```cpp
 using namespace vinc::osal;
-auto memory = SharedMemory::create("example_unique_01", 4096);
-if (!memory) { /* 處理 memory.error() */ }
-else {
-    auto mapping = memory->map(4096, SharedMemoryAccess::ReadWrite);
+
+constexpr std::size_t mapping_bytes = 4096;
+auto memory = SharedMemory::create("example_unique_01", mapping_bytes);
+if (!memory) {
+    // Handle memory.error() before attempting to map the object.
+} else {
+    auto mapping = memory->map(mapping_bytes, SharedMemoryAccess::ReadWrite);
     if (mapping) {
         auto bytes = mapping->writable_bytes();
-        // 由上層協調初始化、讀寫與名稱交付。
+        // The caller coordinates initialization, access and name handoff.
     }
 }
-// POSIX：指定的管理者還必須在適當時機呼叫 unlink_name。
+// On POSIX, the designated owner must also call unlink_name at the proper time.
 ```
 
 另一程序使用 `open(name, ReadOnly)` 與 `map(length, ReadOnly)`。不可把只讀存取當成

@@ -1,7 +1,7 @@
 // Encode, validate and consume the one-time inherited-endpoint manifest.
 // Reject malformed or duplicate entries before exposing endpoints through PipeService.
 
-#include "process_pipe_native.hpp"
+#include <vinc/osal/detail/process_pipe_native.hpp>
 #include <algorithm>
 #include <atomic>
 #include <charconv>
@@ -9,8 +9,8 @@
 #include <string_view>
 
 namespace vinc::osal::detail {
-Result<ChildPipe> ChildPipe::prepare(std::span<const NativePipeBinding> bindings,
-                                     const std::array<NativePipe*, 2>& outputs) {
+vinc::Result<ChildPipe> ChildPipe::prepare(std::span<const NativePipeBinding> bindings,
+                                           const std::array<NativePipe*, 2>& outputs) {
     ChildPipe result;
     result.transfers_.reserve(bindings.size());
     result.handles_.reserve(bindings.size());
@@ -72,14 +72,15 @@ struct Parsed {
 };
 }
 
-Result<std::vector<NativeInheritedPipe>> take_native_inherited_pipes() {
+vinc::Result<std::vector<NativeInheritedPipe>> take_native_inherited_pipes() {
     auto text = read_pipe_bootstrap();
     if (!text) {
         return std::unexpected(text.error());
     }
 
     const auto invalid = [] {
-        return std::unexpected(OsError{ErrorCode::InvalidArgument, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AdoptPipe});
     };
     if (text->size() < 5 || text->size() > max_pipe_bootstrap_bytes || text->substr(0, 3) != "v2:" ||
         (*text)[3] != pipe_platform_tag() || (*text)[4] != ';') {
@@ -137,7 +138,8 @@ Result<std::vector<NativeInheritedPipe>> take_native_inherited_pipes() {
     result.reserve(parsed.size());
     static std::atomic<bool> claimed{false};
     if (claimed.load()) {
-        return std::unexpected(OsError{ErrorCode::Busy, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Busy, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     for (const auto& parsed_pipe : parsed) {
@@ -148,7 +150,8 @@ Result<std::vector<NativeInheritedPipe>> take_native_inherited_pipes() {
     }
 
     if (claimed.exchange(true)) {
-        return std::unexpected(OsError{ErrorCode::Busy, Operation::AdoptPipe});
+        return std::unexpected(
+            vinc::Error{vinc::osal::ErrorCode::Busy, vinc::osal::ErrorOperation::AdoptPipe});
     }
 
     for (const auto& parsed_pipe : parsed) {

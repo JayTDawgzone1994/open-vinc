@@ -11,10 +11,18 @@
 using namespace vinc::osal;
 using namespace std::chrono_literals;
 
-template <class T> T take(Result<T> result) {
+namespace {
+constexpr auto transfer_timeout = 10s;
+constexpr auto endpoint_wait_timeout = 5s;
+// Keep the helper alive while its parent tests cancellation, closure or termination.
+constexpr auto parent_control_window = 30s;
+constexpr auto delayed_echo_start = 250ms;
+constexpr std::size_t echo_chunk_bytes = 1024;
+} // namespace
+
+template <class T> T take(vinc::Result<T> result) {
     if (!result) {
-        throw std::runtime_error("OSAL " + std::to_string(static_cast<int>(result.error().code)) + " " +
-                                 result.error().native.message());
+        throw std::runtime_error(vinc::error_to_string(result.error()));
     }
 
     return std::move(*result);
@@ -22,7 +30,7 @@ template <class T> T take(Result<T> result) {
 
 IoCompletion completion(PipeService& service) {
     std::array<IoCompletion, 1> output;
-    take(service.wait_completions(output, std::chrono::steady_clock::now() + 10s));
+    take(service.wait_completions(output, std::chrono::steady_clock::now() + transfer_timeout));
     return std::move(output[0]);
 }
 
@@ -30,7 +38,8 @@ void send(PipeService& service, PipeWriter& pipe, std::span<const std::byte> dat
     while (!data.empty()) {
         IoBuffer buffer(data.size());
         std::copy(data.begin(), data.end(), buffer.bytes().begin());
-        take(service.submit_write(pipe, std::move(buffer), std::chrono::steady_clock::now() + 10s));
+        take(service.submit_write(pipe, std::move(buffer),
+                                  std::chrono::steady_clock::now() + transfer_timeout));
         auto result = completion(service);
         if (result.status != IoStatus::Completed || !result.transferred) {
             throw std::runtime_error("write failed");
@@ -54,22 +63,29 @@ int main(int argc, char** argv) {
         auto service = take(PipeService::create(service_options));
         if (mode == "reject-capacity") {
             auto inherited = take_inherited_pipes(service);
-            if (inherited || inherited.error().code != ErrorCode::ResourceExhausted) {
+            if (inherited || !inherited.error().is(vinc::osal::ErrorCode::ResourceExhausted)) {
                 return 104;
             }
 
+            const auto& failure = inherited.error();
+            if (!failure.is_operation(ErrorOperation::AdoptPipe) || failure.causes().size() != 1 ||
+                failure.causes().front().domain != vinc::ErrorDomain::Osal ||
+                failure.causes().front().operation != static_cast<std::int32_t>(ErrorOperation::CreatePipe)) {
+                return 106;
+            }
+
             auto again = take_inherited_pipes(service);
-            if (again || again.error().code != ErrorCode::Busy) {
+            if (again || !again.error().is(vinc::osal::ErrorCode::Busy)) {
                 return 105;
             }
 
-            std::this_thread::sleep_for(30s);
+            std::this_thread::sleep_for(parent_control_window);
             return 0;
         }
 
         if (mode == "no-bootstrap") {
             auto missing = take_inherited_pipe(service);
-            return !missing && missing.error().code == ErrorCode::NotFound ? 0 : 81;
+            return !missing && missing.error().is(vinc::osal::ErrorCode::NotFound) ? 0 : 81;
         }
 
         if (mode == "many" || mode == "single-source") {
@@ -92,7 +108,7 @@ int main(int argc, char** argv) {
                 writer.close();
             }
 
-            return service.shutdown_until(std::chrono::steady_clock::now() + 5s) ? 0 : 94;
+            return service.shutdown_until(std::chrono::steady_clock::now() + endpoint_wait_timeout) ? 0 : 94;
         }
 
         if (mode == "single-sink") {
@@ -102,18 +118,20 @@ int main(int argc, char** argv) {
                 return 95;
             }
             auto& reader = std::get<PipeReader>(inherited[0].endpoint);
-            take(service.submit_read(reader, IoBuffer(1), std::chrono::steady_clock::now() + 5s));
+            take(service.submit_read(reader, IoBuffer(1),
+                                     std::chrono::steady_clock::now() + endpoint_wait_timeout));
             auto value = completion(service);
             if (value.status != IoStatus::Completed || value.transferred != 1 ||
                 value.buffer.bytes()[0] != std::byte{42}) {
                 return 96;
             }
-            take(service.submit_read(reader, IoBuffer(1), std::chrono::steady_clock::now() + 5s));
+            take(service.submit_read(reader, IoBuffer(1),
+                                     std::chrono::steady_clock::now() + endpoint_wait_timeout));
             if (completion(service).status != IoStatus::EndOfStream) {
                 return 97;
             }
 
-            return service.shutdown_until(std::chrono::steady_clock::now() + 5s) ? 0 : 98;
+            return service.shutdown_until(std::chrono::steady_clock::now() + endpoint_wait_timeout) ? 0 : 98;
         }
 
         if (mode == "multi") {
@@ -138,13 +156,15 @@ int main(int argc, char** argv) {
                 if (!reader || !writer) {
                     return 100;
                 }
-                take(service.submit_read(*reader, IoBuffer(1), std::chrono::steady_clock::now() + 5s));
+                take(service.submit_read(*reader, IoBuffer(1),
+                                         std::chrono::steady_clock::now() + endpoint_wait_timeout));
                 auto value = completion(service);
                 if (value.status != IoStatus::Completed || value.transferred != 1) {
                     return 101;
                 }
                 send(service, *writer, value.buffer.bytes().first(1));
-                take(service.submit_read(*reader, IoBuffer(1), std::chrono::steady_clock::now() + 5s));
+                take(service.submit_read(*reader, IoBuffer(1),
+                                         std::chrono::steady_clock::now() + endpoint_wait_timeout));
                 if (completion(service).status != IoStatus::EndOfStream) {
                     return 102;
                 }
@@ -154,7 +174,7 @@ int main(int argc, char** argv) {
                 writer->close();
             }
 
-            return service.shutdown_until(std::chrono::steady_clock::now() + 5s) ? 0 : 103;
+            return service.shutdown_until(std::chrono::steady_clock::now() + endpoint_wait_timeout) ? 0 : 103;
         }
 
         auto pipe = take(take_inherited_pipe(service));
@@ -163,18 +183,18 @@ int main(int argc, char** argv) {
         }
 
         if (mode == "hold") {
-            std::this_thread::sleep_for(30s);
+            std::this_thread::sleep_for(parent_control_window);
             return 0;
         }
 
         if (mode == "close") {
             pipe.close();
-            auto stopped = service.shutdown_until(std::chrono::steady_clock::now() + 5s);
+            auto stopped = service.shutdown_until(std::chrono::steady_clock::now() + endpoint_wait_timeout);
             if (!stopped) {
                 return 83;
             }
 
-            std::this_thread::sleep_for(30s);
+            std::this_thread::sleep_for(parent_control_window);
             return 0;
         }
 
@@ -183,25 +203,27 @@ int main(int argc, char** argv) {
             SpawnOptions options;
             options.executable = std::filesystem::absolute(argv[0]);
             options.arguments = {"no-bootstrap"};
-            options.stdout_mode = options.stderr_mode = StdioMode::Null;
+            options.stderr_mode = StdioMode::Null;
+            options.stdout_mode = StdioMode::Null;
             auto child = take(processes.spawn(options));
-            if (take(child.wait_until(std::chrono::steady_clock::now() + 5s)).value != 0) {
+            if (take(child.wait_until(std::chrono::steady_clock::now() + endpoint_wait_timeout)).value != 0) {
                 return 84;
             }
 
-            auto stopped = processes.shutdown_until(std::chrono::steady_clock::now() + 5s);
+            auto stopped = processes.shutdown_until(std::chrono::steady_clock::now() + endpoint_wait_timeout);
             if (!stopped) {
                 return 85;
             }
         }
 
         if (mode == "delayed-echo") {
-            std::this_thread::sleep_for(250ms);
+            std::this_thread::sleep_for(delayed_echo_start);
         }
 
         for (;;) {
-            IoBuffer buffer(1024);
-            take(service.submit_read(pipe.reader, std::move(buffer), std::chrono::steady_clock::now() + 10s));
+            IoBuffer buffer(echo_chunk_bytes);
+            take(service.submit_read(pipe.reader, std::move(buffer),
+                                     std::chrono::steady_clock::now() + transfer_timeout));
             auto received = completion(service);
             if (received.status == IoStatus::EndOfStream) {
                 break;
@@ -213,7 +235,7 @@ int main(int argc, char** argv) {
             send(service, pipe.writer, received.buffer.bytes().first(received.transferred));
         }
         pipe.close();
-        return service.shutdown_until(std::chrono::steady_clock::now() + 5s) ? 0 : 87;
+        return service.shutdown_until(std::chrono::steady_clock::now() + endpoint_wait_timeout) ? 0 : 87;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 90;
