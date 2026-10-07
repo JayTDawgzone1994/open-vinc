@@ -1,0 +1,177 @@
+open-vinc/
+├── AGENTS.md
+├── NAMING.md
+├── README.md
+│
+├── src/
+│   ├── CMakeLists.txt
+│   └── vinc/
+│       ├── CMakeLists.txt
+│       │
+│       ├── sdk/                            # 對外整合入口
+│       │   ├── CMakeLists.txt
+│       │   ├── README.md
+│       │   └── include/vinc/
+│       │       └── vinc.hpp
+│       │
+│       ├── common/                         # 基礎型別與共同契約
+│       │   ├── include/vinc/
+│       │   │   ├── error.hpp
+│       │   │   ├── result.hpp
+│       │   │   └── config.hpp              # 暫時的系統設定位置
+│       │   ├── src/error.cpp
+│       │   ├── CMakeLists.txt
+│       │   └── README.md
+│       │
+│       ├── module_system/                  # BaseModule、Runtime 與中央 ModuleManager
+│       │   ├── include/vinc/module/
+│       │   │   ├── base_module.hpp
+│       │   │   ├── mid.hpp
+│       │   │   ├── context.hpp             # 未來實作
+│       │   │   ├── host/
+│       │   │   │   └── module_manager.hpp
+│       │   │   └── detail/
+│       │   │       ├── module_protocol.hpp
+│       │   │       └── module_runtime.hpp  # 內部啟動宣告
+│       │   ├── src/
+│       │   │   ├── runtime/
+│       │   │   │   ├── base_module.cpp
+│       │   │   │   ├── module_runtime.cpp
+│       │   │   │   └── module_main.cpp
+│       │   │   └── host/
+│       │   │       └── module_manager.cpp
+│       │   ├── cmake/
+│       │   │   └── VincModule.cmake
+│       │   ├── tests/
+│       │   ├── CMakeLists.txt
+│       │   └── README.md
+│       │
+│       ├── message_bus/                            # Shared Memory Message Bus
+│       │   ├── include/vinc/message_bus/
+│       │   │   ├── message_bus.hpp
+│       │   │   └── detail/
+│       │   │       ├── runtime.hpp
+│       │   │       ├── bus_manager.hpp
+│       │   │       ├── ring_buffer.hpp
+│       │   │       └── protocol.hpp
+│       │   ├── src/
+│       │   │   ├── message_bus.cpp
+│       │   │   ├── bus_manager.cpp
+│       │   │   └── ring_buffer.cpp
+│       │   ├── tests/
+│       │   ├── CMakeLists.txt
+│       │   ├── README.md
+│       │   └── DESIGN.md
+│       │
+│       ├── control_channel/                # Socket 控制通道與 heartbeat
+│       │   ├── include/vinc/control/
+│       │   │   ├── channel.hpp
+│       │   │   └── protocol.hpp
+│       │   ├── src/
+│       │   ├── tests/                       # 接回目前放在 Module 的通道測試
+│       │   ├── CMakeLists.txt
+│       │   └── README.md
+│       │
+│       ├── output_hub/                         # 程序輸出擷取與分送
+│       │   ├── include/vinc/output_hub/
+│       │   │   ├── output_hub.hpp
+│       │   │   └── text_renderer.hpp
+│       │   ├── src/
+│       │   ├── tests/
+│       │   ├── CMakeLists.txt
+│       │   └── README.md
+│       │
+│       ├── osal/                           # 可獨立使用的 OS 抽象
+│       │   ├── include/vinc/osal/
+│       │   │   ├── process.hpp
+│       │   │   ├── socket.hpp
+│       │   │   ├── pipe.hpp
+│       │   │   ├── shared_memory.hpp
+│       │   │   ├── file_lock.hpp
+│       │   │   ├── ...                     # 其餘現有 API
+│       │   │   └── detail/
+│       │   │       ├── ...                 # native、state 等內部標頭
+│       │   │       ├── posix/
+│       │   │       └── windows/
+│       │   ├── src/
+│       │   │   ├── ...                     # 共用 .cpp
+│       │   │   ├── posix/
+│       │   │   ├── windows/
+│       │   │   ├── linux/
+│       │   │   └── macos/
+│       │   ├── tests/
+│       │   ├── CMakeLists.txt
+│       │   └── README.md
+│       │
+│       ├── components/
+│       │   ├── message_storage/            # 訊息基礎、容器與記憶體布局
+│       │   │   ├── include/vinc/message/
+│       │   │   │   ├── base_message.hpp
+│       │   │   │   ├── storage.hpp          # 目前包含 MessageArray
+│       │   │   │   ├── generated.hpp        # 生成訊息的執行時支援
+│       │   │   │   └── detail/
+│       │   │   │       └── framework_access.hpp
+│       │   │   ├── src/storage.cpp
+│       │   │   ├── tests/
+│       │   │   ├── CMakeLists.txt
+│       │   │   └── README.md
+│       │   └── concurrency/                # 供框架使用的並行工具
+│       │       ├── include/vinc/concurrency/
+│       │       │   ├── error.hpp
+│       │       │   ├── interprocess_mutex.hpp
+│       │       │   └── detail/
+│       │       │       ├── error.hpp        # FileLock 錯誤轉接，僅供元件與測試
+│       │       │       └── error_catalog.hpp
+│       │       ├── src/
+│       │       ├── tests/
+│       │       ├── CMakeLists.txt
+│       │       └── README.md
+│       │
+│       ├── shell/                     # Shell、Socket Shell、Tcl
+│       │   ├── include/vinc/shell/
+│       │   │   ├── shell.hpp
+│       │   │   ├── socket_shell.hpp
+│       │   │   └── detail/
+│       │   │       ├── command_line.hpp
+│       │   │       ├── command_router.hpp
+│       │   │       ├── script_service.hpp
+│       │   │       └── tcl_runtime.hpp
+│       │   ├── src/
+│       │   ├── tests/
+│       │   ├── CMakeLists.txt
+│       │   └── README.md
+│       │
+│       └── ribosome/                       # 訊息產生器
+│           ├── include/ribosome/
+│           │   └── ...                     # 產生器自己的標頭
+│           ├── src/
+│           ├── data/                       # 生成模板
+│           ├── tests/
+│           ├── CMakeLists.txt
+│           └── README.md
+│
+├── vinc_messages/                          # 使用者可編輯的專案訊息套件
+│   ├── messages/
+│   │   ├── test.msg
+│   │   ├── float3.msg
+│   │   └── ...
+│   ├── CMakeLists.txt                      # 訊息生成與使用相依
+│   └── README.md
+│
+├── apps/
+│   └── vinc/
+│       ├── src/main.cpp                    # 中央程式組裝入口
+│       └── CMakeLists.txt
+│
+├── examples/
+│   ├── module/
+│   ├── message_bus/
+│   └── scripts/
+│
+├── tests/                                  # 跨元件整合、外部使用驗證
+│   └── header_smoke/
+├── library/                                # 第三方原始碼與二次封裝
+│   └── tcl/
+└── build/
+    └── <組態>/generated/
+        └── include/vinc_messages/          # Ribosome 生成結果

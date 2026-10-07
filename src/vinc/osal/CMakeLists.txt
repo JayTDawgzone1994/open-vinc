@@ -11,14 +11,27 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     include(CTest)
 endif()
 
+# An isolated OSAL checkout includes its standard-library-only sibling common.
+# Parent projects may provide the target themselves before adding OSAL.
+if(NOT TARGET vinc::common)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../common" "${CMAKE_CURRENT_BINARY_DIR}/common")
+endif()
+
 find_package(Threads REQUIRED)
+add_library(vinc_osal_errors STATIC src/native_error.cpp)
+target_include_directories(vinc_osal_errors PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(vinc_osal_errors PUBLIC vinc::common)
+set_target_properties(vinc_osal_errors PROPERTIES
+    CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+vinc_register_error_catalog(TARGET vinc_osal_errors
+    HEADER vinc/osal/detail/error_catalog.hpp SYMBOL vinc::osal::detail::error_catalog)
 add_library(vinc_osal STATIC src/process.cpp src/pipe.cpp src/process_pipe.cpp src/process_pipe_native.cpp
     src/socket_address.cpp src/socket.cpp src/socket_poller.cpp src/shared_memory.cpp src/shared_atomic.cpp src/terminal.cpp src/random.cpp
-    src/file_lock.cpp)
+    src/file_lock.cpp src/path.cpp src/dynamic_library.cpp)
 add_library(vinc::osal ALIAS vinc_osal)
 target_compile_features(vinc_osal PUBLIC cxx_std_23)
 target_include_directories(vinc_osal PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(vinc_osal PRIVATE Threads::Threads)
+target_link_libraries(vinc_osal PUBLIC vinc::common vinc::errors PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
 if(WIN32)
     target_sources(vinc_osal PRIVATE src/windows/process.cpp src/windows/pipe.cpp src/windows/socket_poller.cpp src/windows/shared_memory.cpp src/windows/file_lock.cpp)
@@ -62,4 +75,8 @@ endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    vinc_finalize_error_catalog()
 endif()

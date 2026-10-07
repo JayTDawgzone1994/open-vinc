@@ -1,0 +1,136 @@
+#pragma once
+
+// Temporary home for centralized VINC system settings.
+// Runtime defaults will later be managed by Param; layout settings stay compile-time.
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+
+namespace vinc::config {
+// Idle data polling and Host supervision of a locally completed/failed main.
+inline constexpr std::chrono::milliseconds module_pump_idle_interval{10};
+inline constexpr std::chrono::milliseconds module_runtime_poll_interval{20};
+inline constexpr std::size_t module_callback_limit = 256;
+
+
+// Central's grace after first observing a fatal report. Earlier startup or
+// explicit-stop deadlines win; expiry requests OS termination, not proof of exit.
+inline constexpr auto module_fatal_exit_timeout = std::chrono::seconds(5);
+static_assert(module_fatal_exit_timeout > std::chrono::seconds::zero());
+
+// Total stored error records, including the current error. This changes C++ layout;
+// every linked consumer must use the same value and be rebuilt after a change.
+// Unlike runtime settings, this capacity cannot be changed by Param.
+inline constexpr std::size_t error_chain_max_depth = 3;
+static_assert(error_chain_max_depth >= 2, "Error chains require at least two records");
+
+// Message Bus defaults. Byte budgets include the complete encoded message image.
+inline constexpr std::uint32_t message_bus_default_slots = 2;
+inline constexpr std::uint64_t message_bus_default_message_bytes = 1024 * 1024;
+inline constexpr std::uint32_t message_bus_default_topics = 128;
+inline constexpr std::uint32_t message_bus_default_publishers_per_topic = 32;
+inline constexpr std::uint32_t message_bus_default_subscribers_per_topic = 128;
+inline constexpr std::uint64_t message_bus_default_shared_bytes = 1024ULL * 1024 * 1024;
+
+// Control backpressure and the deadline for an unanswered registration request.
+inline constexpr std::size_t message_bus_pending_requests = 32;
+inline constexpr std::size_t message_bus_manager_queue_size = 256;
+inline constexpr auto message_bus_request_timeout = std::chrono::seconds(10);
+
+// Retry policy only: protected reader copies still have no contention timeout.
+// The pre-increment comparison yields for attempts 1..63, then sleeps.
+inline constexpr std::uint32_t message_bus_reader_sleep_threshold = 64;
+inline constexpr auto message_bus_reader_retry_interval = std::chrono::milliseconds(1);
+
+// OutputHub queue and capture defaults. Byte limits count raw payload bytes.
+inline constexpr std::size_t output_hub_default_queue_bytes = 256 * 1024;
+inline constexpr std::size_t output_hub_default_queue_events = 128;
+inline constexpr std::size_t output_hub_default_captures = 128;
+inline constexpr std::size_t output_hub_default_subscribers = 8;
+inline constexpr std::size_t output_hub_default_total_queue_bytes = 2 * 1024 * 1024;
+inline constexpr std::size_t output_hub_default_total_queue_events = 1024;
+inline constexpr auto output_hub_default_drain_timeout = std::chrono::milliseconds(2000);
+inline constexpr std::size_t output_hub_default_take_events = 32;
+
+// Admission limits and worker budgets. Shutdown and tail drain are separate deadlines.
+inline constexpr std::size_t output_hub_max_captures = 1024;
+inline constexpr std::size_t output_hub_max_subscribers = 64;
+inline constexpr std::size_t output_hub_max_source_name_bytes = 256;
+inline constexpr auto output_hub_max_drain_timeout = std::chrono::seconds(60);
+inline constexpr std::size_t output_hub_read_chunk_bytes = 4096;
+inline constexpr std::size_t output_hub_completion_batch_size = 32;
+inline constexpr auto output_hub_poll_interval = std::chrono::milliseconds(20);
+inline constexpr auto output_hub_failure_backoff = std::chrono::milliseconds(20);
+inline constexpr auto output_hub_shutdown_timeout = std::chrono::seconds(2);
+
+// Text presentation limits are independent of the raw Pipe read chunk size.
+inline constexpr std::size_t output_hub_text_max_sources = 256;
+inline constexpr std::size_t output_hub_text_line_bytes = 4096;
+inline constexpr auto output_hub_text_flush_interval = std::chrono::milliseconds(100);
+
+// Local Shell admission limits; byte limits apply before parsing or editing.
+inline constexpr std::size_t shell_max_line_bytes = 4096;
+inline constexpr std::size_t shell_max_arguments = 256;
+inline constexpr std::size_t shell_history_entries = 128;
+inline constexpr std::size_t shell_max_jobs = 16;
+
+// Keep output batches bounded so command results and keyboard input get a turn.
+inline constexpr std::size_t shell_output_batch_events = 16;
+inline constexpr std::size_t shell_final_output_batch_events = 128;
+inline constexpr auto shell_command_timeout = std::chrono::seconds(5);
+inline constexpr auto shell_completion_timeout = std::chrono::seconds(1);
+inline constexpr auto shell_terminal_poll_interval = std::chrono::milliseconds(20);
+inline constexpr auto shell_headless_backoff = std::chrono::milliseconds(20);
+
+// Shutdown has no overall timeout. These intervals control collection and diagnostics.
+inline constexpr auto shell_shutdown_poll_interval = std::chrono::milliseconds(250);
+inline constexpr auto shell_shutdown_report_interval = std::chrono::seconds(1);
+inline constexpr auto shell_job_poll_interval = std::chrono::milliseconds(10);
+
+// Remote Shell defaults. Timeouts measure disconnected ownership and stalled sends,
+// not the lifetime of an idle, healthy TCP connection.
+inline constexpr char shell_socket_default_ip[] = "127.0.0.1";
+inline constexpr std::uint16_t shell_socket_default_port = 5500;
+inline constexpr auto shell_socket_disconnect_timeout = std::chrono::milliseconds(30000);
+inline constexpr auto shell_socket_send_timeout = std::chrono::milliseconds(30000);
+inline constexpr std::size_t shell_socket_max_connections = 8;
+// One listener plus live clients. Retained sessions also cover reconnecting owners;
+// an extra provisional session can restore an owner when ordinary storage is full.
+inline constexpr std::size_t shell_socket_poller_capacity = shell_socket_max_connections + 1;
+inline constexpr std::size_t shell_socket_retained_session_factor = 2;
+inline constexpr std::size_t shell_socket_resume_slots = 1;
+inline constexpr std::size_t shell_script_mailboxes =
+    shell_socket_max_connections * shell_socket_retained_session_factor + 1; // Local owner included.
+
+// Network queue bytes count escaped wire text; the payload limit applies before escaping.
+inline constexpr std::size_t shell_socket_queue_bytes = 1024 * 1024;
+inline constexpr std::size_t shell_socket_payload_bytes = 256 * 1024;
+inline constexpr std::size_t shell_socket_reply_reserve_bytes = 600 * 1024;
+inline constexpr std::size_t shell_socket_queue_items = 128;
+inline constexpr std::size_t shell_socket_collect_threshold_items = 120;
+inline constexpr std::size_t shell_socket_output_queue_bytes = 128 * 1024;
+inline constexpr std::size_t shell_socket_output_queue_events = 64;
+inline constexpr std::size_t shell_socket_output_batch_events = 4;
+inline constexpr std::size_t shell_socket_accept_budget = 8;
+inline constexpr int shell_socket_send_budget = 8;
+inline constexpr std::size_t shell_socket_read_bytes = 4096;
+inline constexpr std::size_t shell_socket_ready_events = 16;
+inline constexpr auto shell_socket_poll_interval = std::chrono::milliseconds(20);
+// Suspend listener polling while resource pressure persists; retry without a busy loop.
+inline constexpr auto shell_socket_accept_retry_initial = std::chrono::milliseconds(100);
+inline constexpr auto shell_socket_accept_retry_max = std::chrono::milliseconds(5000);
+inline constexpr auto shell_socket_diagnostic_interval = std::chrono::seconds(5);
+inline constexpr auto shell_socket_final_drain_timeout = std::chrono::seconds(2);
+
+// Tcl output, delivered output and result messages have separate bounded buffers.
+inline constexpr std::size_t shell_script_output_bytes = 256 * 1024;
+inline constexpr std::size_t shell_script_delivery_bytes = 256 * 1024;
+inline constexpr std::size_t shell_script_result_bytes = 256 * 1024;
+inline constexpr std::size_t shell_script_result_suffix_reserve = 32;
+inline constexpr auto shell_script_wait_slice = std::chrono::milliseconds(20);
+
+// Bound diagnostic delivery before a child closes its control connection.
+// Ordinary Socket error acknowledgement only; fatal shared records use no delivery timeout.
+inline constexpr auto module_error_report_timeout = std::chrono::milliseconds(500);
+
+} // namespace vinc::config

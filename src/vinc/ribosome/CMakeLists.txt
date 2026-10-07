@@ -9,14 +9,6 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/generated
-)
-# Public generator declarations.
-# Supports includes such as <ribosome/ribosome.hpp>.
-include_directories(include)
-
 # Generator executable sources.
 # The current entry point is in ribosome.cpp.
 set(SOURCES
@@ -27,22 +19,39 @@ set(SOURCES
 # Build the compiler invoked by generate_messages.
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+# Escape CMake paths as C++ UTF-8 literals, including standalone builds.
+function(ribosome_path_literal output value)
+    string(REPLACE "\\" "\\\\" escaped "${value}")
+    string(REPLACE "\"" "\\\"" escaped "${escaped}")
+    set(${output} "${escaped}" PARENT_SCOPE)
+endfunction()
+ribosome_path_literal(ribosome_input_literal "${VINC_MESSAGE_INPUT_DIR}")
+ribosome_path_literal(ribosome_output_literal "${VINC_MESSAGE_OUTPUT_DIR}")
+ribosome_path_literal(ribosome_template_literal "${CMAKE_CURRENT_SOURCE_DIR}/data/message_sample.txt")
+
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ribosome/ribosome_config.hpp.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/ribosome_config.hpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/ribosome_config.hpp.configured"
     @ONLY
 )
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>/ribosome_config.hpp"
+    INPUT "${CMAKE_CURRENT_BINARY_DIR}/ribosome_config.hpp.configured")
 
-target_include_directories(ribosome PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
+target_include_directories(ribosome PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
 
 # Historical filesystem-library override, retained as a commented example.
 # target_link_libraries(${PROJECT_NAME} stdc++fs)
 
 # Enable compiler diagnostics for the generator.
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
+    target_compile_options(${PROJECT_NAME} PRIVATE /W4 /utf-8)
 else()
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+if(MINGW)
+    target_link_options(ribosome PRIVATE -municode)
 endif()
 
 if(BUILD_TESTING)
@@ -55,4 +64,33 @@ if(BUILD_TESTING)
         "-DTEMPLATE=${CMAKE_CURRENT_SOURCE_DIR}/data/message_sample.txt"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/schema_tests.cmake")
     set_tests_properties(ribosome.schema PROPERTIES TIMEOUT 60)
+
+    # Compile real output to verify literal semantics and generated name lookup.
+    set(regression_root "${CMAKE_CURRENT_BINARY_DIR}/regression/$<CONFIG>")
+    set(regression_inputs
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/messages/Constants.msg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/messages/Names.msg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/messages/Point.msg")
+    add_custom_command(OUTPUT "${regression_root}/generation.stamp"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${regression_root}"
+        COMMAND $<TARGET_FILE:ribosome> --input "${CMAKE_CURRENT_SOURCE_DIR}/tests/messages"
+            --output "${regression_root}/vinc_messages"
+            --template "${CMAKE_CURRENT_SOURCE_DIR}/data/message_sample.txt"
+        COMMAND ${CMAKE_COMMAND} -E touch "${regression_root}/generation.stamp"
+        DEPENDS ribosome ${regression_inputs} "${CMAKE_CURRENT_SOURCE_DIR}/data/message_sample.txt"
+        BYPRODUCTS "${regression_root}/vinc_messages/all_messages.hpp"
+            "${regression_root}/vinc_messages/Constants.hpp"
+            "${regression_root}/vinc_messages/Names.hpp"
+            "${regression_root}/vinc_messages/Point.hpp"
+        VERBATIM)
+    add_executable(ribosome_generated_tests tests/generated_tests.cpp "${regression_root}/generation.stamp")
+    target_include_directories(ribosome_generated_tests PRIVATE "${regression_root}")
+    target_link_libraries(ribosome_generated_tests PRIVATE vinc::message_storage)
+    if(MSVC)
+        target_compile_options(ribosome_generated_tests PRIVATE /W4 /utf-8 /permissive-)
+    else()
+        target_compile_options(ribosome_generated_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME ribosome.generated COMMAND ribosome_generated_tests)
+    set_tests_properties(ribosome.generated PROPERTIES TIMEOUT 20)
 endif()

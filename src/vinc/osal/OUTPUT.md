@@ -8,7 +8,7 @@ OSAL 本身也不依賴 Module、Logger、Shell、Tcl 或 message bus。
 ## 公開介面與模式
 
 ```cpp
-Result<ProcessWithOutput> spawn_with_output(
+vinc::Result<ProcessWithOutput> spawn_with_output(
     ProcessService&, PipeService&, const SpawnOptions&,
     std::span<const PipeBinding> bindings = {});
 

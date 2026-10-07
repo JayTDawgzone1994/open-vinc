@@ -1,10 +1,9 @@
 #pragma once
 #include <string_view>
 
-namespace vinc 
-{
-    // CMake substitutes source-tree defaults at configure time; CLI paths can override them.
-    constexpr std::string_view kDefaultInputPath = "@CMAKE_SOURCE_DIR@/messages";
-    constexpr std::string_view kDefaultOutputPath = "@CMAKE_SOURCE_DIR@/vinc/vinc_messages/include/vinc_messages";
-    constexpr std::string_view kDefaultTemplatePath = "@CMAKE_CURRENT_SOURCE_DIR@/data/message_sample.txt";
+namespace vinc {
+// CMake substitutes schema and build-output defaults at configure time; CLI paths can override them.
+constexpr std::u8string_view kDefaultInputPath = u8"@ribosome_input_literal@";
+constexpr std::u8string_view kDefaultOutputPath = u8"@ribosome_output_literal@";
+constexpr std::u8string_view kDefaultTemplatePath = u8"@ribosome_template_literal@";
 }

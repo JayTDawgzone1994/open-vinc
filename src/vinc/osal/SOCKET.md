@@ -71,7 +71,7 @@ namespace、ancillary data／fd 傳遞、原生 handle 匯入／匯出及 TLS �
 - 已要求取消時不開始下一次操作；操作已產生結果時，返回該結果。
 - 到期仍允許一次立即嘗試（poll 等待時間為零）；只有需要繼續等待時回報 Timeout。
   `SocketPoller::create()` 則在初始期限已到時直接拒絕建立。
-- Deadline 是 steady_clock 的絕對時間。取消或期限不是硬即時排程保證，
+- `vinc::Deadline` 由 common 的 `<vinc/time.hpp>` 提供，是 steady_clock 的絕對時間。取消或期限不是硬即時排程保證，
   原生系統呼叫、配置與資源清理亦不承諾固定完成時間。
 
 ## 串流與資料報
@@ -162,8 +162,11 @@ Socket move-only；SocketPoller 也 move-only。`close()` 可重複呼叫，會�
 options、close、移動與析構等狀態變更需與其他存取同步。上層安排自己的 event loop，
 OSAL 不執行 callback、業務工作、程序建立、驗證或重連政策。
 
-OS 失敗使用既有 Result／OsError，保留統一分類、失敗操作與原生 error_code。
-POSIX resolver 使用獨立 getaddrinfo error category，不與 errno 混淆。
+OS 失敗使用 `vinc::Result`／`vinc::Error`，保留統一分類、操作及原生來源／數值。
+最外層 operation 對應呼叫的 Socket API；例如 receive_until 的等待逾時為
+ReceiveSocket ← WaitSocket，code 仍為 Timeout。Poller 初始化或登記失敗亦保留實際原因，
+同一操作的直接轉交不重複包裝；完整規則見 [OSAL 錯誤契約](README.md#統一錯誤介面)。
+POSIX resolver 使用獨立原生來源 PosixResolver，不與 errno 混淆。
 物件建立、地址字串與 resolver 可拋出標準配置例外；不承諾全 API noexcept。
 IP 的 try_send／try_receive 不逐次配置 buffer；本機來源地址結果可能配置字串。
 

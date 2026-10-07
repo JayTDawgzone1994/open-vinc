@@ -69,23 +69,33 @@ set_target_properties(vinc_tcl PROPERTIES IMPORTED_LOCATION "${tcl_archive}"
 add_dependencies(vinc_tcl vinc_tcl_build)
 # Deploy beside each executable; no dependency on the source tree or system Tcl.
 function(vinc_deploy_tcl target)
-    set(destination "${CMAKE_CURRENT_BINARY_DIR}")
+    if(NOT TARGET "${target}")
+        message(FATAL_ERROR "vinc_deploy_tcl requires an existing executable target")
+    endif()
+    get_target_property(target_type "${target}" TYPE)
+    if(NOT target_type STREQUAL "EXECUTABLE")
+        message(FATAL_ERROR "vinc_deploy_tcl requires an executable target: ${target}")
+    endif()
+    # Resolve after all output-directory properties have been assigned, including
+    # properties set by a parent project after add_subdirectory returns.
+    set(destination "$<TARGET_FILE_DIR:${target}>")
     if(ARGC GREATER 1)
         set(destination "${ARGV1}")
+        if(NOT IS_ABSOLUTE "${destination}" AND NOT destination MATCHES "\\$<")
+            get_filename_component(destination "${destination}" ABSOLUTE
+                BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
     endif()
-    # One resource-copy target per destination prevents different executable builds
-    # from writing the same Tcl resource directory concurrently.
+    # Equal literal destinations share a target. Different expressions may resolve
+    # to the same directory; deploy.cmake serializes those copies at build time.
     string(MD5 key "${destination}")
     if(NOT TARGET vinc_tcl_resources_${key})
         add_custom_target(vinc_tcl_resources_${key}
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${tcl_source}/library" "${destination}/lib/tcl9.1"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${tcl_source}/license.terms" "${destination}/lib/tcl9.1/license.terms"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}/lib/tcl9.1/licenses"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${tcl_source}/utf8proc/LICENSE.md" "${destination}/lib/tcl9.1/licenses/utf8proc.txt"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${tcl_source}/libtommath/LICENSE" "${destination}/lib/tcl9.1/licenses/libtommath.txt"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${tcl_source}/compat/zlib/LICENSE" "${destination}/lib/tcl9.1/licenses/zlib.txt"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE=${CMAKE_CURRENT_FUNCTION_LIST_DIR}/upstream"
+                "-DDESTINATION=${destination}"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/deploy.cmake"
             VERBATIM)
     endif()
     add_dependencies(${target} vinc_tcl_resources_${key})
 endfunction()
-set(tcl_source "${tcl_source}" CACHE INTERNAL "Pinned Tcl source directory")

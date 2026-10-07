@@ -65,7 +65,21 @@ Open-VINC 自有原始碼目錄，編譯產物放到根目錄 `build/`。
 
 Windows 整合測試包含實際搬移執行檔與 Tcl 資源、Unicode 路徑／參數、無終端部署、
 腳本錯誤與取消、Ctrl+C 完整關閉。未執行完整 Tcl 上游測試套件。
-Open-VINC 的測試結果見 [Shell 文件](../../src/vinc/stem_shell/README.md#驗證)。
+Open-VINC 的測試結果見 [Shell 文件](../../src/vinc/shell/README.md#驗證)。
+
+### CMake 部署 helper
+
+`vinc_deploy_tcl(target)` 接受 executable target，預設把資源放到
+`$<TARGET_FILE_DIR:target>/lib/tcl9.1`，不使用呼叫處的 binary directory。
+即使父專案在 add_subdirectory 之後設定 `RUNTIME_OUTPUT_DIRECTORY`，也跟隨最終輸出位置。
+可用 `vinc_deploy_tcl(target destination)` 指定根目錄；相對的字面路徑以呼叫處的
+binary directory 為基準。此覆寫只控制複製位置，runtime 仍從執行檔旁尋找資源。
+
+部署 target 每次建置都執行，資源被刪除時不需重新連結即可補回；
+`deploy.cmake` 在目的地 lib 目錄取得建置期間的檔案鎖，最多等待 60 秒，
+避免不同 target 的目的地運算式解析成同一目錄後同時寫入。
+鎖檔可以保留在部署目錄，不是 runtime 功能。複製 Tcl、utf8proc、libtommath、zlib 授權。
+中央預設服務與搬移／資源補回的 CTest 為 `sdk.external_consumer`，結果見 SDK README。
 
 上游 `win/README` 記載 Tcl 9.1 的 Windows 最低目標為 Windows 10，並提供 Visual C++／NMAKE
 建置路徑。這是選定相依套件的限制，Open-VINC 的完整最低 OS／工具鏈矩陣仍須在整合時確認。
@@ -81,3 +95,28 @@ Ctrl+C 另外觸發框架完整關閉。標準 Tcl 的阻塞式 `after ms` 由�
 再執行對應的建置與行為驗證，更新本文件、`revision.txt`、套件總表及主專案的 gitlink。
 版本變更時也需核對 CMake 的庫名稱、資源目錄及保留字清單，重新建立 Tcl 建置產物。
 來源 tag 方便辨識版本，實際回溯依據為主專案保存的完整 commit。
+
+## 待處理事項
+
+### 增量建置與父專案整合（2026-10-06 CMake 重審）
+
+- **來源與生成建置圖確認，尚未做版本切換實測：** Windows ExternalProject 的 configure
+  stamp 只依賴 cfgcmd 與前一步 stamp；`stage.cmake`、`revision.txt` 與固定來源版本沒有
+  形成重建相依。現有 Ninja 的 RERUN_CMAKE 亦未列入 revision 檔及 submodule HEAD。
+  只更新固定版本或 staging 腳本後沿用舊 build，可能沿用舊 staging／靜態庫；資源部署卻從
+  當前 upstream 複製，存在新資源配舊庫的風險。尚未修復；建議讓 pin 與 staging 腳本變化
+  明確觸發重新驗證、staging 及重建。版本更新時先沿用重新建立產物的既有維護要求。
+- **已確認的路徑占用：** Shell 的 CMake 使用 `${CMAKE_BINARY_DIR}/library/tcl`，
+  外部 add_subdirectory 整合時會占用父專案的該目錄；父專案也使用該 binary directory
+  時可能衝突。尚未實際配置碰撞案例；建議改用 Open-VINC 所屬的 binary subtree，
+  保持執行檔旁資源部署契約不變。
+
+### Windows 建置目錄含空白（2026-10-06；已重現，尚未修復）
+
+外部 SDK 專案使用含空白的 build root 時，Tcl `win/rules.vc` 的無引號 inference rules
+發生 NMAKE U1087。嘗試以 NMAKE 參數提供相對 ROOT／OUT_DIR／TMP_DIR 後，
+上游仍將 mkdir 的路徑展開為無引號絕對路徑並發生 U1077；該嘗試未保留。
+不修改固定上游，也未引入短路徑、junction 或外部暫存建置目錄。
+
+目前 Windows 建置目錄須避免空白；執行檔的輸出／部署目錄含空白是獨立情境，
+由 SDK 外部測試驗證。後續須先討論建置位置策略及清理契約，再實作完整的建置路徑支援。
