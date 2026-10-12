@@ -7,7 +7,38 @@ Socket 控制通道只交換註冊、退訂與 Publisher 增減資訊。
 
 依序接收透過 Context pump 派送 callback；`get_last()` 提供最新值。沒有額外資料 Socket 通知。
 
+跨程序延遲量測工具見 [Benchmark](benchmarks/README.md)：1～128 MiB、push／loan 兩條路徑，
+每組共享配置預算上限 4 GiB。它是 opt-in 工具，不改動框架的預設容量與 pump 設定。
+
 ## 命名與驗證
+
+Topic 與 Param 的分隔符決策由 [NAMING.md](../../../NAMING.md#topic-與-param-名稱分隔符)
+維護。Topic 允許 `/`、禁止 `.`；分類前綴是命名建議，不代表發布者身分。
+訊息的 `publisher_name()` 保留既有名稱及框架填入行為。
+
+### Topic 分隔符驗證（2026-10-08）
+
+`src/message_bus.cpp` 的 Client 與 `src/bus_manager.cpp` 的中央發布／訂閱入口
+共用 `detail/protocol.hpp` 的分隔符檢查。含 `.` 的 Topic 回傳 MessageBus
+`InvalidArgument`，operation 為 `Advertise` 或 `Subscribe`；Client 在建立註冊所需的
+本機狀態與送出要求前拒絕，中央在建立 Topic／共享資源與分配註冊名額前再次驗證。
+非法名稱不會關閉正常會話，呼叫端可修正名稱後重新註冊。
+
+`frames` 與 `camera/frames` 均可使用，不強制 `/` 的數量，也不自動補 Module 前綴或
+替換分隔符；原有空名稱、NUL、長度及編碼驗證維持原行為。控制封包布局、協定版本
+及錯誤碼編號不變；既有含 `.` 的 Topic 必須由發布／訂閱雙方一起改名，沒有相容別名。
+Benchmark 已將 `benchmark.payload` 改為 `benchmark/payload`，量測邏輯不變。
+
+Windows x64／MSVC Debug、Release 完整增量建置成功，Release 含 Benchmark target。
+兩種組態的 Message Bus 五套測試、`module.context` 與 `message_bus.shell` 各 **7/7**
+通過（34.19／14.75 秒，非效能量測）。新增案例確認 Client 不送出非法要求、中央拒絕
+繞過 Client 的真實封包、錯誤操作碼及拒絕後名額／共享預算仍可使用；跨程序案例以
+`camera/frames` 驗證多發布者，並比對兩個 Module 的 `publisher_name()`。
+本輪未執行全專案測試、Benchmark 效能量測或 Linux／macOS 驗證。
+
+Param 尚未實作；其分隔符驗證及 Module 名稱的配套限制留待 Param 設計，不在本輪變更。
+
+### 歷史命名與驗證紀錄
 
 2026-10-03：環形緩衝區型別統一為 `detail::RingBuffer`，共享控制標頭為 `RingBufferHeader`。
 檔名為 `ring_buffer.hpp`／`ring_buffer.cpp`，測試為 `ring_buffer_tests.cpp`、
@@ -223,11 +254,17 @@ Windows 使用 Interlocked64；Linux／macOS 使用編譯器原子操作並靜�
 發布可見性與 slot 協定使用原子 word，整個 `commit`／Message Bus API 含配置與同步，**不宣稱整體 lock-free**。
 目前支援設計範圍為同主機、同版本 framework、64-bit 程序；沒有跨編譯器 ABI／安全沙箱／硬即時保證。
 中央崩潰時 POSIX 命名 shared memory 可能殘留，尚未實作跨中央重啟的 orphan 掃描回收。
-Windows x64 為實測平台；Linux／macOS 尚待原生建置與故障驗證，未做吞吐量 benchmark。
+Windows x64 為實測平台；Linux／macOS 尚待原生建置與故障驗證。
+有節奏的延遲／資料率量測見 [Benchmark](benchmarks/README.md)；尚未測量飽和吞吐量。
 
 同步證明、控制協定與測試對照見 [DESIGN.md](DESIGN.md)。
 
 ## 可直接操作的範例
+
+**文件待修正（2026-10-06 benchmark 閱讀確認）：** 下方歷史互動範例仍列出
+`subscriber next`，與目前 Context callback／`get_last()` 的契約不符。
+舊命令已移除；請先以本頁「三條使用路徑」與現有 example 為準，後續需同步重寫這段逐步操作。
+本輪僅記錄文件落差，沒有恢復舊 API。
 
 Windows Debug 建置後，從儲存庫根目錄執行：
 
@@ -389,3 +426,23 @@ callbacks 必須保留 Session 所有權，且與 Plugin／Client 的相同建�
 回歸；完整案例、結果與平台限制統一記錄於
 [Module System Context 驗證](../module_system/README.md#contextpump-實作驗證2026-10-06)。
 Bus 原有 ring buffer 共享布局及 writer 等待政策維持。
+
+## 中央共享資源名稱服務（2026-10-08）
+
+正式 Manager 組裝時向 `BusManager::create()` 注入 common 的私有 `ResourceNames`。
+Topic counter、RingBuffer control／data 都先 reserve 留下紀錄，再建立 OSAL SharedMemory；
+建立者 unlink 成功／名稱已不存在或 Windows 退役時，才 retire 記錄。清理未完成則保留供下次中央處理。
+無注入的獨立 Bus 測試仍採原有隨機名稱；這不提供跨中央崩潰的持久清理保證。
+本接線不改 payload、排序、等待或 Reader 回收協定，也不增加每筆 pub/sub 的檔案操作。
+跨世代與名稱生命週期契約見 [Module System INSTANCE.md](../module_system/INSTANCE.md)。
+
+## Recorder 探索及接收上限（2026-10-12）
+
+新增 Client／Context `list_topics(after)`，回傳有活動 Publisher 的 topic/hash/Publisher 數。
+控制協定新增 v2 operation 0x0207，每頁至多 32 筆、字典序游標，舊端點拒絕不支援的 operation；
+不傳 payload，也不保證多頁跨拓樸變更的原子快照。
+
+SubscriberOptions 新增 max_message_bytes，0 保留既有行為。非零時在接收 allocation 前檢查，
+callback 路徑略過過大映像並推進 cursor／記錄 oversized_messages；get_last 回 CapacityExceeded，
+不改 callback cursor。正常訊息仍走原布局驗證及 Reader lease 複製，writer 等待政策不變。
+Recorder 的使用邊界與驗證见 [Bag README](../bag/README.md)。

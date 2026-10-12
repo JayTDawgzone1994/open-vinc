@@ -2,6 +2,12 @@
 add_executable(shell src/main.cpp)
 set_target_properties(shell PROPERTIES OUTPUT_NAME Vinc)
 vinc_deploy_tcl(shell)
+add_custom_command(TARGET shell POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:shell>/licenses/tomlplusplus"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${VINC_REPOSITORY_ROOT}/library/tomlplusplus/upstream/LICENSE"
+        "$<TARGET_FILE_DIR:shell>/licenses/tomlplusplus/LICENSE"
+    VERBATIM)
 target_include_directories(shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
 target_link_libraries(shell PRIVATE vinc::shell)
 set_target_properties(shell PROPERTIES
@@ -26,6 +32,13 @@ if(BUILD_TESTING AND VINC_BUILD_EXAMPLES)
     set_tests_properties(message_bus.shell PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "value=20")
 endif()
 
+if(BUILD_TESTING)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bag-smoke.tcl"
+        "bagRecorder\nrecorder status\nexit\n")
+    add_test(NAME bag.shell COMMAND shell --shell-port 0 -S "${CMAKE_CURRENT_BINARY_DIR}/bag-smoke.tcl")
+    set_tests_properties(bag.shell PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "bag: idle")
+endif()
+
 # Generate after collecting all process modules. Generator expressions resolve
 # each Plugin library path for this build configuration.
 set(catalog_template [=[
@@ -33,6 +46,7 @@ set(catalog_template [=[
 
 // Generated from the registered process-module targets. Edit the CMake sources instead.
 #include <vinc/module/host/module_manager.hpp>
+#include <vinc/config.hpp>
 
 
 namespace vinc {

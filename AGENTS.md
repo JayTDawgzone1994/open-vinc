@@ -41,7 +41,7 @@ Open-VINC 是可在不同專案與作業系統重複使用的通用軟體框架�
 
 - 採用 **C++23**；CMake 要求標準等級 23、禁止降級、關閉語言擴充。最低 CMake 宣告為 **3.20**；工具鏈若需要更高版本，依驗證結果調整並同步文件。
 - 主要目標平台為 Windows、macOS、Linux。Linux 最低目標 **Ubuntu 22.04**，允許安裝較新工具鏈，不以預設 GCC 11 作為 C++23 支援基準。確切編譯器／標準庫最低版本及 Windows／macOS 最低 OS 仍待驗證確認。
-- **OSAL 保持通用且可獨立使用**，封裝標準函式庫未滿足的 OS 能力；允許依賴只使用標準函式庫的 `common`，搬移或獨立建置時一併提供。OSAL 不依賴 Module、Message Bus 或 Shell，也不為外觀一致而重包所有 API。框架的跨程序 mutex 由同步層使用 OSAL FileLock 實作。
+- **OSAL 保持通用且可獨立使用**，封裝標準函式庫未滿足的 OS 能力；允許依賴只使用標準函式庫的 `common`，搬移或獨立建置時一併提供。OSAL 不依賴 Module、Message Bus 或 Shell，也不為外觀一致而重包所有 API。框架的跨程序 mutex 由 Concurrency 使用 OSAL SharedMemory／SharedWord 實作；死亡回收須由上層確認程序退出，契約見 Concurrency README。
 - **Module 以獨立程序執行**，使用 OSAL 管理生命週期；中央與 Module 共用 Socket 控制通道及雙向 heartbeat。失聯與退出依模組政策處理；heartbeat 不代表所有應用功能正常。
 - **控制與資料分工：** Socket 承載命令、生命週期及 Message Bus 註冊／拓樸等控制資訊；Message Bus 的訊息資料使用共享記憶體。每個 Publisher 管理自己的 RingBuffer，同一 topic 可有多個 Publisher。
 - 共享訊息布局須可跨程序映射，不依賴程序本地 pointer。既有布局與協定已有實作，但不因此承諾跨版本、編譯器或架構的穩定 ABI；同步、權限及故障回收仍需依用途驗證。
@@ -121,12 +121,14 @@ Open-VINC 是可在不同專案與作業系統重複使用的通用軟體框架�
 
 - [名稱與含義](NAMING.md)：ModuleType、Module、MID、Context／pump 與鎖的命名及決策狀態。
 - [OSAL](src/vinc/osal/README.md)、[Components](src/vinc/components/README.md)、[Concurrency](src/vinc/components/concurrency/README.md)：OS 能力、共用工具與跨程序 mutex。
-- [Module System](src/vinc/module_system/README.md)、[控制通道](src/vinc/control_channel/README.md)：啟停、heartbeat、停止／重啟政策與控制協定。
+- [Module System](src/vinc/module_system/README.md)、[中央名稱與共享鎖接線](src/vinc/module_system/INSTANCE.md)、[控制通道](src/vinc/control_channel/README.md)：啟停、heartbeat、停止／重啟政策與控制協定。
 - [Message Bus](src/vinc/message_bus/README.md)、[Message Bus 設計](src/vinc/message_bus/DESIGN.md)：共享記憶體交換、排序、占用與回收。
 - [訊息儲存](src/vinc/components/message_storage/README.md)、[Ribosome](src/vinc/ribosome/README.md)：訊息布局、容器與產生器。
 - [Shell](src/vinc/shell/README.md)、[Socket Shell](src/vinc/shell/SOCKET.md)、[OutputHub](src/vinc/output_hub/README.md)：腳本、遠端操作與輸出管理。
 - [SDK 與元件目錄](src/vinc/sdk/README.md)：整合入口、target 與框架接線契約。
 - [Common](src/vinc/common/README.md)：錯誤介面與暫時設定標頭的實作現況。
+- [Param](src/vinc/param/README.md)：具型別參數、Context 快取與 pump、A/B 共享映像、權限與 TOML 保存。
+- [Bag Recorder](src/vinc/bag/README.md)：錄製 Module、SQLite 格式、容量與丟失統計；Player 尚未實作。
 
 ## 過時內容提醒
 

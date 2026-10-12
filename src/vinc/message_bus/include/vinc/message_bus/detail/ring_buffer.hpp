@@ -7,6 +7,7 @@
 #include <vinc/osal/shared_memory.hpp>
 #include <vinc/osal/shared_atomic.hpp>
 #include <atomic>
+#include <vinc/detail/resource_names.hpp>
 #include <functional>
 
 namespace vinc::message_bus::detail {
@@ -122,6 +123,7 @@ struct Reservation {
 };
 
 class RingBuffer : public std::enable_shared_from_this<RingBuffer> {
+    std::shared_ptr<vinc::detail::ResourceNames> resources_;
     osal::SharedMemory control_;
     osal::SharedMemory data_;
     osal::SharedMemoryMapping control_map_;
@@ -152,7 +154,7 @@ public:
         return (bytes + payload_alignment_mask) & ~payload_alignment_mask;
     }
 
-    static vinc::Result<std::shared_ptr<RingBuffer>> create(Descriptor);
+    static vinc::Result<std::shared_ptr<RingBuffer>> create(Descriptor, std::shared_ptr<vinc::detail::ResourceNames> resources = {});
     static vinc::Result<std::shared_ptr<RingBuffer>> open(Descriptor, bool writer);
 
     RingBufferHeader& header() {
@@ -182,12 +184,13 @@ public:
 };
 
 struct NamedCounter {
+    std::shared_ptr<vinc::detail::ResourceNames> resources;
     osal::SharedMemory memory;
     osal::SharedMemoryMapping mapping;
     std::string name;
     bool creator = false;
     ~NamedCounter();
-    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string);
+    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string, std::shared_ptr<vinc::detail::ResourceNames> resources = {});
     static vinc::Result<std::shared_ptr<NamedCounter>> open(std::string);
     vinc::Result<std::uint64_t> next();
 };

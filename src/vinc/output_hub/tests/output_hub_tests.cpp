@@ -126,6 +126,7 @@ int main(int argc, char** argv) {
             check(sizes[0] == expected_large_stream_bytes && sizes[1] == sizes[0] && end_events == 2,
                   "raw fanout lost bytes/EOF");
             auto skipped = slow.take();
+            check(!skipped.sources_skipped.empty(), "overflow attributes loss to its source without allocating on producer");
             check(skipped.skipped.bytes > 0 && skipped.skipped.events > 0,
                   "slow destination loss not counted");
             check(muted.take().events.empty(), "muted queue received data");

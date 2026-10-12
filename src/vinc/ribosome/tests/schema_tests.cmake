@@ -88,3 +88,12 @@ if(protected_result STREQUAL "0" OR NOT EXISTS "${input}/Frame.msg" OR NOT prote
 endif()
 message(STATUS "PASS: output/input overlap protection")
 include("${CMAKE_CURRENT_LIST_DIR}/regression_tests.cmake")
+
+file(WRITE "${input}/message_types.msg" "uint8_t value;\n")
+run_case(catalog_filename_collision FALSE "collide")
+file(REMOVE "${input}/message_types.msg")
+run_case(catalog_recovery TRUE "")
+file(READ "${output}/message_types.hpp" catalog)
+if(NOT catalog MATCHES "visit_types" OR NOT catalog MATCHES "operator.*<::vinc::Frame>")
+    message(FATAL_ERROR "Missing generated compile-time type visitor")
+endif()

@@ -20,6 +20,11 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+option(VINC_BUILD_BUS_BENCHMARK "Build the opt-in cross-process Message Bus benchmark" OFF)
+if(VINC_BUILD_BUS_BENCHMARK)
+    add_subdirectory(benchmarks)
+endif()
+
 # Metadata has no dependency on the component runtime or selected catalog.
 add_library(vinc_message_bus_errors INTERFACE)
 target_include_directories(vinc_message_bus_errors INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")

@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 #include <vinc/module/host/module_manager.hpp>
 #include <iostream>
 #include <stdexcept>
@@ -34,7 +35,7 @@ void take(Result<void> result) {
 }
 
 void test_case(const std::filesystem::path& plugin, const std::string& mode, bool success, bool stop) {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     ModuleType type{"contextTest", plugin, "contextNode", {}};
     type.policy.max_restarts = stop ? 0 : 1;
     type.policy.restart_delay = restart_delay;

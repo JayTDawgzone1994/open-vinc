@@ -1,3 +1,5 @@
+#include <vinc/module/detail/manager_access.hpp>
+#include <vinc/log/detail/manager.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc/time.hpp>
 #include <vinc/shell/detail/socket_shell.hpp>
@@ -128,6 +130,9 @@ struct SocketShell::Impl {
     struct Session {
         std::uint64_t id;
         std::uint64_t contract_cursor = 0;
+        std::uint64_t param_cursor = 0;
+        std::uint64_t log_cursor = 0;
+        log::View log_view;
         std::string resume_code;
         osal::Socket socket;
         osal::SocketRegistration registration{};
@@ -617,6 +622,11 @@ struct SocketShell::Impl {
             return true;
         }
 
+        if (name == "log" && arguments.size() > 1 && arguments[1] == "show") {
+            auto result = log::detail::view_command(session.log_view, arguments);
+            reply(session, result ? *result : error_to_string(result.error()));
+            return true;
+        }
         if (name == "output") {
             if (arguments.size() != 2 || (arguments[1] != "on" && arguments[1] != "off")) {
                 reply(session, "Usage: output on|off");
@@ -812,9 +822,21 @@ struct SocketShell::Impl {
                 config::shell_socket_queue_bytes - config::shell_socket_reply_reserve_bytes &&
             session.replies.size() < config::shell_socket_collect_threshold_items;
         if (can_collect_replies && session.socket && !session.provisional) {
+            const auto log_text = detail::ManagerAccess::log_take(manager, session.log_view);
+            if (!log_text.empty()) {
+                reply(session, log_text);
+            }
+            const auto log_diagnostic = detail::ManagerAccess::log_notification(manager, session.log_cursor);
+            if (!log_diagnostic.empty()) {
+                reply(session, log_diagnostic);
+            }
             const auto diagnostics = router.contract_notifications(session.contract_cursor);
             if (!diagnostics.empty()) {
                 reply(session, diagnostics);
+            }
+            const auto parameter_diagnostics = router.param_notifications(session.param_cursor);
+            if (!parameter_diagnostics.empty()) {
+                reply(session, parameter_diagnostics);
             }
         }
         collect_command_result(session, can_collect_replies);

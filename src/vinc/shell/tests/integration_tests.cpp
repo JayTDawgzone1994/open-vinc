@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Run Shell against real module helpers while feeding controlled terminal input.
 // Verify responsive commands, late replies and shutdown that waits for actual child exit.
 
@@ -105,7 +106,7 @@ std::string start(ModuleManager& manager, const Workspace& files, const std::str
 
 void test_output_and_prompt(const std::filesystem::path& executable) {
     Workspace files;
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -150,7 +151,7 @@ void test_output_and_prompt(const std::filesystem::path& executable) {
 
 void test_restart_output_generation(const std::filesystem::path& executable) {
     Workspace files;
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -200,7 +201,7 @@ void test_restart_output_generation(const std::filesystem::path& executable) {
 
 void test_terminal_failure_waits_for_process(const std::filesystem::path& executable) {
     Workspace files;
-    auto manager = checked_value(ModuleManager::create());
+    auto manager = checked_value(vinc::test::create_manager());
     register_helper(*manager, executable);
     const auto module = start(*manager, files, "normal");
     InputPipe input;
@@ -220,7 +221,7 @@ void test_terminal_failure_waits_for_process(const std::filesystem::path& execut
 
 void test_command_timeout_and_shutdown(const std::filesystem::path& executable) {
     Workspace files;
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -265,7 +266,7 @@ void test_command_timeout_and_shutdown(const std::filesystem::path& executable) 
 
 void test_interrupt_with_hung_module(const std::filesystem::path& executable) {
     Workspace files;
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -323,7 +324,7 @@ void test_interrupt_with_hung_module(const std::filesystem::path& executable) {
 void test_exit_and_eof(const std::filesystem::path& executable) {
     for (const bool eof : {false, true}) {
         Workspace files;
-        auto manager_owner = vinc::ModuleManager::create();
+        auto manager_owner = vinc::test::create_manager();
         if (!manager_owner) {
             throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
         }
@@ -349,7 +350,7 @@ void test_exit_and_eof(const std::filesystem::path& executable) {
 
 void test_contract_notification(const std::filesystem::path& executable) {
     Workspace files;
-    auto manager = checked_value(ModuleManager::create());
+    auto manager = checked_value(vinc::test::create_manager());
     register_helper(*manager, executable);
     const auto module = start(*manager, files, "normal");
     shell::CommandRouter router(*manager);
@@ -374,7 +375,7 @@ void test_contract_notification(const std::filesystem::path& executable) {
 }
 
 void test_debug_gate_shutdown(const std::filesystem::path& executable) {
-    auto manager = checked_value(ModuleManager::create());
+    auto manager = checked_value(vinc::test::create_manager());
     register_helper(*manager, executable);
     InputPipe input;
     std::ostringstream output;

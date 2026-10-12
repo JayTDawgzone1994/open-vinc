@@ -1,7 +1,7 @@
 # This component owns its schemas, generated output and usage requirements.
 cmake_minimum_required(VERSION 3.20)
 file(GLOB message_inputs "${CMAKE_CURRENT_SOURCE_DIR}/messages/*.msg")
-set(message_outputs "${VINC_MESSAGE_OUTPUT_DIR}/all_messages.hpp")
+set(message_outputs "${VINC_MESSAGE_OUTPUT_DIR}/all_messages.hpp" "${VINC_MESSAGE_OUTPUT_DIR}/message_types.hpp")
 foreach(input IN LISTS message_inputs)
     get_filename_component(name "${input}" NAME_WE)
     list(APPEND message_outputs "${VINC_MESSAGE_OUTPUT_DIR}/${name}.hpp")

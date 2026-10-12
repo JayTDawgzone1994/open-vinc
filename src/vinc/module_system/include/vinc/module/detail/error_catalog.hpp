@@ -57,7 +57,13 @@ inline constexpr auto error_entries = std::array{
     ErrorCodeEntry{ErrorCode::IncompleteFaultReport, "Incomplete fault report"},
     ErrorCodeEntry{ErrorCode::PluginLoadFailed, "Cannot load module plugin"},
     ErrorCodeEntry{ErrorCode::InvalidPlugin, "Invalid module plugin entry or type"},
-    ErrorCodeEntry{ErrorCode::IncompatiblePlugin, "Incompatible module plugin entry"}};
+    ErrorCodeEntry{ErrorCode::IncompatiblePlugin, "Incompatible module plugin entry"},
+    ErrorCodeEntry{ErrorCode::InstanceRunning, "A Vinc with this name is already running"},
+    ErrorCodeEntry{ErrorCode::InstanceStorageFailed, "Vinc instance resource journal failed"},
+    ErrorCodeEntry{ErrorCode::InvalidInstanceJournal, "Invalid Vinc instance resource journal"},
+    ErrorCodeEntry{ErrorCode::LogFailed, "Log operation failed"},
+               ErrorCodeEntry{ErrorCode::ParamFailed, "Parameter service failed"},
+               ErrorCodeEntry{ErrorCode::LockFailed, "Module shared lock operation failed"}};
 inline constexpr auto operation_entries =
     std::array{ErrorOperationEntry{ErrorOperation::Create, "Create"},
                ErrorOperationEntry{ErrorOperation::RegisterType, "RegisterType"},
@@ -113,7 +119,15 @@ inline constexpr auto operation_entries =
                ErrorOperationEntry{ErrorOperation::Pump, "Pump"},
                ErrorOperationEntry{ErrorOperation::MainHook, "MainHook"},
                ErrorOperationEntry{ErrorOperation::SubscriptionCallback, "SubscriptionCallback"},
-               ErrorOperationEntry{ErrorOperation::Finish, "Finish"}};
+               ErrorOperationEntry{ErrorOperation::Finish, "Finish"},
+               ErrorOperationEntry{ErrorOperation::OpenInstance, "OpenInstance"},
+               ErrorOperationEntry{ErrorOperation::RecordResource, "RecordResource"},
+               ErrorOperationEntry{ErrorOperation::CleanInstance, "CleanInstance"},
+               ErrorOperationEntry{ErrorOperation::AccessLock, "AccessLock"},
+               ErrorOperationEntry{ErrorOperation::AccessLog, "AccessLog"},
+               ErrorOperationEntry{ErrorOperation::AccessParam, "AccessParam"},
+               ErrorOperationEntry{ErrorOperation::ParamCallback, "ParamCallback"},
+               ErrorOperationEntry{ErrorOperation::RecoverLock, "RecoverLock"}};
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::ModuleSystem, "ModuleSystem", error_entries,
                                             operation_entries};
 static_assert(valid_catalog(error_catalog));

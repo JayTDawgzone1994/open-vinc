@@ -1,6 +1,6 @@
 # Root composition: libraries first, then examples and the central application.
 cmake_minimum_required(VERSION 3.20)
-project(vinc_root LANGUAGES CXX)
+project(vinc_root LANGUAGES C CXX)
 
 # Shared Plugin consumers require PIC and image-local implementation symbols.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -35,5 +35,6 @@ if(VINC_BUILD_EXAMPLES)
     add_subdirectory("${VINC_REPOSITORY_ROOT}/examples/message_bus" "examples/message_bus")
 endif()
 if(VINC_BUILD_APPS)
+    add_subdirectory(vinc/bag/module)
     add_subdirectory("${VINC_REPOSITORY_ROOT}/apps/vinc" "apps/vinc")
 endif()

@@ -1,26 +1,32 @@
 #pragma once
 
-// Internal bookkeeping shared only by the implementation and controlled tests.
-#include <vinc/osal/file_lock.hpp>
+#include <vinc/osal/shared_memory.hpp>
+#include <vinc/osal/shared_atomic.hpp>
+#include <vinc/owner_id.hpp>
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
-#include <optional>
+#include <string>
 
 namespace vinc::concurrency::detail {
-struct InterprocessMutexState {
-    osal::FileLock file_lock;
-    // Protects the reservation and retained FileLock guard. Ownership changes
-    // also occur under this mutex; try_lock can inspect the identity separately.
-    std::mutex local_mutex;
-    std::condition_variable_any local_changed;
-    bool occupied = false;
-    // Process-local TLS identity, never dereferenced or stored in shared memory.
-    // Atomic reads preserve recursive Busy without waiting for local_mutex.
-    std::atomic<const void*> owner_thread_token{nullptr};
-    std::optional<osal::FileLockGuard> file_guard;
+inline constexpr std::uint64_t mutex_magic = 0x56494e434d555458ULL;
+inline constexpr std::uint32_t mutex_layout_version = 1;
+inline constexpr std::uint64_t publication_mask = 1;
+
+struct alignas(8) MutexHeader {
+    std::uint64_t magic = mutex_magic;
+    std::uint32_t version = mutex_layout_version;
+    std::uint32_t bytes = sizeof(MutexHeader);
+    osal::SharedWord control{};
 };
 
-// An implementation that hides a lock here would defeat the try_lock contract.
+struct InterprocessMutexState {
+    std::string name;
+    OwnerId identity = no_owner;
+    osal::SharedMemory memory;
+    osal::SharedMemoryMapping mapping;
+    MutexHeader* header = nullptr;
+    // Process-local affinity/recursion only. No blocking bookkeeping mutex.
+    std::atomic<const void*> local_owner{nullptr};
+};
 static_assert(std::atomic<const void*>::is_always_lock_free);
+static_assert(sizeof(MutexHeader) == 24);
 }

@@ -28,7 +28,9 @@ enum class Domain : std::uint16_t {
     Session = 0,
     Lifecycle = 1,
     Command = 2,
-    MessageBus = 3
+    MessageBus = 3,
+    Param = 4,
+    Log = 5
 };
 
 // request correlates a response with one request; events use zero.

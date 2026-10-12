@@ -1,5 +1,6 @@
 #pragma once
 #include <vinc/module/context.hpp>
+#include <vinc/module/detail/context_lock.hpp>
 
 namespace vinc::detail {
 // Host-owned wiring, valid through Module destruction. No Plugin owns a receiver
@@ -11,5 +12,6 @@ public:
     virtual Result<std::uint64_t> commands() = 0;
     virtual void wait() = 0;
     virtual void fail(const Error&) = 0;
+    virtual Result<std::unique_ptr<ContextLock>> lock(std::uint64_t id, Deadline deadline) = 0;
 };
 }

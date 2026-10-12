@@ -6,9 +6,9 @@
 
 **狀態（2026-10-05）：使用者決定先記錄，暫不處理。** 保留 guard 與本地 occupied
 不等於已確認 native lock 仍被持有；目前是契約證據缺口，尚未重現失敗後已解鎖的情境。
-Concurrency 的原生解鎖移出簿記鎖方案一併暫緩；try_lock 內部競爭回報 WouldBlock
-已另行修正（見 [Concurrency 驗證](src/vinc/components/concurrency/README.md#驗證)），
-不代表此問題已修復。詳細分析及後續決策統一維護於
+2026-10-08：Concurrency 已改用共享原子鎖，不再需要原生解鎖移出簿記鎖方案
+（見 [Concurrency](src/vinc/components/concurrency/README.md)），不代表 FileLock 問題已修復。
+詳細分析及後續決策統一維護於
 [OSAL README 待處理事項](src/vinc/osal/README.md#待處理事項)。
 
 ## OSAL：POSIX fd 建立與 spawn 的並行競爭窗口

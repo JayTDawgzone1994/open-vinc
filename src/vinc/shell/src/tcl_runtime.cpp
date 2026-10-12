@@ -214,6 +214,14 @@ int call_original_command(Tcl_Interp* interpreter_handle, const char* name, Tcl_
 }
 }
 
+Result<std::filesystem::path> executable_directory() {
+    std::lock_guard lock(tcl_initialization_mutex);
+    if (library_path.empty()) {
+        return std::unexpected(Error{ErrorCode::TclResourcesMissing, ErrorOperation::InitializeTcl});
+    }
+    return library_path.parent_path().parent_path();
+}
+
 Result<void> initialize_tcl(const char* executable) {
     if (!executable || !*executable) {
         return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::InitializeTcl});

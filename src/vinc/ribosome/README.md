@@ -230,3 +230,10 @@ Ribosome 的 Release target，使用含 Unicode 的 CMake 預設輸入／輸出�
 
 未重跑全專案所有 CTest 或 `tests/ribosome_generation.cmake` 的完整來源副本流程；
 Linux／macOS、MinGW 尚未實機驗證。新增案例已納入元件正式測試。
+
+## 編譯期訊息清單（2026-10-12）
+
+生成目錄增加 message_types.hpp，提供 `vinc::message::visit_types(visitor)`；
+對每個生成類別呼叫 visitor 的 template operator()<T>()。
+Bag Recorder 用它建立已知型別的 typed subscription，不引入 Bag 相依或 runtime registry。
+message_types 與 all_messages 同為保留輸出名稱；schema hash／image layout 不因清單而改變。

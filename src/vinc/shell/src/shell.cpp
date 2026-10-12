@@ -1,3 +1,5 @@
+#include <vinc/module/detail/manager_access.hpp>
+#include <vinc/log/detail/manager.hpp>
 #include <vinc/osal/path.hpp>
 // Shell event loop: keep keyboard/control input responsive while command jobs run.
 // A foreground script suppresses ordinary input but keeps cancel and full shutdown available.
@@ -37,6 +39,9 @@ struct Shell::Impl {
     std::optional<Error> run_failure;
     std::uint64_t reported_remote_failures = 0;
     std::uint64_t contract_cursor = 0;
+    std::uint64_t param_cursor = 0;
+    std::uint64_t log_cursor = 0;
+    log::View log_view;
     vinc::Deadline next_remote_diagnostic{};
     using Reply = std::variant<Result<shell::CommandReply>, Result<shell::CompletionResult>>;
 
@@ -249,6 +254,11 @@ struct Shell::Impl {
             return true;
         }
 
+        if (target == "log" && arguments.size() > 1 && arguments[1] == "show") {
+            auto result = log::detail::view_command(log_view, arguments);
+            show(result ? *result : error_to_string(result.error()));
+            return true;
+        }
         if (target == "output") {
             if (arguments.size() != 2 || (arguments[1] != "on" && arguments[1] != "off")) {
                 show("Usage: output on|off");
@@ -340,9 +350,21 @@ struct Shell::Impl {
     // Consume worker results only on the Shell thread, keeping editor state and output
     // out of command callbacks. Script errors are displayed without shutting down modules.
     void collect() {
+        const auto log_text = detail::ManagerAccess::log_take(manager, log_view);
+        if (!log_text.empty()) {
+            show(log_text);
+        }
+        const auto log_diagnostic = detail::ManagerAccess::log_notification(manager, log_cursor);
+        if (!log_diagnostic.empty()) {
+            show(log_diagnostic);
+        }
         const auto diagnostics = router.contract_notifications(contract_cursor);
         if (!diagnostics.empty()) {
             show(diagnostics);
+        }
+        const auto parameter_diagnostics = router.param_notifications(param_cursor);
+        if (!parameter_diagnostics.empty()) {
+            show(parameter_diagnostics);
         }
         collect_output();
         collect_script();

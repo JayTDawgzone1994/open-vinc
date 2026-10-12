@@ -1,3 +1,8 @@
+#include <vinc/log/detail/transport.hpp>
+#include <vinc/module/detail/module_locks.hpp>
+#include <vinc/module/detail/module_params.hpp>
+#include <vinc/param/detail/client_access.hpp>
+#include <vinc/param/detail/protocol.hpp>
 #include <vinc/module/detail/context_runtime.hpp>
 // Child bootstrap and hook dispatcher. A separate watchdog receives control frames
 // while application hooks run serially, so a blocked hook cannot disable parent-loss detection.
@@ -31,9 +36,13 @@ namespace vinc {
 class detail::ModuleMessageBusAccess {
 public:
     static void attach(detail::ModuleObject& module, std::shared_ptr<message_bus::Client> client,
-                       ContextRuntime& runtime) {
+                       ContextRuntime& runtime, param::detail::Access& params, log::detail::Access* logs) {
         module.context.client_ = std::move(client);
         module.context.runtime_ = &runtime;
+        param::detail::ClientAccess::bind(module.context.param, params);
+        if (logs) {
+            log::detail::ClientAccess::bind(module.context.log, *logs);
+        }
     }
 
     static void quiesce(detail::ModuleObject& module) {
@@ -68,7 +77,7 @@ std::optional<std::uint64_t> parse_number(const std::string& text) {
 
 // Per-process limits; values and child exit statuses preserve the existing bootstrap ABI.
 constexpr std::size_t pending_request_limit = 32;
-constexpr std::size_t central_session_limit = 1;
+constexpr std::size_t central_session_limit = 2;
 constexpr std::uint64_t maximum_bootstrap_timeout_ms = 86400000;
 constexpr std::uint64_t maximum_stop_grace_ms = 60000;
 
@@ -95,6 +104,9 @@ struct Bootstrap {
 // Shared only by the watchdog and main dispatcher. The mutex protects every
 // non-atomic field; finished keeps its existing sequentially consistent ordering.
 struct RuntimeInbox {
+    log::detail::Host* logs = nullptr;
+    detail::ModuleParams* params = nullptr;
+    detail::ModuleLocks* locks = nullptr; // Host owner outlives inbox/watchdog/hooks.
     std::mutex mutex;
     std::condition_variable changed;
     std::deque<control::Frame> requests;
@@ -129,7 +141,7 @@ Result<Bootstrap> parse_bootstrap(const std::vector<std::string>& args) {
     }
 
     const bool invalid_heartbeat =
-        !*generation || !*interval || *interval >= *timeout || *timeout > maximum_bootstrap_timeout_ms;
+        !valid_mid(*generation) || !*interval || *interval >= *timeout || *timeout > maximum_bootstrap_timeout_ms;
     if (invalid_heartbeat) {
         return std::unexpected(Error{ErrorCode::InvalidBootstrap, ErrorOperation::Bootstrap});
     }
@@ -192,6 +204,10 @@ Result<std::shared_ptr<control::Session>> connect_to_central(control::Service& s
 [[noreturn]] void watchdog_failure(const std::shared_ptr<control::Session>& session, RuntimeInbox& inbox,
                                    const Error& error, int exit_code, Deadline stop_deadline,
                                    std::uint32_t role = detail::primary_failure) noexcept {
+    if (inbox.locks) {
+        inbox.locks->stop();
+        inbox.params->stop();
+    }
     try {
         control::Frame report{control::Kind::Request, detail::lifecycle, detail::report_failure};
         {
@@ -239,8 +255,11 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
             if (terminal) {
                 watchdog_failure(session, inbox, *terminal, child_exit::application_exception, stop_deadline);
             }
-            const auto poll_deadline = (std::min)(stop_deadline,
-                control::Clock::now() + config::module_runtime_poll_interval);
+            if (inbox.logs) {
+                inbox.logs->poll();
+            }
+            const auto poll_deadline =
+                (std::min)(stop_deadline, control::Clock::now() + config::module_runtime_poll_interval);
             auto frame = session->receive_until(poll_deadline);
             if (inbox.finished.load()) {
                 return;
@@ -259,6 +278,14 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                 watchdog_failure(session, inbox,
                                  wrap_error(ErrorCode::CentralLost, ErrorOperation::Receive, frame.error()),
                                  child_exit::central_lost, stop_deadline);
+            }
+            if (frame->kind == control::Kind::Response && frame->domain == detail::lifecycle &&
+                frame->operation == detail::attach_lock) {
+                auto received = inbox.locks->receive(std::move(*frame));
+                if (!received) {
+                    watchdog_failure(session, inbox, received.error(), child_exit::central_lost, stop_deadline);
+                }
+                continue;
             }
             if (frame->kind == control::Kind::Response && frame->domain == detail::lifecycle &&
                 (frame->operation == detail::finishing || frame->operation == detail::completed)) {
@@ -312,6 +339,14 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                 }
                 inbox.debug_released = true;
                 inbox.changed.notify_all();
+            } else if (frame->domain == param::detail::domain) {
+                auto received = inbox.params->receive(std::move(*frame));
+                if (!received) {
+                    watchdog_failure(session, inbox,
+                        wrap_error(ErrorCode::ParamFailed, ErrorOperation::Receive, received.error()),
+                        child_exit::central_lost, stop_deadline);
+                }
+                inbox.changed.notify_all();
             } else if (frame->domain == message_bus::detail::message_bus_domain) {
                 auto received =
                     message_bus::detail::RuntimeAccess::receive(message_bus_client, std::move(*frame));
@@ -327,6 +362,8 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                     watchdog_failure(session, inbox, Error{ErrorCode::Protocol, ErrorOperation::Stop},
                                      child_exit::invalid_stop_message, stop_deadline);
                 }
+                inbox.locks->stop();
+                inbox.params->stop();
                 std::lock_guard lock(inbox.mutex);
                 if (!inbox.stopping) {
                     inbox.stopping = true;
@@ -542,6 +579,9 @@ public:
         }
         return count;
     }
+    Result<std::unique_ptr<detail::ContextLock>> lock(std::uint64_t id, Deadline deadline) override {
+        return inbox_.locks->lock(id, deadline);
+    }
     void wait() override {
         std::unique_lock lock(inbox_.mutex);
         inbox_.changed.wait_for(lock, config::module_pump_idle_interval, [&] {
@@ -549,6 +589,8 @@ public:
         });
     }
     void fail(const Error& error) override {
+        inbox_.locks->stop();
+        inbox_.params->stop();
         std::lock_guard lock(inbox_.mutex);
         if (!inbox_.terminal_failure) {
             inbox_.terminal_failure = error;
@@ -585,6 +627,8 @@ struct RuntimeGuard {
     std::jthread watchdog;
 
     ~RuntimeGuard() {
+        inbox.locks->stop();
+        inbox.params->stop();
         inbox.finished.store(true);
         message_bus::detail::RuntimeAccess::shutdown(client);
         session->close();
@@ -654,6 +698,8 @@ Result<void> run_started_hooks(detail::ModuleObject& module, std::vector<std::st
         }
         inbox.changed.notify_all();
     }
+    inbox.locks->stop();
+    inbox.params->stop();
     if (completed_locally && running) {
         running = completion_exchange(session, inbox, detail::finishing);
     }
@@ -704,7 +750,8 @@ Result<void> run_hooks(const std::vector<std::string>& args, const Bootstrap& bo
         return std::unexpected(registered.error());
     }
     HostContext context_runtime(**module, session, inbox);
-    detail::ModuleMessageBusAccess::attach(**module, client, context_runtime);
+    inbox.params->identify((*module)->get_module_name());
+    detail::ModuleMessageBusAccess::attach(**module, client, context_runtime, *inbox.params, inbox.logs);
     auto result = run_started_hooks(**module, startup_args, session, inbox);
     // Destroy user state and callback closures while both Host adapter and Plugin exist.
     module->reset();
@@ -785,7 +832,13 @@ int run_module_process(const std::vector<std::string>& args) {
             return child_exit::application_exception;
         }
 
+        auto logs = log::detail::Host::connect(**service, args[detail::bootstrap::endpoint], options);
+        detail::ModuleLocks locks(session, bootstrap->generation);
+        detail::ModuleParams params(session, locks);
         RuntimeInbox inbox;
+        inbox.logs = logs.get();
+        inbox.params = &params;
+        inbox.locks = &locks;
         inbox.stop_grace = std::chrono::milliseconds(bootstrap->grace);
         RuntimeGuard guard{inbox, session, **client, {}};
         try {

@@ -25,16 +25,39 @@ struct Queue {
     std::size_t bytes = 0;
     bool enabled = true;
     Loss loss;
+    std::vector<SourceLoss> source_losses;
+    std::size_t source_loss_count = 0;
+    Loss unattributed;
 
-    explicit Queue(QueueLimits queue_limits) : limits(queue_limits), ring(queue_limits.events) {
+    explicit Queue(QueueLimits queue_limits)
+        : limits(queue_limits), ring(queue_limits.events), source_losses(queue_limits.events) {
+    }
+
+    // Preallocated attribution never allocates on the loss path. A stalled observer
+    // spanning more distinct sources than queue slots still gets exact aggregate totals.
+    void record_loss(const std::shared_ptr<const Source>& source, std::size_t lost_bytes) {
+        loss.bytes += lost_bytes;
+        ++loss.events;
+        for (std::size_t i = 0; i < source_loss_count; ++i) {
+            if (source_losses[i].source->id == source->id) {
+                source_losses[i].loss.bytes += lost_bytes;
+                ++source_losses[i].loss.events;
+                return;
+            }
+        }
+        if (source_loss_count < source_losses.size()) {
+            source_losses[source_loss_count++] = {source, {lost_bytes, 1}};
+        } else {
+            unattributed.bytes += lost_bytes;
+            ++unattributed.events;
+        }
     }
 
     // Caller holds mutex and the queue is nonempty.
     void pop(bool lost) {
         auto& item = ring[first];
         if (lost) {
-            loss.bytes += item->bytes.size();
-            ++loss.events;
+            record_loss(item->source, item->bytes.size());
         }
         bytes -= item->bytes.size();
         item.reset();
@@ -52,8 +75,7 @@ struct Queue {
             pop(true);
         }
         if (event->bytes.size() > limits.bytes) {
-            loss.bytes += event->bytes.size();
-            ++loss.events;
+            record_loss(event->source, event->bytes.size());
             return;
         }
 
@@ -62,7 +84,7 @@ struct Queue {
         bytes += event->bytes.size();
     }
 
-    void discard_for_gap(std::size_t missing_bytes) {
+    void discard_for_gap(std::size_t missing_bytes, const std::shared_ptr<const Source>& source) {
         std::lock_guard lock(mutex);
         if (!enabled) {
             return;
@@ -73,8 +95,7 @@ struct Queue {
         while (size) {
             pop(true);
         }
-        loss.bytes += missing_bytes;
-        ++loss.events;
+        record_loss(source, missing_bytes);
     }
 };
 }
@@ -88,6 +109,13 @@ Batch Subscription::take(std::size_t maximum) {
     std::lock_guard lock(queue_->mutex);
     const auto count = std::min(maximum, queue_->size);
     batch.events.reserve(count); // do not change queue/loss if allocation fails
+    batch.sources_skipped.assign(queue_->source_losses.begin(),
+                                 queue_->source_losses.begin() + queue_->source_loss_count);
+    for (std::size_t i = 0; i < queue_->source_loss_count; ++i) {
+        queue_->source_losses[i] = {};
+    }
+    queue_->source_loss_count = 0;
+    batch.unattributed = std::exchange(queue_->unattributed, {});
     batch.skipped = std::exchange(queue_->loss, {});
     for (std::size_t i = 0; i < count; ++i) {
         batch.events.push_back(queue_->ring[queue_->first]);
@@ -112,6 +140,7 @@ void Subscription::set_enabled(bool enabled) {
     }
     // A discontinuity also invalidates a destination's unfinished text fragment.
     ++queue_->loss.events;
+    ++queue_->unattributed.events;
 }
 
 namespace {
@@ -238,7 +267,7 @@ struct OutputHub::Impl {
             // through this same output route to report itself.
             for (auto& weak_queue : queues) {
                 if (auto queue = weak_queue.lock()) {
-                    queue->discard_for_gap(bytes.size());
+                    queue->discard_for_gap(bytes.size(), reader.source);
                 }
             }
         }
@@ -398,6 +427,10 @@ struct OutputHub::Impl {
     static CapturedProcess attach_readers(Capture& capture, osal::ProcessWithOutput& child) {
         capture.readers[stdout_index].pipe = std::move(*child.stdout_reader);
         capture.readers[stderr_index].pipe = std::move(*child.stderr_reader);
+        for (auto& reader : capture.readers) {
+            // These Source objects were created mutable and have not been published.
+            std::const_pointer_cast<Source>(reader.source)->pid = child.process.pid();
+        }
         capture.starting = false;
         return CapturedProcess{std::move(child.process), capture.id};
     }

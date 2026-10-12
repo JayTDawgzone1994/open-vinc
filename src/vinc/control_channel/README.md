@@ -174,3 +174,12 @@ Socket v1 bytes、佇列、heartbeat、等待與故障語意不變。
 Hello v2 監督政策驗證（2026-10-06）：Windows Debug／Release 的 `control.channel` 通過，
 含舊 payload／未知版本／非法旗標／雙方政策不一致拒絕，停用 expiry 後的靜默及恢復、
 真實 EOF 與既有正常 heartbeat。全套驗證見 [ModuleSystem](../module_system/README.md#除錯支援驗證)。
+
+
+## Log 專用局部佇列政策（2026-10-08）
+
+Options::receive_overflow 預設 CloseSession；Log 明確選用 DropNewest。
+Session::queue_stats() 保存接收丟棄 frames／bytes 累計，不經應用 frame 排隊。
+reserved_send_frames/bytes 預設 0，普通 send 保留此容量，send(frame, true) 可使用。
+不重排已有 frames，不改 Hello／heartbeat；政策是本地選項，不是 wire 欄位。
+非法 enum／預留容量被拒絕。見 [Log](../log/README.md)。

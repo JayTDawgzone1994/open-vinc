@@ -37,6 +37,7 @@ struct Peer {
     std::uint64_t sent_sequence = 0;
     std::uint64_t received_sequence = 0;
     Decoder decoder;
+    QueueStats queue_stats;
     std::deque<Bytes> outgoing;
     std::deque<Frame> incoming;
     std::size_t outgoing_bytes = 0;
@@ -196,6 +197,11 @@ void incoming(detail::Peer& peer, Frame frame, vinc::Deadline now) {
     const auto size = header_size + frame.payload.size();
     if (peer.incoming.size() >= detail::queue_count_limit ||
         peer.incoming_bytes + size > detail::queue_bytes_limit) {
+        if (peer.options.receive_overflow == ReceiveOverflow::DropNewest) {
+            ++peer.queue_stats.dropped_frames;
+            peer.queue_stats.dropped_bytes += size;
+            return;
+        }
         fail(peer, error(ErrorCode::Backpressure, ErrorOperation::Receive));
         return;
     }
@@ -435,7 +441,11 @@ bool valid_session_options(const Options& options) {
     const bool valid_handshake =
         options.handshake_timeout.count() > 0 && options.handshake_timeout <= maximum_session_timeout;
     const bool valid_role = options.role == Role::Central || options.role == Role::Module;
-    return valid_identity && valid_heartbeat && valid_handshake && valid_role;
+    const bool valid_queue = options.reserved_send_frames < detail::queue_count_limit &&
+                             options.reserved_send_bytes < detail::queue_bytes_limit &&
+                             (options.receive_overflow == ReceiveOverflow::CloseSession ||
+                              options.receive_overflow == ReceiveOverflow::DropNewest);
+    return valid_identity && valid_heartbeat && valid_handshake && valid_role && valid_queue;
 }
 
 // Prepare a peer before publishing it to the worker. On any failure, local RAII
@@ -488,7 +498,12 @@ Result<void> Session::wait_open(vinc::Deadline deadline) {
     return {};
 }
 
-Result<void> Session::send(Frame frame) {
+QueueStats Session::queue_stats() const {
+    std::lock_guard lock(peer_->mutex);
+    return peer_->queue_stats;
+}
+
+Result<void> Session::send(Frame frame, bool use_reserved_capacity) {
     const bool application_kind =
         frame.kind == Kind::Request || frame.kind == Kind::Response || frame.kind == Kind::Event;
     if (!application_kind || !has_application_identity(frame) || frame.payload.size() > max_payload) {
@@ -516,8 +531,11 @@ Result<void> Session::send(Frame frame) {
 
         const bool active_application = peer_->active_is_application && !peer_->active_frame.empty();
         const auto queued_count = peer_->outgoing.size() + static_cast<std::size_t>(active_application);
-        if (queued_count >= detail::queue_count_limit ||
-            peer_->outgoing_bytes + bytes.size() > detail::queue_bytes_limit) {
+        const auto count_limit =
+            detail::queue_count_limit - (use_reserved_capacity ? 0 : peer_->options.reserved_send_frames);
+        const auto byte_limit =
+            detail::queue_bytes_limit - (use_reserved_capacity ? 0 : peer_->options.reserved_send_bytes);
+        if (queued_count >= count_limit || peer_->outgoing_bytes + bytes.size() > byte_limit) {
             return std::unexpected(control::error(ErrorCode::Backpressure, ErrorOperation::Send));
         }
 

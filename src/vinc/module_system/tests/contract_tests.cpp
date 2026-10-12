@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Real process isolation and retained diagnostics, plus hostile/incomplete record decoding.
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/module/detail/contract_report.hpp>
@@ -86,7 +87,7 @@ void test_validation() {
 }
 
 void test_modules(const std::filesystem::path& helper) {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     ModulePolicy policy;
     policy.startup_timeout = test_deadline;
     check(bool(manager->register_module_type({"helper", helper, "worker", policy})), "register helper");
@@ -118,7 +119,7 @@ void test_modules(const std::filesystem::path& helper) {
               "other module remains functional");
     }
 
-    auto restart_manager = take(ModuleManager::create());
+    auto restart_manager = take(vinc::test::create_manager());
     policy.max_restarts = 1;
     policy.restart_delay = 100ms;
     check(bool(restart_manager->register_module_type({"helper", helper, "restartFault", policy})), "restart policy");

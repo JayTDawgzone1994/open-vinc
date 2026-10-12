@@ -2,8 +2,7 @@
 #include <vinc/result.hpp>
 
 namespace vinc::concurrency {
-// Preserve existing identifiers. Retired service/network codes (8, 10, 13,
-// 15-21) stay reserved; FileLock composition does not expose those categories.
+// Preserve existing identifiers; retired codes (8, 10, 13, 15-21) stay reserved.
 enum class ErrorCode : std::int32_t {
     InvalidArgument = 1,
     NotFound = 2,
@@ -16,7 +15,8 @@ enum class ErrorCode : std::int32_t {
     SystemError = 11,
     Closed = 12,
     WouldBlock = 14,
-    AlreadyExists = 22
+    AlreadyExists = 22,
+    InvalidLayout = 23
 };
 enum class ErrorOperation : std::int32_t {
     Unspecified = 0,
@@ -24,7 +24,10 @@ enum class ErrorOperation : std::int32_t {
     Lock = 2,
     Unlock = 3,
     // The legacy wrapper used zero for Create; common reserves zero for unspecified.
-    Create = 4
+    Create = 4,
+    InspectOwner = 5,
+    Recover = 6,
+    Publish = 7
 };
 } // namespace vinc::concurrency
 

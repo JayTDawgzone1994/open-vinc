@@ -1,206 +1,182 @@
-# Concurrency：並行控制工具
+# Concurrency：共享記憶體跨程序鎖
 
-`vinc::concurrency` 將通用 OSAL 能力組合成框架需要的同步機制。它不依賴 Param、Module、Context、
-Message Bus 或中央服務，也不含任何原生平台 handle、平台標頭或條件後端。
-Open-VINC 不將此 Mutex 暴露在 Module／Context 使用者介面。
+本元件以 OSAL SharedMemory 與 SharedWord 組合框架內部的跨程序互斥鎖。
+不依賴 Module System、Param、Context 或 Message Bus；不建立背景執行緒。
+Module 的正常服務仍經繼承的 Context，不能把這個工具當成可自行取得框架權限的入口。
+它是合作式同步協定，不是抵抗同帳號惡意 native 程序的安全沙箱。
 
-本元件位於 `src/vinc/components/concurrency/`，由使用它的元件建立及管理生命週期，
-不自行啟動背景執行緒或中央服務。原 `sync` 名稱已改為 `concurrency`；
-搬移與後續可讀性整理皆保留原有行為。
+## 實作範圍（2026-10-08）
 
-## 程式碼閱讀順序
+已替換原 FileLock 後端，保留 `InterprocessMutex`／`InterprocessMutexGuard` 名稱及
+`vinc::concurrency` target。舊的檔案路徑 create/open 不提供相容 overload。
+中央監督、MID 交付、Host 私有 Context 接線、停止取消與資源世代已接入 Module System。
+契約見 [Module System INSTANCE.md](../../module_system/INSTANCE.md)；Param 與 TOML 尚未實作。
+工具單元測試的父程序扮演監督者，整合測試另使用實際 Manager／Host／Plugin。
+OSAL FileLock 保留其獨立功能；其原生 unlock 失敗契約並未因本輪而修復。
 
-`InterprocessMutex::try_lock()` 先檢查同 thread 重入，再嘗試一次取得本地簿記鎖，
-在同一範圍內呼叫 OSAL FileLock 的非等待式取得並交付 guard。失敗不建立本地名額，
-成功保存 guard 時也不重新取得簿記鎖。
-
-`lock_until()` 透過 `reserve_local_slot_until()` 保留本地 thread 名額，再等待 FileLock；
-`PendingReservation` 負責失敗時的名額回收，`retain_file_guard()` 保存取得的原生 guard。
-此等待路徑仍在取得／回收簿記鎖時使用一般 mutex，限制見下方待處理事項。
-
-`unlock()` 先驗證持鎖 thread，再釋放 FileLock；成功後才清除本地名額並喚醒等待者。
-測試依所有權、guard 生命週期、取消、FileLock 組合、thread 競爭及程序故障回收分成具名案例。
+## 相依與實作入口
 
 ```text
-Param／其他框架功能（尚未接線）
-    → vinc::concurrency::InterprocessMutex
-        → vinc::osal::FileLock
-            → Windows／POSIX 原生檔案鎖
+Module System 框架服務／監督者
+    → concurrency：互斥、發布位元、受控接管
+        → OSAL SharedMemory：名稱、映射、原生資源
+        → OSAL SharedWord：原生 64-bit SC 原子操作
+        → common：Result／Error、OwnerId 與編號邊界
 ```
 
-## InterprocessMutex
+- `include/vinc/concurrency/interprocess_mutex.hpp`：鎖、Guard 與一般操作。
+- `src/interprocess_mutex.cpp`：具名的資源建立／開啟、映射、布局接合 helper，原子取得與釋放。
+- `detail/mutex_recovery.hpp`：指定中央監督接線，不由 SDK 總標頭直接引入。
+- `detail/interprocess_mutex_state.hpp`：僅供元件實作與布局測試，不是接線介面。
 
-標頭 `<vinc/concurrency/interprocess_mutex.hpp>`，連結入口為 CMake alias `vinc::concurrency`，
-實際 library target 為 `vinc_concurrency`。
-此元件移自 OSAL；舊 `<vinc/osal/interprocess_mutex.hpp>` 不再保留。
-它只呼叫 [FileLock 抽象](../../osal/FILE_LOCK.md)，附加以下規則：
+## 身分與共享布局
 
-- 一個取得操作先保留本地 thread 名額，再透過 FileLock 取得跨程序占用。
-- 同一物件的同 thread 重入回報 `Busy`；其他 thread 可等待，`try_lock` 回報 `WouldBlock`。
-- `try_lock` 遇到內部簿記競爭亦回 `WouldBlock`；同 thread 重入的 `Busy` 優先於此情況。
-  底層 `std::mutex::try_lock()` 允許假性失敗，因此 `WouldBlock` 不證明另一個 guard 必定存在。
-- 取得與釋放必須在同一 thread，guard 移動不改變持有者。
-- 取得／釋放加入共享記憶體存取所需的屏障；資料提交與復原仍由上層負責。
-- 本地名額失敗／取消／例外會釋放並喚醒等待者，不遺留假占用。
+共用數值契約位於 `<vinc/owner_id.hpp>`：
 
-| 操作 | 行為 |
+| 值 | 意義 |
 | --- | --- |
-| `create(path)`／`open(path)` | 透過 FileLock 建立／開啟資源 |
-| `try_lock()` | 成功回傳 `InterprocessMutexGuard`，不等待本地簿記鎖、本地或外部持有者 |
-| `lock_until(deadline, token)` | 同一期限與取消訊號涵蓋本地等待及 FileLock 等待 |
-| `guard.unlock()` | 同 thread 釋放；失敗保留 guard，成功後重複呼叫無作用 |
-| `mutex.close()` | 關閉公開物件；既有 guard 保留資源 |
+| 0 | 沒有持有者 |
+| 1 ～ 2^63−2 | Module 可用的 MID／OwnerId |
+| 2^63−1 | 中央專用 OwnerId，不發給 Module |
 
-不承諾 FIFO、無飢餓或硬即時期限。逾時／取消不會搶走持有者的鎖。
-不同物件即使 open 同一路徑，仍視為一般跨 handle 競爭，不偵測這種遞迴。
-同一 Mutex 的取得操作可並行；close／移動／解構須與其他操作同步。
-Guard 的移動／解構／unlock 也不可競爭。錯 thread 明確 unlock 回報 `InvalidArgument`，
-原 thread 可繼續正常釋放。RAII 解鎖失敗（含錯 thread 解構）採 `std::terminate()`，
-需要處理失敗時應明確呼叫 unlock。
+`MID` 仍為 uint64_t，Module 的正式範圍在 `mid.hpp` 宣告，中央發配器在源頭拒絕耗盡。
+Concurrency 只認識 OwnerId，不反向 include Module 標頭、不維護 MID registry。
+同一程序在同一資源世代必須使用同一 OwnerId；死亡 OwnerId 不可再發配。
 
-同 thread 判斷使用程序本地 thread-local 標記的位址及 atomic pointer；不配置 registry，
-也不把此位址放入共享記憶體或跨程序傳輸。所有權寫入仍在簿記鎖內完成，atomic 僅讓
-`try_lock` 能在鎖外辨識自己的重入，不負責發佈受保護資料。編譯期要求 atomic pointer
-為 lock-free，避免身分查詢本身隱藏另一把鎖；這不表示整個 Mutex 是 lock-free 演算法。
-Guard／待完成取得必須在取得 thread 結束前釋放，thread 異常終止不自動復原。
-OS 呼叫與排程仍可能延遲，不承諾單次 `try_lock` 的硬即時完成時間。
+控制區為原生同布局的 24 bytes：magic(u64)、layout version(u32)、bytes(u32)、SharedWord(u64)。
+control 高 63 bits 為 owner，低 1 bit 為發布選擇；空閒 word 可以是 0 或 1。
+不另有容易與 owner 更新脫節的 locked flag。布局版本目前為 1。
 
-## 錯誤契約
+建立者先完成物件初始化，再把名稱交付給其他程序。open 不初始化，會檢查 magic／版本／大小。
+禁止其他程序在初始化期間自行猜名稱 open；格式驗證不構成並行初始化協定。
+共享區每次中央啟動使用全新名稱，不以名稱重用接管舊世代。名稱由呼叫端提供；Module System 正式接線使用 Instance 發配。
 
-所有可失敗操作使用 `vinc::Result<T>`／`vinc::Error`，不再提供本層 Error payload、
-Result alias 或 `os_error` 欄位。`<vinc/concurrency/error.hpp>` 維護本層的
-`ErrorCode`／`ErrorOperation`，對應 `ErrorDomain::Concurrency`。
-使用 `error.is(ErrorCode::Timeout)`、`error.is_operation(ErrorOperation::Lock)` 判斷目前層，
-並以 `vinc::error_to_string(error)` 取得完整診斷文字。
+控制區一律 ReadWrite：現有 OSAL Windows atomic load 使用 Interlocked RMW。
+這不代表參數 payload 必須可寫；Param 資料權限由上層另行設計。
+跨程序控制欄位只經 SharedWord 存取，不使用 std::atomic 的程序內 fallback 或 wait/notify。
+同機、64-bit、相容 native layout／原子後端是前提；未承諾跨架構／跨版本持久 ABI。
 
-- 本地檢查失敗直接建立本層 Error；內部傳遞不重複包裝。
-- FileLock 失敗透過 `wrap_error()` 轉成本層分類與操作，保留 OSAL 原因、操作及原生來源／數值。
-- 轉接範圍為 FileLock 使用的 12 個分類；未知或非 FileLock 分類回報本層 `SystemError`，
-  原始紀錄仍保留於原因鏈。OSAL 不宣告 InterprocessMutex 操作，也不依賴此庫。
-- 固定容量原因鏈與截斷規則依 [common](../../common/README.md#bounded-cause-chains)，
-  包裝不配置記憶體；文字格式化及既有 STL／配置器例外政策保持不變。
-- 本地重入 `Busy`、錯 thread 明確解鎖 `InvalidArgument`、RAII 解鎖失敗 terminate、
-  解鎖失敗時保留 guard／本地占用，以及逾時／取消順序皆維持。保留本地占用不代表
-  所有原生解鎖失敗都能保證 native lock 仍被持有；此問題見待處理事項。
+## API 與生命週期
 
-既有錯誤碼編號保留，已移除的服務／網路分類編號 8、10、13、15–21 不再使用。
-原 `Operation` 改為 `ErrorOperation`：Open=1、Lock=2、Unlock=3 不變；
-Create 由舊 wrapper 的 0 改為 4，0 現為 common 的 Unspecified。舊 wrapper 不是可沿用的
-序列化格式；這次沒有新增錯誤傳輸協定。
+| 操作 | 契約 |
+| --- | --- |
+| `create(name, owner)` | 排他建立共享區，初始發布位元 0；name 遵守 OSAL SharedMemory 規則 |
+| `open(name, owner)` | 開啟已初始化區域，驗證 owner 與布局，不建立不存在資源 |
+| `try_lock()` | 一次本地保留及共享 CAS 嘗試；競爭回 WouldBlock，不循環忙等 |
+| `lock_until(deadline, stop)` | 反覆嘗試與可取消的本地休眠，成功回傳 Guard |
+| `owner()` | 原子觀察持有者，僅供診斷，不證明存活或允許回收 |
+| `guard.publication()` | 持鎖時取得不透明的選擇位元 |
+| `guard.unlock()` | 同一 CAS 清除 owner 並保留選擇位元；成功後重複呼叫無作用 |
+| `guard.publish_and_unlock()` | 同一 CAS 清除 owner 並翻轉選擇位元；不是兩次獨立 store |
+| `guard.recovered()` | 此 Guard 是否由中央死亡接管入口取得 |
+| `mutex.close()` | 放棄此公開 handle；既有 Guard／等待保留映射，不解除其占用 |
 
-`vinc_concurrency_errors` 是只依賴 `vinc::common` 的 metadata target，將 C++ 靜態表註冊至
-建置時 catalog；不反向依賴 Mutex runtime，也不新增執行期註冊。
-`vinc::concurrency` 透過 OSAL 傳遞 `vinc::errors` 的連結需求。
-`detail/error.hpp` 的 FileLock 轉接 helper 只供本元件實作與測試使用；
-`detail/error_catalog.hpp` 只供 catalog 整合與測試使用。
-`detail/interprocess_mutex_state.hpp` 僅供本元件實作與受控測試使用，其他元件不得依賴。
-測試 friend 的定義留在 `tests/`，只用於暫停簿記鎖；沒有正式 runtime hook。
+Guard 只能在取得它的 thread 釋放。移動不改變 thread 所有者；同一物件的移動／析構不可競爭。
+同一 mutex handle 的同 thread 重入回 Busy，其他 thread 競爭回 WouldBlock。
+不同 handle 不偵測 thread 重入；仍會競爭同一共享 control，不會建立兩個持有者。
 
-## 資源與故障邊界
+本地 thread-affinity 只用程序內 atomic TLS token，不放入共享區，也沒有共用簿記 mutex。
+一般操作不掃描 Module、不查 PID、不自行搶走活著的持有者。個別 thread 異常退出而程序
+仍存活時，不承諾自動回收；監督回收依據必須是整個程序確定退出。
 
-路徑、原生占用及程序退出清理由 FileLock 管理，限制見其文件。
-擁有者仍須先確認全部參與者與 guard 已關閉，才移除鎖檔；不自動刪除或重建。
+Guard 析構／覆蓋式 move assignment 只做普通解鎖，不自動發布候選內容。
+映射由本地共享所有權保持，close/move 必須與對同一公開 mutex 物件的呼叫同步。
+close 不表示其他程序退出，也不自動移除 POSIX 名稱；指定建立者須在安全時機 unlink。
+create 失敗／例外離開時，對本次新建且未交付的名稱做 best-effort unlink；不移除 open 的資源。
+unlink 本身失敗可能留下名稱，不能宣稱所有清理都已成功。
 
-程序退出可解除占用，不表示寫到一半的資料已修復。程序仍存活但 thread 卡住，
-不會被強制解鎖；個別 thread 非正常終止不在自動復原契約內。
-上層應使用版本／A、B slot 等完整提交協定，且只在鎖內做短暫框架工作。
-callback、Socket 等待、存檔與其他鎖等待應在鎖外。
-本次重構未實作或接入 Param／Context，也未變更 Message Bus 同步。
+## 等待、取消與成本
+
+`config::concurrency_retry_interval` 預設 5ms，僅為重試間隔；沒有持鎖時間上限或強制清鎖。
+每個等待呼叫使用自己的本地 condition_variable_any／mutex 接收 stop_token，
+不持有共享所有權或共用簿記鎖休眠。停止訊號可以喚醒本地休眠。
+等待工具的建立可能配置／拋出標準庫例外；不改變全專案的例外政策。
+正常取得成功後到釋放的核心路徑不配置、不呼叫使用者 callback。
+
+檢查順序為 Closed、Cancelled、Timeout，再嘗試取得；已過期不嘗試。
+檢查後同時發生取消／到期時，成功 CAS 仍可交付 Guard，不回報失敗卻藏住占用。
+本版釋放不跨程序喚醒等待者，其他人最多等到下一次排程重試。
+OS 排程與標準庫等待不是硬即時；不承諾 FIFO、公平性或無飢餓。
+整體是 mutex，不能因 CAS 是原子操作而稱為 lock-free 演算法。
+
+## 發布與資料責任
+
+Concurrency 只維護一個選擇位元，不擁有 A/B payload、版本、timestamp 或 Param schema。
+上層把它解釋成 A/B 時，所有讀者必須持同一把鎖，複製完才釋放；callback 在鎖外執行。
+
+1. 取得鎖時，選擇位元仍指向上次完整版本。
+2. 只修改非作用中的候選 slot，不破壞有效 slot。
+3. 普通解鎖或析構保留原位元，候選更新作廢。
+4. 明確 publish_and_unlock 的 SC CAS 同時發布完整候選與解除占用。
+5. 在 CAS 前死亡：中央接管時保留舊位元；CAS 後死亡：新位元與新資料已發布。
+
+新舊 payload 的寫入順序由 OSAL SC 原子操作同步。
+這不是「一般原地修改可以自動回滾」；若使用者元件直接修改有效資料，需自己提供恢復協定。
+再次重用候選 slot 前，上層必須完整建立候選內容，不能把前一次半成品當成有效起點。
+版本號是上層完整快照的欄位，選擇位元本身不是單調版本或更新通知。
+
+## 受控死亡接管
+
+`detail::MutexRecovery::acquire_after_exit(mutex, dead_owner)` 僅供中央監督整合：
+
+- 呼叫端必須已由 OSAL 確认該程序退出；timeout、heartbeat 失聯、送出 kill 都不足以證明。
+- mutex 綁定須為 central_owner；不能以此入口回收中央，也不能回收 no_owner。
+- 核對目前 owner 後，以 CAS 將 dead_owner 改成 central_owner，保留發布位元。
+- 成功回傳 recovered Guard，讓中央在排他範圍丟棄候選或執行上層必要清理。
+- 沒有相符占用或競爭回 WouldBlock；不任意重試並搶其他 owner。
+- 保留正常 thread-affinity 規則，同 handle 重入回 Busy。
+- 接管不是資料已修復的證明，不能直接讓一般 Module 偽裝中央呼叫。
+
+不重用死亡 MID 是避免延遲回收誤認新持有者的前提。普通取得遇到空閒位元繞回時，
+CAS 成功仍只取得當下空閒狀態；資料必須在取得後依當下選擇位元讀取，不靠舊觀察。
+中央死亡後，整個資源世代作廢，舊 Module 應由獨立監督退出；新中央不接管舊鎖。
+ModuleHost 已將 watchdog 故障／停止接入取消訊號；本工具本身不自行判斷中央存活。
+
+## 錯誤與違約
+
+預期失敗使用 common Result／Error，保留舊錯誤碼，新 InvalidLayout=23。
+操作碼新增 InspectOwner=5、Recover=6、Publish=7。共享記憶體失敗包成本層 Error，
+保留 OSAL 原因鏈及 native 診斷。錯誤 catalog 仍是 C++ 靜態表，沒有 runtime registry。
+
+明確錯 thread unlock/publish 回 InvalidArgument 並保留 Guard，原 thread 仍可釋放。
+錯 thread 析構屬 programmer error，走 contract_violation。
+已取得 Guard 的 shared owner 若被非法更動，釋放 CAS 失敗屬嚴重同步契約破壞，
+走 contract_violation，不能假裝釋放成功並繼續讀寫。這不是一般 native unlock 失敗。
+合法釋放不使用 FileLock，因此沒有原本「OS 解鎖錯誤後 RAII 再次 terminate」的路徑。
+OS mapping 被外界截短／破壞等記憶體故障，仍不保證能轉成 Result。
 
 ## 驗證
 
-`concurrency.errors` 驗證 12 個 FileLock 分類的轉接、既有錯誤編號、具 domain 的比對、
-未知／非 FileLock 分類的 fallback、既有原因鏈與原生來源保留，以及最終 catalog 的文字查詢。
-原生 PermissionDenied／ResourceExhausted 等難以穩定觸發的分類使用合成 Error；
-未對實際 OS unlock 失敗進行故障注入，也未新增 RAII terminate 的死亡測試。
+本輪新增／重寫：
 
-`concurrency.interprocess_mutex` 驗證本地 thread 互斥、非遞迴、錯 thread 釋放、guard
-生命週期、本地與外部等待取消、FileLock 與 Mutex 直接交互競爭，以及多程序共享快照一致性。
-持鎖程序 `_Exit`／OS 終止測試保留，確認上層組合未破壞回收行為。
-受控簿記停頓案例確認 `try_lock` 在簿記鎖釋放前回 `WouldBlock`，以及分別經
-`try_lock`／`lock_until` 取得的 owner 仍優先收到 `Busy`。停頓有測試專用的有界安全釋放，
-斷言依回傳與釋放的先後判斷，不以短時間 sleep 猜測競爭窗口。另覆蓋原生 try 失敗後
-再次取得、所有權換 thread，以及 try／wait 混合競爭下的互斥。
-`osal.file_lock` 另外驗證原生 handle 所有權，特別確認 FileLock guard 可跨 thread 交付。
-Linux／macOS 尚待原生驗證，未做效能量測。
+- concurrency.errors：共享資源錯誤轉接、原因鏈、穩定編號與靜態 catalog。
+- concurrency.interprocess_mutex：create/open、owner 邊界、布局版本、Guard lifetime/move、
+  同 thread 重入／錯 thread 明確釋放、取消／逾時、多 thread／多程序 A/B 快照。
+- 故障子程序：半筆候選、完整未提交候選、提交後立即退出、OS 終止、錯 thread 析構。
+  Pipe handshake 定位持鎖階段；父程序先 wait 確认退出，再驗證未回收前仍被占用及受控接管。
+- 延遲重複接管不得清掉新的 live guard，新世代資源可在舊世代仍存在時獨立操作。
+- module.mid：實際 Manager 共用的 allocator helper，並行發配最後合法 MID、保留值及耗盡不回繞。
 
-2026-10-02：Windows x64／MSVC Debug／Release 建置成功，各 25 套 CTest 全通過，
-包含分開的 FileLock 與跨程序互斥鎖測試。
-
-2026-10-03：搬至 `components/concurrency` 並更新名稱後，Windows x64／MSVC
-Debug／Release 建置成功，兩種組態的 `concurrency.interprocess_mutex` 與
-`osal.file_lock` 均通過；本輪未重跑其餘測試，Linux／macOS 未驗證。
-
-同日後續可讀性整理：Windows x64／MSVC Debug／Release 的 concurrency 函式庫與
-測試 target 建置成功，兩種組態的 `concurrency.interprocess_mutex` 均通過。
-本輪未重跑其他元件測試；原有測試情境、逾時與負載數值保留。
-
-2026-10-05 錯誤遷移：Windows x64／MSVC 19.51.36257 的 Debug／Release 完整建置成功，
-包含 `concurrency/error.hpp` 與 Mutex 公開標頭的獨立 include 編譯。
-兩種組態各 **7/7** 相關 CTest 通過：`common.error`、`common.error_chain`、
-`common.error_catalog`、`concurrency.errors`、`concurrency.interprocess_mutex`、
-`osal.file_lock`、`sdk.consumer`。本輪未重跑全專案測試，也未驗證 Linux／macOS。
-本輪前後的 Mutex 執行流程比對確認，除 Result 型別、操作 enum 及錯誤轉接呼叫外，
-取得、等待、回滾與解鎖主體維持原樣；未修改 OSAL 實作。
-
-2026-10-05 簿記競爭修正：Windows x64／MSVC 19.51.36257 Debug／Release 相關 target
-重新建置成功，各 **3/3** CTest 通過：`concurrency.errors`、`concurrency.interprocess_mutex`、
-`osal.file_lock`。本輪未執行全專案測試，Linux／macOS 未建置或執行。
-原生 unlock 呼叫位置、失敗保留狀態及等待／取消政策未變更。
+2026-10-08 Windows x64／MSVC：Debug、Release 相關 target 建置成功，各 **6/6** 通過：
+`concurrency.errors`、`concurrency.interprocess_mutex`、`module.mid`、`module.process`、
+`osal.shared_memory`、`osal.file_lock`。Debug 16.19 秒，Release 15.10 秒。
+Release SDK 公開標頭獨立編譯成功，`sdk.consumer` **1/1** 通過。
+以上為第一輪驗證；第二輪 Windows Debug／Release 全專案 61 套均已取得通過結果，
+包含外部 SDK consumer，詳見 [Module System 驗證](../../module_system/INSTANCE.md)。
+Linux／macOS 新鎖仍須各自原生驗證；
+之前 Linux 框架建置／Message Bus 成功不代表這份新鎖已驗證。
 
 ## 待處理事項
 
-### 2026-10-05 重審：內部等待與故障驗證
-
-- **解鎖失敗後的原生持鎖保證待釐清（阻擋下述解鎖重構）：**
-  目前 FileLock 失敗分支保留 guard／本地 occupied，但未查證原生鎖仍被持有。
-  前次提案的「失敗保留兩層所有權」不能由這些本地狀態推導成立；原生 unlock 失敗
-  不應一概視為可安全繼續讀寫受保護資料。Windows UnlockFileEx 與 Linux／macOS flock
-  文件未提供涵蓋全部失敗的持鎖不變保證；此為契約證據缺口，尚未重現失敗後已解鎖的情境。
-  建議區分尚未呼叫 OS 的本地拒絕，以及原生失敗後無法確認的鎖狀態，再決定故障停用、
-  清理與重試政策；這些仍是提案，尚未修改原有公開契約或實作。下述測試不得以注入前置失敗
-  作為所有原生失敗均保留持鎖的證明。下層追蹤見 [OSAL 待辦](../../osal/README.md#待處理事項)。
-  try_lock 的內部簿記競爭回報 WouldBlock 已另行完成，見下項與驗證紀錄；
-  原生解鎖移出鎖範圍及失敗狀態政策暫緩，已列入根目錄 [TODO](../../../../TODO.md)。
-- **已修正：try_lock 的簿記等待（2026-10-05）。**
-  原本入口、rollback 與 retain 會阻塞式取得 `local_mutex`。目前改為一次 try 取得，
-  失敗不保留名額，成功在同一鎖範圍交付 guard；同 thread `Busy` 優先。
-  已補受控簿記停頓及原生失敗後再取得測試，結果見上方驗證。
-- **仍待處理：lock_until／unlock 的內部簿記等待。**
-  `reserve_local_slot_until()` 仍先取得一般 mutex 才檢查 deadline／stop token；
-  取得成功後保存 guard、失敗回收名額也需此鎖。`InterprocessMutexGuard::unlock()`
-  仍在持有 `local_mutex` 時呼叫 FileLock 原生解鎖，因此已取消的等待者也可能先等待
-  簿記鎖。這不是已確認的互斥失效或死鎖，但內部 mutex 等待不能由 stop token 喚醒。
-  **暫緩提案：** 評估將原生解鎖移出 `local_mutex`，期間保持 occupied，成功後才釋放名額；
-  須先釐清上項原生解鎖失敗契約，再決定等待、回滾與故障狀態，這輪不實作。
-- **已確認測試缺口：原生解鎖失敗與 RAII 終止未驗證。**
-  目前 `tests/error_tests.cpp` 的合成錯誤只驗證轉接，不會進入 Mutex 的失敗持鎖流程。
-  建議補受控 FileLock 解鎖失敗，確認 guard、本地名額、其他等待者與重試成功後喚醒行為；
-  以獨立子程序驗證錯 thread 析構及 RAII 解鎖失敗確實終止。測試注入方式尚待設計，
-  不新增正式 runtime hook，也不改變既有 terminate 或 STL 例外政策。
-- **已確認診斷缺口，根因仍待驗證：** `tests/interprocess_mutex_tests.cpp` 的
-  send_token／receive_token 只提供泛用文字，缺少案例／握手階段、子程序身分與 completion
-  status／error，無法充分定位下方既有間歇性逾時。建議先補診斷及有界失敗清理，
-  再受控重現；不以放寬 timeout 或單次通過作為修復。
-
-初次重審時尚未修改程式或測試，以當時既有 Windows 建置產物執行
-`concurrency.errors`、`concurrency.interprocess_mutex`、`osal.file_lock`，Debug／Release
-各 **3/3** 通過；未重新建置、未重現間歇性逾時，Linux／macOS 未驗證。
-後續只實作已授權的 try_lock 修正，建置及測試結果見上方新紀錄；其餘待辦保留。
-OSAL fd 並行建立／spawn 的問題依使用者決策繼續暫緩，見 [OSAL 待辦](../../osal/README.md#待處理事項)。
-
-### 測試工具的間歇性逾時
-
-2026-10-03 元件目錄整理的首次完整 Debug CTest 中，此測試在另一個 Release 建置
-同時執行時失敗，輸出 `OSAL code=5`（Timeout）及 `receive token`。
-停止並行建置後，單獨重跑通過（0.30 秒），後續 Debug／Release 完整測試亦各 26／26 通過。
-本次沒有改動鎖與 Pipe 的實作邏輯，
-也沒有放寬測試期限；目前不足以將原因歸於系統負載，仍是待驗證的間歇性逾時。
-若再次出現，應先補充 fixture 階段與子程序診斷，定位是哪次 Pipe handshake／等待失敗。
-
-### 已修正：測試的 UTF-8 路徑轉換（2026-10-05）
-
-跨程序鎖測試改用 [OSAL 路徑 helper](../../osal/README.md#utf-8-與原生路徑)，
-移除 char-to-char8_t 轉型及本地重複轉換。非法路徑經 Result 回到既有測試斷言邊界。
-Windows Debug／Release 含本套件的相關測試各 20/20 通過。
-Linux／macOS 尚未驗證。上方間歇性逾時仍為獨立待辦。
+- **第三輪尚未實作：** Param A/B 儲存、完整快照驗證、callback、版本補查與 TOML；
+  本輪只有 A/B 測試 payload，不是正式 Param。
+- **平台驗證：** Linux／macOS 執行本輪互斥與故障套件，包含不同映射位址。
+  同一工具鏈／布局的子程序測試不構成任意 ABI 相容保證。
+- **OSAL 獨立待辦：** FileLock 原生解鎖失敗與 POSIX fd 建立/spawn 競爭仍由 OSAL 追蹤。
+  新 Concurrency 已無 FileLock／共享本地簿記鎖，不再套用原先的解鎖移出簿記鎖提案。
+- **清理限制：** 失敗初始化的 POSIX 名稱僅 best-effort 移除；Module System 已提供建立前記錄／下次啟動清理；獨立使用此工具的呼叫端仍須自行管理殘留。
+  不得為了清理而重用名稱，或刪除其他世代仍在使用的資源。
+- **歷史測試疑慮尚未定位：** 2026-10-03 舊 FileLock 後端測試曾在並行 Release 建置時
+  發生 Pipe handshake Timeout，單獨重跑通過；不足以歸因於負載。
+  本輪已重寫 fixture 並提供有界子程序清理，但未重現或定位舊逾時原因，不能宣稱修復。
+  若再出現，應補充案例、握手階段及 completion／子程序診斷，不能只放寬 timeout。

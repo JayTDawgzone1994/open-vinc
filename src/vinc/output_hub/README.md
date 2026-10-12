@@ -230,3 +230,13 @@ Linux／macOS 本輪未建置或執行。
 原因鏈工作另於同日完成 Windows Debug／Release 全量建置，兩種組態的
 `output_hub.integration` 均通過，新增檢查確認 OSAL 原因、原生值及兩個 catalog
 的文字查詢均保留；完整測試及物件大小結果見 Common。
+
+
+## Log 保存所需的來源資訊（2026-10-08）
+
+Source 增加 PID，在 spawn 成功、開始發布前填入；已發布來源仍不可變。
+Event 增加 wall_received，保留 monotonic received。Log 使用獨立 Subscription。
+Batch 增加 sources_skipped 與 unattributed：每個 queue event slot 預先配置一格来源損失記錄，
+producer loss path 不配置，超過來源格數仍保留 aggregate 與無法歸屬計數。
+skipped 仍為總數，不可再把 sources_skipped 加上去。原始 bytes 與丟舊資料政策不變。
+完整使用方式見 [Log](../log/README.md)。

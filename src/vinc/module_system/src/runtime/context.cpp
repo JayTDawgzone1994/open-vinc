@@ -3,6 +3,15 @@
 #include <algorithm>
 
 namespace vinc {
+Result<std::unique_ptr<detail::ContextLock>> detail::ContextLockAccess::lock(
+    Context& context, std::uint64_t id, Deadline deadline) {
+    if (!context.runtime_ || !context.living()) {
+        return std::unexpected(Error{module_system::ErrorCode::ResourcesUnavailable,
+                                     module_system::ErrorOperation::AccessLock});
+    }
+    return context.runtime_->lock(id, deadline);
+}
+
 namespace {
 using module_system::ErrorCode;
 using module_system::ErrorOperation;
@@ -92,6 +101,21 @@ Result<PumpStats> Context::pump_batch() {
 
         item.boundary = std::move(*captured);
     }
+
+    auto parameters = param.pump();
+    if (!parameters) {
+        if (!living()) {
+            result.stopped = true;
+            return result;
+        }
+        if (parameters.error().is(param::ErrorCode::CallbackFailed)) {
+            auto error = wrap_error(ErrorCode::HookException, ErrorOperation::ParamCallback, parameters.error());
+            runtime_->fail(error);
+            return std::unexpected(error);
+        }
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::Pump, parameters.error()));
+    }
+    result.callbacks += *parameters;
 
     auto commands = runtime_->commands();
     if (!commands) {

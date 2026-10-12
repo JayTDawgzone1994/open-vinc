@@ -5,6 +5,7 @@
 | 套件 | 固定版本 | 來源管理 | 目前狀態 |
 | --- | --- | --- | --- |
 | [Tcl](tcl/README.md) | 9.1.0 | 官方 GitHub 鏡像 submodule，固定 commit | 已接入 CMake 與 Shell；Windows 驗證，Linux／macOS 待驗證 |
+| [toml++](tomlplusplus/README.md) | 3.4.0 | 上游 submodule，固定 commit | 中央 Param 的 TOML 解析與輸出，Plugin 不相依 |
 
 ## 維護原則
 
@@ -31,3 +32,17 @@ git submodule status --recursive
 若子模組有本地變更，先檢查並保存，不使用 `--force` 覆寫。
 
 submodule 是來源管理方式；套件的建置、連結及執行時資源部署須各自完成整合。
+
+
+## Vinc Log 相依
+
+- fmt/upstream：12.2.0，1be298e1bd68957e4cd352e1f676f00e07dcfb57，MIT；SDK 格式化相依。
+- spdlog/upstream：1.17.0，79524ddd08a4ec981b7fea76afd08ee05f83755d，MIT；中央保存端私有相依。
+
+上游未修改。區域 wrapper 固定 static、不 FORCE 父層 cache；spdlog 使用同一份 external fmt。
+完整授權保留於 upstream/LICENSE*，散布時須攜帶。
+
+## SQLite Bag 相依
+
+[SQLite](sqlite/README.md) 3.54.0 使用官方固定 amalgamation，原樣保存並核對雜湊及 SOURCE_ID。
+它是 Bag 的私有 static 相依；一般建置不下載，SDK 不暴露 SQLite 標頭。

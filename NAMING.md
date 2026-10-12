@@ -42,6 +42,10 @@ PID 與 MID 屬於不同的識別空間，不能互相替代。MID 沿用目前�
 每次啟動或重新啟動都取得新 ID，在同一次中央框架程序生命週期內不重複；
 不承諾跨中央框架重啟或跨機器唯一。Module 名稱另行維護，同時登記的完整名稱不得重複。
 
+MID 型別保持 uint64_t，有效範圍由 `mid.hpp` 定義為 1～2^63−2；0 無效，
+2^63−1 保留給中央的共享鎖 OwnerId，不發給 Module。耗盡回報錯誤，不重用或回繞。
+共用數值邊界置於 common 的 `owner_id.hpp`，Concurrency 不依賴 Module System。
+
 Module 的識別使用 `get_mid()`、`ModuleSnapshot.mid` 與 `mid.hpp`。
 
 ## Message Bus 命名
@@ -57,6 +61,30 @@ RingBuffer 包含 Publisher 的讀寫保護協定，不屬於通用容器層；�
 中央管理元件命名為 `BusManager`，
 負責 topic、Publisher／Subscriber 註冊、共享資源預算、拓樸通知與退出回收；訊息 payload 不經過它。
 它是框架接線介面，位於 `vinc::message_bus::detail`。
+
+## Topic 與 Param 名稱分隔符
+
+以下為已確認的命名決策。Topic 分隔符已由 Client 與中央驗證，實作與測試紀錄見
+[Message Bus README](src/vinc/message_bus/README.md#topic-分隔符驗證2026-10-08)；Param 見
+[Param README](src/vinc/param/README.md)。
+
+| 名稱種類 | `.` | `/` | 範例 |
+| --- | --- | --- | --- |
+| Topic | 禁止 | 允許 | `camera/frames`、`frames` |
+| Param | 用於 Module 與參數的歸屬分隔 | 禁止 | `camera.exposure` |
+
+Topic 的 `分類/名稱` 是使用建議，不強制含有 `/`，也不要求前綴等於發布者的 Module 名稱。
+使用者可依用途命名，但須遵守上述分隔符限制；同一 Topic 仍可有多個 Module 發布。
+Topic 的分段不建立子 Module 或子 Context，也不由 Context 自動加上 Module 前綴。
+
+Param 的完整名稱使用 `module.param`；登記自己的參數時可使用參數簡稱，由 Context
+依自己的 Module 身分補上歸屬。完整名稱恰有一個點，各段限 ASCII 字母、數字、`_`、`-`；
+完整名稱含 Module 與點上限 256 bytes。Module 名稱同樣不含點或斜線，`vinc` 保留給中央。
+字串參數內容與檔案路徑仍支援 UTF-8；型別、權限與快取行為由 Param README 維護。
+
+收到訊息的實際發布者透過既有 `publisher_name()` 取得，保留此 API 名稱，不改為
+`get_publisher()`。發布者 metadata 由框架填入，使用者不必自行填寫，也不從 Topic
+名稱推測來源；`publisher_instance()` 是 Publisher ID，不是 Module MID。
 
 ## 訊息容器與存取名稱
 
@@ -99,13 +127,13 @@ Proxy 的有效期依元素種類、節點及借用 lease 的契約決定；詳�
 | --- | --- |
 | `FileLock` | OSAL 的專用檔案排他鎖抽象，封裝原生資源、等待與釋放。 |
 | `FileLockGuard` | 成功取得 FileLock 後的持鎖物件，負責釋放本次持有的鎖。 |
-| `InterprocessMutex` | 共用同步層的跨程序 mutex；使用 FileLock，補上本地 thread 互斥、持鎖 thread 與非遞迴規則。 |
+| `InterprocessMutex` | 共用同步層的跨程序 mutex；使用共享記憶體原子所有權與發布選擇位元，由中央確認程序退出後接管。 |
 | `InterprocessMutexGuard` | 成功取得 InterprocessMutex 後的持鎖物件，負責釋放本次持有的鎖。 |
 
 鎖物件用來取得鎖；Guard 表示一次成功的持鎖，其生命週期結束時自動釋放鎖（RAII），
 也可透過明確的解鎖操作提早釋放。這是鎖與持鎖物件的配對命名，不是將鎖類別改名為 Guard。
 
-兩者目前已分層實作；Guard 的 thread 限制與釋放契約見 [OSAL FileLock](src/vinc/osal/FILE_LOCK.md) 與
+FileLock 與 InterprocessMutex 現為不同實作，後者不再包裝前者；Guard 契約見 [OSAL FileLock](src/vinc/osal/FILE_LOCK.md) 與
 [共用同步層](src/vinc/components/concurrency/README.md)。
 
 ## API 命名與適用邊界
@@ -124,3 +152,9 @@ Publisher、Subscriber、請求、Socket session 與 OSAL 資源 ID 保留各自
 類別、函式、變數、檔案的全域拼寫規則尚未另行制定。
 
 本文件只將使用者已確認的名稱列為決策；提案應明確標示。更新流程依 AGENTS。
+
+## Vinc 名稱
+
+`VINC_NAME` 是建置時指定的本機中央名稱，用於同名排他啟動與共享資源紀錄歸屬。
+它不等於 Module 名稱、MID 或預留的 VID。其範圍與生命週期見
+[Module System INSTANCE.md](src/vinc/module_system/INSTANCE.md)。

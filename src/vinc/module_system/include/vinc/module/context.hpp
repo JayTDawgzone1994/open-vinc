@@ -1,6 +1,8 @@
 #pragma once
 #include <vinc/message_bus/detail/dispatch.hpp>
 #include <vinc/module/error.hpp>
+#include <vinc/param/params.hpp>
+#include <vinc/log/log.hpp>
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -10,6 +12,7 @@ namespace detail {
 class ModuleObject;
 class ModuleMessageBusAccess;
 class ContextRuntime;
+struct ContextLockAccess;
 }
 
 struct PumpStats {
@@ -22,6 +25,7 @@ struct PumpStats {
 // Bound once by ModuleHost after central admission. Its address is process-local;
 // authority comes from the Host's authenticated session, never from a copied MID.
 class Context {
+    friend struct detail::ContextLockAccess;
     friend class detail::ModuleObject;
     friend class detail::ModuleMessageBusAccess;
     struct Subscription {
@@ -43,11 +47,27 @@ class Context {
     Result<PumpStats> pump_batch();
 
 public:
+    param::Params param;
+    log::Logger log;
+
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
     bool living() const noexcept;
     Result<PumpStats> pumpOnce();
     Result<void> pumpLoop();
+
+    Result<message_bus::TopicPage> list_topics(std::string after = {}) {
+        auto access = client();
+        if (!access) {
+            return std::unexpected(access.error());
+        }
+        auto result = access->get().list_topics(std::move(after));
+        if (!result) {
+            return std::unexpected(wrap_error(module_system::ErrorCode::BusFailed,
+                module_system::ErrorOperation::AccessMessageBus, result.error()));
+        }
+        return result;
+    }
 
     template <message_bus::Message T>
     Result<message_bus::Publisher<T>> advertise(std::string topic, message_bus::PublisherOptions options = {}) {

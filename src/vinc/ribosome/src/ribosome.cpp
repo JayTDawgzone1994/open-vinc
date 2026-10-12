@@ -612,7 +612,7 @@ std::vector<MessageInfo> Ribosome::load() {
     }
 
     std::vector<MessageInfo> messages;
-    std::set<std::string> file_names{"all_messages"};
+    std::set<std::string> file_names{"all_messages", "message_types"};
     for (const auto& path : paths) {
         MessageInfo message;
         message.path = path;
@@ -1076,6 +1076,15 @@ std::int8_t Ribosome::make_ligand() {
         }
 
         write_file(stage.path / "all_messages.hpp", umbrella.str());
+        std::ostringstream catalog;
+        catalog << "#pragma once\n#include <vinc_messages/all_messages.hpp>\n"
+                   "namespace vinc::message {\n"
+                   "template<class Visitor> void visit_types(Visitor&& visitor) {\n";
+        for (const auto& message : messages) {
+            catalog << "    visitor.template operator()<::vinc::" << message.name << ">();\n";
+        }
+        catalog << "}\n}\n";
+        write_file(stage.path / "message_types.hpp", catalog.str());
         publish_staging(stage, paths.output);
 
         std::cout << "Generated " << messages.size() << " message classes at " << path_text(paths.output) << '\n';

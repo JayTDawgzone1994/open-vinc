@@ -22,7 +22,16 @@ enum class State {
     Closed
 };
 
+enum class ReceiveOverflow { CloseSession, DropNewest };
+struct QueueStats {
+    std::uint64_t dropped_frames = 0;
+    std::uint64_t dropped_bytes = 0;
+};
 struct Options {
+    // Local queue policies, not handshake fields. Defaults preserve reliable control behavior.
+    ReceiveOverflow receive_overflow = ReceiveOverflow::CloseSession;
+    std::size_t reserved_send_frames = 0;
+    std::size_t reserved_send_bytes = 0;
     // Fixed for this session; peers must explicitly agree during Hello.
     // Disabling expiry retains heartbeat validation, bounded queues and transport failures.
     bool heartbeat_timeout_enabled = true;
@@ -50,7 +59,8 @@ public:
     Result<void> wait_open(vinc::Deadline deadline);
     // Accepted into a bounded queue, not remotely acknowledged. Closed/Send keeps
     // a stored session fault as its cause; explicit close adds no redundant cause.
-    Result<void> send(Frame frame);
+    Result<void> send(Frame frame, bool use_reserved_capacity = false);
+    QueueStats queue_stats() const;
     // Drain already received frames before reporting a closed session.
     // A successful empty optional means there is no queued frame yet.
     Result<std::optional<Frame>> try_receive();

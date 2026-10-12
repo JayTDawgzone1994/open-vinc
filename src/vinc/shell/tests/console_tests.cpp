@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 #include <vinc/osal/path.hpp>
 // Windows-only native console tests in an isolated hidden console.
 // Exercise real key/control events and headless Tcl deployment without changing the user's terminal.
@@ -64,7 +65,7 @@ void check(bool value, const char* message) {
 void output_redraw() {
     // Use the real console for keyboard state and an ostream to inspect the
     // exact redraw sequence without scraping console pixels.
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -156,7 +157,7 @@ void broadcast_shutdown(Terminal& terminal) {
     const auto length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
     check(length > 0 && length < executable.size(), "helper executable directory");
     executable.resize(length);
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }

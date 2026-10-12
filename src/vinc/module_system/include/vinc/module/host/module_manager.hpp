@@ -19,6 +19,9 @@
 #include <vector>
 
 namespace vinc {
+namespace detail {
+struct ManagerAccess;
+}
 using CommandFunction = std::function<Result<int32_t>(std::vector<std::string>&)>;
 using AutoCompleteFunction = std::function<Result<std::vector<std::string>>(std::vector<std::string>&)>;
 
@@ -159,6 +162,7 @@ public:
     bool has_micro_program(const std::string& name) const;
 
 private:
+    friend struct detail::ManagerAccess;
     struct Impl;
     explicit ModuleManager(std::unique_ptr<Impl>) noexcept;
     std::unique_ptr<Impl> impl_;

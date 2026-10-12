@@ -1,4 +1,5 @@
 #include <vinc/osal/path.hpp>
+#include <vinc/module/detail/manager_access.hpp>
 // Central executable entry point: parse -S, locate Tcl resources, reserve command names,
 // register compiled module types, then enter the Shell/deployment loop.
 
@@ -110,6 +111,19 @@ vinc::Result<void> run_services(const char* executable, StartupOptions& options)
         return std::unexpected(owner.error());
     }
     auto& manager = **owner;
+    auto directory = vinc::shell::executable_directory();
+    if (!directory) {
+        return std::unexpected(directory.error());
+    }
+    auto logging = vinc::detail::ManagerAccess::configure_log(manager, *directory / "vinc_data");
+    if (!logging) {
+        std::cerr << "Log file: " << vinc::error_to_string(logging.error()) << '\n';
+    }
+    auto parameters = vinc::detail::ManagerAccess::configure_params(manager, *directory / "vinc_data");
+    if (!parameters) {
+        // Persistence failure leaves the live service available with registered defaults.
+        std::cerr << "Parameter file: " << vinc::error_to_string(parameters.error()) << '\n';
+    }
     // Shell must be destroyed before its manager. Reserve Shell/Tcl command names
     // before registering module factories, so collisions fail at registration.
     auto shell_owner = vinc::Shell::create(manager, std::cout);
