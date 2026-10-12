@@ -10,3 +10,6 @@
 [submodule "library/spdlog/upstream"]
 	path = library/spdlog/upstream
 	url = https://github.com/gabime/spdlog.git
+[submodule "library/pybind11/upstream"]
+	path = library/pybind11/upstream
+	url = https://github.com/pybind/pybind11.git

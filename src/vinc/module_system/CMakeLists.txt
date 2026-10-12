@@ -20,11 +20,11 @@ add_library(vinc::module ALIAS vinc_module)
 target_include_directories(vinc_module PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(vinc_module PUBLIC vinc::message_bus_client vinc::param vinc::log)
 
-add_library(vinc_module_runtime STATIC src/runtime/module_runtime.cpp src/runtime/plugin_loader.cpp src/runtime/module_locks.cpp src/runtime/module_params.cpp)
+add_library(vinc_module_runtime STATIC src/runtime/module_runtime.cpp src/runtime/native_source.cpp src/runtime/plugin_loader.cpp src/runtime/module_locks.cpp src/runtime/module_params.cpp)
 add_library(vinc::module_runtime ALIAS vinc_module_runtime)
 target_link_libraries(vinc_module_runtime PUBLIC vinc::module vinc::message_bus vinc::control vinc_module_contract vinc::concurrency vinc::param_host vinc::log_host)
 
-add_library(vinc_module_manager STATIC src/host/module_manager.cpp src/host/instance.cpp src/host/lock_registry.cpp)
+add_library(vinc_module_manager STATIC src/host/module_manager.cpp src/host/python_modules.cpp src/host/instance.cpp src/host/lock_registry.cpp)
 add_library(vinc::module_manager ALIAS vinc_module_manager)
 target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -66,3 +66,8 @@ target_include_directories(vinc_module_system_errors INTERFACE "${CMAKE_CURRENT_
 target_link_libraries(vinc_module_system_errors INTERFACE vinc::common)
 vinc_register_error_catalog(TARGET vinc_module_system_errors
     HEADER vinc/module/detail/error_catalog.hpp SYMBOL vinc::module_system::detail::error_catalog)
+
+option(VINC_BUILD_PYTHON "Build the optional Python Module SDK" OFF)
+if(VINC_BUILD_PYTHON)
+    add_subdirectory(python)
+endif()

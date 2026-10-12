@@ -66,3 +66,30 @@ if(MSVC)
 else()
     target_compile_options(shell PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+if(VINC_BUILD_PYTHON)
+    vinc_deploy_python(shell)
+    if(VINC_BUILD_EXAMPLES)
+        # Explicit deployment avoids overwriting user-edited scripts on every build.
+        add_custom_target(user_examples_python
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/python"
+                "$<TARGET_FILE_DIR:shell>/data/module"
+            DEPENDS shell VERBATIM)
+        if(BUILD_TESTING)
+            get_property(python_example_executable GLOBAL PROPERTY VINC_PYTHON_TEST_EXECUTABLE)
+            add_test(NAME examples.user_module COMMAND "${python_example_executable}"
+                "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/tests/smoke.py"
+                "$<TARGET_FILE:shell>" "${VINC_REPOSITORY_ROOT}/examples/userExampleModule")
+            set_tests_properties(examples.user_module PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+        endif()
+    endif()
+    if(BUILD_TESTING)
+        get_property(python_test_executable GLOBAL PROPERTY VINC_PYTHON_TEST_EXECUTABLE)
+        add_test(NAME module.python_shell COMMAND "${python_test_executable}"
+            "${VINC_REPOSITORY_ROOT}/src/vinc/module_system/python/tests/shell_test.py"
+            "$<TARGET_FILE:shell>"
+            "${VINC_REPOSITORY_ROOT}/src/vinc/module_system/python/tests/fixtures")
+        set_tests_properties(module.python_shell PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+    endif()
+endif()

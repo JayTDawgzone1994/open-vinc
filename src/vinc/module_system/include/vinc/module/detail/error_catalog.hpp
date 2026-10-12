@@ -5,6 +5,9 @@
 
 namespace vinc::module_system::detail {
 inline constexpr auto error_entries = std::array{
+    ErrorCodeEntry{ErrorCode::PythonUnavailable, "Python executable unavailable"},
+    ErrorCodeEntry{ErrorCode::PythonDiscoveryFailed, "Python module discovery failed"},
+    ErrorCodeEntry{ErrorCode::PythonException, "Unhandled Python exception"},
     ErrorCodeEntry{ErrorCode::InvalidArgument, "Invalid module argument"},
     ErrorCodeEntry{ErrorCode::InvalidPolicy, "Invalid module policy"},
     ErrorCodeEntry{ErrorCode::InvalidName, "Invalid module name"},
@@ -65,7 +68,9 @@ inline constexpr auto error_entries = std::array{
                ErrorCodeEntry{ErrorCode::ParamFailed, "Parameter service failed"},
                ErrorCodeEntry{ErrorCode::LockFailed, "Module shared lock operation failed"}};
 inline constexpr auto operation_entries =
-    std::array{ErrorOperationEntry{ErrorOperation::Create, "Create"},
+    std::array{ErrorOperationEntry{ErrorOperation::DiscoverPython, "DiscoverPython"},
+               ErrorOperationEntry{ErrorOperation::LoadPython, "LoadPython"},
+               ErrorOperationEntry{ErrorOperation::Create, "Create"},
                ErrorOperationEntry{ErrorOperation::RegisterType, "RegisterType"},
                ErrorOperationEntry{ErrorOperation::UnregisterType, "UnregisterType"},
                ErrorOperationEntry{ErrorOperation::ReserveName, "ReserveName"},

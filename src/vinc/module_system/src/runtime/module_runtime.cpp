@@ -8,7 +8,6 @@
 // while application hooks run serially, so a blocked hook cannot disable parent-loss detection.
 
 #include <vinc/time.hpp>
-#include <vinc/module/detail/plugin_loader.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc/module/detail/contract_report.hpp>
 #include <vinc/module/detail/runtime_services.hpp>
@@ -423,7 +422,7 @@ auto invoke_hook(ErrorOperation operation, Function&& function) -> decltype(func
     }
 }
 
-Result<void> report_failure(const std::shared_ptr<control::Session>& session, RuntimeInbox& inbox,
+Result<void> report_module_failure(const std::shared_ptr<control::Session>& session, RuntimeInbox& inbox,
                             const Error& error, std::uint32_t role) {
 #ifdef VINC_MODULE_TESTING
     module_system::test::checkpoint(module_system::test::Point::ReportFailure);
@@ -536,13 +535,21 @@ Result<control::Bytes> execute_request(detail::ModuleObject& module, const contr
 }
 
 Result<void> dispatch_request(detail::ModuleObject& module, const control::Frame& request,
-                              const std::shared_ptr<control::Session>& session) {
+                              const std::shared_ptr<control::Session>& session, bool fatal_errors = false) {
     auto payload = execute_request(module, request);
     control::Frame response{control::Kind::Response, request.domain, request.operation, request.request};
     response.payload = payload ? std::move(*payload) : detail::encode_failure(payload.error());
     auto sent = session->send(std::move(response));
     if (!sent) {
         return std::unexpected(wrap_error(ErrorCode::ChannelFailed, ErrorOperation::Send, sent.error()));
+    }
+    if (!payload && fatal_errors) {
+        const auto& error = payload.error();
+        const bool application_error = error.is(ErrorCode::HookFailed) || error.is(ErrorCode::HookException) ||
+                                       error.is(ErrorCode::ResourceExhausted);
+        if (application_error) {
+            return std::unexpected(error);
+        }
     }
     return {};
 }
@@ -553,9 +560,11 @@ class HostContext final : public detail::ContextRuntime {
     detail::ModuleObject& module_;
     std::shared_ptr<control::Session> session_;
     RuntimeInbox& inbox_;
+    bool fatal_command_errors_;
 public:
-    HostContext(detail::ModuleObject& module, std::shared_ptr<control::Session> session, RuntimeInbox& inbox)
-        : module_(module), session_(std::move(session)), inbox_(inbox) {
+    HostContext(detail::ModuleObject& module, std::shared_ptr<control::Session> session,
+                RuntimeInbox& inbox, bool fatal_errors = false)
+        : module_(module), session_(std::move(session)), inbox_(inbox), fatal_command_errors_(fatal_errors) {
     }
     bool living() const noexcept override {
         return !inbox_.stopping.load();
@@ -571,8 +580,11 @@ public:
             if (!living()) {
                 break;
             }
-            auto dispatched = dispatch_request(module_, request, session_);
+            auto dispatched = dispatch_request(module_, request, session_, fatal_command_errors_);
             if (!dispatched) {
+                if (fatal_command_errors_) {
+                    fail(dispatched.error());
+                }
                 return std::unexpected(dispatched.error());
             }
             ++count;
@@ -681,7 +693,7 @@ Result<void> run_started_hooks(detail::ModuleObject& module, std::vector<std::st
     // the independent watchdog still enforces the existing stop deadline.
     const auto report = [&](const Error& error, std::uint32_t role) noexcept {
         try {
-            (void)report_failure(session, inbox, error, role);
+            (void)report_module_failure(session, inbox, error, role);
         } catch (...) {
             // Keep the original failure; reporting cannot replace its cause.
         }
@@ -728,9 +740,9 @@ Result<void> run_started_hooks(detail::ModuleObject& module, std::vector<std::st
 Result<void> run_hooks(const std::vector<std::string>& args, const Bootstrap& bootstrap,
                        const std::shared_ptr<control::Session>& session,
                        const std::shared_ptr<message_bus::Client>& client, RuntimeInbox& inbox,
-                       const detail::LoadedPlugin& plugin) {
-    auto module = invoke_hook(ErrorOperation::ConstructModule, [&]() -> Result<detail::PluginModule> {
-        auto instance = plugin.create(args[detail::bootstrap::base_name]);
+                       detail::ModuleSource& source) {
+    auto module = invoke_hook(ErrorOperation::ConstructModule, [&]() -> Result<detail::RuntimeModule> {
+        auto instance = source.create(args[detail::bootstrap::base_name]);
         if (!instance) {
             return std::unexpected(instance.error());
         }
@@ -749,7 +761,7 @@ Result<void> run_hooks(const std::vector<std::string>& args, const Bootstrap& bo
     if (!registered) {
         return std::unexpected(registered.error());
     }
-    HostContext context_runtime(**module, session, inbox);
+    HostContext context_runtime(**module, session, inbox, source.fatal_command_errors());
     inbox.params->identify((*module)->get_module_name());
     detail::ModuleMessageBusAccess::attach(**module, client, context_runtime, *inbox.params, inbox.logs);
     auto result = run_started_hooks(**module, startup_args, session, inbox);
@@ -781,7 +793,7 @@ int exit_with_error(int status, const Error& error) noexcept {
 } // namespace
 
 // Framework bootstrap arguments precede application arguments; use ModuleManager to launch.
-int run_module_process(const std::vector<std::string>& args) {
+int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSource& source) {
     try {
         auto bootstrap = parse_bootstrap(args);
         if (!bootstrap) {
@@ -797,7 +809,12 @@ int run_module_process(const std::vector<std::string>& args) {
             return exit_with_error(child_exit::invalid_bootstrap, bound.error());
         }
 
-        std::optional<detail::LoadedPlugin> plugin;
+        struct SourceGuard {
+            ModuleSource& source;
+            ~SourceGuard() {
+                source.clear();
+            }
+        } source_guard{source};
         auto service = control::Service::create(central_session_limit);
         if (!service) {
             return exit_with_error(
@@ -855,18 +872,11 @@ int run_module_process(const std::vector<std::string>& args) {
                         return {};
                     }
                 }
-                auto path = osal::path_from_utf8(args[detail::bootstrap::plugin_path]);
-                if (!path) {
-                    return std::unexpected(wrap_error(ErrorCode::PluginLoadFailed,
-                                                      ErrorOperation::LoadPlugin, path.error()));
+                auto prepared = source.prepare(args, runtime_services.services());
+                if (!prepared) {
+                    return std::unexpected(prepared.error());
                 }
-                auto loaded = detail::LoadedPlugin::load(*path, args[detail::bootstrap::module_type],
-                                                         runtime_services.services());
-                if (!loaded) {
-                    return std::unexpected(loaded.error());
-                }
-                plugin.emplace(std::move(*loaded));
-                return run_hooks(args, *bootstrap, session, *client, inbox, *plugin);
+                return run_hooks(args, *bootstrap, session, *client, inbox, source);
             }();
             if (!result) {
                 // Already reported failures are not duplicated; early factory/name failures use this path.
@@ -876,14 +886,14 @@ int run_module_process(const std::vector<std::string>& args) {
                     needs_report = inbox.next_fault_request == detail::name_registration_request + 1;
                 }
                 if (needs_report) {
-                    (void)report_failure(session, inbox, result.error(), detail::primary_failure);
+                    (void)report_module_failure(session, inbox, result.error(), detail::primary_failure);
                 }
                 return child_exit::application_exception;
             }
             return 0;
         } catch (const std::system_error& error) {
             if (guard.watchdog.joinable()) {
-                (void)report_failure(session, inbox,
+                (void)report_module_failure(session, inbox,
                                      Error{ErrorCode::SupervisorFailed, ErrorOperation::Supervise,
                                            osal::native_error(error.code())},
                                      detail::primary_failure);
@@ -896,7 +906,7 @@ int run_module_process(const std::vector<std::string>& args) {
             // Reporting allocates; exhaustion cannot guarantee transport diagnostics.
             return child_exit::application_exception;
         } catch (...) {
-            (void)report_failure(session, inbox,
+            (void)report_module_failure(session, inbox,
                                  Error{ErrorCode::SupervisorFailed, ErrorOperation::Supervise},
                                  detail::primary_failure);
         }

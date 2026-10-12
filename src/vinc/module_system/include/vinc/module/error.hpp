@@ -60,7 +60,10 @@ enum class ErrorCode : std::int32_t {
     InvalidInstanceJournal = 55,
     LockFailed = 56,
     ParamFailed = 57,
-    LogFailed = 58
+    LogFailed = 58,
+    PythonUnavailable = 59,
+    PythonDiscoveryFailed = 60,
+    PythonException = 61
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,
@@ -125,7 +128,9 @@ enum class ErrorOperation : std::int32_t {
     RecoverLock = 60,
     AccessParam = 61,
     ParamCallback = 62,
-    AccessLog = 63
+    AccessLog = 63,
+    DiscoverPython = 64,
+    LoadPython = 65
 };
 }
 

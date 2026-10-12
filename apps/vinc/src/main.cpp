@@ -1,3 +1,4 @@
+#include <vinc/module/host/python_modules.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc/module/detail/manager_access.hpp>
 // Central executable entry point: parse -S, locate Tcl resources, reserve command names,
@@ -30,6 +31,7 @@ constexpr std::uint32_t minimum_connections = 1;
 constexpr const char* usage =
     "Usage: Vinc [--shell-ip IP] [--shell-port PORT] [--shell-disconnect-timeout SECONDS]\n"
     "            [--shell-send-timeout SECONDS] [--shell-max-connections 1..8] [-S file.tcl [args...]]\n"
+    "            [--python PATH]\n"
     "Defaults: 127.0.0.1:5500, 30-second disconnect/send timeouts, 8 connections.\n"
     "Raw TCP, no authentication or encryption. Port 0 selects an ephemeral port.\n";
 
@@ -37,6 +39,7 @@ struct StartupOptions {
     std::filesystem::path script;
     std::vector<std::string> script_arguments;
     vinc::shell::SocketShellOptions network;
+    std::filesystem::path python;
 };
 
 // Internal CLI control flow, not a framework error API. Help exits before service creation.
@@ -69,6 +72,19 @@ ParseAction parse_arguments(int argc, char** argv, StartupOptions& options) {
             // Everything after the script path belongs to Tcl, even tokens resembling CLI options.
             options.script_arguments.assign(argv + index + 1, argv + argc);
             break;
+        }
+
+        if (name == "--python") {
+            auto path = vinc::osal::path_from_utf8(argv[index]);
+            if (!path) {
+                return ParseAction::InvalidArguments;
+            }
+            std::error_code error;
+            options.python = std::filesystem::absolute(*path, error);
+            if (error) {
+                return ParseAction::InvalidArguments;
+            }
+            continue;
         }
 
         if (name == "--shell-ip") {
@@ -134,6 +150,18 @@ vinc::Result<void> run_services(const char* executable, StartupOptions& options)
     auto registered = vinc::register_built_modules(manager);
     if (!registered) {
         return std::unexpected(registered.error());
+    }
+
+    auto discovered = vinc::discover_python_modules(manager, *directory / "data" / "module",
+        *directory / "python" / "vinc" / "bootstrap.py", options.python);
+    if (!discovered) {
+        std::cerr << "Python discovery: " << vinc::error_to_string(discovered.error()) << '\n';
+    } else {
+        for (const auto& issue : discovered->issues) {
+            auto path = vinc::osal::path_to_utf8(issue.path);
+            std::cerr << "Python module " << (path ? *path : "<invalid path>") << ": "
+                      << vinc::error_to_string(issue.error) << '\n';
+        }
     }
 
     const auto endpoint = shell.start_socket_shell(std::move(options.network));

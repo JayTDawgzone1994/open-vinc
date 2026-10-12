@@ -13,6 +13,7 @@ class ModuleObject;
 class ModuleMessageBusAccess;
 class ContextRuntime;
 struct ContextLockAccess;
+struct ContextLanguageAccess;
 }
 
 struct PumpStats {
@@ -25,6 +26,7 @@ struct PumpStats {
 // Bound once by ModuleHost after central admission. Its address is process-local;
 // authority comes from the Host's authenticated session, never from a copied MID.
 class Context {
+    friend struct detail::ContextLanguageAccess;
     friend struct detail::ContextLockAccess;
     friend class detail::ModuleObject;
     friend class detail::ModuleMessageBusAccess;

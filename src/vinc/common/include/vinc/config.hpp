@@ -195,3 +195,8 @@ inline constexpr int bag_info_progress_interval = 1000;
 inline constexpr std::uint64_t bag_info_progress_calls = 100000;
 inline constexpr std::size_t bag_name_bytes = 256;
 }
+
+namespace vinc::config {
+// Maximum diagnostic text emitted for one unhandled Python exception.
+inline constexpr std::size_t python_traceback_bytes = 32 * 1024;
+}

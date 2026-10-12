@@ -1,3 +1,4 @@
+#include <vinc/module/detail/python_launch.hpp>
 #include <vinc/log/detail/manager.hpp>
 #include <iostream>
 #include <vinc/param/detail/manager.hpp>
@@ -564,7 +565,7 @@ struct ModuleManager::Impl {
         return true;
     }
 
-    osal::SpawnOptions make_spawn_options(const Record& record) {
+    Result<osal::SpawnOptions> make_spawn_options(const Record& record) {
         const auto& policy = record.module_type.policy;
         osal::SpawnOptions options;
         // Central coordinates shutdown; terminal Ctrl+C must not kill children first.
@@ -582,10 +583,16 @@ struct ModuleManager::Impl {
                              std::to_string(policy.stop_timeout.count()),
                              record.module_type.name,
                              record.contract_report->name(),
-                             utf8(record.module_type.library),
+                             utf8(record.module_type.python ? record.module_type.python->script : record.module_type.library),
                              record.snapshot.debug ? "1" : "0"};
         options.arguments.insert(options.arguments.end(), record.arguments.begin(), record.arguments.end());
 
+        if (record.module_type.python) {
+            auto prepared = detail::prepare_python_spawn(options, *record.module_type.python);
+            if (!prepared) {
+                return std::unexpected(prepared.error());
+            }
+        }
         return options;
     }
 
@@ -637,10 +644,14 @@ struct ModuleManager::Impl {
         record.contract_report = std::move(*report);
 
         auto options = make_spawn_options(record);
+        if (!options) {
+            record_failure(record, options.error());
+            return;
+        }
         record.startup_deadline = record.snapshot.debug
                                       ? (Deadline::max)()
                                       : Clock::now() + record.module_type.policy.startup_timeout;
-        spawn_child(record, options);
+        spawn_child(record, *options);
     }
 
     // Release the completed run and apply restart policy to the same logical Module.
@@ -1492,8 +1503,15 @@ Result<void> ModuleManager::register_module_type(ModuleType module_type) {
         module_type.name.find('\0') != std::string::npos ||
         module_type.module_base_name.size() > module_name_limit_bytes ||
         module_type.module_base_name.find('\0') != std::string::npos ||
-        !module_type.library.is_absolute()) {
+        (!module_type.python && !module_type.library.is_absolute())) {
         return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::RegisterType));
+    }
+    if (module_type.python) {
+        const auto& python = *module_type.python;
+        if (!module_type.library.empty() || !python.script.is_absolute() || !python.bootstrap.is_absolute() ||
+            (!python.executable.empty() && !python.executable.is_absolute())) {
+            return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::RegisterType));
+        }
     }
     if (module_type.module_base_name.empty()) {
         module_type.module_base_name = module_type.name;
@@ -1545,6 +1563,9 @@ Result<MID> ModuleManager::start_module(const std::string& name, std::vector<std
     record->snapshot.generation = *mid;
     record->snapshot.module_type = name;
     record->snapshot.plugin_path = entry->second.library;
+    if (entry->second.python) {
+        record->snapshot.python_script = entry->second.python->script;
+    }
     record->snapshot.debug = options.debug;
     record->arguments = std::move(args);
     impl_->records.push_back(record);

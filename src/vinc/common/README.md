@@ -351,6 +351,10 @@ explicitly authorized work and will later be managed by Param. Layout settings
 such as `error_chain_max_depth` remain compile-time only; its contract is described
 under bounded cause chains above.
 
+`python_traceback_bytes` bounds the diagnostic emitted for one escaped Python hook
+exception (32 KiB by default). Python lifecycle and error conversion contracts are
+maintained in [Python Module](../module_system/python/README.md).
+
 `module_fatal_exit_timeout` defaults to five seconds after central first observes a
 fatal state. Earlier startup or explicit-stop deadlines win. This is a termination
 request policy, not a hard OS exit guarantee; see the [ModuleSystem contract](../module_system/README.md#fatal-退出監督2026-10-06).

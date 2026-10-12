@@ -12,9 +12,12 @@ stdout／stderr 由中央 [OutputHub](../output_hub/README.md) 自啟動起擷�
 
 ### ModuleHost／Plugin 接線（2026-10-06）
 
-Module 交付為動態庫，由 `ModuleHost` 在獨立程序中載入。中央只保存庫路徑，
+C++ Module 交付為動態庫，由 `ModuleHost` 在獨立程序中載入。中央只保存庫路徑，
 不在中央程序載入 Plugin；一個 Module 實例對應一個 Host 程序。停止後結束 Host，
-不在同程序內重載。自動掃描、即時新增、中央版本相容性檢查仍未實作。
+不在同程序內重載。原生 Plugin 的自動掃描、即時新增、中央版本相容性檢查仍未實作。
+Python Module 則由系統 Python 執行，共用相同的 Runtime／中央監督；啟動掃描與語言邊界見
+[Python Module](python/README.md)。已接入生命週期、Shell hooks、pump、typed Message Bus、Param 與 Log；
+訊息／例外／借用的 Python 語意由該文件維護，沒有額外的控制服務 owner。
 
 `vinc_add_process_module()` 現在建立 MODULE library；名稱仍表示獨立程序執行的 Module。
 `REGISTER_MODULE` 匯出唯一的 `vinc_module_plugin` 查詢入口，傳回版本／大小、ModuleType、
@@ -54,7 +57,8 @@ RuntimeServices 仍僅處理 fatal，沒有加入 Bus、Param 或 Context placeh
 1. [`BaseModule`](include/vinc/module/base_module.hpp)：應用 hook、MID／名稱與 Message Bus 的可用時機。
 2. [`ModuleManager`](include/vinc/module/host/module_manager.hpp)：中央登記、啟停、命令與查詢介面。
 3. [`module_protocol.hpp`](include/vinc/module/detail/module_protocol.hpp)：中央與子程序共用的操作碼、啟動參數位置與回覆布局。
-4. [`module_runtime.cpp`](src/runtime/module_runtime.cpp)：`run_module_process` 串起啟動流程；
+4. [`module_runtime.cpp`](src/runtime/module_runtime.cpp)：`run_module_runtime` 串起共用啟動流程；
+   [`native_source.cpp`](src/runtime/native_source.cpp) 提供 `run_module_process` 與 Plugin 建立／銷毀配對；
    `parse_bootstrap`／`connect_to_central` 驗證並建立連線，`register_module_name` 完成名稱註冊，
    `Context::pumpOnce`／`HostContext::commands` 派送使用者 hook，`watch_central` 獨立接收控制訊息與監督停止期限。
 5. [`module_manager.cpp`](src/host/module_manager.cpp)：`launch` 依序重設 generation、準備 listener、

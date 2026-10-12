@@ -14,9 +14,15 @@ Tcl 腳本與 Socket Shell 都是中央啟動時自動準備的預設功能，�
 
 ## 入口與生成來源
 
+- 中央啟動時亦掃描執行檔旁 `data/module/<ModuleType>/<ModuleType>.py`，不執行腳本。
+  缺少目錄視為沒有 Python Module；個別登記問題回報後繼續啟動。
+  `--python PATH` 指定系統 Python／venv，預設依 PATH 選取；放在 `-S` 之前。
+  `VINC_BUILD_PYTHON=ON` 建置並部署 `python/vinc` 原生擴充與啟動腳本，不部署直譯器。
+  詳見 [Python Module](../../src/vinc/module_system/python/README.md)。
+
 - `parse_arguments()` 只解析 CLI，回傳啟動、顯示說明或參數錯誤的內部流程狀態。
   `-S` 路徑後的所有參數仍交給 Tcl；`--help` 在建立服務前退出。
-- `run_services()` 保留 Tcl 初始化、Manager 建立、Shell 保留命令名稱、catalog 註冊、
+- `run_services()` 依序完成 Tcl 初始化、Manager 建立、Shell 保留命令名稱、catalog 註冊、Python 掃描、
   Socket Shell 啟動及 Shell 執行的順序，逐步檢查共用 Result。
   Shell 透過 `create()` 建立並先於 Manager 銷毀；`run()` 也回傳 Result，
   服務故障須等既有完整關閉流程結束後才回到 `application()`。

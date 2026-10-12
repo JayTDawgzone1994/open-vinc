@@ -10,6 +10,13 @@
 
 ## 使用方式
 
+一般 Module 作者可先看 [userExampleModule C++／Python 對照](../../../examples/userExampleModule/README.md)，
+包含可執行的 Shell 操作與 API 閱讀索引。
+
+以下是 C++ SDK。可選的系統 Python 綁定位於 Module System，建置開關為 `VINC_BUILD_PYTHON`；
+不會讓一般 C++ 使用端或中央連入 Python。Context 的 Bus／Param／Log、訊息容器與 ABI 限制見
+[Python SDK](../module_system/python/README.md)。
+
 ```cpp
 #include <vinc/vinc.hpp>
 ```

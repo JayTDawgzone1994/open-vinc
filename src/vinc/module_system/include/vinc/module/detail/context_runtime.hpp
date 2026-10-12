@@ -14,4 +14,14 @@ public:
     virtual void fail(const Error&) = 0;
     virtual Result<std::unique_ptr<ContextLock>> lock(std::uint64_t id, Deadline deadline) = 0;
 };
+
+// Language adapters report escaped callbacks without introducing an exception
+// into the C++ callback contract. Called only while the Context is admitted.
+struct ContextLanguageAccess {
+    static void fail(Context& context, const Error& error) {
+        if (context.runtime_) {
+            context.runtime_->fail(error);
+        }
+    }
+};
 }

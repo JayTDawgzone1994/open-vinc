@@ -849,6 +849,24 @@ void emit_message_metadata(std::ostream& output, const MessageInfo& message, con
            << "    static const message::detail::Schema& schema() {\n"
            << "        return " << schema_name << "();\n"
            << "    }\n\n";
+    output << "    // Compile-time field visits support language bindings without parsing schemas at runtime.\n"
+           << "    template<class Visitor> static void ribosome_visit_fields([[maybe_unused]] Visitor&& visitor) {\n";
+    std::size_t index = 0;
+    for (const auto& field : message.variables) {
+        if (!field.constant) {
+            output << "        visitor.template field<" << member_type(field) << ">(\""
+                   << field.name << "\", " << index << ");\n";
+            ++index;
+        }
+    }
+    output << "    }\n\n";
+    output << "    template<class Visitor> static void ribosome_visit_constants([[maybe_unused]] Visitor&& visitor) {\n";
+    for (const auto& field : message.variables) {
+        if (field.constant) {
+            output << "        visitor(\"" << field.name << "\", " << field.name << ");\n";
+        }
+    }
+    output << "    }\n\n";
     for (const auto& field : message.variables) {
         if (!field.constant) {
             continue;
