@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Exercise the production Host gate and explicit per-launch supervision policy.
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/shell/detail/command_router.hpp>
@@ -142,7 +143,7 @@ public:
 #endif
 
 void exercise(const std::filesystem::path& plugin) {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     ModulePolicy policy;
     policy.heartbeat_interval = heartbeat_interval;
     policy.heartbeat_timeout = heartbeat_timeout;

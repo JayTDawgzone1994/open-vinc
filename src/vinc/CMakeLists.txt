@@ -25,9 +25,12 @@ add_subdirectory(ribosome)       # Build-time message compiler
 add_subdirectory(osal)           # Independent OS process primitives
 add_subdirectory(components)     # Reusable concurrency and message storage tools
 add_subdirectory(output_hub)         # Bounded process-output fanout and plain-text rendering
-add_subdirectory(control_channel) # Shared framed Socket sessions
+add_subdirectory(control_channel)
+add_subdirectory(log) # Shared framed Socket sessions
+add_subdirectory(param)           # Typed parameters, shared snapshots and central persistence
 include(module_system/cmake/VincModule.cmake)
 add_subdirectory(message_bus)             # Shared-memory publish/subscribe
+add_subdirectory(bag)
 add_subdirectory(module_system)         # Process-module runtime and supervisor
 
 # Build reusable Shell logic.
@@ -35,6 +38,10 @@ add_subdirectory(shell)
 
 # The SDK adds only usage requirements; components retain their own targets.
 add_subdirectory(sdk)
+if(BUILD_TESTING)
+    add_subdirectory(param/tests)
+    add_subdirectory(log/tests)
+endif()
 
 # Every provider has registered C++ metadata; freeze one catalog for this build.
 vinc_finalize_error_catalog()

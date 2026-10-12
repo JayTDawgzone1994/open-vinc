@@ -1,73 +1,76 @@
 #pragma once
 
-// Framework synchronization built exclusively on the OSAL FileLock abstraction.
-// A dedicated local lock file identifies cooperating processes' exclusive lock.
 #include <vinc/time.hpp>
+#include <vinc/owner_id.hpp>
 #include <vinc/concurrency/error.hpp>
-#include <filesystem>
 #include <memory>
 #include <stop_token>
+#include <string_view>
 
 namespace vinc::concurrency {
 namespace detail {
 struct InterprocessMutexState;
-struct InterprocessMutexTestAccess;
+struct MutexRecovery;
 }
 
 class InterprocessMutexGuard {
 public:
-    InterprocessMutexGuard() noexcept;
-    // A failed unlock (including wrong-thread destruction) terminates rather
-    // than silently discarding ownership. Use explicit unlock to handle errors.
+    InterprocessMutexGuard() noexcept = default;
     ~InterprocessMutexGuard();
     InterprocessMutexGuard(InterprocessMutexGuard&& other) noexcept;
     InterprocessMutexGuard& operator=(InterprocessMutexGuard&& other) noexcept;
     InterprocessMutexGuard(const InterprocessMutexGuard&) = delete;
     InterprocessMutexGuard& operator=(const InterprocessMutexGuard&) = delete;
     explicit operator bool() const noexcept;
-    // Idempotent after success. Must run on the acquiring thread. Native failure
-    // retains the guard/local reservation; native lock state is not guaranteed
-    // for every failure (see README). Wrong-thread use returns InvalidArgument.
-    [[nodiscard]] vinc::Result<void> unlock() noexcept;
+    // Only while held. The bit is opaque here; all payload readers must copy
+    // under this mutex. Mapping lifetime is retained by the guard.
+    bool publication() const noexcept;
+    bool recovered() const noexcept;
+    // Ordinary release/destruction preserves publication (aborts an A/B update).
+    // Must run on the acquiring thread. Repeated unlock is harmless.
+    [[nodiscard]] Result<void> unlock() noexcept;
+    // Bit flip and owner release have ONE atomic linearization point.
+    [[nodiscard]] Result<void> publish_and_unlock() noexcept;
 
 private:
     friend class InterprocessMutex;
-    explicit InterprocessMutexGuard(std::shared_ptr<detail::InterprocessMutexState> state) noexcept;
-    void release_or_terminate() noexcept;
+    friend struct detail::MutexRecovery;
+    InterprocessMutexGuard(std::shared_ptr<detail::InterprocessMutexState> state,
+                           std::uint64_t held_word, bool recovered = false) noexcept;
+    Result<void> release(bool publish) noexcept;
+    void release_or_violate() noexcept;
     std::shared_ptr<detail::InterprocessMutexState> state_;
+    std::uint64_t held_word_ = 0;
+    bool recovered_ = false;
 };
 
 class InterprocessMutex {
 public:
-    InterprocessMutex() noexcept;
-    ~InterprocessMutex();
-    InterprocessMutex(InterprocessMutex&& other) noexcept;
-    InterprocessMutex& operator=(InterprocessMutex&& other) noexcept;
+    InterprocessMutex() noexcept = default;
+    ~InterprocessMutex() = default;
+    InterprocessMutex(InterprocessMutex&&) noexcept = default;
+    InterprocessMutex& operator=(InterprocessMutex&&) noexcept = default;
     InterprocessMutex(const InterprocessMutex&) = delete;
     InterprocessMutex& operator=(const InterprocessMutex&) = delete;
     explicit operator bool() const noexcept;
 
-    // Absolute path in an existing private directory on a local filesystem.
-    // create is exclusive; open never creates. No implicit parent directories,
-    // inheritance, path replacement or unlink on destruction. Caller must not
-    // remove/replace/reuse the path until ALL participants have closed it.
-    [[nodiscard]] static vinc::Result<InterprocessMutex> create(const std::filesystem::path& path);
-    [[nodiscard]] static vinc::Result<InterprocessMutex> open(const std::filesystem::path& path);
-    // Concurrent acquisition is supported. Recursive use through this handle
-    // reports Busy, even during bookkeeping contention. try_lock does not wait
-    // for local bookkeeping or another owner: either contention returns WouldBlock.
-    // Separately opened handles also contend through the OS in the same process.
-    [[nodiscard]] vinc::Result<InterprocessMutexGuard> try_lock() const;
-    [[nodiscard]] vinc::Result<InterprocessMutexGuard> lock_until(vinc::Deadline deadline,
-                                                            std::stop_token stop = {}) const;
-    // Detach this handle; a guard or already-running wait retains the resource.
-    // close/move/destruction must not race calls on this public object.
+    // OSAL SharedMemory names. One process always uses the same supervisor-issued
+    // owner in this epoch. Names/owners are never reused while peers can exist.
+    // Publish the name only after create returns. Open never initializes memory.
+    [[nodiscard]] static Result<InterprocessMutex> create(std::string_view name, OwnerId owner);
+    [[nodiscard]] static Result<InterprocessMutex> open(std::string_view name, OwnerId owner);
+    [[nodiscard]] Result<InterprocessMutexGuard> try_lock() const;
+    [[nodiscard]] Result<InterprocessMutexGuard> lock_until(Deadline deadline,
+                                                         std::stop_token stop = {}) const;
+    // Diagnostic snapshot, not proof of liveness or authority to reclaim.
+    [[nodiscard]] Result<OwnerId> owner() const noexcept;
+    // Detaches this handle; guards/waits retain the mapping. Close/move must be
+    // synchronized with calls on this public object. Does not unlink the name.
     void close() noexcept;
 
 private:
-    // Defined only in tests; no runtime hook or public access to bookkeeping.
-    friend struct detail::InterprocessMutexTestAccess;
+    friend struct detail::MutexRecovery;
     explicit InterprocessMutex(std::shared_ptr<detail::InterprocessMutexState> state) noexcept;
     std::shared_ptr<detail::InterprocessMutexState> state_;
 };
-} // namespace vinc::concurrency
+}

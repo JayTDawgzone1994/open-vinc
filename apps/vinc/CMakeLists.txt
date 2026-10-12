@@ -2,6 +2,12 @@
 add_executable(shell src/main.cpp)
 set_target_properties(shell PROPERTIES OUTPUT_NAME Vinc)
 vinc_deploy_tcl(shell)
+add_custom_command(TARGET shell POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:shell>/licenses/tomlplusplus"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${VINC_REPOSITORY_ROOT}/library/tomlplusplus/upstream/LICENSE"
+        "$<TARGET_FILE_DIR:shell>/licenses/tomlplusplus/LICENSE"
+    VERBATIM)
 target_include_directories(shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
 target_link_libraries(shell PRIVATE vinc::shell)
 set_target_properties(shell PROPERTIES
@@ -26,6 +32,13 @@ if(BUILD_TESTING AND VINC_BUILD_EXAMPLES)
     set_tests_properties(message_bus.shell PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "value=20")
 endif()
 
+if(BUILD_TESTING)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bag-smoke.tcl"
+        "bagRecorder\nrecorder status\nexit\n")
+    add_test(NAME bag.shell COMMAND shell --shell-port 0 -S "${CMAKE_CURRENT_BINARY_DIR}/bag-smoke.tcl")
+    set_tests_properties(bag.shell PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "bag: idle")
+endif()
+
 # Generate after collecting all process modules. Generator expressions resolve
 # each Plugin library path for this build configuration.
 set(catalog_template [=[
@@ -33,6 +46,7 @@ set(catalog_template [=[
 
 // Generated from the registered process-module targets. Edit the CMake sources instead.
 #include <vinc/module/host/module_manager.hpp>
+#include <vinc/config.hpp>
 
 
 namespace vinc {
@@ -51,4 +65,31 @@ if(MSVC)
     target_compile_options(shell PRIVATE /W4 /utf-8)
 else()
     target_compile_options(shell PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(VINC_BUILD_PYTHON)
+    vinc_deploy_python(shell)
+    if(VINC_BUILD_EXAMPLES)
+        # Explicit deployment avoids overwriting user-edited scripts on every build.
+        add_custom_target(user_examples_python
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/python"
+                "$<TARGET_FILE_DIR:shell>/data/module"
+            DEPENDS shell VERBATIM)
+        if(BUILD_TESTING)
+            get_property(python_example_executable GLOBAL PROPERTY VINC_PYTHON_TEST_EXECUTABLE)
+            add_test(NAME examples.user_module COMMAND "${python_example_executable}"
+                "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/tests/smoke.py"
+                "$<TARGET_FILE:shell>" "${VINC_REPOSITORY_ROOT}/examples/userExampleModule")
+            set_tests_properties(examples.user_module PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+        endif()
+    endif()
+    if(BUILD_TESTING)
+        get_property(python_test_executable GLOBAL PROPERTY VINC_PYTHON_TEST_EXECUTABLE)
+        add_test(NAME module.python_shell COMMAND "${python_test_executable}"
+            "${VINC_REPOSITORY_ROOT}/src/vinc/module_system/python/tests/shell_test.py"
+            "$<TARGET_FILE:shell>"
+            "${VINC_REPOSITORY_ROOT}/src/vinc/module_system/python/tests/fixtures")
+        set_tests_properties(module.python_shell PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+    endif()
 endif()

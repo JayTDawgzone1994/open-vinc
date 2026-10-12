@@ -136,3 +136,9 @@ Windows x64 MSVC Debug／Release 全部 23 個 CTest 套件通過。
 IPv6、跨 Session 腳本互斥、恢復碼輪替、斷線取消歸屬、慢客戶端逾時、模組程序操作及退出尾端輸出。
 另以 Vinc 執行檔驗證預設 port、非互動 stdin EOF、CLI 設定、port 衝突先於部署、錯誤 port 與遠端退出。
 Linux／macOS 尚待實機建置與行為驗證；PuTTY GUI 尚未實測。
+
+
+## Log 顯示
+
+每條連線的 log show 預設 off，有獨立等級／Module filter 與游標。
+落後顯示 gap，不阻塞檔案保存；與 output on/off 分開。見 [Log](../log/README.md)。

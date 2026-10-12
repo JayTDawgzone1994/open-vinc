@@ -3,7 +3,7 @@
 此目錄集中供其他框架元件使用的工具與基礎設施。各工具保留自己的 CMake target，
 由使用它的元件建立及管理生命週期；分類目錄本身不啟動服務，也不提供整包連結 target。
 
-- [Concurrency](concurrency/README.md)：並行控制工具，目前提供使用 OSAL FileLock 的跨程序互斥鎖。
+- [Concurrency](concurrency/README.md)：使用 OSAL SharedMemory／SharedWord 的框架跨程序互斥鎖；中央監督與 Host 接線由 [Module System](../module_system/INSTANCE.md) 維護。
 - [Message Storage](message_storage/README.md)：生成訊息的儲存、容器與可搬移映像；runtime 只依賴 common。
 
 `components` 可以依賴 OSAL；`common` 則繼續放置只依賴標準函式庫的共用型別與契約。

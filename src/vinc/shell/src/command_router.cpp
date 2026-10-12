@@ -2,6 +2,7 @@
 // Return a structured result so terminal display and Tcl errors share the same dispatch behavior.
 
 #include <vinc/shell/detail/command_router.hpp>
+#include <vinc/module/detail/manager_access.hpp>
 #include <algorithm>
 #include <sstream>
 #include <charconv>
@@ -125,6 +126,10 @@ std::string CommandRouter::contract_notifications(std::uint64_t& cursor) {
     return text;
 }
 
+std::string CommandRouter::param_notifications(std::uint64_t& cursor) {
+    return detail::ManagerAccess::param_diagnostic(manager_, cursor);
+}
+
 Result<void> CommandRouter::initialize() {
     for (const auto& [name, _] : builtins_) {
         auto result = manager_.reserve_command_name(name);
@@ -152,6 +157,26 @@ Result<CommandReply> CommandRouter::execute(const std::vector<std::string>& argu
 
     const auto& target = arguments.front();
     if (const auto builtin_entry = builtins_.find(target); builtin_entry != builtins_.end()) {
+        if (builtin_entry->second == Builtin::Log) {
+            if (arguments.size() > 1 && arguments[1] == "show") {
+                return std::unexpected(Error{ErrorCode::SessionRequired, ErrorOperation::Execute});
+            }
+            auto result = detail::ManagerAccess::log_command(
+                manager_, std::vector<std::string>(arguments.begin() + 1, arguments.end()));
+            if (!result) {
+                return std::unexpected(
+                    wrap_error(ErrorCode::CommandFailed, ErrorOperation::Execute, result.error()));
+            }
+            return CommandReply{0, false, std::move(*result)};
+        }
+        if (builtin_entry->second == Builtin::Param) {
+            auto result = detail::ManagerAccess::param_command(
+                manager_, std::vector<std::string>(arguments.begin() + 1, arguments.end()), stop);
+            if (!result) {
+                return std::unexpected(wrap_error(ErrorCode::CommandFailed, ErrorOperation::Execute, result.error()));
+            }
+            return CommandReply{0, false, std::move(*result)};
+        }
         if (builtin_entry->second == Builtin::Debug) {
             return execute_debug(arguments, stop);
         }
@@ -262,7 +287,9 @@ Result<CommandReply> CommandRouter::execute_debug(const std::vector<std::string>
 Result<CommandReply> CommandRouter::make_help() {
     std::ostringstream help;
     help << "[Commands] debug start <ModuleType> [args...], debug continue <MID>, debug stop <MID>\n"
-            "help, srun file.tcl [args...], scancel, sstatus, output on|off, exit\n[Remote] "
+            "log status|reopen|level MODULE_OR_MID_OR_all error|warn|info|debug\n"
+            "log show on|off|error|warn|info|debug; log show module NAME_OR_MID_OR_all\n"
+            "param list|get NAME|set NAME VALUE|save|status\nhelp, srun file.tcl [args...], scancel, sstatus, output on|off, exit\n[Remote] "
             "disconnect, resume <code>\nCtrl+D cancels a local script; Ctrl+C shuts down the "
             "framework.\n[ModuleTypes]";
     for (const auto& name : manager_.get_registered_module_type_names()) {

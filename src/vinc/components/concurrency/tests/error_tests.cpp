@@ -11,9 +11,9 @@
 namespace {
 using vinc::concurrency::ErrorCode;
 using vinc::concurrency::ErrorOperation;
-using vinc::concurrency::detail::translate_file_lock_error;
+using vinc::concurrency::detail::translate_shared_memory_error;
 
-static_assert(std::is_same_v<decltype(vinc::concurrency::InterprocessMutex::create({})),
+static_assert(std::is_same_v<decltype(vinc::concurrency::InterprocessMutex::create({}, vinc::central_owner)),
                              vinc::Result<vinc::concurrency::InterprocessMutex>>);
 static_assert(static_cast<std::int32_t>(ErrorOperation::Open) == 1);
 static_assert(static_cast<std::int32_t>(ErrorOperation::Lock) == 2);
@@ -26,7 +26,7 @@ void check(bool condition, const char* reason) {
     }
 }
 
-void test_file_lock_translation() {
+void test_shared_memory_translation() {
     struct Mapping {
         vinc::osal::ErrorCode lower;
         ErrorCode upper;
@@ -48,12 +48,12 @@ void test_file_lock_translation() {
     // Synthetic native provenance is copied verbatim, regardless of the host OS.
     constexpr vinc::NativeError native{vinc::NativeErrorSource::LinuxErrno, 13};
     for (const auto& mapping : mappings) {
-        const auto lower = vinc::make_error(mapping.lower, vinc::osal::ErrorOperation::LockFileLock, native);
-        const auto upper = translate_file_lock_error(lower, ErrorOperation::Lock);
+        const auto lower = vinc::make_error(mapping.lower, vinc::osal::ErrorOperation::MapSharedMemory, native);
+        const auto upper = translate_shared_memory_error(lower, ErrorOperation::Lock);
         check(upper.is(mapping.upper) && upper.code == mapping.stable_code, "translation/code identity");
         check(!upper.is(mapping.lower), "lower domain leaked into primary classification");
         check(upper.is_operation(ErrorOperation::Lock), "outer operation lost");
-        check(!upper.is_operation(vinc::osal::ErrorOperation::LockFileLock), "operation domain ignored");
+        check(!upper.is_operation(vinc::osal::ErrorOperation::MapSharedMemory), "operation domain ignored");
         check(upper.native == native, "native provenance lost");
         check(upper.causes().size() == 1 && upper.causes().front() == lower.record(), "cause lost");
         check(!upper.truncated(), "single cause unexpectedly truncated");
@@ -67,8 +67,8 @@ void test_unknown_and_nested_causes() {
     constexpr vinc::NativeError native{static_cast<vinc::NativeErrorSource>(70004), -70005};
     const auto unknown = vinc::Error::from_raw(unknown_domain, unknown_code, unknown_operation, native);
     const auto lower = vinc::wrap_error(vinc::osal::ErrorCode::SystemError,
-                                         vinc::osal::ErrorOperation::UnlockFileLock, unknown);
-    const auto upper = translate_file_lock_error(lower, ErrorOperation::Unlock);
+                                         vinc::osal::ErrorOperation::CloseSharedMemory, unknown);
+    const auto upper = translate_shared_memory_error(lower, ErrorOperation::Unlock);
     check(upper.is(ErrorCode::SystemError), "nested primary classification");
     check(upper.causes().back() == unknown.record(), "deepest cause lost");
     check(upper.native == native, "foreign native source changed");
@@ -83,20 +83,20 @@ void test_unknown_and_nested_causes() {
         vinc::Error::from_raw(unknown_domain, 2, unknown_operation, native),
         vinc::Error::from_raw(vinc::ErrorDomain::Osal, unknown_code, unknown_operation, native)};
     for (const auto& failure : foreign_cases) {
-        const auto translated = translate_file_lock_error(failure, ErrorOperation::Open);
+        const auto translated = translate_shared_memory_error(failure, ErrorOperation::Open);
         check(translated.is(ErrorCode::SystemError), "unknown failure needs local fallback");
         check(translated.causes().front() == failure.record(), "unknown numeric record lost");
     }
 
-    constexpr auto non_file_lock_codes = std::array{
+    constexpr auto unrelated_resource_codes = std::array{
         vinc::osal::ErrorCode::ServiceClosed, vinc::osal::ErrorCode::ObservationLost,
         vinc::osal::ErrorCode::PeerClosed, vinc::osal::ErrorCode::AddressInUse,
         vinc::osal::ErrorCode::AddressNotAvailable, vinc::osal::ErrorCode::ConnectionRefused,
         vinc::osal::ErrorCode::ConnectionReset, vinc::osal::ErrorCode::NotConnected,
         vinc::osal::ErrorCode::MessageTooLarge, vinc::osal::ErrorCode::NetworkUnreachable};
-    for (const auto code : non_file_lock_codes) {
+    for (const auto code : unrelated_resource_codes) {
         const auto failure = vinc::make_error(code);
-        const auto translated = translate_file_lock_error(failure, ErrorOperation::Create);
+        const auto translated = translate_shared_memory_error(failure, ErrorOperation::Create);
         check(translated.is(ErrorCode::SystemError), "unrelated OSAL category exposed by mutex");
         check(translated.causes().front() == failure.record(), "unexpected OSAL cause lost");
     }
@@ -127,7 +127,7 @@ void test_selected_catalog() {
 
 int main() {
     try {
-        test_file_lock_translation();
+        test_shared_memory_translation();
         test_unknown_and_nested_causes();
         test_selected_catalog();
         std::cout << "PASS: Concurrency error translation, causes and selected catalog\n";

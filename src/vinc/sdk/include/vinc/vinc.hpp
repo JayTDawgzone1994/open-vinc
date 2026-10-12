@@ -1,4 +1,5 @@
 #pragma once
+#include <vinc/log/log.hpp>
 
 // Convenience entry point for supported framework APIs. Individual component headers
 // remain available. Generated application messages must be included separately.
@@ -13,6 +14,9 @@
 #include <vinc/config.hpp>
 #include <vinc/module/base_module.hpp>
 #include <vinc/module/context.hpp>
+#include <vinc/param/params.hpp>
+#include <vinc/param/types.hpp>
+#include <vinc/param/error.hpp>
 #include <vinc/module/mid.hpp>
 #include <vinc/module/contract_report.hpp>
 #include <vinc/module/host/module_manager.hpp>

@@ -79,6 +79,7 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND} -E touch "${regression_root}/generation.stamp"
         DEPENDS ribosome ${regression_inputs} "${CMAKE_CURRENT_SOURCE_DIR}/data/message_sample.txt"
         BYPRODUCTS "${regression_root}/vinc_messages/all_messages.hpp"
+            "${regression_root}/vinc_messages/message_types.hpp"
             "${regression_root}/vinc_messages/Constants.hpp"
             "${regression_root}/vinc_messages/Names.hpp"
             "${regression_root}/vinc_messages/Point.hpp"

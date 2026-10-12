@@ -2,7 +2,7 @@
 
 `<vinc/osal/file_lock.hpp>`，連結 `vinc::osal`。本元件只封裝專用鎖檔的排他鎖與
 原生資源生命週期，不認識 Module、Param、Context 或上層 Mutex。
-需要「同一 thread 取得／釋放、非遞迴、本地等待」的規則時，使用
+框架的「同一 thread 取得／釋放、非遞迴」共享鎖另由以下元件提供，目前已不再包裝 FileLock：
 [共用同步層 InterprocessMutex](../components/concurrency/README.md)。
 
 ## 原生能力與範圍
@@ -56,7 +56,8 @@ Windows 建立時使用目前使用者 DACL、非繼承 handle、不分享刪除
 在這個契約下，程序退出後由 OS 回收占用；**不提供統一 OwnerDied 或資料完整性判斷**。
 程序仍活著但應用不釋放 guard 時，不會強制回收；OS 清理也沒有硬即時期限。
 
-create 成功後才交付路徑；每輪使用新的資源名稱。close／解構不刪除鎖檔。
+create 成功後才交付路徑。一般工作資源可每輪使用新名稱；用於單例 admission 的鎖檔
+則保留同一個檔案身分、重複 open，不能在不同啟動之間自行刪除重建。close／解構不刪除鎖檔。
 擁有者必須停止新的 open，確認全部參與者、pending 操作與 guard 都關閉，再移除檔案。
 尤其 POSIX 不可在仍有 handle 時刪除重建同一路徑，否則會產生兩個不同鎖資源。
 

@@ -7,7 +7,7 @@ OSAL 提供同一份 C++23 程序操作介面。框架只使用
 目前提供程序管理、[通用 OSAL Socket](SOCKET.md)、[通用 OSAL Pipe](PIPE.md)
 及 [OSAL Shared Memory](SHARED_MEMORY.md)，另有通用
 [OSAL FileLock](FILE_LOCK.md)。跨程序 Mutex 由上層[共用同步庫](../components/concurrency/README.md)
-組合 FileLock 實作，OSAL 不依賴該庫。`<vinc/osal/terminal.hpp>` 另提供 Shell 所需的
+組合 SharedMemory／SharedWord 實作，OSAL 不依賴該庫。`<vinc/osal/terminal.hpp>` 另提供 Shell 所需的
 終端模式、具期限的文字／按鍵／EOF 事件，以及 Windows／POSIX 模式還原；使用邊界見
 [Shell 說明](../shell/README.md)。
 `<vinc/osal/random.hpp>` 提供通用 `random_bytes(span<byte>)`：以 OS 隨機來源填入呼叫端緩衝區，
@@ -378,9 +378,10 @@ CMake 3.31.6、Ninja 1.12.1。Linux 與 macOS 後端目前尚未在目標 OS 實
   文件未提供涵蓋全部失敗的持鎖不變保證。現有 FILE_LOCK.md 的「失敗保留 guard，可重試」
   不足以定義資料存取是否仍安全；尚未重現原生失敗後已解鎖的情境，也未決定修訂契約。
   **狀態（2026-10-05）：使用者決定先記錄，暫不處理。** 根目錄 [TODO](../../../TODO.md)
-  保留追蹤入口；Concurrency 的 try_lock 內部競爭已另行修正，原生解鎖重構及故障政策仍暫緩。
+  保留追蹤入口。2026-10-08 Concurrency 已改用 SharedMemory／SharedWord，
+  不再使用 FileLock；本項仍是 OSAL FileLock 自身的待辦。
   **下一步：** 區分已知狀態與無法確認狀態，先與使用者確認清理／重試／故障政策，
-  再修改 OSAL 與 [Concurrency](../components/concurrency/README.md#待處理事項)；暫停受影響的解鎖重構。
+  再修改 OSAL。舊 Concurrency 解鎖重構提案已由新共享鎖取代，不代表 FileLock 缺口已解決。
 - **POSIX 內部 fd 與標準串流隔離不一致（2026-10-05 重審）：**
   `src/linux/monitor.cpp`、`src/macos/monitor.cpp`、`src/posix/file_lock.cpp` 與
   `src/posix/shared_memory.cpp` 原先取得原生 fd 後，未避開標準串流使用的 0／1／2。

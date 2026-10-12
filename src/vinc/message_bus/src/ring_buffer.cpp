@@ -25,9 +25,17 @@ vinc::Error io(const vinc::Error& failure, ErrorOperation operation) {
     return vinc::wrap_error(ErrorCode::Io, operation, failure);
 }
 
-void unlink(const std::string& name) noexcept {
+void unlink(const std::string& name, const std::shared_ptr<vinc::detail::ResourceNames>& resources = {}) noexcept {
     if (!name.empty()) {
-        (void)osal::SharedMemory::unlink_name(name);
+        try {
+            auto unlinked = osal::SharedMemory::unlink_name(name);
+            if (resources && (unlinked || unlinked.error().is(osal::ErrorCode::NotFound) ||
+                              unlinked.error().is(osal::ErrorCode::Unsupported))) {
+                (void)resources->retire(name);
+            }
+        } catch (...) {
+            // Keep the persisted record when cleanup cannot finish during unwinding.
+        }
     }
 }
 
@@ -79,11 +87,11 @@ RingBuffer::~RingBuffer() {
     if (creator_) {
         retire();
         if (control_) {
-            unlink(descriptor.control);
+            unlink(descriptor.control, resources_);
         }
 
         if (data_) {
-            unlink(descriptor.data);
+            unlink(descriptor.data, resources_);
         }
     }
 }
@@ -197,7 +205,7 @@ vinc::Result<void> RingBuffer::map_payload(osal::SharedMemoryAccess access) {
     return {};
 }
 
-vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descriptor) {
+vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descriptor, std::shared_ptr<vinc::detail::ResourceNames> resources) {
     if (descriptor.slots < minimum_ring_buffer_slots || descriptor.slots > maximum_ring_buffer_slots ||
         !descriptor.readers || descriptor.readers > maximum_ring_buffer_readers ||
         descriptor.bytes < minimum_message_bytes || descriptor.bytes > SIZE_MAX - payload_alignment_mask ||
@@ -207,6 +215,7 @@ vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descript
 
     auto ring_buffer = std::make_shared<RingBuffer>();
     ring_buffer->descriptor = std::move(descriptor);
+    ring_buffer->resources_ = std::move(resources);
     ring_buffer->creator_ = true;
     ring_buffer->writable_ = true;
 
@@ -496,7 +505,7 @@ PublisherStats RingBuffer::stats(std::uint32_t requested) {
 
 NamedCounter::~NamedCounter() {
     if (creator) {
-        unlink(name);
+        unlink(name, resources);
     }
 }
 
@@ -523,9 +532,10 @@ vinc::Result<void> initialize_counter(NamedCounter& counter) {
 }
 }
 
-vinc::Result<std::shared_ptr<NamedCounter>> NamedCounter::create(std::string name) {
+vinc::Result<std::shared_ptr<NamedCounter>> NamedCounter::create(std::string name, std::shared_ptr<vinc::detail::ResourceNames> resources) {
     auto counter = std::make_shared<NamedCounter>();
     counter->name = std::move(name);
+    counter->resources = std::move(resources);
     auto memory = osal::SharedMemory::create(counter->name, sizeof(SharedWord));
     if (!memory) {
         return std::unexpected(io(memory.error(), ErrorOperation::CreateCounter));

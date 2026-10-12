@@ -14,6 +14,7 @@ namespace vinc::shell {
 // Call from main before creating Shells/workers. A failed initialization may be
 // retried after deploying the missing resources; success is idempotent.
 Result<void> initialize_tcl(const char* executable);
+Result<std::filesystem::path> executable_directory();
 Result<std::vector<std::string>> tcl_reserved_commands();
 
 struct ScriptCompletion {

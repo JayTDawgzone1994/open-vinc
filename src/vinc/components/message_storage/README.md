@@ -57,6 +57,11 @@ auto* ptr = &msg->data().detections;   // 指向原欄位
 
 ## 三條資料路徑
 
+**文件待修正（2026-10-06 benchmark 閱讀確認）：** 本節稍後的
+`Module::message_bus()` 取得方式已過時；目前應從 BaseModule 繼承的
+`context.advertise<T>()`／`context.subscribe<T>()` 使用服務，依 Module System 的 Context 契約。
+後續需同步清理舊說明；本輪未修改 Storage API。
+
 | 路徑 | 已實作的訊息儲存行為 |
 | --- | --- |
 | 接收共享訊息 | 生成類別的 `from_bytes()` 複製完整映像一次，再驗證副本並建立本機欄位存取介面；解除來源映射後可繼續讀寫 |
@@ -416,3 +421,9 @@ Windows Debug／Release 的 `message.access` 及新增 Module 真實程序越界
 RuntimeServices 接線後，`tests/contract_probe.hpp` 改驗證 Common 的 fallback 退出碼；
 使用者 terminate handler 採另一個哨兵碼，避免將不相關的 C++ termination 視為契約測試成功。
 本輪未改動容器存取或可恢復錯誤語意。
+
+## Bag 格式識別接線（2026-10-12）
+
+Bag 僅使用生成訊息的 Snapshot API 產生 canonical 映像，並引用
+`message::detail::format::version` 保存相同的 image version。該常數的框架接線不授權
+Bag 修改布局或繞過驗證；schema hash 與映像仍由 Message Storage／Ribosome 維護。

@@ -27,6 +27,8 @@ std::string contract_diagnostic_text(std::string_view name, const ModuleContract
 // Shell owns its builtins. No callback capturing the Shell is stored in ModuleManager.
 class CommandRouter {
     enum class Builtin {
+        Log,
+        Param,
         Debug,
         Help,
         Exit,
@@ -36,6 +38,8 @@ class CommandRouter {
     };
     ModuleManager& manager_;
     const std::map<std::string, Builtin> builtins_{
+        {"param", Builtin::Param},
+        {"log", Builtin::Log},
         {"debug", Builtin::Debug},
         {"exit", Builtin::Exit},      {"help", Builtin::Help},      {"srun", Builtin::Script},
         {"scancel", Builtin::Cancel}, {"output", Builtin::Session}, {"disconnect", Builtin::Session},
@@ -58,6 +62,7 @@ public:
     Result<void> initialize();
     bool builtin(std::string_view name) const;
     std::string contract_notifications(std::uint64_t& cursor);
+    std::string param_notifications(std::uint64_t& cursor);
     Result<CommandReply> execute(const std::vector<std::string>& arguments, std::stop_token stop = {});
     Result<CompletionResult> complete(std::string input);
 };

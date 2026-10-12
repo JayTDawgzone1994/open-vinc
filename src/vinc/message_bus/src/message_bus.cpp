@@ -314,6 +314,7 @@ struct SubscriberCore {
     std::atomic<bool> closed{false};
     std::map<std::uint64_t, Source> sources;
     SubscriberStats losses;
+    std::uint64_t max_message_bytes = 0;
 };
 
 class MessageAccess {
@@ -655,6 +656,14 @@ vinc::Result<std::unique_ptr<BaseMessage>> read_impl(const std::shared_ptr<Subsc
                 const auto code = latest ? ErrorCode::NoPublishedData : ErrorCode::NoNewData;
                 return std::unexpected(vinc::make_error(code, operation));
             }
+            if (subscriber->max_message_bytes && candidate.size > subscriber->max_message_bytes) {
+                if (latest) {
+                    return std::unexpected(Error{ErrorCode::CapacityExceeded, operation});
+                }
+                selected->cursor = candidate.sequence;
+                ++subscriber->losses.oversized_messages;
+                continue;
+            }
             // Allocation and zero-initialization are outside the read protection.
             std::vector<std::byte> bytes(static_cast<std::size_t>(candidate.size));
             auto& ring_buffer = *selected->ring_buffer;
@@ -763,6 +772,10 @@ Client::~Client() = default;
 vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::string topic, std::uint64_t schema,
                                                                      PublisherOptions options) {
     return detail::guarded(ErrorOperation::Advertise, [&]() -> vinc::Result<std::shared_ptr<detail::PublisherCore>> {
+        if (!detail::valid_topic_separators(topic)) {
+            return std::unexpected(vinc::make_error(ErrorCode::InvalidArgument, ErrorOperation::Advertise));
+        }
+
         // Allocate local ownership before the remote mutation so failures can clean up.
         auto core = std::make_shared<detail::PublisherCore>();
         core->transport = impl_->transport;
@@ -810,13 +823,56 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
     });
 }
 
+Result<TopicPage> Client::list_topics(std::string after) {
+    return detail::guarded(ErrorOperation::ListTopics, [&]() -> Result<TopicPage> {
+        if (after.size() > detail::maximum_name_bytes) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::ListTopics});
+        }
+        control::Bytes payload;
+        auto encoded = control::put_string(payload, after);
+        if (!encoded) {
+            return std::unexpected(wrap_error(ErrorCode::InvalidArgument, ErrorOperation::ListTopics, encoded.error()));
+        }
+        auto response = impl_->transport->request(detail::ListTopics, std::move(payload));
+        if (!response) {
+            return std::unexpected(wrap_error(ErrorCode::Io, ErrorOperation::ListTopics, response.error()));
+        }
+        control::Reader reader(*response);
+        const auto count = reader.u32();
+        if (count > detail::topics_per_page) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ListTopics});
+        }
+        TopicPage result;
+        std::string previous = after;
+        for (std::uint32_t index = 0; index < count; ++index) {
+            TopicInfo topic{reader.string(), reader.u64(), reader.u32()};
+            if (topic.name <= previous || topic.name.size() > detail::maximum_name_bytes ||
+                !topic.schema || !topic.publishers || topic.publishers > detail::maximum_attached_publishers) {
+                return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ListTopics});
+            }
+            previous = topic.name;
+            result.topics.push_back(std::move(topic));
+        }
+        result.next = reader.string();
+        if (!reader.done() || (!result.next.empty() && (count == 0 || result.next != previous))) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ListTopics});
+        }
+        return result;
+    });
+}
+
 vinc::Result<std::shared_ptr<detail::SubscriberCore>> Client::subscribe_raw(std::string topic, std::uint64_t schema,
                                                                       SubscriberOptions options) {
     return detail::guarded(ErrorOperation::Subscribe, [&]() -> vinc::Result<std::shared_ptr<detail::SubscriberCore>> {
+        if (!detail::valid_topic_separators(topic)) {
+            return std::unexpected(vinc::make_error(ErrorCode::InvalidArgument, ErrorOperation::Subscribe));
+        }
+
         auto core = std::make_shared<detail::SubscriberCore>();
         core->transport = impl_->transport;
         core->schema = schema;
         core->topic = topic;
+        core->max_message_bytes = options.max_message_bytes;
         control::Bytes payload;
         auto encoded = control::put_string(payload, topic);
         if (!encoded) {

@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/module/detail/plugin.hpp>
 #include <vinc/osal/dynamic_library.hpp>
@@ -45,7 +46,7 @@ void test_library(const std::filesystem::path& path) {
 
 void expect_failure(const std::filesystem::path& path, module_system::ErrorCode code,
                     std::string type = "pluginFixture", std::string name = "badPlugin") {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     ModulePolicy policy;
     policy.startup_timeout = startup_timeout;
     check(bool(manager->register_module_type({type, path, name, policy})), "register test plugin");
@@ -81,7 +82,7 @@ int main(int argc, char** argv) {
         expect_failure(valid, module_system::ErrorCode::InvalidPlugin, "wrongType");
         expect_failure(valid, module_system::ErrorCode::HookException, "pluginFixture", "throwConstructor");
 
-        auto missing_host = take(ModuleManager::create({}, valid.parent_path() / "missing-host.exe"));
+        auto missing_host = take(vinc::test::create_manager({}, valid.parent_path() / "missing-host.exe"));
         check(bool(missing_host->register_module_type({"pluginFixture", valid, "missingHost"})),
               "register with missing Host");
         const auto missing_mid = take(missing_host->start_module("pluginFixture"));
@@ -89,7 +90,7 @@ int main(int argc, char** argv) {
         check(!missing_start && missing_start.error().is(module_system::ErrorCode::SpawnFailed),
               "Host spawn failure differs from Plugin load failure");
 
-        auto manager = take(ModuleManager::create());
+        auto manager = take(vinc::test::create_manager());
         const auto relocated = valid.parent_path() / std::filesystem::path(u8"Plugin 中文 空白.dll");
         std::filesystem::copy_file(valid, relocated, std::filesystem::copy_options::overwrite_existing);
         struct RemoveFixture {

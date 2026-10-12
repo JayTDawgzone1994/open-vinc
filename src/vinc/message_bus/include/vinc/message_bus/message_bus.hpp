@@ -28,6 +28,21 @@ enum class StartPosition {
 
 struct SubscriberOptions {
     StartPosition start = StartPosition::OldestRetained;
+    // Zero preserves unrestricted reception. Oversized callback records are skipped
+    // before allocation and counted; get_last reports CapacityExceeded instead.
+    std::uint64_t max_message_bytes = 0;
+};
+
+struct TopicInfo {
+    std::string name;
+    std::uint64_t schema = 0;
+    std::uint32_t publishers = 0;
+};
+
+// Pages are individually consistent, not a transaction across changing topology.
+struct TopicPage {
+    std::vector<TopicInfo> topics;
+    std::string next;
 };
 
 struct Limits {
@@ -59,6 +74,7 @@ struct PublisherLoss {
 
 // Totals retain losses from retired sources without retaining unbounded source history.
 struct SubscriberStats {
+    std::uint64_t oversized_messages = 0;
     std::uint64_t overwrite_events = 0;
     std::uint64_t lost_messages = 0;
     std::vector<PublisherLoss> sources; // Only currently attached sources; totals include retired ones.
@@ -157,6 +173,7 @@ public:
     Client(const Client&) = delete;
     Client& operator=(const Client&) = delete;
     ~Client();
+    vinc::Result<TopicPage> list_topics(std::string after = {});
 
     template <Message T> vinc::Result<Publisher<T>> advertise(std::string topic, PublisherOptions options = {}) {
         auto publisher = advertise_raw(std::move(topic), T::schema().hash, options);

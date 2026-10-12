@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Use the actual supervisor and real child, with deterministic exception/exit checkpoints.
 #include "../src/host/module_manager.cpp"
 #include <iostream>
@@ -78,7 +79,7 @@ int main(int argc, char** argv) {
     try {
         check(argc == 2, "helper path required");
         test_record_lifetime();
-        auto manager = take(ModuleManager::create());
+        auto manager = take(vinc::test::create_manager());
         ModuleType type;
         type.name = "helper";
         type.module_base_name = "fault-child";

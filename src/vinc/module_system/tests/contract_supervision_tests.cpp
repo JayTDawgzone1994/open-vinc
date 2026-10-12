@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Exercise the real manager, with a test-only termination failure adapter.
 #include "../src/host/module_manager.cpp"
 #include <vinc/osal/shared_atomic.hpp>
@@ -152,7 +153,7 @@ ModuleContractDiagnostic await_failure(ModuleManager& manager, MID mid) {
 }
 
 void test_processes(const std::filesystem::path& helper) {
-    auto manager = take(ModuleManager::create({}, fault_host));
+    auto manager = take(vinc::test::create_manager({}, fault_host));
     check(bool(manager->register_module_type(type_for(helper))), "register fault fixture");
     const auto marker_path = std::filesystem::temp_directory_path() /
                              ("fatal_stop_" + std::to_string(std::random_device{}()));
@@ -225,7 +226,7 @@ void test_processes(const std::filesystem::path& helper) {
           "shutdown does not wait out the longer fatal grace");
     check(!std::filesystem::exists(marker_path), "shutdown skips fatal target's user stop hook");
 
-    auto startup_manager = take(ModuleManager::create({}, fault_host));
+    auto startup_manager = take(vinc::test::create_manager({}, fault_host));
     auto type = type_for(helper);
     type.policy.startup_timeout = short_startup_timeout;
     check(bool(startup_manager->register_module_type(type)), "register short startup policy");
@@ -239,7 +240,7 @@ void test_processes(const std::filesystem::path& helper) {
     startup_manager->begin_shutdown();
     check(bool(startup_manager->wait_shutdown(control::Clock::now() + test_timeout)), "startup fixture cleanup");
 
-    auto restart_manager = take(ModuleManager::create({}, fault_host));
+    auto restart_manager = take(vinc::test::create_manager({}, fault_host));
     type = type_for(helper);
     type.policy.max_restarts = 1;
     type.policy.restart_delay = restart_delay;

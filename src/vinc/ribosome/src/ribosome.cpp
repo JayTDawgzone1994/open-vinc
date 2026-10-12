@@ -612,7 +612,7 @@ std::vector<MessageInfo> Ribosome::load() {
     }
 
     std::vector<MessageInfo> messages;
-    std::set<std::string> file_names{"all_messages"};
+    std::set<std::string> file_names{"all_messages", "message_types"};
     for (const auto& path : paths) {
         MessageInfo message;
         message.path = path;
@@ -849,6 +849,24 @@ void emit_message_metadata(std::ostream& output, const MessageInfo& message, con
            << "    static const message::detail::Schema& schema() {\n"
            << "        return " << schema_name << "();\n"
            << "    }\n\n";
+    output << "    // Compile-time field visits support language bindings without parsing schemas at runtime.\n"
+           << "    template<class Visitor> static void ribosome_visit_fields([[maybe_unused]] Visitor&& visitor) {\n";
+    std::size_t index = 0;
+    for (const auto& field : message.variables) {
+        if (!field.constant) {
+            output << "        visitor.template field<" << member_type(field) << ">(\""
+                   << field.name << "\", " << index << ");\n";
+            ++index;
+        }
+    }
+    output << "    }\n\n";
+    output << "    template<class Visitor> static void ribosome_visit_constants([[maybe_unused]] Visitor&& visitor) {\n";
+    for (const auto& field : message.variables) {
+        if (field.constant) {
+            output << "        visitor(\"" << field.name << "\", " << field.name << ");\n";
+        }
+    }
+    output << "    }\n\n";
     for (const auto& field : message.variables) {
         if (!field.constant) {
             continue;
@@ -1076,6 +1094,15 @@ std::int8_t Ribosome::make_ligand() {
         }
 
         write_file(stage.path / "all_messages.hpp", umbrella.str());
+        std::ostringstream catalog;
+        catalog << "#pragma once\n#include <vinc_messages/all_messages.hpp>\n"
+                   "namespace vinc::message {\n"
+                   "template<class Visitor> void visit_types(Visitor&& visitor) {\n";
+        for (const auto& message : messages) {
+            catalog << "    visitor.template operator()<::vinc::" << message.name << ">();\n";
+        }
+        catalog << "}\n}\n";
+        write_file(stage.path / "message_types.hpp", catalog.str());
         publish_staging(stage, paths.output);
 
         std::cout << "Generated " << messages.size() << " message classes at " << path_text(paths.output) << '\n';

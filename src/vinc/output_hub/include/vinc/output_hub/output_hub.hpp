@@ -32,6 +32,7 @@ struct Source {
     std::uint64_t generation = 0;
     std::string name;
     Stream stream = Stream::Stdout;
+    std::uint64_t pid = 0;
 };
 
 struct Event {
@@ -41,6 +42,7 @@ struct Event {
     EventKind kind = EventKind::Data;
     std::string bytes;
     std::optional<vinc::Error> error;
+    std::chrono::system_clock::time_point wall_received = std::chrono::system_clock::now();
 };
 
 struct Loss {
@@ -48,9 +50,15 @@ struct Loss {
     std::uint64_t events = 0;
 };
 
+struct SourceLoss {
+    std::shared_ptr<const Source> source;
+    Loss loss;
+};
 struct Batch {
     std::vector<std::shared_ptr<const Event>> events;
     Loss skipped;
+    std::vector<SourceLoss> sources_skipped;
+    Loss unattributed;
 };
 
 struct QueueLimits {

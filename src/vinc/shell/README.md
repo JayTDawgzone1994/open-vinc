@@ -400,3 +400,20 @@ Shell 的 Module 故障顯示說明，移除誤置的 MessageArray 契約及已�
   明確 Ctrl+C／exit 對除錯 Module 仍執行完整 shutdown。
 
 步驟及 debugger／符號限制見 [Module 除錯指南](../module_system/DEBUGGING.md)。
+
+## Param 命令（2026-10-08）
+
+新增保留命令 `param list`、`param get NAME`、`param set NAME VALUE`、`param save`、
+`param status`；本地、Tcl、Socket Shell 共用 CommandRouter。中央權限可改 FrameworkOnly
+參數。錯誤以 Shell → ModuleSystem → Param 原因鏈呈現，失敗不要求框架退出。
+本機與遠端會顯示新的 Param 保存／型別更新診斷；不是 Module OutputHub 訂閱的一部分。
+完整格式、保存政策與快取時機由 [Param README](../param/README.md) 維護。
+本輪不更動 Shell IP／port／timeout 的既有設定來源。
+
+
+## Log 指令（2026-10-08）
+
+新增 log status、log reopen、log level MODULE_OR_MID_OR_all error|warn|info|debug。
+本地／遠端 Session 各自支援 log show on|off|error|warn|info|debug，及 log show module NAME_OR_MID_OR_all。
+show 預設 off，僅影響顯示；output on/off 原意不變。Tcl 可用中央指令，show 需互動 Session。
+不把命令結果、Tcl puts 或使用者輸入全部保存。見 [Log](../log/README.md)。

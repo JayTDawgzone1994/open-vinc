@@ -48,7 +48,11 @@ void checkpoint(Point point, osal::Process*) {
 int main() {
     using namespace vinc;
     try {
+        detail::ModuleLocks locks({}, 1);
+        detail::ModuleParams params({}, locks);
         RuntimeInbox inbox;
+        inbox.params = &params;
+        inbox.locks = &locks;
         std::vector<std::string> args;
         LifecycleFixture rejected;
         auto result = run_started_hooks(rejected, args, {}, inbox);

@@ -1,6 +1,6 @@
 // Compile actual generator output: successful generation alone cannot validate
 // C++ name lookup or the meaning of emitted literals.
-#include <vinc_messages/all_messages.hpp>
+#include <vinc_messages/message_types.hpp>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -16,7 +16,9 @@ static_assert(Constants::single == 0.1f);
 static_assert(Constants::smallest_single == std::numeric_limits<float>::denorm_min());
 static_assert(Constants::largest_single == std::numeric_limits<float>::max());
 static_assert(Constants::embedded == std::string_view("a\0b", 3));
-static_assert(Constants::digits == std::string_view("\0" "127", 4));
+static_assert(Constants::digits == std::string_view("\0"
+                                                    "127",
+                                                    4));
 static_assert(Constants::escapes == "\n\r\t\"\\");
 static_assert(Constants::empty.empty());
 static_assert(Constants::placeholders == "${VALUE} ${DO_MESSAGE_CLASS} ${DO_INCLUDE_DEPENDENT_MESSAGES}");
@@ -24,6 +26,17 @@ static_assert(Constants::utf8 == "訊息🚀");
 static_assert(Constants::Base == 7);
 
 int main() {
+    std::size_t known_types = 0;
+    vinc::message::visit_types([&]<class T> {
+        if (T::schema().hash != 0) {
+            ++known_types;
+        }
+    });
+    if (known_types != 3) {
+        std::cerr << "missing generated message type\n";
+        return 1;
+    }
+
     if (!std::signbit(Constants::negative_zero) || !std::isnan(Constants::not_a_number)) {
         std::cerr << "floating sign/NaN not preserved\n";
         return 1;

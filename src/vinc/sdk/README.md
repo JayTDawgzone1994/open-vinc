@@ -10,12 +10,19 @@
 
 ## 使用方式
 
+一般 Module 作者可先看 [userExampleModule C++／Python 對照](../../../examples/userExampleModule/README.md)，
+包含可執行的 Shell 操作與 API 閱讀索引。
+
+以下是 C++ SDK。可選的系統 Python 綁定位於 Module System，建置開關為 `VINC_BUILD_PYTHON`；
+不會讓一般 C++ 使用端或中央連入 Python。Context 的 Bus／Param／Log、訊息容器與 ABI 限制見
+[Python SDK](../module_system/python/README.md)。
+
 ```cpp
 #include <vinc/vinc.hpp>
 ```
 
 ```cmake
-# 使用原始碼套件；請先初始化 library/tcl/upstream submodule。
+# 使用原始碼套件；請先初始化 library/ 下 Tcl 與 toml++ submodule。
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(VINC_BUILD_APPS OFF CACHE BOOL "" FORCE)
 set(VINC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -61,6 +68,7 @@ SDK 對 Shell 只提供錯誤分類與 `SocketShellOptions` 設定資料；
 | output_hub | `vinc::output_hub` | 程序輸出擷取、分送與呈現 |
 | components/message_storage | `vinc::message_storage` | BaseMessage、MessageArray 與生成訊息支援 |
 | message_bus | `vinc::message_bus` | Publisher／Subscriber、BusManager 與 RingBuffer |
+| param | `vinc::param` | Context 參數 facade、型別與 codec；Host／中央內部 target 見 Param README |
 | module_system | `vinc::module` | BaseModule、Plugin client 相依 |
 | module_system | `vinc::module_manager` | 中央 ModuleManager |
 | module_system | `vinc::module_entry` | 提供 Host main／wmain 的 object target |
@@ -247,3 +255,26 @@ Windows x64／MSVC 19.51.36257、CMake 4.3.2、Ninja 1.13.2，繁體中文語系
 本機紀錄：build/msvc-deps-*-external.log、build/msvc-deps-*-sdk-build.log、
 build/msvc-deps-*-common.log，
 以及 build/sdk-incremental-probe/fixed/results.json。
+
+## 中央名稱與 Host 私有鎖
+
+中央建置可設定 `VINC_NAME`；同名占用會由 Manager::create 回報錯誤。
+框架私有 `ContextLockAccess` 經 Host 取得 lease，未加入 SDK 總標頭或公開 Context 方法。
+Concurrency Guard 的操作／析構留在 Host；Plugin 不因此擁有另一份框架鎖管理服務。
+Param 接線後 Plugin entry version 5／bootstrap v10 需完整重新建置相連程式；
+名稱、依賴及清理契約見 [Module System INSTANCE.md](../module_system/INSTANCE.md)。
+
+## Param 接線（2026-10-08）
+
+整合入口提供 `<vinc/param/params.hpp>`、`types.hpp` 與 `error.hpp`。Module 從繼承的
+`context.param` 使用，不自行建立服務。Plugin 只連結 facade／codec；Host 擁有唯一
+ModuleParams 控制接線，中央擁有 ParamManager 與 TOML。
+資料位置、保存／權限／pump 契約見 [Param README](../param/README.md)。
+既有 config／Socket Shell 設定未自動遷移至 Param。
+
+
+## Log API（2026-10-08）
+
+vinc/vinc.hpp 包含 Log；Module 透過繼承的 context.log 使用。SDK target 帶入 fmt，
+不洩漏 spdlog headers／definitions；Plugin 不取得 Log Host／Manager 或 control service。
+Context 布局更新為 Plugin entry version 5／bootstrap v10。見 [Log](../log/README.md)。

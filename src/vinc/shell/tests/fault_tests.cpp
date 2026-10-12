@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Exercise actual implementation boundaries with test-only OSAL result injection.
 #include "../src/socket_shell.cpp"
 #include "../src/shell.cpp"
@@ -202,7 +203,7 @@ void test_input_rollback() {
     succeeding.send("ok\n");
 }
 void test_accept_backoff() {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     shell::ScriptService scripts(*manager);
     shell::SocketShellOptions options;
     options.port = 0;
@@ -222,7 +223,7 @@ void test_accept_backoff() {
     server->finish_shutdown();
 }
 void test_listener_isolation() {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     shell::ScriptService scripts(*manager);
     shell::SocketShellOptions options;
     options.port = 0;
@@ -252,7 +253,7 @@ void test_listener_isolation() {
 }
 
 void test_worker_isolation(const char* helper) {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     std::ostringstream output;
     auto local = take(Shell::create(*manager, output));
     take(manager->register_module_type({"shellHelper", std::filesystem::absolute(helper), "alive", {}}));
@@ -300,7 +301,7 @@ int main(int argc, char** argv) {
         take(shell::initialize_tcl(argv[0]));
         test_input_rollback();
         {
-            auto manager = take(ModuleManager::create());
+            auto manager = take(vinc::test::create_manager());
             shell::ScriptService scripts(*manager);
             auto server = shell::SocketShellTestAccess::idle(*manager, scripts);
             shell::SocketShellTestAccess::check_boundaries(*server);

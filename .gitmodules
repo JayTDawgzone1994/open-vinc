@@ -1,3 +1,15 @@
 [submodule "tcl"]
 	path = library/tcl/upstream
 	url = https://github.com/tcltk/tcl.git
+[submodule "tomlplusplus"]
+	path = library/tomlplusplus/upstream
+	url = https://github.com/marzer/tomlplusplus.git
+[submodule "library/fmt/upstream"]
+	path = library/fmt/upstream
+	url = https://github.com/fmtlib/fmt.git
+[submodule "library/spdlog/upstream"]
+	path = library/spdlog/upstream
+	url = https://github.com/gabime/spdlog.git
+[submodule "library/pybind11/upstream"]
+	path = library/pybind11/upstream
+	url = https://github.com/pybind/pybind11.git

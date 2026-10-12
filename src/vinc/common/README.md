@@ -2,6 +2,20 @@
 
 正式入口為 `error.hpp`／`result.hpp`。ModuleSystem 遷移後已移除無呼叫端的舊整數錯誤表。
 
+## Shared owner identities
+
+`<vinc/owner_id.hpp>` defines the standard-library-only numeric boundary shared by
+ModuleSystem and Concurrency: zero is unowned, 1 through 2^63−2 are Module owners,
+and 2^63−1 is the central owner. ModuleSystem exposes its MID range in `mid.hpp`
+and checks the allocator there; Concurrency validates without truncating values.
+This is a fixed protocol boundary, not a runtime Param setting. One bit of the
+64-bit shared control word remains available for atomic publication and release.
+No registry or dependency on ModuleSystem is introduced in common.
+
+`config::concurrency_retry_interval` defaults to 5ms. It controls cancellable
+shared-mutex retry sleeps, not a maximum holding time; see the
+[Concurrency contract](../components/concurrency/README.md).
+
 
 ## Error interface
 
@@ -207,7 +221,7 @@ provenance; do not silently turn all failures into one generic code.
   bad_alloc/length_error conversion. Public checked operations return Result; invalid unchecked
   access terminates through the common contract handler. AccessError has been removed.
   See the Message Storage README for scope and verification.
-- Concurrency uses common Result/Error and a static metadata provider. FileLock
+- Concurrency uses common Result/Error and a static metadata provider. SharedMemory
   failures are translated into Concurrency codes with bounded OSAL causes; local
   failures remain single-layer. See the Concurrency README for identifier migration.
 - Shell uses common Result/Error for factories, parsing, routing, socket startup,
@@ -336,6 +350,10 @@ centralized system settings. Runtime defaults will be added gradually within
 explicitly authorized work and will later be managed by Param. Layout settings
 such as `error_chain_max_depth` remain compile-time only; its contract is described
 under bounded cause chains above.
+
+`python_traceback_bytes` bounds the diagnostic emitted for one escaped Python hook
+exception (32 KiB by default). Python lifecycle and error conversion contracts are
+maintained in [Python Module](../module_system/python/README.md).
 
 `module_fatal_exit_timeout` defaults to five seconds after central first observes a
 fatal state. Earlier startup or explicit-stop deadlines win. This is a termination
@@ -472,3 +490,31 @@ Initialization happens after native loading and before Module creation. Plugin
 clear follows Module destruction and Host worker shutdown, before the Host table
 or report storage expires. This does not expand RuntimeServices beyond fatal reporting.
 See [Module System](../module_system/README.md) for the matching-build ABI and loader limits.
+
+## 共享資源名稱接線
+
+`detail/resource_names.hpp` 只定義 `ResourceNames::reserve()`／`retire()` 抽象，使用標準型別與 Result。
+它讓 Bus 接受中央提供的名稱服務，而不反向依賴 Module System 或檔案系統。
+這不是 runtime error registry，也不是使用者可取得框架共享區的公開入口。
+資源建立前記錄、名稱退役與上限由 [Module System](../module_system/INSTANCE.md) 維護；
+`config.hpp` 的 `instance_*`、`module_lock_*` 是本輪新增的暫時系統設定。
+
+## Param settings and catalog (2026-10-08)
+
+`ErrorDomain::Param = 10` identifies the component-owned static catalog. Common
+does not depend on Param runtime. New `param_*` constants in config bound names,
+strings, snapshots, file input and pending work; their defaults and limits are
+maintained in the [Param README](../param/README.md). Existing framework settings
+remain in config; adding Param does not migrate them or enable dynamic rebinding.
+
+
+## Log 設定與錯誤分類（2026-10-08）
+
+新增 ErrorDomain::Log = 11，錯誤／操作 enum 與靜態 catalog 由 [Log](../log/README.md) 維護。
+config 的 log_* 預算與間隔僅服務新功能；本輪未把既有設定遷入 Param。
+
+## Bag 設定與錯誤（2026-10-12）
+
+新增 ErrorDomain::Bag=12、NativeErrorSource::Sqlite=11。文字表由 Bag 元件註冊，
+common 不依賴 SQLite。config::bag_* 保存 queue／單筆預算、主資料庫大小上限、批次、探索／pump 間隔、
+metadata／查詢限制與 Recorder 收尾期限；定義和限制見 [Bag README](../bag/README.md)。

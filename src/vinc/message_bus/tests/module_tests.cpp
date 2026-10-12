@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // End-to-end Message Bus tests through independent Module processes and the central BusManager.
 // Verify multiple Publishers, copied reads, loans, topology changes and crash cleanup.
 
@@ -39,7 +40,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     try {
-        auto manager_owner = vinc::ModuleManager::create();
+        auto manager_owner = vinc::test::create_manager();
         if (!manager_owner) {
             throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
         }
@@ -85,11 +86,11 @@ int main(int argc, char** argv) {
             return predicate();
         };
         // Scenario: registration before any Publisher and the copied publication path.
-        auto subscriber = start({"sub", "frames"});
+        auto subscriber = start({"sub", "camera/frames"});
         check(command(subscriber, {"last"}) == no_published_data,
               "get_last before Publisher fails immediately");
         check(command(subscriber, {"next"}) == no_new_data, "next before Publisher fails immediately");
-        auto primary_publisher = start({"pub", "frames", "1", "4194304"});
+        auto primary_publisher = start({"pub", "camera/frames", "1", "4194304"});
         check(command(primary_publisher, {"slots"}) == 2, "one requested slot becomes two");
         check(command(primary_publisher, {"wrong-schema"}) == type_mismatch,
               "topic schema mismatch rejected");
@@ -99,6 +100,8 @@ int main(int argc, char** argv) {
               }),
               "first shared message");
         check(command(subscriber, {"last"}) == 1, "latest repeats");
+        check(command(subscriber, {"publisher-is", primary_publisher}) == 1,
+              "publisher metadata must identify the Module, not the topic prefix");
         check(command(subscriber, {"next"}) == 1, "latest did not advance next");
         check(command(subscriber, {"next"}) == no_new_data, "no new message");
         // Scenario: a large nested loan is invisible until committed.
@@ -111,18 +114,20 @@ int main(int argc, char** argv) {
         check(command(subscriber, {"next"}) == 2, "large nested message received");
         check(command(subscriber, {"copy-size"}) == 2097152, "full payload copied");
         // Scenario: independent next cursors and latest reads across two Publishers.
-        auto history_subscriber = start({"sub", "frames"});
+        auto history_subscriber = start({"sub", "camera/frames"});
         check(command(history_subscriber, {"next"}) == 1, "default subscription starts oldest retained");
-        auto new_only_subscriber = start({"sub", "frames", "new"});
+        auto new_only_subscriber = start({"sub", "camera/frames", "new"});
         check(command(new_only_subscriber, {"next"}) == no_new_data,
               "new-only cursor starts at subscription");
         check(command(new_only_subscriber, {"last"}) == 2, "latest is independent of new-only cursor");
-        auto secondary_publisher = start({"pub", "frames", "3", "8192"});
+        auto secondary_publisher = start({"pub", "camera/frames", "3", "8192"});
         check(command(secondary_publisher, {"push", "3"}) == 0, "second Publisher");
         check(eventually([&] {
                   return command(subscriber, {"last"}) == 3;
               }),
               "dynamic Publisher attachment");
+        check(command(subscriber, {"publisher-is", secondary_publisher}) == 1,
+              "shared topic must preserve the second Module publisher identity");
         check(command(primary_publisher, {"push", "4"}) == 0, "publish after second Publisher");
         check(command(subscriber, {"next"}) == 3 && command(subscriber, {"next"}) == 4,
               "merge visible candidates by timestamp");
@@ -158,7 +163,7 @@ int main(int argc, char** argv) {
                   return command(subscriber, {"last"}) == no_published_data;
               }),
               "last Publisher removal gives no data");
-        auto restarted = start({"pub", "frames", "2", "8192"});
+        auto restarted = start({"pub", "camera/frames", "2", "8192"});
         check(command(restarted, {"push", "10"}) == 0, "new Publisher instance");
         check(eventually([&] {
                   return command(subscriber, {"next"}) == 10;

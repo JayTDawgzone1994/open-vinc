@@ -17,13 +17,17 @@ inline constexpr auto error_entries = std::array{
     ErrorCodeEntry{ErrorCode::SystemError, "Mutex system operation failed"},
     ErrorCodeEntry{ErrorCode::Closed, "Mutex is closed"},
     ErrorCodeEntry{ErrorCode::WouldBlock, "Mutex cannot be acquired immediately"},
-    ErrorCodeEntry{ErrorCode::AlreadyExists, "Mutex resource already exists"}};
+    ErrorCodeEntry{ErrorCode::AlreadyExists, "Mutex resource already exists"},
+    ErrorCodeEntry{ErrorCode::InvalidLayout, "Incompatible or uninitialized shared mutex layout"}};
 
 inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::Open, "Open"},
     ErrorOperationEntry{ErrorOperation::Lock, "Lock"},
     ErrorOperationEntry{ErrorOperation::Unlock, "Unlock"},
-    ErrorOperationEntry{ErrorOperation::Create, "Create"}};
+    ErrorOperationEntry{ErrorOperation::Create, "Create"},
+    ErrorOperationEntry{ErrorOperation::InspectOwner, "InspectOwner"},
+    ErrorOperationEntry{ErrorOperation::Recover, "Recover"},
+    ErrorOperationEntry{ErrorOperation::Publish, "Publish"}};
 
 inline constexpr ErrorCatalog error_catalog{
     ErrorDomain::Concurrency, "Concurrency", error_entries, operation_entries};

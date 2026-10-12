@@ -1,6 +1,11 @@
 # 專案訊息套件
 
 本套件位於儲存庫根目錄的 `vinc_messages/`，與 `apps/` 同層。
+
+`UserExampleFrame.msg`／`UserExampleItem.msg` 供
+[Module SDK 對照範例](../examples/userExampleModule/README.md) 使用，並由同一份編譯型別清單提供給 C++ 與 Python。
+它們是示範應用訊息，不是中央控制協定或框架必需訊息。
+
 使用者在 `messages/` 新增或修改 `.msg`；本套件維護對應的生成建置規則。
 連結 `vinc::messages`（或既有的 `vinc_messages`）即可取得生成相依、標頭路徑及訊息儲存 library。
 

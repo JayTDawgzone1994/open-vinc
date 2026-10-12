@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Local Shell tests for parsing, quoting, UTF-8 editing, name reservation and dispatch.
 // No child process is needed for these command/editor contracts.
 
@@ -48,7 +49,7 @@ void test_parsing_and_quoting() {
 }
 
 void test_initialization_failure() {
-    auto manager = checked_value(ModuleManager::create());
+    auto manager = checked_value(vinc::test::create_manager());
     std::ostringstream output;
     const auto uninitialized = Shell::create(*manager, output);
     check(!uninitialized && uninitialized.error().is(shell::ErrorCode::TclNotInitialized),
@@ -75,7 +76,7 @@ void test_error_contracts() {
               quote.error().operation == static_cast<std::int32_t>(shell::ErrorOperation::ParseLine),
           "parser returns typed code and operation");
 
-    auto manager = checked_value(ModuleManager::create());
+    auto manager = checked_value(vinc::test::create_manager());
     std::ostringstream output;
     std::vector<output_hub::Subscription> subscriptions;
     for (std::size_t index = 0; index < config::output_hub_max_subscribers; ++index) {
@@ -166,7 +167,7 @@ void test_parser_boundaries() {
 }
 
 void test_dispatch_and_lifetime() {
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }

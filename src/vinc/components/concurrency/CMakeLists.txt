@@ -5,6 +5,8 @@ add_library(vinc::concurrency ALIAS vinc_concurrency)
 target_include_directories(vinc_concurrency PUBLIC include)
 target_link_libraries(vinc_concurrency PUBLIC vinc::common vinc::osal PRIVATE Threads::Threads)
 target_compile_features(vinc_concurrency PUBLIC cxx_std_23)
+set_target_properties(vinc_concurrency PROPERTIES
+    CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 if(MSVC)
     target_compile_options(vinc_concurrency PRIVATE /W4 /utf-8)
 else()

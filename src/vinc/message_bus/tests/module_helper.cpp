@@ -195,6 +195,10 @@ public:
             return copied_ ? static_cast<int32_t>(copied_->data().sequence.get()) : -1;
         }
 
+        if (command == "publisher-is" && args.size() == 2) {
+            return copied_ && copied_->publisher_name() == args[1] ? 1 : 0;
+        }
+
         if (command == "copy-size") {
             return copied_ ? static_cast<int32_t>(copied_->data().payload.size()) : -1;
         }

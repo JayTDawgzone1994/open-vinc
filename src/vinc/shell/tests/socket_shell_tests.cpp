@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 // Real OSAL TCP clients exercise session ownership and framing. No mock sockets.
 #include "input_pipe.hpp"
 #include <vinc/shell/detail/shell.hpp>
@@ -172,7 +173,7 @@ void test_sessions_and_backpressure(Files& files) {
     constexpr auto expired_owner_probe_delay = 1400ms; // Longer than disconnect_timeout.
     constexpr int stalled_receive_buffer_bytes = 1024;
 
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
 
     if (!manager_owner) {
 
@@ -305,7 +306,7 @@ void test_sessions_and_backpressure(Files& files) {
 
 void test_connection_capacity() {
     constexpr int expected_default_connections = 8;
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -334,7 +335,7 @@ void test_connection_capacity() {
 }
 
 void test_ipv6_listener() {
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -352,7 +353,7 @@ void test_ipv6_listener() {
 
 void test_remote_shutdown(Files& files, char** argv) {
     // Full local event loop: remote exit must wait for the actual child stop hook.
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -419,7 +420,7 @@ void test_remote_shutdown(Files& files, char** argv) {
 }
 
 void test_remote_contract(Files& files, const std::filesystem::path& helper) {
-    auto manager = take(ModuleManager::create());
+    auto manager = take(vinc::test::create_manager());
     take(manager->register_module_type({"shellHelper", helper, "faultNode", {}}));
     const auto mid = take(manager->start_module("shellHelper", {"normal", text(files.path)}));
     take(manager->wait_running(mid, Clock::now() + fixture_wait_timeout));

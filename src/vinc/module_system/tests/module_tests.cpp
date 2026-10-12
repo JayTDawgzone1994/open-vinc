@@ -1,3 +1,5 @@
+#include <vinc/module/detail/module_protocol.hpp>
+#include "../../../../tests/support/manager.hpp"
 // Central supervision integration tests against real helper processes.
 // Check readiness, exclusive name registration, request failure, parent loss, restart and stop behavior.
 
@@ -104,7 +106,7 @@ void test_parent_loss(const std::filesystem::path& helper) {
             "orphan_" + std::to_string(std::random_device{}()), 1234));
         osal::SpawnOptions spawn;
         spawn.executable = std::filesystem::path(VINC_MODULE_HOST_PATH);
-        spawn.arguments = {"--vinc-module-v7",
+        spawn.arguments = {detail::bootstrap::version_marker,
                            endpoint_text,
                            "orphan",
                            "orphan-test",
@@ -195,12 +197,12 @@ int main(int argc, char** argv) {
         const auto silent_helper = std::filesystem::absolute(argv[2]);
         auto invalid_limits = message_bus::Limits{};
         invalid_limits.max_topics = 0;
-        auto invalid_manager = ModuleManager::create(invalid_limits);
+        auto invalid_manager = vinc::test::create_manager(invalid_limits);
         check(!invalid_manager && invalid_manager.error().is(module_system::ErrorCode::BusFailed) &&
                   invalid_manager.error().causes().size() == 1 &&
                   invalid_manager.error().causes().front().domain == ErrorDomain::MessageBus,
               "manager factory reports dependency failure and releases partial services");
-        auto manager_owner = vinc::ModuleManager::create();
+        auto manager_owner = vinc::test::create_manager();
         if (!manager_owner) {
             throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
         }
@@ -474,7 +476,7 @@ int main(int argc, char** argv) {
               "explicit stop never restarts");
         check(bool(manager.unregister_module_type("helper")), "unregister retry module type");
         {
-            auto reserved_owner = vinc::ModuleManager::create();
+            auto reserved_owner = vinc::test::create_manager();
             if (!reserved_owner) {
                 throw std::runtime_error(vinc::error_to_string(reserved_owner.error()));
             }
@@ -518,7 +520,7 @@ int main(int argc, char** argv) {
               "native launch error retained");
         check(bool(manager.unregister_module_type("helper")), "unregister missing module type");
         policy.max_restarts = 0;
-        auto silent_owner = take(ModuleManager::create({}, silent_helper));
+        auto silent_owner = take(vinc::test::create_manager({}, silent_helper));
         auto& silent_manager = *silent_owner;
         check(bool(silent_manager.register_module_type({"silent", silent_helper, "silentNode", policy})),
               "register silent peer");
@@ -563,7 +565,7 @@ int main(int argc, char** argv) {
         std::filesystem::remove(marker);
         check(stopped_name == manager.inspect(*graceful)->name, "on_stop executed");
         {
-            auto scoped_owner = vinc::ModuleManager::create();
+            auto scoped_owner = vinc::test::create_manager();
             if (!scoped_owner) {
                 throw std::runtime_error(vinc::error_to_string(scoped_owner.error()));
             }

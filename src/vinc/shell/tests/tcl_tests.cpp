@@ -1,3 +1,4 @@
+#include "../../../../tests/support/manager.hpp"
 #include <vinc/osal/path.hpp>
 // Embed real Tcl to test language behavior, argument preservation and per-run isolation.
 // Cancellation/error cases also verify that script failure does not implicitly stop live modules.
@@ -86,7 +87,7 @@ struct Files {
 };
 
 void test_module_wait_cancellation(Files& files, shell::TclRuntime& runtime, char** argv) {
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -134,7 +135,7 @@ void test_module_wait_cancellation(Files& files, shell::TclRuntime& runtime, cha
 }
 
 void test_startup_error_returns_to_shell(Files& files, char** argv) {
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -181,7 +182,7 @@ void test_startup_error_returns_to_shell(Files& files, char** argv) {
 }
 
 void test_foreground_script_cancellation(Files& files) {
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }
@@ -240,7 +241,7 @@ void test_foreground_script_cancellation(Files& files) {
 }
 
 void test_startup_interrupt(Files& files, char** argv) {
-    auto manager_owner = vinc::ModuleManager::create();
+    auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
     }

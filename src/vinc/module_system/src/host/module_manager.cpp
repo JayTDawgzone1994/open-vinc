@@ -1,3 +1,11 @@
+#include <vinc/module/detail/python_launch.hpp>
+#include <vinc/log/detail/manager.hpp>
+#include <iostream>
+#include <vinc/param/detail/manager.hpp>
+#include <vinc/module/detail/instance.hpp>
+#include <vinc/module/detail/lock_registry.hpp>
+#include <vinc/module/detail/instance_name.hpp>
+#include <vinc/module/detail/manager_access.hpp>
 // Central module supervisor: allocate MIDs, approve names, launch through OSAL, wait for Ready,
 // route requests, and stop/reap each generation before retiring its Message Bus resources.
 
@@ -6,6 +14,7 @@
 #include <vinc/module/detail/contract_report.hpp>
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/module/detail/host_path.hpp>
+#include <vinc/module/detail/mid_allocator.hpp>
 #include <vinc/module/detail/module_protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <algorithm>
@@ -51,7 +60,7 @@ constexpr int directory_reservation_attempts = 8;
 constexpr std::size_t directory_nonce_characters = 12;
 constexpr int module_listener_backlog = 4;
 // One local Shell plus eight remote Shell subscribers.
-constexpr std::size_t output_subscriber_limit = 9;
+constexpr std::size_t output_subscriber_limit = 10;
 
 bool valid_policy(const ModulePolicy& policy) {
     const bool invalid_heartbeat = policy.heartbeat_interval <= 0ms ||
@@ -113,13 +122,7 @@ Result<std::string> nonce() {
 std::atomic<MID> next_mid{1};
 
 Result<MID> new_mid() {
-    auto mid = next_mid.load(std::memory_order_relaxed);
-    do {
-        if (mid == UINT64_MAX) {
-            return std::unexpected(failure(ErrorCode::MidExhausted, ErrorOperation::AllocateMid));
-        }
-    } while (!next_mid.compare_exchange_weak(mid, mid + 1, std::memory_order_relaxed));
-    return mid;
+    return detail::allocate_mid(next_mid);
 }
 
 // One logical Module across restarts. Record::mutex protects its current generation.
@@ -336,7 +339,7 @@ struct ProcessServices {
 };
 
 Result<ProcessServices> create_process_services() {
-    auto channels = control::Service::create();
+    auto channels = control::Service::create(control::detail::default_session_capacity * 2);
     if (!channels) {
         return std::unexpected(
             wrap_error(ErrorCode::ServiceFailed, ErrorOperation::Create, channels.error()));
@@ -354,13 +357,13 @@ struct DataServices {
     std::unique_ptr<message_bus::detail::BusManager> bus;
 };
 
-Result<DataServices> create_data_services(message_bus::Limits limits) {
+Result<DataServices> create_data_services(message_bus::Limits limits, std::shared_ptr<detail::ResourceNames> resources) {
     auto output =
         output_hub::OutputHub::create(output_hub::Limits{.max_subscribers = output_subscriber_limit});
     if (!output) {
         return std::unexpected(wrap_error(ErrorCode::OutputFailed, ErrorOperation::Create, output.error()));
     }
-    auto bus = message_bus::detail::BusManager::create(limits);
+    auto bus = message_bus::detail::BusManager::create(limits, std::move(resources));
     if (!bus) {
         return std::unexpected(wrap_error(ErrorCode::BusFailed, ErrorOperation::Create, bus.error()));
     }
@@ -369,7 +372,25 @@ Result<DataServices> create_data_services(message_bus::Limits limits) {
 
 } // namespace
 
+namespace {
+Result<std::unique_ptr<param::detail::ParamManager>> create_param_services(
+    detail::LockRegistry& locks, std::shared_ptr<detail::ResourceNames> names) {
+    auto descriptor = locks.create();
+    if (!descriptor) {
+        return std::unexpected(descriptor.error());
+    }
+    auto storage = param::detail::Storage::create(std::move(names), descriptor->name, descriptor->id);
+    if (!storage) {
+        return std::unexpected(storage.error());
+    }
+    return param::detail::ParamManager::create(std::move(*storage));
+}
+}
+
 struct ModuleManager::Impl {
+    // Declared first, destroyed last: admission survives all resource producers.
+    std::shared_ptr<detail::Instance> instance;
+    std::unique_ptr<detail::LockRegistry> locks;
     mutable std::mutex mutex;
     std::condition_variable wake;
     std::map<std::string, ModuleType> module_types;
@@ -381,6 +402,9 @@ struct ModuleManager::Impl {
     // One local Shell plus eight connected remote Shell subscribers.
     std::unique_ptr<output_hub::OutputHub> output;
     std::unique_ptr<message_bus::detail::BusManager> bus_manager;
+    std::unique_ptr<param::detail::ParamManager> params;
+    std::unique_ptr<log::detail::Manager> logs;
+    std::string instance_name;
     std::filesystem::path directory;
     std::filesystem::path host_executable;
     std::jthread worker;
@@ -525,10 +549,23 @@ struct ModuleManager::Impl {
             return false;
         }
 
+        if (logs) {
+            control::Options options;
+            options.generation = record.snapshot.mid;
+            options.token = record.token;
+            options.heartbeat_timeout_enabled = !record.snapshot.debug;
+            options.heartbeat_interval = record.module_type.policy.heartbeat_interval;
+            options.heartbeat_timeout = record.module_type.policy.heartbeat_timeout;
+            options.handshake_timeout = record.module_type.policy.startup_timeout;
+            auto log_listener = logs->listen(record.snapshot.mid, utf8(record.socket_path), options);
+            if (!log_listener) {
+                logs->diagnostic("Log listener unavailable: " + error_to_string(log_listener.error()));
+            }
+        }
         return true;
     }
 
-    osal::SpawnOptions make_spawn_options(const Record& record) {
+    Result<osal::SpawnOptions> make_spawn_options(const Record& record) {
         const auto& policy = record.module_type.policy;
         osal::SpawnOptions options;
         // Central coordinates shutdown; terminal Ctrl+C must not kill children first.
@@ -546,10 +583,16 @@ struct ModuleManager::Impl {
                              std::to_string(policy.stop_timeout.count()),
                              record.module_type.name,
                              record.contract_report->name(),
-                             utf8(record.module_type.library),
+                             utf8(record.module_type.python ? record.module_type.python->script : record.module_type.library),
                              record.snapshot.debug ? "1" : "0"};
         options.arguments.insert(options.arguments.end(), record.arguments.begin(), record.arguments.end());
 
+        if (record.module_type.python) {
+            auto prepared = detail::prepare_python_spawn(options, *record.module_type.python);
+            if (!prepared) {
+                return std::unexpected(prepared.error());
+            }
+        }
         return options;
     }
 
@@ -567,6 +610,12 @@ struct ModuleManager::Impl {
         record.output_capture = child->capture;
         record.process.emplace(std::move(child->process));
         record.snapshot.pid = record.process->pid();
+        if (logs) {
+            logs->identify(record.snapshot.mid,
+                           record.snapshot.name.empty() ? "starting:" + std::to_string(record.snapshot.mid)
+                                                        : record.snapshot.name,
+                           record.snapshot.pid);
+        }
         record.snapshot.state = ModuleState::Starting;
         record.changed.notify_all();
     }
@@ -582,7 +631,12 @@ struct ModuleManager::Impl {
             return;
         }
 
-        auto report = detail::ContractReportStorage::create("fault_" + record.token.substr(0, 18), record.snapshot.mid);
+        auto report_name = instance->reserve();
+        if (!report_name) {
+            record_failure(record, report_name.error());
+            return;
+        }
+        auto report = detail::ContractReportStorage::create(*report_name, record.snapshot.mid);
         if (!report) {
             record_failure(record, report.error());
             return;
@@ -590,15 +644,28 @@ struct ModuleManager::Impl {
         record.contract_report = std::move(*report);
 
         auto options = make_spawn_options(record);
+        if (!options) {
+            record_failure(record, options.error());
+            return;
+        }
         record.startup_deadline = record.snapshot.debug
                                       ? (Deadline::max)()
                                       : Clock::now() + record.module_type.policy.startup_timeout;
-        spawn_child(record, options);
+        spawn_child(record, *options);
     }
 
     // Release the completed run and apply restart policy to the same logical Module.
     // An explicit user stop suppresses restart even if retries remain.
     void finished(Record& record) {
+        if (logs) {
+            logs->exited(record.snapshot.mid);
+            if (record.snapshot.last_failure && record.snapshot.last_failure->mid == record.snapshot.mid) {
+                logs->diagnostic("Module stopped: " + record.snapshot.name +
+                                     " mid=" + std::to_string(record.snapshot.mid) + " " +
+                                     error_to_string(record.snapshot.last_failure->error),
+                                 log::Level::Error);
+            }
+        }
         if (record.session) {
             record.session->close();
         }
@@ -617,6 +684,12 @@ struct ModuleManager::Impl {
             auto closed = record.contract_report->close();
             if (!closed) {
                 save_cleanup(record, closed.error());
+            }
+            if (closed) {
+                auto retired = instance->retire(record.contract_report->name());
+                if (!retired) {
+                    save_cleanup(record, retired.error());
+                }
             }
             record.contract_report.reset();
         }
@@ -666,6 +739,18 @@ struct ModuleManager::Impl {
         // the later recovered root diagnostic. Copies here never allocate.
         diagnostic.sequence = contract_revision.load() + 1;
         record.snapshot.last_contract_failure = diagnostic;
+        if (logs && diagnostic.report) {
+            const auto& report = *diagnostic.report;
+            auto text = "Module contract failure: " + record.snapshot.name +
+                        " mid=" + std::to_string(record.snapshot.mid) +
+                        " pid=" + std::to_string(record.snapshot.pid) + " reason=" + report.reason.data() +
+                        " file=" + report.file.data() + ":" + std::to_string(report.line) +
+                        " function=" + report.function.data();
+            if (report.has_index) {
+                text += " index=" + std::to_string(report.index) + " size=" + std::to_string(report.size);
+            }
+            logs->diagnostic(std::move(text), log::Level::Error);
+        }
         contract_revision.store(diagnostic.sequence);
         record.fault = true;
     }
@@ -714,7 +799,12 @@ struct ModuleManager::Impl {
 
                 // Only confirmed OS exit permits reclaiming this generation's shared reader leases.
                 // A missing heartbeat alone does not prove that the process has stopped touching memory.
+                auto recovered = locks->exited(record.snapshot.mid);
+                if (!recovered) {
+                    save_cleanup(record, recovered.error());
+                }
                 bus_manager->exited(record.snapshot.generation);
+                params->exited(record.snapshot.mid);
                 record.normal_completion = record.completed && !record.fault &&
                     (**exit_status).kind == osal::ExitKind::Code && (**exit_status).value == 0;
                 if (!record.user_stop && !record.fault && !record.normal_completion) {
@@ -831,6 +921,28 @@ struct ModuleManager::Impl {
                 } else if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
                     frame.operation == detail::report_failure) {
                     receive_failure(record, frame);
+                } else if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
+                           frame.operation == detail::attach_lock) {
+                    receive_lock_request(record, frame);
+                } else if (frame.domain == param::detail::domain) {
+                    if (!record.name_confirmed || record.fault || record.user_stop || record.finishing) {
+                        record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::AccessParam));
+                        break;
+                    }
+                    const auto operation = frame.operation;
+                    const auto request = frame.request;
+                    auto submitted = params->submit(record.snapshot.mid, record.session, std::move(frame));
+                    if (!submitted) {
+                        if (submitted.error().is(param::ErrorCode::CapacityExceeded)) {
+                            control::Frame response{control::Kind::Response, param::detail::domain, operation, request};
+                            response.payload = param::detail::encode_failure(submitted.error());
+                            (void)record.session->send(std::move(response));
+                        } else {
+                            record_failure(record, wrap_error(ErrorCode::ParamFailed, ErrorOperation::Receive,
+                                                              submitted.error()));
+                            break;
+                        }
+                    }
                 } else if (frame.domain == message_bus::detail::message_bus_domain) {
                     if (!record.name_confirmed) {
                         record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::Receive));
@@ -890,6 +1002,38 @@ struct ModuleManager::Impl {
                     break;
                 }
             }
+        }
+    }
+
+    void receive_lock_request(Record& record, const control::Frame& frame) {
+        control::Reader reader(frame.payload);
+        const auto version = reader.u32();
+        const auto id = reader.u64();
+        if (!reader.done() || version != detail::lock_protocol_version || !frame.request ||
+            !record.name_confirmed) {
+            record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::AccessLock));
+            return;
+        }
+        auto descriptor = (record.user_stop || record.fault || record.finishing)
+            ? Result<detail::LockDescriptor>(std::unexpected(failure(ErrorCode::Closing, ErrorOperation::AccessLock)))
+            : locks->descriptor(id);
+        control::Frame response{control::Kind::Response, detail::lifecycle, detail::attach_lock, frame.request};
+        if (!descriptor) {
+            response.payload = detail::encode_failure(descriptor.error());
+        } else {
+            control::put_u32(response.payload, detail::result_success);
+            control::put_u32(response.payload, detail::lock_protocol_version);
+            control::put_u64(response.payload, descriptor->id);
+            control::put_u64(response.payload, record.snapshot.mid);
+            auto encoded = control::put_string(response.payload, descriptor->name);
+            if (!encoded) {
+                record_failure(record, wrap_error(ErrorCode::Protocol, ErrorOperation::AccessLock, encoded.error()));
+                return;
+            }
+        }
+        auto sent = record.session->send(std::move(response));
+        if (!sent) {
+            record_failure(record, wrap_error(ErrorCode::ChannelFailed, ErrorOperation::AccessLock, sent.error()));
         }
     }
 
@@ -972,14 +1116,11 @@ struct ModuleManager::Impl {
         std::optional<Error> rejection;
 
         if (!reader.done() || name.empty() || name.size() > module_name_limit_bytes ||
-            std::any_of(name.begin(), name.end(), [](unsigned char character) {
-                // ASCII C0 controls and DEL are not accepted in a registered name.
-                return character < 32 || character == 127;
-            })) {
+            !param::valid_segment(name)) {
             rejection = failure(ErrorCode::InvalidName, ErrorOperation::RegisterName);
         } else if (!record->snapshot.name.empty() && name != record->snapshot.name) {
             rejection = failure(ErrorCode::RestartNameChanged, ErrorOperation::RegisterName);
-        } else if (reserved_commands.contains(name) || module_types.contains(name) ||
+        } else if (name == "vinc" || name == "param" || reserved_commands.contains(name) || module_types.contains(name) ||
                    programs.contains(name)) {
             rejection = failure(ErrorCode::NameReserved, ErrorOperation::RegisterName);
         }
@@ -1027,6 +1168,10 @@ struct ModuleManager::Impl {
             }
             record->snapshot.name = std::move(name);
             record->name_confirmed = true;
+            params->admit(record->snapshot.mid, record->snapshot.name);
+            if (logs) {
+                logs->identify(record->snapshot.mid, record->snapshot.name, record->snapshot.pid);
+            }
         } else {
             save_failure(*record, *rejection);
             record->startup_rejected = true;
@@ -1187,6 +1332,10 @@ ModuleManager::ModuleManager(std::unique_ptr<Impl> implementation) noexcept
 }
 
 Result<std::unique_ptr<ModuleManager>> ModuleManager::create(message_bus::Limits limits, std::filesystem::path host_executable) {
+    return detail::ManagerAccess::create(std::string(detail::instance_name), limits, std::move(host_executable));
+}
+
+Result<std::unique_ptr<ModuleManager>> detail::ManagerAccess::create(std::string name, message_bus::Limits limits, std::filesystem::path host_executable) {
     try {
         if (host_executable.empty()) {
             host_executable = std::filesystem::path(VINC_MODULE_HOST_PATH);
@@ -1194,17 +1343,37 @@ Result<std::unique_ptr<ModuleManager>> ModuleManager::create(message_bus::Limits
         if (!host_executable.is_absolute()) {
             return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::Create));
         }
+        auto instance = detail::Instance::create(name);
+        if (!instance) {
+            return std::unexpected(instance.error());
+        }
         auto process_services = create_process_services();
         if (!process_services) {
             return std::unexpected(process_services.error());
         }
-        auto data_services = create_data_services(limits);
+        auto data_services = create_data_services(limits, *instance);
         if (!data_services) {
             return std::unexpected(data_services.error());
         }
-        auto implementation = std::make_unique<Impl>(
+        auto implementation = std::make_unique<ModuleManager::Impl>(
             std::move(process_services->channels), std::move(process_services->processes),
             std::move(data_services->output), std::move(data_services->bus));
+        implementation->instance = std::move(*instance);
+        implementation->locks = std::make_unique<detail::LockRegistry>(implementation->instance);
+        implementation->instance_name = std::move(name);
+        auto parameters = create_param_services(*implementation->locks, implementation->instance);
+        if (!parameters) {
+            return std::unexpected(
+                wrap_error(ErrorCode::ParamFailed, ErrorOperation::Create, parameters.error()));
+        }
+        implementation->params = std::move(*parameters);
+        auto logs = log::detail::Manager::create(*implementation->channels, *implementation->output,
+                                                 implementation->instance_name);
+        if (logs) {
+            implementation->logs = std::move(*logs);
+        } else {
+            std::cerr << "Log unavailable: " << error_to_string(logs.error()) << '\n';
+        }
         implementation->host_executable = std::move(host_executable);
         auto directory = implementation->reserve_socket_directory();
         if (!directory) {
@@ -1212,8 +1381,8 @@ Result<std::unique_ptr<ModuleManager>> ModuleManager::create(message_bus::Limits
         }
         // Construct the owner before launching; its destructor can roll back a failed thread start.
         auto manager = std::unique_ptr<ModuleManager>(new ModuleManager(std::move(implementation)));
-        manager->impl_->worker = std::jthread([state = manager->impl_.get()](std::stop_token stop) {
-            state->monitor(stop);
+        manager->impl_->worker = std::jthread([state = manager->impl_.get()](std::stop_token token) {
+            state->monitor(token);
         });
         return manager;
     } catch (const std::system_error& error) {
@@ -1222,6 +1391,50 @@ Result<std::unique_ptr<ModuleManager>> ModuleManager::create(message_bus::Limits
     } catch (const std::bad_alloc&) {
         return std::unexpected(failure(ErrorCode::ResourceExhausted, ErrorOperation::Create));
     }
+}
+
+Result<detail::LockDescriptor> detail::ManagerAccess::create_lock(ModuleManager& manager) {
+    {
+        std::lock_guard lock(manager.impl_->mutex);
+        if (manager.impl_->closing) {
+            return std::unexpected(failure(ErrorCode::Closing, ErrorOperation::AccessLock));
+        }
+    }
+    // Admission linearizes above. In-flight creation may finish during shutdown;
+    // the registry retains it until destruction, without blocking supervision.
+    return manager.impl_->locks->create();
+}
+
+Result<void> detail::ManagerAccess::configure_params(ModuleManager& manager, std::filesystem::path data_root) {
+    auto result = manager.impl_->params->configure(data_root / manager.impl_->instance_name / "params.toml");
+    if (!result) {
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
+    }
+    return {};
+}
+Result<std::string> detail::ManagerAccess::param_command(ModuleManager& manager, std::vector<std::string> args, std::stop_token cancellation) {
+    auto result = manager.impl_->params->command(std::move(args), cancellation);
+    if (!result) {
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
+    }
+    return result;
+}
+Result<void> detail::ManagerAccess::register_param(ModuleManager& manager, std::string name, param::Value defaults) {
+    auto result = manager.impl_->params->register_framework(std::move(name), std::move(defaults));
+    if (!result) {
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
+    }
+    return {};
+}
+std::string detail::ManagerAccess::param_diagnostic(ModuleManager& manager, std::uint64_t& cursor) {
+    return manager.impl_->params->diagnostic(cursor);
+}
+Result<param::Snapshot> detail::ManagerAccess::param_snapshot(ModuleManager& manager) {
+    auto result = manager.impl_->params->inspect();
+    if (!result) {
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
+    }
+    return result;
 }
 
 ModuleManager::~ModuleManager() {
@@ -1265,11 +1478,13 @@ ModuleManager::~ModuleManager() {
         }
         close_listener(*record);
     }
-    impl_->channels.reset();
+    impl_->params.reset();
 
     // Normal destructor-driven stop also drains observed generations. The
     // bounded fallback does not pretend that unobserved process exits occurred.
     (void)impl_->output->wait_until(Clock::now() + output_drain_timeout);
+    impl_->logs.reset();
+    impl_->channels.reset();
     std::error_code remove_error;
     std::filesystem::remove(impl_->directory, remove_error);
 }
@@ -1288,8 +1503,15 @@ Result<void> ModuleManager::register_module_type(ModuleType module_type) {
         module_type.name.find('\0') != std::string::npos ||
         module_type.module_base_name.size() > module_name_limit_bytes ||
         module_type.module_base_name.find('\0') != std::string::npos ||
-        !module_type.library.is_absolute()) {
+        (!module_type.python && !module_type.library.is_absolute())) {
         return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::RegisterType));
+    }
+    if (module_type.python) {
+        const auto& python = *module_type.python;
+        if (!module_type.library.empty() || !python.script.is_absolute() || !python.bootstrap.is_absolute() ||
+            (!python.executable.empty() && !python.executable.is_absolute())) {
+            return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::RegisterType));
+        }
     }
     if (module_type.module_base_name.empty()) {
         module_type.module_base_name = module_type.name;
@@ -1341,6 +1563,9 @@ Result<MID> ModuleManager::start_module(const std::string& name, std::vector<std
     record->snapshot.generation = *mid;
     record->snapshot.module_type = name;
     record->snapshot.plugin_path = entry->second.library;
+    if (entry->second.python) {
+        record->snapshot.python_script = entry->second.python->script;
+    }
     record->snapshot.debug = options.debug;
     record->arguments = std::move(args);
     impl_->records.push_back(record);
@@ -1770,3 +1995,42 @@ bool ModuleManager::has_micro_program(const std::string& name) const {
     return impl_->programs.contains(name);
 }
 } // namespace vinc
+
+namespace vinc::detail {
+Result<void> ManagerAccess::configure_log(ModuleManager& manager, std::filesystem::path root,
+                                          log::FileOptions options) {
+    if (!manager.impl_->logs) {
+        return std::unexpected(Error{module_system::ErrorCode::LogFailed, module_system::ErrorOperation::AccessLog});
+    }
+    auto result = manager.impl_->logs->configure(root / manager.impl_->instance_name / "logs", options);
+    if (!result) {
+        return std::unexpected(wrap_error(module_system::ErrorCode::LogFailed, module_system::ErrorOperation::AccessLog, result.error()));
+    }
+    return {};
+}
+
+Result<std::string> ManagerAccess::log_command(ModuleManager& manager, const std::vector<std::string>& args) {
+    if (!manager.impl_->logs) {
+        return std::unexpected(Error{module_system::ErrorCode::LogFailed, module_system::ErrorOperation::AccessLog});
+    }
+    auto result = manager.impl_->logs->command(args);
+    if (!result) {
+        return std::unexpected(wrap_error(module_system::ErrorCode::LogFailed, module_system::ErrorOperation::AccessLog, result.error()));
+    }
+    return result;
+}
+
+std::string ManagerAccess::log_take(ModuleManager& manager, log::View& view) {
+    if (!manager.impl_->logs) {
+        return {};
+    }
+    return manager.impl_->logs->take(view);
+}
+
+std::string ManagerAccess::log_notification(ModuleManager& manager, std::uint64_t& cursor) {
+    if (!manager.impl_->logs) {
+        return {};
+    }
+    return manager.impl_->logs->notification(cursor);
+}
+}

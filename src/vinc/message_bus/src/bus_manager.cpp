@@ -16,6 +16,11 @@
 #endif
 
 namespace vinc::message_bus::detail {
+namespace {
+vinc::Error io_resource(const vinc::Error& error, ErrorOperation operation) {
+    return vinc::wrap_error(ErrorCode::Io, operation, error);
+}
+}
 struct BusManager::Impl {
     struct Peer {
         std::shared_ptr<control::Session> session;
@@ -46,6 +51,7 @@ struct BusManager::Impl {
         bool exit = false;
     };
 
+    std::shared_ptr<vinc::detail::ResourceNames> resources;
     Limits limits;
     std::uint64_t next_id = 1;
     std::uint64_t allocated = 0;
@@ -60,7 +66,8 @@ struct BusManager::Impl {
     std::size_t pending_work = 0;
     std::thread worker;
 
-    explicit Impl(Limits settings) : limits(settings) {
+    explicit Impl(Limits settings, std::shared_ptr<vinc::detail::ResourceNames> names)
+        : resources(std::move(names)), limits(settings) {
     }
 
     void start_worker() {
@@ -124,7 +131,11 @@ struct BusManager::Impl {
             return std::unexpected(vinc::make_error(ErrorCode::ResourceExhausted, ErrorOperation::CreateTopic));
         }
 
-        auto counter = NamedCounter::create(shared_name('t'));
+        auto counter_name = resources ? resources->reserve() : vinc::Result<std::string>(shared_name('t'));
+        if (!counter_name) {
+            return std::unexpected(io_resource(counter_name.error(), ErrorOperation::CreateTopic));
+        }
+        auto counter = NamedCounter::create(*counter_name, resources);
         if (!counter) {
             return std::unexpected(counter.error());
         }
@@ -237,6 +248,10 @@ struct BusManager::Impl {
         }
 
         const auto slots = (std::max)(minimum_ring_buffer_slots, requested);
+        if (!valid_topic_separators(name)) {
+            return std::unexpected(vinc::make_error(ErrorCode::InvalidArgument, ErrorOperation::Advertise));
+        }
+
         if (RingBuffer::slot_stride(bytes) > limits.max_shared_bytes / slots) {
             return std::unexpected(vinc::make_error(ErrorCode::ResourceExhausted, ErrorOperation::Advertise));
         }
@@ -271,11 +286,22 @@ struct BusManager::Impl {
         descriptor.slots = slots;
         descriptor.bytes = bytes;
         descriptor.readers = limits.subscribers_per_topic;
-        descriptor.control = shared_name('c');
-        descriptor.data = shared_name('d');
+        auto control_name = resources ? resources->reserve() : vinc::Result<std::string>(shared_name('c'));
+        if (!control_name) {
+            return std::unexpected(io_resource(control_name.error(), ErrorOperation::Advertise));
+        }
+        auto data_name = resources ? resources->reserve() : vinc::Result<std::string>(shared_name('d'));
+        if (!data_name) {
+            if (resources) {
+                (void)resources->retire(*control_name);
+            }
+            return std::unexpected(io_resource(data_name.error(), ErrorOperation::Advertise));
+        }
+        descriptor.control = std::move(*control_name);
+        descriptor.data = std::move(*data_name);
         descriptor.counter = topic_state.counter->name;
         descriptor.publisher = item.name;
-        auto ring_buffer = RingBuffer::create(descriptor);
+        auto ring_buffer = RingBuffer::create(descriptor, resources);
         if (!ring_buffer) {
             return std::unexpected(ring_buffer.error());
         }
@@ -311,6 +337,10 @@ struct BusManager::Impl {
         const auto start = reader.u32();
         if (!reader.done() || start > 1) {
             return std::unexpected(vinc::make_error(ErrorCode::Protocol, ErrorOperation::Subscribe));
+        }
+
+        if (!valid_topic_separators(name)) {
+            return std::unexpected(vinc::make_error(ErrorCode::InvalidArgument, ErrorOperation::Subscribe));
         }
 
         auto found = topic(name, schema);
@@ -374,8 +404,43 @@ struct BusManager::Impl {
         return body;
     }
 
+    vinc::Result<control::Bytes> list_topics(const Work& item) {
+        control::Reader reader(item.frame.payload);
+        const auto after = reader.string();
+        if (!reader.done() || after.size() > maximum_name_bytes) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ListTopics});
+        }
+        std::vector<TopicInfo> page;
+        auto iterator = topics.upper_bound(after);
+        while (iterator != topics.end() && page.size() < topics_per_page) {
+            if (!iterator->second.publishers.empty()) {
+                page.push_back({iterator->first, iterator->second.schema,
+                    static_cast<std::uint32_t>(iterator->second.publishers.size())});
+            }
+            ++iterator;
+        }
+        control::Bytes result;
+        control::put_u32(result, static_cast<std::uint32_t>(page.size()));
+        for (const auto& entry : page) {
+            auto encoded = control::put_string(result, entry.name);
+            if (!encoded) {
+                return std::unexpected(wrap_error(ErrorCode::Protocol, ErrorOperation::ListTopics, encoded.error()));
+            }
+            control::put_u64(result, entry.schema);
+            control::put_u32(result, entry.publishers);
+        }
+        const std::string next = iterator != topics.end() && !page.empty() ? page.back().name : std::string{};
+        auto encoded = control::put_string(result, next);
+        if (!encoded) {
+            return std::unexpected(wrap_error(ErrorCode::Protocol, ErrorOperation::ListTopics, encoded.error()));
+        }
+        return result;
+    }
+
     vinc::Result<control::Bytes> execute(const Work& item) {
         switch (item.frame.operation) {
+        case ListTopics:
+            return list_topics(item);
         case Advertise:
             return advertise(item);
         case Subscribe:
@@ -460,7 +525,7 @@ struct BusManager::Impl {
 BusManager::BusManager(std::unique_ptr<Impl> implementation) noexcept : impl_(std::move(implementation)) {
 }
 
-vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings) {
+vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings, std::shared_ptr<vinc::detail::ResourceNames> resources) {
     if (!settings.max_topics || !settings.publishers_per_topic ||
         settings.publishers_per_topic > maximum_attached_publishers || !settings.subscribers_per_topic ||
         settings.subscribers_per_topic > maximum_ring_buffer_readers ||
@@ -469,7 +534,7 @@ vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings) {
     }
 
     try {
-        auto impl = std::make_unique<Impl>(settings);
+        auto impl = std::make_unique<Impl>(settings, std::move(resources));
         auto result = std::unique_ptr<BusManager>(new BusManager(std::move(impl)));
         result->impl_->start_worker();
         return result;

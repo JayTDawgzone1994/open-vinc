@@ -6,13 +6,21 @@
 #include <vinc/message_bus/detail/ring_buffer.hpp>
 #include <vinc/message_bus/detail/runtime.hpp>
 #include <vinc/message_bus/detail/error_protocol.hpp>
+#include <string_view>
 
 namespace vinc::message_bus::detail {
 // Bounded control descriptors; these are protocol/admission limits, not queue defaults.
 inline constexpr std::uint32_t maximum_attached_publishers = 32;
 inline constexpr std::size_t maximum_name_bytes = 256;
+inline constexpr std::uint32_t topics_per_page = 32;
 inline constexpr std::size_t response_status_bytes = sizeof(std::uint32_t);
 inline constexpr std::uint64_t minimum_bus_manager_shared_bytes = 1024;
+
+// Topic separators describe user naming, never Module ownership. Keep this
+// check separate from existing length/encoding validation and its diagnostics.
+inline bool valid_topic_separators(std::string_view topic) noexcept {
+    return topic.find('.') == std::string_view::npos;
+}
 
 enum Operation : std::uint16_t {
     // High byte is the Bus protocol version. v1 used 1..6; disjoint identities
@@ -22,11 +30,12 @@ enum Operation : std::uint16_t {
     ClosePublisher = 0x0203,
     Unsubscribe = 0x0204,
     Attach = 0x0205,
-    Detach = 0x0206
+    Detach = 0x0206,
+    ListTopics = 0x0207
 };
 
 inline bool supported_operation(std::uint16_t operation) noexcept {
-    return operation >= Advertise && operation <= Detach;
+    return operation >= Advertise && operation <= ListTopics;
 }
 
 inline vinc::Result<void> encode_descriptor(control::Bytes& bytes, const Descriptor& descriptor) {

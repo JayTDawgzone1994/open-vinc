@@ -2,6 +2,7 @@
 // Exercise real Socket sessions without invoking application module hooks.
 
 #include "channel_test_support.hpp"
+#include <vinc/config.hpp>
 #include <array>
 #include <iostream>
 #include <stdexcept>
@@ -322,13 +323,45 @@ void test_disabled_expiry() {
     options.role = control::Role::Module;
     options.heartbeat_timeout_enabled = true;
     auto child = take(service->attach(std::move(remote), options));
-    check(!central->wait_open(control::Clock::now() + operation_timeout), "different expiry policies rejected");
+    check(!central->wait_open(control::Clock::now() + operation_timeout),
+          "different expiry policies rejected");
     wait_closed(*child);
+}
+
+void test_lossy_receive_and_reserved_send() {
+    auto options = channel_test::options();
+    options.receive_overflow = control::ReceiveOverflow::DropNewest;
+    options.reserved_send_frames = config::log_session_reserved_records;
+    options.reserved_send_bytes = config::log_session_reserved_bytes;
+    auto service = take(control::Service::create());
+    auto peer = attach_raw(*service, options);
+    constexpr std::size_t overflow_frames = 160;
+    for (std::size_t i = 0; i < overflow_frames; ++i) {
+        send_frame(peer.remote, application());
+    }
+    const auto until = control::Clock::now() + operation_timeout;
+    while (peer.session->queue_stats().dropped_frames == 0 && control::Clock::now() < until) {
+        std::this_thread::sleep_for(state_check_interval);
+    }
+    check(peer.session->queue_stats().dropped_frames > 0, "opt-in receive loss counted outside droppable frames");
+    check(peer.session->state() == control::State::Open, "log overflow preserves connection");
+    bool saturated = false;
+    for (int attempt = 0; attempt < max_backpressure_attempts; ++attempt) {
+        auto result = peer.session->send(application(control::max_payload));
+        if (!result) {
+            check(result.error().is(control::ErrorCode::Backpressure), "normal send reaches bounded capacity");
+            saturated = true;
+            break;
+        }
+    }
+    check(saturated, "bounded outgoing queue saturated");
+    check(bool(peer.session->send(application(), true)), "urgent record can use reserved outgoing capacity");
 }
 
 int main() {
     try {
         control::Frame frame{control::Kind::Request, 42, 7, 19, {std::byte{1}, std::byte{2}}};
+        test_lossy_receive_and_reserved_send();
         test_framing(frame);
         test_argument_bytes();
         test_disabled_expiry();

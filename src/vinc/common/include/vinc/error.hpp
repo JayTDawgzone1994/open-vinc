@@ -21,7 +21,10 @@ enum class ErrorDomain : std::uint32_t {
     Concurrency = 6,
     OutputHub = 7,
     Shell = 8,
-    Common = 9
+    Common = 9,
+    Param = 10,
+    Log = 11,
+    Bag = 12
 };
 
 // Each source identifies a numeric namespace, including its originating platform.
@@ -37,7 +40,8 @@ enum class NativeErrorSource : std::uint32_t {
     DarwinResolver = 7,
     LinuxGeneric = 8,
     DarwinGeneric = 9,
-    WindowsGeneric = 10
+    WindowsGeneric = 10,
+    Sqlite = 11
 };
 
 struct NativeError {

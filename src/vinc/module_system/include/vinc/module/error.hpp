@@ -54,7 +54,16 @@ enum class ErrorCode : std::int32_t {
     IncompleteFaultReport = 49,
     PluginLoadFailed = 50,
     InvalidPlugin = 51,
-    IncompatiblePlugin = 52
+    IncompatiblePlugin = 52,
+    InstanceRunning = 53,
+    InstanceStorageFailed = 54,
+    InvalidInstanceJournal = 55,
+    LockFailed = 56,
+    ParamFailed = 57,
+    LogFailed = 58,
+    PythonUnavailable = 59,
+    PythonDiscoveryFailed = 60,
+    PythonException = 61
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,
@@ -111,7 +120,17 @@ enum class ErrorOperation : std::int32_t {
     Pump = 52,
     MainHook = 53,
     SubscriptionCallback = 54,
-    Finish = 55
+    Finish = 55,
+    OpenInstance = 56,
+    RecordResource = 57,
+    CleanInstance = 58,
+    AccessLock = 59,
+    RecoverLock = 60,
+    AccessParam = 61,
+    ParamCallback = 62,
+    AccessLog = 63,
+    DiscoverPython = 64,
+    LoadPython = 65
 };
 }
 

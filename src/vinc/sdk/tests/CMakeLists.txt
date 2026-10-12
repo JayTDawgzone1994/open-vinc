@@ -17,6 +17,12 @@ set(public_headers
     vinc/time.hpp
     vinc/config.hpp
     vinc/module/base_module.hpp
+    vinc/log/log.hpp
+    vinc/log/types.hpp
+    vinc/log/error.hpp
+    vinc/param/params.hpp
+    vinc/param/types.hpp
+    vinc/param/error.hpp
     vinc/module/context.hpp
     vinc/module/error.hpp
     vinc/module/mid.hpp

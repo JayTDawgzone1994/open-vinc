@@ -14,11 +14,15 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <vector>
 
 namespace vinc {
+namespace detail {
+struct ManagerAccess;
+}
 using CommandFunction = std::function<Result<int32_t>(std::vector<std::string>&)>;
 using AutoCompleteFunction = std::function<Result<std::vector<std::string>>(std::vector<std::string>&)>;
 
@@ -52,13 +56,21 @@ struct ModulePolicy {
     std::chrono::milliseconds restart_delay{1000};
 };
 
-// A ModuleType describes a Plugin library and naming/policy defaults; registering it does not launch.
+struct PythonLaunch {
+    std::filesystem::path script;
+    std::filesystem::path bootstrap;
+    // Empty selects Python from PATH at launch. An override is an absolute executable path.
+    std::filesystem::path executable;
+};
+
+// A ModuleType describes a Plugin or Python entry; registering it does not launch.
 // module_base_name is a proposal for the child's on_name hook, never auto-suffixed.
 struct ModuleType {
     std::string name;
     std::filesystem::path library;
     std::string module_base_name;
     ModulePolicy policy;
+    std::optional<PythonLaunch> python;
 };
 
 struct ModuleDiagnostic {
@@ -83,6 +95,7 @@ struct ModuleSnapshot {
     std::string name;
     std::string module_type;
     std::filesystem::path plugin_path;
+    std::filesystem::path python_script;
     bool debug = false;
     bool debug_waiting = false;
     MID mid = 0;
@@ -159,6 +172,7 @@ public:
     bool has_micro_program(const std::string& name) const;
 
 private:
+    friend struct detail::ManagerAccess;
     struct Impl;
     explicit ModuleManager(std::unique_ptr<Impl>) noexcept;
     std::unique_ptr<Impl> impl_;

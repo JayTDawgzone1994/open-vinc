@@ -12,9 +12,12 @@ stdout／stderr 由中央 [OutputHub](../output_hub/README.md) 自啟動起擷�
 
 ### ModuleHost／Plugin 接線（2026-10-06）
 
-Module 交付為動態庫，由 `ModuleHost` 在獨立程序中載入。中央只保存庫路徑，
+C++ Module 交付為動態庫，由 `ModuleHost` 在獨立程序中載入。中央只保存庫路徑，
 不在中央程序載入 Plugin；一個 Module 實例對應一個 Host 程序。停止後結束 Host，
-不在同程序內重載。自動掃描、即時新增、中央版本相容性檢查仍未實作。
+不在同程序內重載。原生 Plugin 的自動掃描、即時新增、中央版本相容性檢查仍未實作。
+Python Module 則由系統 Python 執行，共用相同的 Runtime／中央監督；啟動掃描與語言邊界見
+[Python Module](python/README.md)。已接入生命週期、Shell hooks、pump、typed Message Bus、Param 與 Log；
+訊息／例外／借用的 Python 語意由該文件維護，沒有額外的控制服務 owner。
 
 `vinc_add_process_module()` 現在建立 MODULE library；名稱仍表示獨立程序執行的 Module。
 `REGISTER_MODULE` 匯出唯一的 `vinc_module_plugin` 查詢入口，傳回版本／大小、ModuleType、
@@ -54,7 +57,8 @@ RuntimeServices 仍僅處理 fatal，沒有加入 Bus、Param 或 Context placeh
 1. [`BaseModule`](include/vinc/module/base_module.hpp)：應用 hook、MID／名稱與 Message Bus 的可用時機。
 2. [`ModuleManager`](include/vinc/module/host/module_manager.hpp)：中央登記、啟停、命令與查詢介面。
 3. [`module_protocol.hpp`](include/vinc/module/detail/module_protocol.hpp)：中央與子程序共用的操作碼、啟動參數位置與回覆布局。
-4. [`module_runtime.cpp`](src/runtime/module_runtime.cpp)：`run_module_process` 串起啟動流程；
+4. [`module_runtime.cpp`](src/runtime/module_runtime.cpp)：`run_module_runtime` 串起共用啟動流程；
+   [`native_source.cpp`](src/runtime/native_source.cpp) 提供 `run_module_process` 與 Plugin 建立／銷毀配對；
    `parse_bootstrap`／`connect_to_central` 驗證並建立連線，`register_module_name` 完成名稱註冊，
    `Context::pumpOnce`／`HostContext::commands` 派送使用者 hook，`watch_central` 獨立接收控制訊息與監督停止期限。
 5. [`module_manager.cpp`](src/host/module_manager.cpp)：`launch` 依序重設 generation、準備 listener、
@@ -128,6 +132,17 @@ BaseModule 由子程序內的框架工廠建立，中央透過程序與控制通
 應用初始化放在建構子或 `on_start`。尚未啟動的 ModuleType 靜態 autocomplete
 目前回傳空清單，執行中 Module的 virtual autocomplete 已透過 Socket 接通。
 
+## MID 數值範圍（2026-10-08）
+
+`mid.hpp` 保留 `MID = uint64_t`，以 `invalid_mid`／`max_mid`／`valid_mid()` 定義
+合法 Module 身分為 1～2^63−2；0 無效，2^63−1 保留給中央的共享鎖所有者。
+數值邊界由 common `owner_id.hpp` 供 Module System 與 Concurrency 共用。
+中央的程序級發配器從 1 單調增加，最後合法值發出後回報 `MidExhausted`，不回繞、
+不重用已退出 Module 的 MID；`detail/mid_allocator.hpp` 是 Manager 與邊界測試共用的實作。
+中央／Host 已接上共享鎖交付、死亡接管與停止取消；Param 接線見 [Param README](../param/README.md)。
+本次 VINC_NAME、資源清理與私有 Context 接線契約見 [INSTANCE.md](INSTANCE.md)。
+相關新測試為 `module.mid`，涵蓋並行最後編號、保留值與耗盡時 counter 不變。
+
 ## Context 與執行模式
 
 Module 必須明確繼承 `BaseModule<RunMode::FrameworkLoop>` 或 `BaseModule<RunMode::Manual>`，
@@ -169,7 +184,8 @@ Context 的 callback 登記與批次 metadata 在本地配置，訊息逐筆複�
 登記上限 `config::module_callback_limit` 預設 256，closed 登記在後續註冊／pump 時移除。
 Bus 批次接線使用指定的 `message_bus/detail/dispatch.hpp`；Bus 不反向依賴 Module System。
 同 topic 多來源維持現有 timestamp／Publisher rank 合併，沒有新增全域線性 FIFO 承諾。
-Param、timer 註冊與跨程序資料通知不在本輪範圍。
+Param 已接入 `context.param`，共享版本補查與 callback 亦由 pump 派送，見 [Param README](../param/README.md)。
+timer 註冊與 Message Bus 跨程序資料通知仍未提供。
 
 ### 正常完成、故障及收尾
 
@@ -189,7 +205,7 @@ Finishing 啟動中央收尾期限；on_stop／Module 解構完成後才送 Comp
 會增加少量閒置喚醒；不新增執行緒，也不保證 OS 排程的硬期限。
 
 Host 經內部非模板 `detail::ModuleObject` 操作兩種公開 BaseModule，維持 Plugin 成對 create/destroy。
-Plugin entry version 為 2，bootstrap 標記為 `--vinc-module-v7`；舊 Plugin／Host 明確拒絕，
+Plugin entry version 為 5，bootstrap 標記為 `--vinc-module-v10`；舊 Plugin／Host 明確拒絕，
 中央、Host、Plugin 與 SDK 消費端須一同重建。同工具鏈／CRT 的 ABI 限制維持。
 RuntimeServices bridge 仍僅供 fatal，未加入一般 Context 服務。
 
@@ -267,7 +283,7 @@ Timeout 時仍持續監督，可以再次等待；成功代表受管理程序已
 
 ### Module v3 協定
 
-程序啟動標記為 `--vinc-module-v7`，在 Plugin 路徑之後加入本次啟動的 debug 旗標（0／1）。
+程序啟動標記為 `--vinc-module-v10`，在 Plugin 路徑之後加入本次啟動的 debug 旗標（0／1）。
 中央與 Host 須一同重新建置，不提供舊 bootstrap 轉接；以下 Socket 錯誤 payload 仍為既有 v3 格式。
 外層 Control Channel 的 v1 frame 不變；更新的是 Module payload 契約。
 
@@ -489,7 +505,7 @@ OS 強殺當成可攔截的 C++ 契約失敗；可恢復失敗仍走 Result。
 - ModuleManager 在每次 spawn 前建立排他、唯一命名的 SharedMemory。每個 MID 一份，
   中央既有監督迴圈只讀原子狀態，存活時不讀 payload。`vinc_module_contract` 是元件內部共用 target，讓中央／Runtime
   使用同一份紀錄 codec 與 OSAL owner；Common 不依賴它，也不依賴 OSAL。
-- 子程序先驗證 bootstrap v5（新增 Plugin 路徑）、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
+- 子程序先驗證 bootstrap v10、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
   建立控制服務與呼叫使用者工廠／hooks。綁定活到 Runtime 服務停止後；解除綁定等待正在
   使用 context 的讀者離開，才解除映射。bootstrap 以前或綁定以前的故障仍沒有這份保證。
 - 故障呼叫端直接寫入預先配置的 bytes，發布 committed 狀態後 `_Exit(76)`。
@@ -667,7 +683,7 @@ Linux／macOS 未原生建置或執行；ELF symbol visibility 設定尚待該�
 
 ## Plugin Host 生命週期與故障隔離
 
-1. Host 驗證 bootstrap v6，映射 fatal storage，綁定自己的 RuntimeServices。
+1. Host 驗證 bootstrap v10，映射 fatal storage，綁定自己的 RuntimeServices。
 2. 建立 Control Service、Session、Bus Client 與既有 watchdog。
 3. 透過 OSAL DynamicLibrary 載入指定庫、驗證入口與種類，再初始化 Plugin bridge。
 4. Plugin create 建立 Module；沿用 MID、名稱核准、on_start、命令及 on_stop 流程。
@@ -778,3 +794,36 @@ Context、Module 程序／Manager／Runtime 故障、debug、兩項 Shell 與 SD
 崩潰回收、父程序失聯、Plugin 版本拒絕及 SDK 消費端也在回歸範圍內。
 Linux／macOS 未執行；未量測大量 Module 的輪詢、配置與 callback 負載成本。
 本機紀錄為 build/context-*-build.log、build/context-*-tests.log，未納入版本控制。
+
+## 共享鎖第二輪待處理事項
+
+中央 admission、資源世代、Host 私有 lease、停止取消與確認退出回收已接線，契約與
+測試案例見 [INSTANCE.md](INSTANCE.md)。後續 Param 接線已完成，契約見 [Param README](../param/README.md)。
+
+- Linux／macOS 必須原生驗證本次 FileLock admission、資源清理與 Host 行為。
+- epoch 前綴保留有容量上限；尚無離線維護／壓縮工具。到上限時明確回報啟動失敗，
+  不自動刪除可能仍對應舊 mapping 的記錄。完整限制及下一步見 INSTANCE.md。
+
+### 2026-10-08 第二輪驗證
+
+Windows x64／MSVC Debug、Release 建置成功，各 61 套測試皆取得通過結果
+（Release 的三套建置型測試補載工具鏈環境後重跑）。包含新增的 instance、locks、
+lock_protocol、原有故障／退出測試及外部 SDK；詳細紀錄見 [INSTANCE.md](INSTANCE.md)。
+
+
+## Context Log 與中央保存（2026-10-08）
+
+Context 增加 context.log；Host 持有 adapter 與獨立 Log Session，Plugin 僅連入 API／fmt。
+中央 Manager 擁有 collector／writer；Framework entry 自動設定保存路徑。
+正常停止先排空 OutputHub，再停止 Log，最後釋放 Control Service。
+Log 建立失敗可診斷，不當作 Module 啟停失敗；fatal report 仍獨立。
+Context 布局更新為 Plugin entry version 5／bootstrap v10，需完整重新建置相連程式。
+API、backpressure、fence 與容量見 [Log](../log/README.md)。
+
+## Recorder 接線（2026-10-12）
+
+Context 新增 list_topics(after)，仍借用 Host 的既有 Bus Client／控制 Session。
+Bag Recorder 是 Manual Module：main 呼叫 pumpOnce 與有界週期探索，另有一個專用磁碟 worker。
+內建錄製 Module 的收尾期限使用 config::bag_stop_timeout（30 秒）；CMake module helper 的
+STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設或中央關閉政策。
+見 [Bag README](../bag/README.md)。

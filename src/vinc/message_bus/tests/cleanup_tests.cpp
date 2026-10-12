@@ -245,7 +245,7 @@ void test_malformed_advertise(MalformedReply kind) {
 
 // Drive the real manager via real control frames, without a module dispatcher.
 // These tests own every simulated owner and guarantee no payload access during exited().
-control::Bytes manager_request(detail::BusManager& manager, Connection& connection, std::uint64_t owner,
+Result<control::Bytes> manager_request(detail::BusManager& manager, Connection& connection, std::uint64_t owner,
                                std::uint16_t operation, control::Bytes payload) {
     control::Frame frame{control::Kind::Request, detail::message_bus_domain, operation,
                          connection.next_request++, std::move(payload)};
@@ -256,7 +256,7 @@ control::Bytes manager_request(detail::BusManager& manager, Connection& connecti
     check(response.kind == control::Kind::Response, "expected manager response");
     auto decoded = take(detail::decode_response(response.payload));
     if (decoded.failure) {
-        throw std::runtime_error(error_to_string(*decoded.failure));
+        return std::unexpected(*decoded.failure);
     }
 
     return control::Bytes(decoded.body.begin(), decoded.body.end());
@@ -269,7 +269,7 @@ detail::Descriptor register_publisher(detail::BusManager& manager, Connection& c
     control::put_u64(payload, Frame::schema().hash);
     control::put_u32(payload, fixture_slots);
     control::put_u64(payload, message_bytes);
-    auto body = manager_request(manager, connection, owner, detail::Advertise, std::move(payload));
+    auto body = take(manager_request(manager, connection, owner, detail::Advertise, std::move(payload)));
     control::Reader reader(body);
     auto value = detail::decode_descriptor(reader);
     check(reader.done(), "manager descriptor must be complete");
@@ -282,7 +282,7 @@ detail::Attachment register_subscriber(detail::BusManager& manager, Connection& 
     ok(control::put_string(payload, topic));
     control::put_u64(payload, Frame::schema().hash);
     control::put_u32(payload, 0);
-    auto body = manager_request(manager, connection, owner, detail::Subscribe, std::move(payload));
+    auto body = take(manager_request(manager, connection, owner, detail::Subscribe, std::move(payload)));
     control::Reader reader(body);
     check(reader.u64() != 0 && reader.u32() == 1, "fixture needs one publisher");
     auto value = detail::decode_attachment(reader);
@@ -309,6 +309,121 @@ void process_release(detail::BusManager& manager, Connection& connection, std::u
     check(event.kind == control::Kind::Event && event.operation == operation, "expected rollback event");
     ok(manager.submit(owner, "rollback-owner", connection.central, std::move(event)));
     ok(manager.drain_until(deadline()));
+}
+
+void test_topic_discovery() {
+    Connection publisher;
+    auto manager = take(detail::BusManager::create());
+    constexpr std::uint64_t publisher_owner = 201;
+    constexpr std::uint64_t reader_owner = 202;
+    constexpr std::size_t topic_count = detail::topics_per_page + 3;
+    for (std::size_t index = 0; index < topic_count; ++index) {
+        (void)register_publisher(*manager, publisher, publisher_owner, "discovery/" + std::to_string(index));
+    }
+    Connection reader;
+    auto first = take(client_request(*manager, reader, reader_owner, [&] { return reader.client->list_topics(); }));
+    check(first.topics.size() == detail::topics_per_page && !first.next.empty(), "discovery has bounded pages");
+    auto second = take(client_request(*manager, reader, reader_owner, [&] { return reader.client->list_topics(first.next); }));
+    check(first.topics.size() + second.topics.size() == topic_count && second.next.empty(), "complete discovery traversal");
+    check(second.topics.front().name > first.topics.back().name && second.topics.front().schema == Frame::schema().hash,
+        "ordered typed discovery metadata");
+    manager->exited(publisher_owner);
+    ok(manager->drain_until(deadline()));
+    auto empty = take(client_request(*manager, reader, reader_owner, [&] { return reader.client->list_topics(); }));
+    check(empty.topics.empty(), "retired topics disappear");
+    manager->exited(reader_owner);
+    ok(manager->drain_until(deadline()));
+}
+
+void test_malformed_discovery() {
+    for (int mode = 0; mode < 3; ++mode) {
+        Connection connection;
+        auto request = std::async(std::launch::async, [&] { return connection.client->list_topics(); });
+        const auto frame = take(connection.central->receive_until(deadline()));
+        control::Bytes body;
+        control::put_u32(body, mode == 0 ? detail::topics_per_page + 1 : 1);
+        if (mode != 0) {
+            ok(control::put_string(body, "topic"));
+            control::put_u64(body, Frame::schema().hash);
+            control::put_u32(body, 1);
+            if (mode == 2) {
+                ok(control::put_string(body, "non-progressing-cursor"));
+            }
+        }
+        connection.reply(frame, std::move(body));
+        auto result = request.get();
+        check(!result && result.error().is(bus::ErrorCode::Protocol), "reject malformed discovery pages");
+    }
+}
+
+void test_client_topic_separators() {
+    std::size_t sends = 0;
+    auto client = take(detail::RuntimeAccess::create(detail::ControlTransport{
+        [&](control::Frame) -> Result<void> {
+            ++sends;
+            // Fail immediately if validation accidentally lets a request escape.
+            return std::unexpected(make_error(control::ErrorCode::Closed, control::ErrorOperation::Send));
+        },
+        [] {}
+    }));
+
+    for (const auto* name : {"camera.frames", ".frames", "camera.", "camera/frames.raw"}) {
+        auto published = client->advertise<Frame>(name);
+        check(!published && published.error().is(bus::ErrorCode::InvalidArgument) &&
+                  published.error().is_operation(bus::ErrorOperation::Advertise),
+              "client must reject dotted publication names");
+        auto subscribed = client->subscribe<Frame>(name);
+        check(!subscribed && subscribed.error().is(bus::ErrorCode::InvalidArgument) &&
+                  subscribed.error().is_operation(bus::ErrorOperation::Subscribe),
+              "client must reject dotted subscription names");
+    }
+
+    check(sends == 0, "invalid topic names must not send registration requests");
+    detail::RuntimeAccess::shutdown(*client);
+}
+
+void test_manager_topic_separators() {
+    Connection connection;
+    constexpr std::uint64_t owner = 1;
+    bus::Limits limits;
+    limits.max_topics = 1;
+    limits.publishers_per_topic = 1;
+    limits.subscribers_per_topic = 1;
+    limits.max_shared_bytes = detail::RingBuffer::control_bytes(fixture_slots, 1) +
+                              detail::RingBuffer::slot_stride(message_bytes) * fixture_slots +
+                              sizeof(detail::SharedWord);
+    auto manager = take(detail::BusManager::create(limits));
+
+    // Bypass Client validation with real wire requests. Exact limits reveal any
+    // registry, ID or shared-budget mutation left by a rejected request.
+    for (const auto operation : {detail::Advertise, detail::Subscribe}) {
+        for (const auto* name : {"camera.frames", ".frames", "camera.", "camera/frames.raw"}) {
+            control::Bytes payload;
+            ok(control::put_string(payload, name));
+            control::put_u64(payload, Frame::schema().hash);
+            if (operation == detail::Advertise) {
+                control::put_u32(payload, fixture_slots);
+                control::put_u64(payload, message_bytes);
+            } else {
+                control::put_u32(payload, 0);
+            }
+
+            auto result = manager_request(*manager, connection, owner, operation, std::move(payload));
+            const auto expected = operation == detail::Advertise ? bus::ErrorOperation::Advertise
+                                                                : bus::ErrorOperation::Subscribe;
+            check(!result && result.error().is(bus::ErrorCode::InvalidArgument) &&
+                      result.error().is_operation(expected),
+                  "manager must reject dotted topic names with the caller operation");
+        }
+    }
+
+    const auto publisher = register_publisher(*manager, connection, owner, "camera/frames");
+    check(publisher.id == 1, "rejected names must not consume publisher IDs");
+    const auto subscriber = register_subscriber(*manager, connection, owner, "camera/frames");
+    check(subscriber.reader == 0 && subscriber.descriptor.id == publisher.id,
+          "rejected names must not consume subscription capacity");
+    manager->exited(owner);
+    ok(manager->drain_until(deadline()));
 }
 
 void test_registration_capacity_reuse() {
@@ -438,6 +553,10 @@ void pending_remaining(std::size_t count) noexcept {
 
 int main() {
     try {
+        test_topic_discovery();
+        test_malformed_discovery();
+        test_client_topic_separators();
+        test_manager_topic_separators();
         test_send_failure();
         test_advertise_failure(FaultPoint::ResponseCopy);
         test_advertise_failure(FaultPoint::DescriptorDecode);

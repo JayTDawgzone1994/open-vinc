@@ -7,6 +7,27 @@
 #include <cstdint>
 
 namespace vinc::config {
+// Param admission and persistence bounds; existing framework settings are not migrated to Param.
+inline constexpr std::size_t param_name_bytes = 256;
+inline constexpr std::size_t param_string_bytes = 256;
+inline constexpr std::size_t param_entry_limit = 1024;
+inline constexpr std::size_t param_pending_limit = 32;
+inline constexpr std::size_t param_queue_limit = 256;
+inline constexpr std::size_t param_slot_bytes = 1024 * 1024;
+inline constexpr std::size_t param_file_bytes = 4 * 1024 * 1024;
+inline constexpr auto param_wait_poll_interval = std::chrono::milliseconds(10); // Active caller cancellation checks.
+inline constexpr auto param_request_timeout = std::chrono::seconds(10);
+inline constexpr auto param_lock_timeout = std::chrono::seconds(2);
+// Bounds for central admission and its process-crash resource journal.
+inline constexpr std::size_t instance_name_attempts = 32;
+// Retained prefix reservations bound disk metadata and startup scanning.
+inline constexpr std::size_t instance_epoch_limit = 65536;
+inline constexpr std::size_t instance_resource_limit = 16384;
+inline constexpr std::size_t module_lock_limit = 64;
+inline constexpr std::size_t module_lock_pending_limit = 32;
+// Shared mutex polling sleeps locally; cancellation wakes the sleep. This is a
+// retry policy, not an OS scheduling or hard completion guarantee.
+inline constexpr auto concurrency_retry_interval = std::chrono::milliseconds(5);
 // Idle data polling and Host supervision of a locally completed/failed main.
 inline constexpr std::chrono::milliseconds module_pump_idle_interval{10};
 inline constexpr std::chrono::milliseconds module_runtime_poll_interval{20};
@@ -133,4 +154,49 @@ inline constexpr auto shell_script_wait_slice = std::chrono::milliseconds(20);
 // Ordinary Socket error acknowledgement only; fatal shared records use no delivery timeout.
 inline constexpr auto module_error_report_timeout = std::chrono::milliseconds(500);
 
+// Log budgets count encoded records/bytes, not filesystem allocation units.
+inline constexpr std::size_t log_message_bytes = 8 * 1024;
+inline constexpr std::size_t log_file_bytes = 16 * 1024 * 1024;
+inline constexpr std::size_t log_total_bytes = 128 * 1024 * 1024;
+inline constexpr std::size_t log_queue_records = 1024;
+inline constexpr std::size_t log_queue_bytes = 8 * 1024 * 1024;
+inline constexpr std::size_t log_reserved_records = 64;
+inline constexpr std::size_t log_reserved_bytes = 512 * 1024;
+inline constexpr std::size_t log_session_reserved_records = 8;
+inline constexpr std::size_t log_session_reserved_bytes = 32 * 1024;
+inline constexpr std::size_t log_collection_budget = 16;
+inline constexpr std::size_t log_display_bytes = 64 * 1024;
+inline constexpr std::chrono::milliseconds log_poll_interval{20};
+inline constexpr std::chrono::milliseconds log_flush_interval{1000};
+inline constexpr std::chrono::milliseconds log_shutdown_timeout{1000};
+inline constexpr std::chrono::milliseconds log_connect_timeout{1000};
+inline constexpr std::chrono::milliseconds log_statistics_interval{1000};
 } // namespace vinc::config
+
+namespace vinc::config {
+// Recorder pending payload budget includes the writer's current transaction.
+inline constexpr std::uint64_t bag_queue_bytes = 256ULL * 1024 * 1024;
+inline constexpr std::size_t bag_queue_records = 4096;
+inline constexpr std::uint64_t bag_message_bytes = 128ULL * 1024 * 1024 + 1024 * 1024;
+// Main database bytes only; transaction journal space is additional.
+inline constexpr std::uint64_t bag_min_database_bytes = 4ULL * 1024 * 1024;
+inline constexpr std::uint64_t bag_database_bytes = 16ULL * 1024 * 1024 * 1024;
+inline constexpr std::uint64_t bag_batch_bytes = 16ULL * 1024 * 1024;
+inline constexpr std::size_t bag_batch_records = 256;
+inline constexpr auto bag_flush_interval = std::chrono::milliseconds{100};
+inline constexpr auto bag_discovery_interval = std::chrono::milliseconds{500};
+inline constexpr auto bag_pump_interval = std::chrono::milliseconds{10};
+inline constexpr std::size_t bag_max_topics = 1024;
+inline constexpr std::size_t bag_max_sources = 65536;
+inline constexpr int bag_sqlite_cache_kib = 8192;
+inline constexpr int bag_sqlite_busy_timeout_ms = 2000;
+inline constexpr auto bag_stop_timeout = std::chrono::seconds{30};
+inline constexpr int bag_info_progress_interval = 1000;
+inline constexpr std::uint64_t bag_info_progress_calls = 100000;
+inline constexpr std::size_t bag_name_bytes = 256;
+}
+
+namespace vinc::config {
+// Maximum diagnostic text emitted for one unhandled Python exception.
+inline constexpr std::size_t python_traceback_bytes = 32 * 1024;
+}

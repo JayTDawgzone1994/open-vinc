@@ -20,6 +20,14 @@ The aggregate header does not include generated application messages.
 Components remain individually usable. `apps/vinc` assembles the central executable;
 `examples/module` and `examples/message_bus` contain the process examples.
 
+## Parameters
+
+Modules use their inherited `context.param` for typed registration, watched local
+caches and pump callbacks. The central Shell provides `param list/get/set/save/status`.
+Values are shared through protected A/B snapshots and saved explicitly to TOML under
+`vinc_data/<VINC_NAME>/params.toml` beside Vinc. See the [Param guide](src/vinc/param/README.md).
+Existing framework configuration is not automatically migrated to this service.
+
 ## Core Architecture
 
 The new [OSAL Process layer](src/vinc/osal/README.md) exposes one C++23 API for
@@ -144,3 +152,17 @@ using only the `vinc_messages` target's usage requirements. Nested messages use 
 production template and are instantiated with field access, copying, serialization,
 and deserialization. CTest also includes schema/hash checks and generated-message
 behavior tests, including OSAL shared-memory transfer between independent processes.
+
+
+### Vinc Log
+
+Module 使用 context.log.info("value = {}", value)，既有 printf 同時由中央保存。
+預設路徑為執行檔旁 vinc_data/<VINC_NAME>/logs/<日期>/，單檔 16 MiB、總量 128 MiB。
+log status 查狀態，log show on 開啟目前 Shell 的結構化顯示。
+見 [Log README](src/vinc/log/README.md)。
+
+## Bag Recorder
+
+可用 `bagRecorder record session01 --all` 啟動錄製，再用 `recorder status`／`recorder finish` 管理。
+只錄指定 topic、容量設定、SQLite 檔案及未知型別限制見 [Bag README](src/vinc/bag/README.md)。
+Player 尚未實作。
