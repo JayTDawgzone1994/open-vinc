@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(poll);
         }
         check(reopened, "explicit reopen recovers file output");
-        ModuleType type{"logTest", take(osal::path_from_utf8(argv[1])), "camera"};
+        ModuleType type{"logTest", take(osal::path_from_utf8(argv[1]))};
         type.policy.heartbeat_interval = 50ms;
         type.policy.heartbeat_timeout = 1000ms;
         take(manager->register_module_type(type));

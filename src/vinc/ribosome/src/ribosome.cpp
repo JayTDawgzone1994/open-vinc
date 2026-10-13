@@ -193,6 +193,7 @@ bool valid_identifier(const std::string& name) {
         "topic_name",
         "publisher_name",
         "get_message_timestamp",
+        "get_message_monotonic_timestamp",
         "get_topic_count",
         "publisher_instance",
         "message",
@@ -215,7 +216,7 @@ bool reserved_message_name(const std::string& name) {
         "Result", "Error", "ErrorRecord", "ErrorDomain", "NativeError", "NativeErrorSource",
         "ErrorCodeTraits", "ErrorOperationTraits", "ErrorCodeEnum", "ErrorOperationEnum",
         "config", "detail", "message_bus", "make_message", "make_error", "error_to_string",
-        "wrap_error", "contract_violation"
+        "wrap_error", "contract_violation", "format_utc", "unix_nanoseconds"
     };
     return names.contains(name);
 }
@@ -595,14 +596,21 @@ void parse_fields(MessageInfo& message) {
 // Sort input paths for reproducible output and reject names that collide on
 // case-insensitive filesystems, even when generation runs on a case-sensitive OS.
 std::vector<MessageInfo> Ribosome::load() {
-    if (!fs::is_directory(input_)) {
-        throw std::runtime_error("Input path does not exist or is not a directory: " + path_text(input_));
-    }
-
     std::vector<fs::path> paths;
-    for (const auto& entry : fs::directory_iterator(input_)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".msg") {
-            paths.push_back(entry.path());
+    std::set<fs::path> directories;
+    for (const auto& input : inputs_) {
+        if (!fs::is_directory(input)) {
+            throw std::runtime_error("Input path does not exist or is not a directory: " + path_text(input));
+        }
+
+        if (!directories.insert(fs::canonical(input)).second) {
+            continue;
+        }
+
+        for (const auto& entry : fs::directory_iterator(input)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".msg") {
+                paths.push_back(entry.path());
+            }
         }
     }
 
@@ -993,7 +1001,7 @@ struct StagingDirectory {
     }
 };
 
-OutputPaths validate_output_paths(const fs::path& requested_output, const fs::path& input,
+OutputPaths validate_output_paths(const fs::path& requested_output, const std::vector<fs::path>& inputs,
                                   const fs::path& requested_template) {
     if (requested_output.empty() || requested_output.filename().empty() ||
         requested_output.filename() == "." || requested_output.filename() == "..") {
@@ -1007,7 +1015,9 @@ OutputPaths validate_output_paths(const fs::path& requested_output, const fs::pa
 
     const auto path = requested_template.empty() ? fs::path(kDefaultTemplatePath) : requested_template;
     const auto resolved_output = fs::weakly_canonical(output);
-    for (const auto& protected_path : {input, path}) {
+    auto protected_paths = inputs;
+    protected_paths.push_back(path);
+    for (const auto& protected_path : protected_paths) {
         const auto resolved = fs::weakly_canonical(fs::absolute(protected_path));
         const auto relative = resolved.lexically_relative(resolved_output);
         if (resolved == resolved_output || (!relative.empty() && *relative.begin() != "..")) {
@@ -1079,7 +1089,7 @@ void publish_staging(StagingDirectory& stage, const fs::path& output) {
 std::int8_t Ribosome::make_ligand() {
     StagingDirectory stage;
     try {
-        const auto paths = validate_output_paths(output_, input_, template_);
+        const auto paths = validate_output_paths(output_, inputs_, template_);
         prepare_staging(stage, paths.output);
 
         auto source = load_template(paths.source_template);
@@ -1120,6 +1130,7 @@ int run_cli(int argc, Character** argv) {
     vinc::Ribosome generator;
     generator.set_text_message_path(std::filesystem::path(vinc::kDefaultInputPath));
     generator.set_cpp_message_path(std::filesystem::path(vinc::kDefaultOutputPath));
+    bool explicit_input = false;
     for (int i = 1; i < argc; i += 2) {
         if (i + 1 >= argc) {
             std::cerr << "Expected --input/--output/--template PATH\n";
@@ -1128,7 +1139,12 @@ int run_cli(int argc, Character** argv) {
 
         const std::filesystem::path option = argv[i];
         if (option == std::filesystem::path("--input")) {
-            generator.set_text_message_path(argv[i + 1]);
+            if (!explicit_input) {
+                generator.set_text_message_path(argv[i + 1]);
+                explicit_input = true;
+            } else {
+                generator.add_text_message_path(argv[i + 1]);
+            }
         } else if (option == std::filesystem::path("--output")) {
             generator.set_cpp_message_path(argv[i + 1]);
         } else if (option == std::filesystem::path("--template")) {

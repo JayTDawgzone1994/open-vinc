@@ -91,7 +91,7 @@ The Tcl integration currently requires a single-configuration generator; see the
 
 ## Creating a New Module
 
-For independently running modules, use `BaseModule` and `vinc_add_process_module` as
+For independently running modules, use `BaseModule` and `add_module` as
 shown in the [Module guide](src/vinc/module_system/README.md). The framework supplies the
 process entry point, Socket session, and heartbeat. `exampleModule` demonstrates this path.
 The helper builds a Plugin library. The framework's `ModuleHost` supplies main/wmain,
@@ -112,7 +112,10 @@ include paths, the C++23 requirement, and the generation dependency:
 target_link_libraries(my_target PRIVATE vinc_messages)
 ```
 
-Modules that use these messages also link `vinc_messages` explicitly.
+Modules created with `add_module()` receive this dependency automatically.
+Other CMake targets explicitly link `vinc::messages`. External schema directories
+can be registered with `add_message_dir(path)` after adding Open-VINC; see the
+[SDK CMake functions](src/vinc/sdk/README.md#公開-cmake-functions).
 The generated headers use the `vinc_message_storage` library
 supplied transitively by the `vinc_messages` interface target. Create local messages
 with `vinc::make_message<MessageType>()`; see the [Ribosome guide](src/vinc/ribosome/README.md)

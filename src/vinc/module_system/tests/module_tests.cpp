@@ -108,7 +108,6 @@ void test_parent_loss(const std::filesystem::path& helper) {
         spawn.executable = std::filesystem::path(VINC_MODULE_HOST_PATH);
         spawn.arguments = {detail::bootstrap::version_marker,
                            endpoint_text,
-                           "orphan",
                            "orphan-test",
                            "1234",
                            "40",
@@ -116,7 +115,7 @@ void test_parent_loss(const std::filesystem::path& helper) {
                            "2000",
                            "200",
                            "helper",
-                           report->name(), take(osal::path_to_utf8(helper)), "0"};
+                           report->name(), take(osal::path_to_utf8(helper)), "0", "--name", "orphan"};
         auto child = process_service->spawn(spawn);
         check(bool(child), "spawn orphan test");
 
@@ -213,8 +212,8 @@ int main(int argc, char** argv) {
         policy.startup_timeout = 1500ms;
         policy.stop_timeout = 300ms;
         policy.restart_delay = 150ms;
-        check(bool(manager.register_module_type({"helper", helper, "node", policy})), "register");
-        check(!manager.register_module_type({"helper", helper, "node", policy}),
+        check(bool(manager.register_module_type({"helper", helper, policy})), "register");
+        check(!manager.register_module_type({"helper", helper, policy}),
               "duplicate module type rejected");
         // The legacy adapters distinguish starting a ModuleType from commanding a Module.
         check(manager.has_module_type("helper") && !manager.has_active_module("helper"),
@@ -430,9 +429,9 @@ int main(int argc, char** argv) {
         check(bool(manager.unregister_module_type("helper")), "unregister module type");
         // Automatic restart budget, logical-name retention and stale MID rejection.
         policy.max_restarts = retry_budget;
-        check(bool(manager.register_module_type({"helper", helper, "retry", policy})),
+        check(bool(manager.register_module_type({"helper", helper, policy})),
               "register retry policy");
-        auto retry = manager.start_module("helper", {"crash-start"});
+        auto retry = manager.start_module("helper", {"--name", "retry", "crash-start"});
         check(bool(retry), "retry start");
         check(eventually(
                   [&] {
@@ -446,7 +445,7 @@ int main(int argc, char** argv) {
         check(manager.inspect("retry")->last_exit && manager.inspect("retry")->last_exit->value == 42,
               "native exit code retained");
         check(bool(manager.forget_module("retry")), "forget terminal record");
-        auto recover = manager.start_module("helper");
+        auto recover = manager.start_module("helper", {"--name", "retry"});
         check(bool(recover), "start recoverable module");
         check(bool(manager.wait_running(*recover, control::Clock::now() + recovery_start_timeout)),
               "recoverable ready");
@@ -483,9 +482,9 @@ int main(int argc, char** argv) {
             auto& reserved = **reserved_owner;
             auto slow_retry = policy;
             slow_retry.restart_delay = reserved_name_retry_delay;
-            check(bool(reserved.register_module_type({"helper", helper, "reservedInstance", slow_retry})),
+            check(bool(reserved.register_module_type({"helper", helper, slow_retry})),
                   "restart reservation module type");
-            auto first = reserved.start_module("helper");
+            auto first = reserved.start_module("helper", {"--name", "reservedInstance"});
             check(first && reserved.wait_started(*first) && *first != *recover,
                   "MIDs unique across managers");
             (void)reserved.command(*first, {"crash"}, control::Clock::now() + command_timeout);
@@ -493,7 +492,7 @@ int main(int argc, char** argv) {
                       return reserved.inspect("reservedInstance")->state == ModuleState::RestartWaiting;
                   }),
                   "restart waiting observed");
-            auto thief = reserved.start_module("helper");
+            auto thief = reserved.start_module("helper", {"--name", "reservedInstance"});
             auto rejected = reserved.wait_started(*thief);
             check(!rejected && rejected.error().is(vinc::module_system::ErrorCode::NameExists),
                   "name reserved between restarts");
@@ -506,7 +505,7 @@ int main(int argc, char** argv) {
         // Launch failure and missing heartbeat detection.
         policy.max_restarts = 0;
         check(bool(manager.register_module_type(
-                  {"helper", helper.parent_path() / "does-not-exist.exe", "missing", policy})),
+                  {"helper", helper.parent_path() / "does-not-exist.exe", policy})),
               "register missing executable");
         auto missing = manager.start_module("helper");
         check(bool(missing), "queue missing executable");
@@ -522,7 +521,7 @@ int main(int argc, char** argv) {
         policy.max_restarts = 0;
         auto silent_owner = take(vinc::test::create_manager({}, silent_helper));
         auto& silent_manager = *silent_owner;
-        check(bool(silent_manager.register_module_type({"silent", silent_helper, "silentNode", policy})),
+        check(bool(silent_manager.register_module_type({"silent", silent_helper, policy})),
               "register silent peer");
         auto silent = silent_manager.start_module("silent");
         check(bool(silent), "start silent peer");
@@ -544,7 +543,7 @@ int main(int argc, char** argv) {
               "heartbeat cause and reaped exit retained");
 
         // Graceful stop callbacks and manager destruction.
-        check(bool(manager.register_module_type({"helper", helper, "graceful", policy})),
+        check(bool(manager.register_module_type({"helper", helper, policy})),
               "register graceful helper");
         const auto marker = std::filesystem::temp_directory_path() /
                             ("ov-stop-" + std::to_string(std::random_device{}()) + ".txt");
@@ -570,11 +569,11 @@ int main(int argc, char** argv) {
                 throw std::runtime_error(vinc::error_to_string(scoped_owner.error()));
             }
             auto& scoped = **scoped_owner;
-            check(bool(scoped.register_module_type({"helper", helper, "scopeNode", policy})),
+            check(bool(scoped.register_module_type({"helper", helper, policy})),
                   "scoped registration");
             // UTF-8 fixture boundary, identical byte-copy contract to graceful startup above.
             auto name = scoped.start_module(
-                "helper", {"marker", std::string(reinterpret_cast<const char*>(marker_utf8.data()),
+                "helper", {"--name", "scopeNode", "marker", std::string(reinterpret_cast<const char*>(marker_utf8.data()),
                                                  marker_utf8.size())});
             check(name && scoped.wait_running(*name, control::Clock::now() + stop_timeout),
                   "scoped module ready");

@@ -109,7 +109,8 @@ Context 無公開建構子，來自框架建立的 BaseModule；成功 import �
 PythonSource 提供 Python 物件適配。共同 Runtime 先準備認證、fatal bridge、Bus／Param／Log 接線及 watchdog，
 再載入使用者程式。Module 銷毀後停止服務，最後 clear source，仍早於 fatal bridge 失效。
 Python 擴充包含唯一 Runtime owner；不另啟動一個 ModuleHost 幫 Python 轉送。
-Native Plugin 入口及控制封包布局未因這輪改變。
+Python 初次接入時未改變 Native Plugin 入口；目前雙時間 metadata 使用 Plugin entry 7／bootstrap v12。
+Python Source 以無參數 create 建立 wrapper，不從中央取得預設實例名稱；on_name 契約不變。
 
 ## 驗證與後續
 
@@ -170,7 +171,9 @@ latest = subscriber.get_last()
   巢狀 record view 用 `copy.copy(view)` 取得獨立副本，避免與合法的 `copy` 欄位撞名。
   常數放在 `Type.constants` 唯讀 mapping；字串常數是保留原始內容的 bytes。
   Python keyword 欄位可用 getattr／setattr。
-- 發布 metadata 為唯讀：topic_name、publisher_name、publisher_instance、get_message_timestamp、get_topic_count。
+- 發布 metadata 為唯讀：topic_name、publisher_name、publisher_instance、get_message_timestamp、
+  get_message_monotonic_timestamp、get_topic_count。Unix／單調時間均為無號 64-bit 奈秒，以 Python int 交付。
+  `vinc.format_utc(message.get_message_timestamp())` 產生 UTC 文字，負數／超過 uint64 輸入拒絕。
   發布時仍由框架填入，Python 無 setter。schema_hash 是編譯期 hash。
 - 本地訊息 view 保留其 owner；移除的巢狀節點不因索引再利用而復活。
   共享 loan 的 view 不因保存 Python 參照而延長發布有效期。沒有 raw pointer、memoryview 或 NumPy 零拷貝入口。

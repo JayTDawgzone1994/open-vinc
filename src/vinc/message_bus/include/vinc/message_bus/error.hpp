@@ -17,7 +17,8 @@ enum class ErrorCode : std::int32_t {
     Timeout = 12,
     Io = 13,
     InvalidData = 14,
-    WorkerFailed = 15
+    WorkerFailed = 15,
+    TimestampUnavailable = 16
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,

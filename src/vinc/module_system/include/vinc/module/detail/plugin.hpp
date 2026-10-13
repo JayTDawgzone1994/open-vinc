@@ -6,7 +6,7 @@
 namespace vinc {
 namespace detail {
 class ModuleObject;
-inline constexpr std::uint32_t plugin_entry_version = 5;
+inline constexpr std::uint32_t plugin_entry_version = 7;
 inline constexpr char plugin_entry_symbol[] = "vinc_module_plugin";
 
 // Same-toolchain C++ ABI. The C export only fixes symbol lookup; it does not
@@ -16,7 +16,7 @@ struct PluginEntry {
     std::uint32_t size;
     const char* module_type;
     Result<void> (*initialize)(const RuntimeServices&) noexcept;
-    Result<ModuleObject*> (*create)(std::string);
+    Result<ModuleObject*> (*create)();
     void (*destroy)(ModuleObject*) noexcept;
     void (*clear)() noexcept;
 };
@@ -37,8 +37,8 @@ using PluginQuery = const PluginEntry* (*)() noexcept;
         static const ::vinc::detail::PluginEntry entry{ \
             ::vinc::detail::plugin_entry_version, sizeof(::vinc::detail::PluginEntry), ModuleTypeName, \
             ::vinc::detail::bind_runtime_services, \
-            [](std::string name) -> ::vinc::Result<::vinc::detail::ModuleObject*> { \
-                return new ClassType(std::move(name)); \
+            []() -> ::vinc::Result<::vinc::detail::ModuleObject*> { \
+                return new ClassType(); \
             }, \
             [](::vinc::detail::ModuleObject* module) noexcept { \
                 delete static_cast<ClassType*>(module); \

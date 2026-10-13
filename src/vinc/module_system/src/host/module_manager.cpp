@@ -573,8 +573,6 @@ struct ModuleManager::Impl {
         options.executable = host_executable;
         options.arguments = {detail::bootstrap::version_marker,
                              utf8(record.socket_path),
-                             record.snapshot.name.empty() ? record.module_type.module_base_name
-                                                          : record.snapshot.name,
                              record.token,
                              std::to_string(record.snapshot.generation),
                              std::to_string(policy.heartbeat_interval.count()),
@@ -1501,8 +1499,6 @@ Result<void> ModuleManager::register_module_type(ModuleType module_type) {
     }
     if (module_type.name.empty() || module_type.name.size() > module_name_limit_bytes ||
         module_type.name.find('\0') != std::string::npos ||
-        module_type.module_base_name.size() > module_name_limit_bytes ||
-        module_type.module_base_name.find('\0') != std::string::npos ||
         (!module_type.python && !module_type.library.is_absolute())) {
         return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::RegisterType));
     }
@@ -1513,16 +1509,12 @@ Result<void> ModuleManager::register_module_type(ModuleType module_type) {
             return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::RegisterType));
         }
     }
-    if (module_type.module_base_name.empty()) {
-        module_type.module_base_name = module_type.name;
-    }
 
     std::lock_guard registry_lock(impl_->mutex);
     if (impl_->closing) {
         return std::unexpected(failure(ErrorCode::Closing, ErrorOperation::RegisterType));
     }
-    if (impl_->reserved_commands.contains(module_type.name) ||
-        impl_->reserved_commands.contains(module_type.module_base_name)) {
+    if (impl_->reserved_commands.contains(module_type.name)) {
         return std::unexpected(failure(ErrorCode::NameReserved, ErrorOperation::RegisterType));
     }
     if (impl_->module_types.contains(module_type.name) || impl_->programs.contains(module_type.name) ||
@@ -1693,11 +1685,6 @@ Result<void> ModuleManager::reserve_command_name(const std::string& name) {
     }
     if (impl_->module_types.contains(name) || impl_->programs.contains(name) || impl_->find_locked(name)) {
         return std::unexpected(failure(ErrorCode::NameExists, ErrorOperation::ReserveName));
-    }
-    for (const auto& [_, type] : impl_->module_types) {
-        if (type.module_base_name == name) {
-            return std::unexpected(failure(ErrorCode::NameExists, ErrorOperation::ReserveName));
-        }
     }
     impl_->reserved_commands.insert(name);
     return {};

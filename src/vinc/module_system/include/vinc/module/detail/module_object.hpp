@@ -9,8 +9,8 @@ class ModuleObject {
     friend class detail::ModuleMessageBusAccess;
 
 public:
-    // The framework supplies a default proposal; on_name runs before central registration.
-    explicit ModuleObject(std::string module_name);
+    // The Module source may supply its own proposal; central approval follows on_name.
+    explicit ModuleObject(std::string module_name = {});
     virtual ~ModuleObject();
 
     const std::string& get_module_name() const noexcept {

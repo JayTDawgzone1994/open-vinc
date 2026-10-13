@@ -16,7 +16,7 @@
 
 每個 Publisher 有 control 與 payload 兩個命名共享區；topic 另有共用 counter。
 固定 header 128 bytes，每 slot metadata 64 bytes，每訂閱 reader token 64 bytes。
-payload 有 N 個固定 byte budget 的位置，stride 對齊 8 bytes。控制區版本為 1，
+payload 有 N 個固定 byte budget 的位置，stride 對齊 8 bytes。控制區版本為 2，
 magic、schema、dimensions、instance ID 在 open 時核對；訊息映像維持 message_storage v2。
 
 不可變 header 在對外註冊前建好；運作中的共享欄位一律透過 OSAL `SharedWord` 存取。
@@ -34,7 +34,8 @@ gate 高 62 bits 是該 RingBuffer 全域遞增的 reservation generation，低 
 | 3 | Writing：只有 Publisher 可寫 |
 
 generation 每次成功保留位置就增加，包含之後發布失敗的 reservation；不會因重用不同 slot 而重複。
-每 slot 有自身 sequence、timestamp、topic count、image size。RingBuffer head 是最後成功發布的 sequence。
+每 slot 有自身 sequence、Unix timestamp、monotonic timestamp、topic count、image size。
+兩個時間皆用 SharedWord 寫入及讀取，排序只比較 monotonic timestamp；額外欄位使用原 reserved word。RingBuffer head 是最後成功發布的 sequence。
 `gate=Ready` 後最後更新 head，這次 head store 是 publication point；讀者不接受 sequence 大於所觀察 head 的 slot。
 正常Publisher操作在本機序列化，所以 head 按自身FIFO增加。
 

@@ -8,7 +8,8 @@ class NativePeer : public BaseModule<RunMode::FrameworkLoop> {
     std::optional<message_bus::Publisher<int3>> publisher_;
     std::optional<message_bus::Subscriber<int3>> subscriber_;
 public:
-    using BaseModule::BaseModule;
+    NativePeer() : BaseModule("nativeNode") {
+    }
     Result<void> on_start(const std::vector<std::string>&) override {
         auto publisher = context.advertise<int3>("python/reply");
         if (!publisher) {

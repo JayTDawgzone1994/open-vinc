@@ -24,7 +24,8 @@ constexpr auto stalled_wait = std::chrono::milliseconds(10);
 
 class ContractFaultModule : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
 public:
-    using BaseModule::BaseModule;
+    ContractFaultModule() : BaseModule("fatal-worker") {
+    }
 
     vinc::Result<std::string> on_name(std::vector<std::string>& args) override {
         if (args.empty()) {

@@ -727,180 +727,6 @@ private:
     bool field_ = false;
 };
 
-// Arbitrary C++ objects are valid local elements, but acquire no wire eligibility.
-template <class T>
-    requires(!detail::transferable<T>())
-class MessageArray<T> {
-public:
-    using iterator = typename std::vector<T>::iterator;
-    using const_iterator = typename std::vector<T>::const_iterator;
-    MessageArray() = default;
-    MessageArray(const MessageArray&) = default;
-    MessageArray(MessageArray&&) = default;
-    MessageArray& operator=(const MessageArray&) = delete;
-    MessageArray& operator=(MessageArray&&) = delete;
-
-    [[nodiscard]] Result<void> assign(const MessageArray& other) {
-        return attempt(ErrorOperation::Assign, [&] {
-            values_ = other.values_;
-        });
-    }
-
-    [[nodiscard]] Result<void> assign(MessageArray&& other) {
-        if (this == &other) {
-            return {};
-        }
-
-        return attempt(ErrorOperation::Assign, [&] {
-            values_ = std::move(other.values_);
-        });
-    }
-
-    std::size_t size() const noexcept {
-        return values_.size();
-    }
-
-    std::size_t capacity() const noexcept {
-        return values_.capacity();
-    }
-
-    bool empty() const noexcept {
-        return values_.empty();
-    }
-
-    T& operator[](std::size_t i) {
-        if (i >= values_.size()) {
-            vinc::contract_index_violation("array index out of range", i, values_.size());
-        }
-
-        return values_[i];
-    }
-
-    const T& operator[](std::size_t i) const {
-        if (i >= values_.size()) {
-            vinc::contract_index_violation("array index out of range", i, values_.size());
-        }
-
-        return values_[i];
-    }
-
-    [[nodiscard]] Result<T> at(std::size_t i) const
-        requires std::copy_constructible<T>
-    {
-        if (i >= values_.size()) {
-            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::Read});
-        }
-
-        try {
-            return values_[i];
-        } catch (const std::bad_alloc&) {
-            return std::unexpected(Error{ErrorCode::ResourceExhausted, ErrorOperation::Copy});
-        } catch (const std::length_error&) {
-            return std::unexpected(Error{ErrorCode::SizeOverflow, ErrorOperation::Copy});
-        }
-    }
-
-    [[nodiscard]] Result<void> set(std::size_t i, const T& value) {
-        if (i >= values_.size()) {
-            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::Write});
-        }
-
-        return attempt(ErrorOperation::Write, [&] {
-            values_[i] = value;
-        });
-    }
-
-    [[nodiscard]] Result<void> set(std::size_t i, T&& value) {
-        if (i >= values_.size()) {
-            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::Write});
-        }
-
-        return attempt(ErrorOperation::Write, [&] {
-            values_[i] = std::move(value);
-        });
-    }
-
-    iterator begin() noexcept {
-        return values_.begin();
-    }
-
-    iterator end() noexcept {
-        return values_.end();
-    }
-
-    const_iterator begin() const noexcept {
-        return values_.begin();
-    }
-
-    const_iterator end() const noexcept {
-        return values_.end();
-    }
-
-    Result<void> resize(std::size_t size) {
-        return attempt(ErrorOperation::Resize, [&] {
-            values_.resize(size);
-        });
-    }
-
-    Result<void> reserve(std::size_t capacity) {
-        return attempt(ErrorOperation::Reserve, [&] {
-            values_.reserve(capacity);
-        });
-    }
-
-    Result<void> clear() {
-        values_.clear();
-        return {};
-    }
-
-    Result<void> shrink_to_fit() {
-        return attempt(ErrorOperation::Shrink, [&] {
-            values_.shrink_to_fit();
-        });
-    }
-
-    Result<void> pop_back() {
-        if (empty()) {
-            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::PopBack});
-        }
-
-        values_.pop_back();
-        return {};
-    }
-
-    Result<void> push_back(const T& v) {
-        return attempt(ErrorOperation::Append, [&] {
-            values_.push_back(v);
-        });
-    }
-
-    Result<void> push_back(T&& v) {
-        return attempt(ErrorOperation::Append, [&] {
-            values_.push_back(std::move(v));
-        });
-    }
-
-    template <class... Args> Result<void> emplace_back(Args&&... args) {
-        return attempt(ErrorOperation::Append, [&] {
-            values_.emplace_back(std::forward<Args>(args)...);
-        });
-    }
-
-private:
-    template <class F> static Result<void> attempt(ErrorOperation action, F&& f) {
-        try {
-            f();
-            return {};
-        } catch (const std::bad_alloc&) {
-            return std::unexpected(Error{ErrorCode::ResourceExhausted, action});
-        } catch (const std::length_error&) {
-            return std::unexpected(Error{ErrorCode::SizeOverflow, action});
-        }
-    }
-
-    std::vector<T> values_;
-};
-
 // A scalar reference stores a descriptor identity, not a pointer into movable bytes.
 template <class T, bool ReadOnly> class ScalarRef {
 public:
@@ -1315,6 +1141,182 @@ template <class T> Result<Snapshot> MessageArray<T>::snapshot(std::uint64_t max_
 
     return detail::snapshot(state_, max_bytes); // snapshots the entire owning message
 }
+
+// Keep primary-template member definitions before this constrained specialization.
+// MSVC 19.44 otherwise binds the out-of-class snapshot definition to the local-only class.
+// Arbitrary C++ objects are valid local elements, but acquire no wire eligibility.
+template <class T>
+    requires(!detail::transferable<T>())
+class MessageArray<T> {
+public:
+    using iterator = typename std::vector<T>::iterator;
+    using const_iterator = typename std::vector<T>::const_iterator;
+    MessageArray() = default;
+    MessageArray(const MessageArray&) = default;
+    MessageArray(MessageArray&&) = default;
+    MessageArray& operator=(const MessageArray&) = delete;
+    MessageArray& operator=(MessageArray&&) = delete;
+
+    [[nodiscard]] Result<void> assign(const MessageArray& other) {
+        return attempt(ErrorOperation::Assign, [&] {
+            values_ = other.values_;
+        });
+    }
+
+    [[nodiscard]] Result<void> assign(MessageArray&& other) {
+        if (this == &other) {
+            return {};
+        }
+
+        return attempt(ErrorOperation::Assign, [&] {
+            values_ = std::move(other.values_);
+        });
+    }
+
+    std::size_t size() const noexcept {
+        return values_.size();
+    }
+
+    std::size_t capacity() const noexcept {
+        return values_.capacity();
+    }
+
+    bool empty() const noexcept {
+        return values_.empty();
+    }
+
+    T& operator[](std::size_t i) {
+        if (i >= values_.size()) {
+            vinc::contract_index_violation("array index out of range", i, values_.size());
+        }
+
+        return values_[i];
+    }
+
+    const T& operator[](std::size_t i) const {
+        if (i >= values_.size()) {
+            vinc::contract_index_violation("array index out of range", i, values_.size());
+        }
+
+        return values_[i];
+    }
+
+    [[nodiscard]] Result<T> at(std::size_t i) const
+        requires std::copy_constructible<T>
+    {
+        if (i >= values_.size()) {
+            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::Read});
+        }
+
+        try {
+            return values_[i];
+        } catch (const std::bad_alloc&) {
+            return std::unexpected(Error{ErrorCode::ResourceExhausted, ErrorOperation::Copy});
+        } catch (const std::length_error&) {
+            return std::unexpected(Error{ErrorCode::SizeOverflow, ErrorOperation::Copy});
+        }
+    }
+
+    [[nodiscard]] Result<void> set(std::size_t i, const T& value) {
+        if (i >= values_.size()) {
+            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::Write});
+        }
+
+        return attempt(ErrorOperation::Write, [&] {
+            values_[i] = value;
+        });
+    }
+
+    [[nodiscard]] Result<void> set(std::size_t i, T&& value) {
+        if (i >= values_.size()) {
+            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::Write});
+        }
+
+        return attempt(ErrorOperation::Write, [&] {
+            values_[i] = std::move(value);
+        });
+    }
+
+    iterator begin() noexcept {
+        return values_.begin();
+    }
+
+    iterator end() noexcept {
+        return values_.end();
+    }
+
+    const_iterator begin() const noexcept {
+        return values_.begin();
+    }
+
+    const_iterator end() const noexcept {
+        return values_.end();
+    }
+
+    Result<void> resize(std::size_t size) {
+        return attempt(ErrorOperation::Resize, [&] {
+            values_.resize(size);
+        });
+    }
+
+    Result<void> reserve(std::size_t capacity) {
+        return attempt(ErrorOperation::Reserve, [&] {
+            values_.reserve(capacity);
+        });
+    }
+
+    Result<void> clear() {
+        values_.clear();
+        return {};
+    }
+
+    Result<void> shrink_to_fit() {
+        return attempt(ErrorOperation::Shrink, [&] {
+            values_.shrink_to_fit();
+        });
+    }
+
+    Result<void> pop_back() {
+        if (empty()) {
+            return std::unexpected(Error{ErrorCode::OutOfRange, ErrorOperation::PopBack});
+        }
+
+        values_.pop_back();
+        return {};
+    }
+
+    Result<void> push_back(const T& v) {
+        return attempt(ErrorOperation::Append, [&] {
+            values_.push_back(v);
+        });
+    }
+
+    Result<void> push_back(T&& v) {
+        return attempt(ErrorOperation::Append, [&] {
+            values_.push_back(std::move(v));
+        });
+    }
+
+    template <class... Args> Result<void> emplace_back(Args&&... args) {
+        return attempt(ErrorOperation::Append, [&] {
+            values_.emplace_back(std::forward<Args>(args)...);
+        });
+    }
+
+private:
+    template <class F> static Result<void> attempt(ErrorOperation action, F&& f) {
+        try {
+            f();
+            return {};
+        } catch (const std::bad_alloc&) {
+            return std::unexpected(Error{ErrorCode::ResourceExhausted, action});
+        } catch (const std::length_error&) {
+            return std::unexpected(Error{ErrorCode::SizeOverflow, action});
+        }
+    }
+
+    std::vector<T> values_;
+};
 
 // Low-level local arena for composing root arrays. Generated message classes provide
 // the schema-bound application API; this owner is not a Message Bus ring or publisher.

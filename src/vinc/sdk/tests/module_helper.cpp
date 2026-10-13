@@ -3,7 +3,8 @@
 
 class SdkModule final : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
 public:
-    using BaseModule::BaseModule;
+    SdkModule() : BaseModule("sdkNode") {
+    }
 
     vinc::Result<int32_t> module_interface(std::vector<std::string>) override {
         return 17;

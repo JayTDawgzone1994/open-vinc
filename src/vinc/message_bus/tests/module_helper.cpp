@@ -67,7 +67,7 @@ class MessageBusTestModule : public vinc::BaseModule<vinc::RunMode::FrameworkLoo
     }
 
 public:
-    explicit MessageBusTestModule(std::string name) : BaseModule(std::move(name)) {
+    MessageBusTestModule() : BaseModule("busNode") {
     }
 
     vinc::Result<std::string> on_name(std::vector<std::string>& args) override {
@@ -171,7 +171,8 @@ public:
             }
             copied_ = std::move(*result);
             if (copied_->topic_name() != topic_ || copied_->publisher_name() == "unknown" ||
-                !copied_->get_message_timestamp() || !copied_->get_topic_count() ||
+                copied_->get_message_timestamp() < 1'000'000'000'000'000'000ULL ||
+                !copied_->get_message_monotonic_timestamp() || !copied_->get_topic_count() ||
                 !copied_->publisher_instance()) {
                 return -999;
             }

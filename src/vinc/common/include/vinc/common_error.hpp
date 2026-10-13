@@ -6,11 +6,13 @@ namespace vinc::common {
 enum class ErrorCode : std::int32_t {
     InvalidRuntimeServices = 1,
     IncompatibleRuntimeServices = 2,
-    RuntimeServicesAlreadyBound = 3
+    RuntimeServicesAlreadyBound = 3,
+    TimestampOutOfRange = 4
 };
 
 enum class ErrorOperation : std::int32_t {
-    BindRuntimeServices = 1
+    BindRuntimeServices = 1,
+    ReadTime = 2
 };
 }
 

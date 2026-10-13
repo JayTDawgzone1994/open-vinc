@@ -35,7 +35,7 @@ bool healthy(ModuleManager& manager) {
 
 bool run(ModuleManager& manager, const std::filesystem::path& plugin,
          std::vector<std::string> args, const Options& options) {
-    ModuleType type{"busBenchmark", plugin, "benchmarkNode", {}};
+    ModuleType type{"busBenchmark", plugin, {}};
     if (!good(manager.register_module_type(type))) {
         return false;
     }

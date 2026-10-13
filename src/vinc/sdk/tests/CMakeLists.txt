@@ -5,7 +5,9 @@ add_executable(sdk_consumer_tests consumer.cpp)
 target_link_libraries(sdk_consumer_tests PRIVATE vinc::sdk)
 add_dependencies(sdk_consumer_tests sdk_module_helper)
 add_test(NAME sdk.consumer COMMAND sdk_consumer_tests "$<TARGET_FILE:sdk_module_helper>")
-set_tests_properties(sdk.consumer PROPERTIES TIMEOUT 30)
+# This public consumer uses the default central name, like the real Vinc app.
+# Do not overlap it with Shell integration tests that own that instance lock.
+set_tests_properties(sdk.consumer PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 
 # Each supported public header must also compile as a translation unit's first include.
 set(public_headers

@@ -47,6 +47,7 @@ struct Status {
 struct TopicSummary {
     Topic topic;
     std::uint64_t records = 0;
+    // Minimum/maximum Unix timestamps, not insertion order when the clock changes.
     std::uint64_t first_timestamp = 0;
     std::uint64_t last_timestamp = 0;
 };
@@ -59,7 +60,7 @@ struct SourceSummary {
 
 struct Info {
     bool completed = false;
-    std::int64_t start_utc_ns = 0;
+    std::uint64_t start_utc_ns = 0;
     Counters counters;
     std::vector<TopicSummary> topics;
     std::vector<SourceSummary> sources;

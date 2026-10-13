@@ -37,7 +37,7 @@ void run(const std::filesystem::path& plugin) {
     auto observer = take(vinc::concurrency::InterprocessMutex::open(descriptor.name, vinc::central_owner));
     vinc::ModuleType type;
     type.name = "LockFixture";
-    type.module_base_name = "lock";
+
     type.library = plugin;
     type.policy.max_restarts = 1;
     ok(manager->register_module_type(type));

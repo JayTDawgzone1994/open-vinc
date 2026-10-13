@@ -97,9 +97,9 @@ void test_module_wait_cancellation(Files& files, shell::TclRuntime& runtime, cha
     ModulePolicy policy;
     policy.stop_timeout = 1s;
     check(bool(manager.register_module_type(
-              {"shellHelper", std::filesystem::absolute(argv[1]), "waitingNode", policy})),
+              {"shellHelper", std::filesystem::absolute(argv[1]), policy})),
           "register waiting helper");
-    auto name = manager.start_module("shellHelper", {"normal", utf8(files.path)});
+    auto name = manager.start_module("shellHelper", {"--name", "waitingNode", "normal", utf8(files.path)});
     check(name && manager.wait_started(*name), "waiting helper ready");
     auto waiting = files.write("waiting.tcl", "waitingNode slow\nwaitingNode fail\n");
     check(runtime.start(waiting, {},
@@ -144,13 +144,15 @@ void test_startup_error_returns_to_shell(Files& files, char** argv) {
     auto shell_owner = checked_value(vinc::Shell::create(manager, output));
     auto& shell = *shell_owner;
     const auto exe = std::filesystem::absolute(argv[1]);
-    check(!manager.register_module_type({"set", exe, "valid", {}}), "Tcl module type name reserved");
-    check(!manager.register_module_type({"valid", exe, "list", {}}),
-          "Tcl module base reserved instead of adding suffix");
+    check(!manager.register_module_type({"set", exe, {}}), "Tcl module type name reserved");
     ModulePolicy policy;
     policy.stop_timeout = 1s;
     policy.startup_timeout = 4s;
-    check(bool(manager.register_module_type({"shellHelper", exe, "node", policy})), "register helper");
+    check(bool(manager.register_module_type({"shellHelper", exe, policy})), "register helper");
+    const auto reserved_mid = checked_value(manager.start_module("shellHelper", {"--name", "list"}));
+    const auto reserved_name = manager.wait_started(reserved_mid);
+    check(!reserved_name && reserved_name.error().is(module_system::ErrorCode::NameReserved),
+          "source-proposed Tcl command name is rejected before startup");
     auto startup = files.write(
         "deployment.tcl",
         "shellHelper normal {" + utf8(files.path) +
@@ -260,10 +262,10 @@ void test_startup_interrupt(Files& files, char** argv) {
     ModulePolicy policy;
     policy.stop_timeout = 1s;
     check(bool(manager.register_module_type(
-              {"shellHelper", std::filesystem::absolute(argv[1]), "shutdownNode", policy})),
+              {"shellHelper", std::filesystem::absolute(argv[1]), policy})),
           "shutdown helper");
     auto startup = files.write("interrupt-startup.tcl",
-                               "shellHelper normal {" + utf8(files.path) + "}\nloopStarted\nwhile {1} {}\n");
+                               "shellHelper --name shutdownNode normal {" + utf8(files.path) + "}\nloopStarted\nwhile {1} {}\n");
     std::atomic<bool> ok{true};
     std::jthread feeder([&] {
         if (!eventually([&] {

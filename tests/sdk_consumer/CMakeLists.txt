@@ -15,6 +15,23 @@ set(parent_build_type "${CMAKE_BUILD_TYPE}")
 set(parent_crt "${CMAKE_MSVC_RUNTIME_LIBRARY}")
 set(BUILD_SHARED_LIBS ON)
 add_subdirectory("${VINC_SOURCE_DIR}/src" open-vinc)
+
+# Keep mutable schemas in the test build directory. Reconfiguration must not
+# overwrite edits made by the incremental regression driver.
+set(schema_root "${CMAKE_CURRENT_BINARY_DIR}/message-inputs")
+if(NOT EXISTS "${schema_root}/initialized")
+    file(MAKE_DIRECTORY "${schema_root}/common" "${schema_root}/camera")
+    file(WRITE "${schema_root}/common/ExternalLeaf.msg" "uint32_t revision = 1;\nuint32_t value;\n")
+    file(WRITE "${schema_root}/camera/ExternalFrame.msg" "ExternalLeaf leaf;\n")
+    file(WRITE "${schema_root}/initialized" "owned by sdk.external_consumer\n")
+endif()
+add_message_dir("${schema_root}/common")
+file(RELATIVE_PATH camera_messages "${CMAKE_CURRENT_SOURCE_DIR}" "${schema_root}/camera")
+add_message_dir("${camera_messages}")
+add_message_dir("${schema_root}/common/.")
+
+add_executable(external_message_probe messages.cpp)
+target_link_libraries(external_message_probe PRIVATE vinc::messages)
 if(NOT BUILD_SHARED_LIBS OR NOT CMAKE_CXX_STANDARD EQUAL 23 OR CMAKE_CXX_EXTENSIONS OR
    NOT CMAKE_CXX_STANDARD_REQUIRED OR NOT "${CMAKE_CXX_FLAGS}" STREQUAL "${parent_cxx_flags}" OR
    NOT "${CMAKE_BUILD_TYPE}" STREQUAL "${parent_build_type}" OR NOT "${CMAKE_MSVC_RUNTIME_LIBRARY}" STREQUAL "${parent_crt}")
@@ -37,8 +54,12 @@ add_executable(sdk_incremental_probe incremental.cpp)
 target_include_directories(sdk_incremental_probe PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/incremental")
 target_link_libraries(sdk_incremental_probe PRIVATE vinc::sdk)
 add_dependencies(external_consumer sdk_incremental_probe)
-vinc_add_process_module(external_module
-    MODULE_TYPE_NAME ExternalModule MODULE_BASE_NAME externalNode SOURCES module.cpp)
+add_module(external_module
+    MODULE_TYPE_NAME ExternalModule SOURCES module.cpp)
+if(VINC_TEST_DUPLICATE_MODULE)
+    add_module(duplicate_module MODULE_TYPE_NAME ExternalModule SOURCES module.cpp)
+endif()
+add_dependencies(external_consumer external_message_probe)
 
 # Change the central executable's output AFTER the framework has registered its
 # deployment target. Both default copy targets resolve to the same directory.
@@ -52,7 +73,7 @@ vinc_deploy_tcl(external_consumer)
 vinc_deploy_tcl(shell "${CMAKE_CURRENT_BINARY_DIR}/explicit resources")
 add_dependencies(external_consumer external_module)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/executables.cmake" CONTENT
-    "set(central [==[$<TARGET_FILE:shell>]==])\nset(consumer [==[$<TARGET_FILE:external_consumer>]==])\nset(module [==[$<TARGET_FILE:external_module>]==])\nset(incremental_probe [==[$<TARGET_FILE:sdk_incremental_probe>]==])\n")
+    "set(central [==[$<TARGET_FILE:shell>]==])\nset(consumer [==[$<TARGET_FILE:external_consumer>]==])\nset(module [==[$<TARGET_FILE:external_module>]==])\nset(incremental_probe [==[$<TARGET_FILE:sdk_incremental_probe>]==])\nset(message_probe [==[$<TARGET_FILE:external_message_probe>]==])\n")
 
 # A child runtime must not acquire the central manager or output service through its target.
 get_target_property(runtime_links vinc_module LINK_LIBRARIES)

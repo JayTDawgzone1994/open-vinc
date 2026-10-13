@@ -165,13 +165,12 @@ void broadcast_shutdown(Terminal& terminal) {
     vinc::ModulePolicy policy;
     policy.stop_timeout = 1500ms;
     check(bool(manager.register_module_type(
-              {"shellHelper", std::filesystem::path(executable).parent_path() / "shell_process_helper.dll",
-               "consoleNode", policy})),
+              {"shellHelper", std::filesystem::path(executable).parent_path() / "shell_process_helper.dll", policy})),
           "register console helper");
     const auto path = directory.u8string();
     // char may read UTF-8 char8_t object bytes; copy while the owning string remains alive.
     auto module = manager.start_module(
-        "shellHelper", {"slow-stop", std::string(reinterpret_cast<const char*>(path.data()), path.size())});
+        "shellHelper", {"--name", "consoleNode", "slow-stop", std::string(reinterpret_cast<const char*>(path.data()), path.size())});
     check(bool(module) && bool(manager.wait_started(*module)), "console helper ready");
     // This test runs in its own hidden console; never broadcasts to the user's console.
     check(GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0), "broadcast OS Ctrl+C");

@@ -5,8 +5,11 @@
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <vinc/message_bus/detail/protocol.hpp>
 #include <vinc_messages/Frame.hpp>
+#include <vinc/time.hpp>
+#include <vinc/common_error.hpp>
 #include <atomic>
 #include <future>
+#include <limits>
 #include <iostream>
 #include <stdexcept>
 
@@ -23,6 +26,8 @@ constexpr std::uint64_t message_bytes = 1024;
 constexpr std::uint32_t fixture_slots = 2;
 constexpr std::uint32_t fixture_readers = 2;
 constexpr std::size_t sessions_per_connection = 2;
+// Overrides only this test thread; production has no clock override.
+thread_local std::optional<Result<std::uint64_t>> clock_override;
 std::atomic<FaultPoint> armed{FaultPoint::None};
 std::atomic<bool> fault_hit{false};
 std::atomic<std::size_t> remaining_pending{SIZE_MAX};
@@ -146,6 +151,83 @@ control::Bytes subscription(std::uint64_t id, const detail::Descriptor* source =
     }
 
     return body;
+}
+
+void test_publication_times() {
+    Connection connection;
+    const auto source = descriptor();
+    auto ring = take(detail::RingBuffer::create(source));
+    auto counter = take(detail::NamedCounter::create(source.counter));
+    auto advertise = std::async(std::launch::async, [&] {
+        return connection.client->advertise<Frame>("time-test");
+    });
+    connection.reply(take(connection.central->receive_until(deadline())), advertisement(source));
+    auto publisher = take(advertise.get());
+    auto subscribe = std::async(std::launch::async, [&] {
+        return connection.client->subscribe<Frame>("time-test");
+    });
+    connection.reply(take(connection.central->receive_until(deadline())), subscription(42, &source));
+    auto subscriber = take(subscribe.get());
+
+    auto local = make_message<Frame>();
+    local->data().sequence = 42;
+    clock_override = 1000;
+    ok(publisher.push(*local));
+    auto first = take(subscriber.get_last());
+    check(first->get_message_timestamp() == 1000 && first->get_message_monotonic_timestamp() > 0,
+          "push delivers both framework clocks");
+    check(local->get_message_timestamp() == 0 && local->get_message_monotonic_timestamp() == 0,
+          "push never mutates source metadata");
+    auto copy = std::make_unique<Frame>(*first);
+    check(copy->get_message_timestamp() == first->get_message_timestamp() &&
+              copy->get_message_monotonic_timestamp() == first->get_message_monotonic_timestamp(),
+          "message copy preserves both publication clocks");
+    auto serialized = std::vector<std::uint8_t>{};
+    ok(first->serialize(serialized));
+    ok(copy->deserialize(serialized));
+    check(copy->get_message_timestamp() == first->get_message_timestamp() &&
+              copy->get_message_monotonic_timestamp() == first->get_message_monotonic_timestamp(),
+          "payload decoding preserves both destination timestamps");
+
+    clock_override = 500;
+    ok(publisher.push(*first));
+    auto replayed = take(subscriber.get_last());
+    check(replayed->get_message_timestamp() == 500 &&
+              replayed->get_message_monotonic_timestamp() >= first->get_message_monotonic_timestamp(),
+          "republishing replaces source times even when UTC moves backward");
+    check(first->get_message_timestamp() == 1000, "republishing preserves the local received message");
+    auto loan = take(publisher.get_next());
+    clock_override = 0;
+    ok(publisher.commit(loan));
+    auto committed = take(subscriber.get_last());
+    check(committed->get_message_timestamp() == 0 && committed->get_message_monotonic_timestamp() > 0,
+          "commit samples at publication, and Unix epoch zero is valid");
+
+    const auto published = detail::shared_load(ring->header().head);
+    clock_override = std::unexpected(Error{common::ErrorCode::TimestampOutOfRange, common::ErrorOperation::ReadTime});
+    auto failed = publisher.push(*local);
+    check(!failed && failed.error().is(bus::ErrorCode::TimestampUnavailable) &&
+              failed.error().is_operation(bus::ErrorOperation::Push) &&
+              failed.error().causes().size() == 1 &&
+              failed.error().causes().front().domain == ErrorDomain::Common,
+          "clock failure returns Bus classification and preserves Common cause");
+    check(detail::shared_load(ring->header().head) == published, "failed push cannot publish partial metadata");
+    clock_override = (std::numeric_limits<std::uint64_t>::max)();
+    ok(publisher.push(*local));
+    auto maximum = take(subscriber.get_last());
+    check(maximum->get_message_timestamp() == (std::numeric_limits<std::uint64_t>::max)(),
+          "retry after failed push preserves all timestamp bits");
+    auto failed_loan = take(publisher.get_next());
+    const auto before_failure = detail::shared_load(ring->header().head);
+    clock_override = std::unexpected(Error{common::ErrorCode::TimestampOutOfRange, common::ErrorOperation::ReadTime});
+    failed = publisher.commit(failed_loan);
+    check(!failed && failed.error().is(bus::ErrorCode::TimestampUnavailable) &&
+              failed.error().is_operation(bus::ErrorOperation::Commit), "commit reports clock failure");
+    check(detail::shared_load(ring->header().head) == before_failure, "failed commit leaves publication head unchanged");
+    auto outstanding = publisher.get_next();
+    check(!outstanding && outstanding.error().is(bus::ErrorCode::OutstandingLoan),
+          "post-seal failure retains existing outstanding-loan policy");
+    clock_override.reset();
 }
 
 void test_send_failure() {
@@ -493,11 +575,11 @@ void test_exit_cleanup(FaultPoint point) {
     auto ring = take(detail::RingBuffer::open(second, true));
     std::atomic<bool> closed{false};
     const auto reservation = take(ring->reserve(closed));
-    ok(ring->publish(reservation, detail::minimum_message_bytes, 1, 1));
+    ok(ring->publish(reservation, detail::minimum_message_bytes, 1, 1, 1));
     auto candidate = ring->candidate(0, false);
     check(candidate && ring->protect(*candidate, reader.reader), "fixture pins reader token");
     const auto next = take(ring->reserve(closed));
-    ok(ring->publish(next, detail::minimum_message_bytes, 2, 2));
+    ok(ring->publish(next, detail::minimum_message_bytes, 2, 2, 2));
 
     // The fixture performs no further work as owner_id. Its pinned token models
     // a process that died at the copy boundary; no concurrent reader exists here.
@@ -538,6 +620,10 @@ void test_exit_cleanup(FaultPoint point) {
 }
 
 namespace vinc::message_bus::detail::testing {
+Result<std::uint64_t> publication_timestamp() noexcept {
+    return clock_override ? *clock_override : vinc::unix_nanoseconds();
+}
+
 void checkpoint(FaultPoint point) {
     auto expected = point;
     if (armed.compare_exchange_strong(expected, FaultPoint::None)) {
@@ -553,6 +639,7 @@ void pending_remaining(std::size_t count) noexcept {
 
 int main() {
     try {
+        test_publication_times();
         test_topic_discovery();
         test_malformed_discovery();
         test_client_topic_separators();

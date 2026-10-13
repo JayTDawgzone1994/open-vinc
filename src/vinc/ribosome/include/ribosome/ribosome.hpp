@@ -29,8 +29,12 @@ struct MessageInfo {
 class Ribosome {
 public:
     std::int8_t set_text_message_path(const std::filesystem::path& path) {
-        input_ = path;
+        inputs_ = {path};
         return 0;
+    }
+
+    void add_text_message_path(const std::filesystem::path& path) {
+        inputs_.push_back(path);
     }
 
     std::int8_t set_cpp_message_path(const std::filesystem::path& path) {
@@ -48,7 +52,7 @@ private:
     std::vector<MessageInfo> load();
     void resolve(std::vector<MessageInfo>& messages);
     std::string generate(const MessageInfo& message, const std::string& source);
-    std::filesystem::path input_;
+    std::vector<std::filesystem::path> inputs_;
     std::filesystem::path output_;
     std::filesystem::path template_;
 };

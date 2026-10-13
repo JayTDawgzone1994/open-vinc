@@ -28,7 +28,7 @@ std::unique_ptr<ModuleManager> create(std::string name, const std::filesystem::p
                                       const std::filesystem::path& root) {
     auto manager = take(Access::create(std::move(name)));
     take(Access::configure_params(*manager, root));
-    ModuleType type{"paramTest", plugin, "camera"};
+    ModuleType type{"paramTest", plugin};
     take(manager->register_module_type(std::move(type)));
     return manager;
 }

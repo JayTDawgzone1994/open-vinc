@@ -3,7 +3,7 @@
 本目錄負責 CLI、Module catalog 與中央服務的組裝。
 Shell 邏輯仍由 `src/vinc/shell` 元件維護。
 CMake target 為 `shell`，輸出程式仍為建置目錄中的 `Vinc.exe`／`Vinc`。
-Module 範例先登記，再生成本程式的 catalog；生成檔在本次建置目錄內。
+Module 在正常配置流程登記，最外層配置結束時統一生成 catalog；生成檔在本次建置目錄內。
 
 `VINC_BUILD_APPS=OFF` 可略過中央程式；`VINC_BUILD_EXAMPLES=OFF` 可略過內建範例及其 catalog 項目。
 既有 CLI、socket 預設值與關閉行為未改變。操作方式見 [Shell README](../../src/vinc/shell/README.md)。
@@ -62,15 +62,10 @@ Linux／macOS 尚未驗證。
 
 ## 待處理事項
 
-### 外部 Module 註冊晚於中央 catalog 收集（2026-10-06 CMake 重審）
+### 外部 Module 註冊晚於中央 catalog 收集
 
-**已確認，尚未修復：** `CMakeLists.txt` 在進入中央目錄時立即讀取
-`VINC_PROCESS_TARGETS`／`VINC_PROCESS_CATALOG`，並將當時的內容交給 `file(GENERATE)`。
-外部父專案在 `add_subdirectory(open-vinc/src ...)` 返回後才呼叫
-`vinc_add_process_module()`，新 Module 不會進入中央 catalog，也不會成為中央 target 的建置相依。
-延後寫檔本身不會重新讀取已展開的變數。
-
-已讀取上一輪 `sdk.external_consumer` 的實際生成檔：外部 Module 存在，但中央
-`register_built_modules()` 是空函式。原測試由消費端手動登記 Module，未覆蓋中央自動登記。
-**未核准提案：** 在組裝階段結束後統一收集 catalog 與 target 相依，並讓外部測試從真正的
-中央 Shell 啟動該 Module。須先確認組裝時機，再修改；不要求一般使用者操作 runtime 初始化。
+2026-10-12 已調整接線：中央 catalog 收集延至最外層 CMake 目錄的正常配置結束，
+此時重新讀取 Module 登記資訊，產生 catalog 並加入 Plugin 建置相依。
+外部父專案在 add_subdirectory(open-vinc/src ...) 返回後呼叫 add_module 亦會納入。
+實例預設名稱不再存放於 catalog，由 Module source 決定。
+實際驗證結果見 [SDK README](../../src/vinc/sdk/README.md)。

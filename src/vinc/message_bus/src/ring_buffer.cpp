@@ -390,7 +390,7 @@ vinc::Result<Reservation> RingBuffer::reserve(const std::atomic<bool>& closed) {
 // Publish metadata first, then the ready token, then head. Readers must observe
 // both readiness and a sequence no newer than head before treating a slot as published.
 vinc::Result<void> RingBuffer::publish(const Reservation& reservation, std::uint64_t bytes, std::uint64_t timestamp,
-                                 std::uint64_t count) {
+                                 std::uint64_t monotonic_timestamp, std::uint64_t count) {
     if (!alive()) {
         return std::unexpected(vinc::make_error(ErrorCode::Closed, ErrorOperation::Publish));
     }
@@ -403,6 +403,7 @@ vinc::Result<void> RingBuffer::publish(const Reservation& reservation, std::uint
 
     shared_store(slot.sequence, reservation.sequence);
     shared_store(slot.timestamp, timestamp);
+    shared_store(slot.monotonic_timestamp, monotonic_timestamp);
     shared_store(slot.count, count);
     shared_store(slot.size, bytes);
     shared_store(slot.gate, (reservation.generation << gate_state_bits) | ready);
@@ -441,6 +442,7 @@ std::optional<Metadata> RingBuffer::candidate(std::uint64_t cursor, bool latest,
         if ((gate & gate_state_mask) == ready) {
             Metadata metadata{shared_load(slot.sequence),
                               shared_load(slot.timestamp),
+                              shared_load(slot.monotonic_timestamp),
                               shared_load(slot.count),
                               shared_load(slot.size),
                               gate,

@@ -363,9 +363,9 @@ void test_remote_shutdown(Files& files, char** argv) {
     auto shell_owner = checked_value(vinc::Shell::create(manager, output));
     auto& shell = *shell_owner;
     check(bool(manager.register_module_type(
-              {"shellHelper", std::filesystem::absolute(argv[1]), "socketNode", {}})),
+              {"shellHelper", std::filesystem::absolute(argv[1]), {}})),
           "register module");
-    check(!manager.register_module_type({"resume", std::filesystem::absolute(argv[1]), "reserved", {}}),
+    check(!manager.register_module_type({"resume", std::filesystem::absolute(argv[1]), {}}),
           "remote names reserved");
     shell::SocketShellOptions options;
     options.port = 0;
@@ -389,7 +389,7 @@ void test_remote_shutdown(Files& files, char** argv) {
     Client owner_client(endpoint);
     Client observer_client(endpoint);
     observer_client.command("output off");
-    owner_client.send("shellHelper output " + shell::quote_argument(text(files.path)) + "\n");
+    owner_client.send("shellHelper --name socketNode output " + shell::quote_argument(text(files.path)) + "\n");
     owner_client.until("Started socketNode");
     owner_client.until("VINC > ");
     check(eventually([&] {
@@ -421,8 +421,8 @@ void test_remote_shutdown(Files& files, char** argv) {
 
 void test_remote_contract(Files& files, const std::filesystem::path& helper) {
     auto manager = take(vinc::test::create_manager());
-    take(manager->register_module_type({"shellHelper", helper, "faultNode", {}}));
-    const auto mid = take(manager->start_module("shellHelper", {"normal", text(files.path)}));
+    take(manager->register_module_type({"shellHelper", helper, {}}));
+    const auto mid = take(manager->start_module("shellHelper", {"--name", "faultNode", "normal", text(files.path)}));
     take(manager->wait_running(mid, Clock::now() + fixture_wait_timeout));
     shell::ScriptService scripts(*manager);
     take(scripts.initialize());
@@ -436,7 +436,11 @@ void test_remote_contract(Files& files, const std::filesystem::path& helper) {
     check(notification.find("[Module fault] faultNode MID=") != std::string::npos,
           "remote diagnostic is independent of muted module output");
     client.until("VINC > ");
-    const auto help = client.command("help");
+    // Fatal exit may also queue a Log disconnect notification with its own prompt.
+    // Identify the command reply before consuming its terminating prompt.
+    client.send("help\r\n");
+    client.until("[Commands]");
+    const auto help = client.until("VINC > ");
     check(help.find("[Module fault] faultNode MID=") != std::string::npos,
           "remote remains usable and can query retained fault");
     client.close();

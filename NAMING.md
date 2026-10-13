@@ -158,3 +158,10 @@ Publisher、Subscriber、請求、Socket session 與 OSAL 資源 ID 保留各自
 `VINC_NAME` 是建置時指定的本機中央名稱，用於同名排他啟動與共享資源紀錄歸屬。
 它不等於 Module 名稱、MID 或預留的 VID。其範圍與生命週期見
 [Module System INSTANCE.md](src/vinc/module_system/INSTANCE.md)。
+
+## 訊息發布時間
+
+`timestamp`／`get_message_timestamp()` 表示 Unix 奈秒，供日期追查；
+`monotonic_timestamp`／`get_message_monotonic_timestamp()` 表示同主機單調發布時間，供 Bus 排序。
+兩者皆為 uint64_t，由框架填入；採樣、格式化與版本契約見
+[Message Bus](src/vinc/message_bus/README.md#雙時間發布-metadata2026-10-13)。

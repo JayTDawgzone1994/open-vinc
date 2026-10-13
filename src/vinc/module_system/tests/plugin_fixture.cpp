@@ -18,10 +18,10 @@ const auto stalled = [] {
 
 class PluginFixture final : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
 public:
-    explicit PluginFixture(std::string name) : BaseModule(std::move(name)) {
-        if (get_module_name() == "throwConstructor") {
-            throw std::runtime_error("fixture constructor failed");
-        }
+    PluginFixture() : BaseModule("workingPlugin") {
+#ifdef VINC_PLUGIN_THROW_CONSTRUCTOR
+        throw std::runtime_error("fixture constructor failed");
+#endif
     }
 
     ~PluginFixture() override {
@@ -56,7 +56,7 @@ private:
 extern "C" VINC_PLUGIN_EXPORT const vinc::detail::PluginEntry* vinc_module_plugin() noexcept {
     static const vinc::detail::PluginEntry entry{
 #ifdef VINC_PLUGIN_BAD_VERSION
-        vinc::detail::plugin_entry_version + 1,
+        vinc::detail::plugin_entry_version - 1,
 #else
         vinc::detail::plugin_entry_version,
 #endif
@@ -69,7 +69,7 @@ extern "C" VINC_PLUGIN_EXPORT const vinc::detail::PluginEntry* vinc_module_plugi
             return vinc::detail::bind_runtime_services(services);
 #endif
         },
-        [](std::string) -> vinc::Result<vinc::detail::ModuleObject*> {
+        []() -> vinc::Result<vinc::detail::ModuleObject*> {
             return nullptr;
         },
         [](vinc::detail::ModuleObject*) noexcept {},

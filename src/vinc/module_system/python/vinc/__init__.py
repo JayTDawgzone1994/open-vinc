@@ -1,7 +1,7 @@
 """VINC Python Module SDK. Importing this package creates no framework session."""
 from enum import Enum
 import sys
-from ._native import Error, ErrorRecord, NativeError, PumpStats, error_to_string
+from ._native import Error, ErrorRecord, NativeError, PumpStats, error_to_string, format_utc
 from ._native import messages, message_bus, param, log
 
 # Public package aliases for the statically bound extension submodules.

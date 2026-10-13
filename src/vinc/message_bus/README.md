@@ -192,9 +192,12 @@ if (received) {
 只比較這次掃描所觀察到的已提交候選，不提供所有 Publisher 的原子快照或全域嚴格 FIFO。
 取得時間後被 OS 暫停的 Publisher，可能稍後才讓較舊時間戳可見；不等待或回頭重排已交付訊息。
 
-時間戳單位為 nanoseconds，同一主機內比較，**不是 Unix 時間或 nanosecond 精度承諾**。
+`get_message_timestamp()` 是 `uint64_t` Unix nanoseconds，供日期追查；
+`get_message_monotonic_timestamp()` 是 `uint64_t` 同主機單調 nanoseconds，供 Bus 排序。
+兩者均不承諾 nanosecond 實際精度，UTC 校時不影響單調排序。
 框架填入 `topic_name()`、`publisher_name()`、`publisher_instance()`、
-`get_message_timestamp()`、`get_topic_count()`；使用者沒有 metadata setter。
+上述兩個時間與 `get_topic_count()`；使用者沒有 metadata setter。
+完整發布時機及相容性見[雙時間發布 metadata](#雙時間發布-metadata2026-10-13)。
 topic count 在同一 topic 存活期間由各 Publisher 共用 atomic 計數器配置，可能因失敗有缺號，
 不是排序依據。topic 無訂閱也無 Publisher 後釋放，重建時 count 重新開始；
 Publisher instance ID 在同一 ModuleManager 生命週期不重用，不能跨中央重啟當持久識別。
@@ -446,3 +449,51 @@ SubscriberOptions 新增 max_message_bytes，0 保留既有行為。非零時在
 callback 路徑略過過大映像並推進 cursor／記錄 oversized_messages；get_last 回 CapacityExceeded，
 不改 callback cursor。正常訊息仍走原布局驗證及 Reader lease 複製，writer 等待政策不變。
 Recorder 的使用邊界與驗證见 [Bag README](../bag/README.md)。
+
+## 雙時間發布 metadata（2026-10-13）
+
+- `push(const T&)` 與 `commit(loan)` 在 payload 複製／封存完成後取樣 Unix 與 OSAL 單調時間，
+  寫入兩個 metadata 欄位後才發布 Ready／head。它們是先後取樣，並非原子時鐘快照；
+  OS 仍可能在取樣與 publication point 間暫停執行緒。
+- 每次重新發布都覆寫 Bus 的兩個時間；不沿用來源訊息 metadata，也不修改 push 的本機來源物件。
+  借出 loan 時不取發布時間；Subscriber 不改成接收時間。訊息複製保留兩個欄位，
+  payload serialize／deserialize 仍不攜帶或替換發布 metadata。
+- `get_last`、跨 Publisher 合併與批次讀取只比較單調時間；相同值依 Publisher rank。
+  不新增全域嚴格 FIFO 保證，Unix 時間可能倒退。
+- Unix 時間無法表示（1970 年以前或超出 uint64 奈秒）回
+  `MessageBus::TimestampUnavailable / Push` 或 `Commit`，保留 Common 原因。
+  不發布新 head；push 回滾本次 reservation，可重試。commit 在 seal 之後失敗沿用既有政策：
+  撤銷 loan 存取，保留 outstanding 狀態，需關閉該 Publisher，不暗中重新借出或取消。
+- RingBuffer 布局升 **v2**：使用一個原 reserved word 保存單調時間，slot 仍為 64 bytes，
+  header／reader token 尺寸不變。舊／未知布局拒絕。同步、Reader 保護與無限等待政策不變。
+  控制協定維持 v2，payload 映像維持 v2，schema hash 不因發布 metadata 改變。
+- C++ BaseMessage 布局改變：Plugin entry **7**、bootstrap **v12**，所有中央／Host／Plugin／
+  Python 擴充一起重建。Python 同時提供兩個唯讀 getter 及 `vinc.format_utc()`。
+
+UTC 格式化使用 common `<vinc/time.hpp>`：`vinc::format_utc(msg.get_message_timestamp())`。
+Bag 同步改為 v2，分開保存兩種發布時間；舊 Bag 不相容，見 [Bag](../bag/README.md)。
+Param 時間、heartbeat／timeout、碰撞等待計時與 Log 的既有契約不在本輪變更範圍。
+
+### 本輪驗證（2026-10-13，Windows x64）
+
+使用 Windows SDK 10.0.26100.0、CMake 4.3.2、Ninja 1.13.2 與 Python 3.13.12，
+四種組態皆完成完整建置；相關 CTest 結果如下：
+
+| 編譯器 | 組態 | 相關測試 | 測試紀錄（相對 repository root） |
+| --- | --- | --- | --- |
+| MSVC 19.51.36257 | Debug | 27/27 | `build/dual-time-1951-debug-tests.log` |
+| MSVC 19.51.36257 | Release | 27/27 | `build/dual-time-1951-release-tests.log` |
+| MSVC 19.44.35229 | Debug | 27/27 | `build/dual-time-1944-debug-tests.log` |
+| MSVC 19.44.35229 | Release | 27/27 | `build/dual-time-1944-release-tests.log` |
+
+範圍包含 Common 時間／錯誤、訊息儲存、Bus、Ribosome、Module 程序／Context／Plugin、
+Python、外部 SDK consumer 與 Bag。覆蓋 unsigned UTC 邊界、時鐘倒退時的單調排序、
+push／commit 取樣與失敗回滾、跨程序 metadata、舊布局／Bag 版本拒絕及錄製時間欄位。
+補入最後一項 RingBuffer 並行 metadata 斷言後，19.51 Debug 再完成完整建置，
+並重跑 `common.time`、`message_bus.cleanup`、`message_bus.ring_buffer`，3/3 通過；
+其餘三組 27 項回歸包含該斷言。
+
+本輪執行的是 76 項 CTest 中的 27 項相關測試，未宣稱全套重跑。
+MSVC Debug 的 `message.access` 仍依既有 iterator-debug 條件略過配置失敗掃描，Release 執行該路徑。
+19.44 建置仍有 Shell `tcl_runtime.cpp` 的既有 C4127 警告，本輪未修改該部分。
+Linux／macOS 尚未驗證本輪變更。

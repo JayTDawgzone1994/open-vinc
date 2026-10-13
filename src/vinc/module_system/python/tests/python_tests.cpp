@@ -102,7 +102,6 @@ void test_parent_loss(const std::filesystem::path& python, const std::filesystem
 
         spawn.arguments = {detail::bootstrap::version_marker,
                            endpoint_text,
-                           "orphan",
                            "orphan-test",
                            "1234",
                            std::to_string(orphan_heartbeat_interval.count()),
@@ -255,7 +254,7 @@ void lifecycle(const std::filesystem::path& python, const std::filesystem::path&
     check(!manager->wait_started(imported), "import error isolated from central");
     ModuleType retry;
     retry.name = "retryType";
-    retry.module_base_name = "retryNode";
+
     retry.policy.max_restarts = 1;
     retry.policy.restart_delay = retry_delay;
     retry.python = PythonLaunch{fixtures / "manual/manual.py", bootstrap, python};
@@ -278,7 +277,7 @@ void lifecycle(const std::filesystem::path& python, const std::filesystem::path&
     // Native stop supervision must work even when a hook monopolizes Python execution.
     ModuleType blocking;
     blocking.name = "blockingType";
-    blocking.module_base_name = "blockingNode";
+
     blocking.policy.stop_timeout = stop_grace;
     blocking.python = PythonLaunch{fixtures / "framework/framework.py", bootstrap, python};
     take(manager->register_module_type(blocking));

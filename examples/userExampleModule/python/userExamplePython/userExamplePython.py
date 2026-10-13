@@ -29,6 +29,8 @@ def describe(message):
     print(f"MESSAGE sequence={message.data().sequence} topic={message.topic_name()} "
           f"publisher={message.publisher_name()} publisher_id={message.publisher_instance()} "
           f"count={message.get_topic_count()} timestamp_ns={message.get_message_timestamp()} "
+          f"utc={vinc.format_utc(message.get_message_timestamp())} "
+          f"monotonic_ns={message.get_message_monotonic_timestamp()} "
           f"samples={len(message.data().samples)} note={message.data().note.decode()}")
     if len(message.data().groups) and len(message.data().groups[0]):
         item = message.data().groups[0][0]

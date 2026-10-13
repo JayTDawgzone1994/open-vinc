@@ -150,7 +150,7 @@ void exercise(const std::filesystem::path& plugin) {
     policy.startup_timeout = startup_timeout;
     policy.stop_timeout = stop_timeout;
     policy.max_restarts = 2;
-    require(manager->register_module_type({"helper", plugin, "debugNode", policy}));
+    require(manager->register_module_type({"helper", plugin, policy}));
     shell::CommandRouter router(*manager);
     require(router.initialize());
 

@@ -146,7 +146,8 @@ class ContextModule : public BaseModule<RunMode::Manual> {
     }
 
 public:
-    using BaseModule::BaseModule;
+    ContextModule() : BaseModule("contextNode") {
+    }
     Result<void> on_start(const std::vector<std::string>& args) override {
         main_thread_ = std::this_thread::get_id();
         mode_ = args.at(0);

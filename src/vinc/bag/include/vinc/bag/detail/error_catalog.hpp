@@ -14,7 +14,8 @@ inline constexpr std::array error_entries{ErrorCodeEntry{ErrorCode::InvalidArgum
                                           ErrorCodeEntry{ErrorCode::BusFailed, "BusFailed"},
                                           ErrorCodeEntry{ErrorCode::StorageFailed, "StorageFailed"},
                                           ErrorCodeEntry{ErrorCode::AlreadyExists, "AlreadyExists"},
-                                          ErrorCodeEntry{ErrorCode::WorkerFailed, "WorkerFailed"}};
+                                          ErrorCodeEntry{ErrorCode::WorkerFailed, "WorkerFailed"},
+                                          ErrorCodeEntry{ErrorCode::TimestampUnavailable, "TimestampUnavailable"}};
 inline constexpr std::array operation_entries{ErrorOperationEntry{ErrorOperation::Create, "Create"},
                                               ErrorOperationEntry{ErrorOperation::Write, "Write"},
                                               ErrorOperationEntry{ErrorOperation::Finish, "Finish"},

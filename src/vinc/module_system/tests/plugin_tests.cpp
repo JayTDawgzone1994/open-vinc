@@ -45,11 +45,11 @@ void test_library(const std::filesystem::path& path) {
 }
 
 void expect_failure(const std::filesystem::path& path, module_system::ErrorCode code,
-                    std::string type = "pluginFixture", std::string name = "badPlugin") {
+                    std::string type = "pluginFixture") {
     auto manager = take(vinc::test::create_manager());
     ModulePolicy policy;
     policy.startup_timeout = startup_timeout;
-    check(bool(manager->register_module_type({type, path, name, policy})), "register test plugin");
+    check(bool(manager->register_module_type({type, path, policy})), "register test plugin");
     const auto mid = take(manager->start_module(type));
     auto started = manager->wait_running(mid, control::Clock::now() + test_timeout);
     check(!started, "bad plugin must not become ready");
@@ -70,7 +70,7 @@ void expect_failure(const std::filesystem::path& path, module_system::ErrorCode 
 
 int main(int argc, char** argv) {
     try {
-        check(argc == 7, "six plugin fixture paths required");
+        check(argc == 8, "seven plugin fixture paths required");
         const auto valid = std::filesystem::absolute(argv[1]);
         test_library(valid);
         expect_failure(valid.parent_path() / "missing-plugin.dll", module_system::ErrorCode::PluginLoadFailed);
@@ -80,10 +80,10 @@ int main(int argc, char** argv) {
         expect_failure(std::filesystem::absolute(argv[5]), module_system::ErrorCode::ServiceFailed);
         expect_failure(std::filesystem::absolute(argv[6]), module_system::ErrorCode::StartupTimeout);
         expect_failure(valid, module_system::ErrorCode::InvalidPlugin, "wrongType");
-        expect_failure(valid, module_system::ErrorCode::HookException, "pluginFixture", "throwConstructor");
+        expect_failure(std::filesystem::absolute(argv[7]), module_system::ErrorCode::HookException);
 
         auto missing_host = take(vinc::test::create_manager({}, valid.parent_path() / "missing-host.exe"));
-        check(bool(missing_host->register_module_type({"pluginFixture", valid, "missingHost"})),
+        check(bool(missing_host->register_module_type({"pluginFixture", valid})),
               "register with missing Host");
         const auto missing_mid = take(missing_host->start_module("pluginFixture"));
         auto missing_start = missing_host->wait_running(missing_mid, control::Clock::now() + test_timeout);
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
                 std::filesystem::remove(path, ignored);
             }
         } remove_fixture{relocated};
-        check(bool(manager->register_module_type({"pluginFixture", relocated, "workingPlugin"})), "valid registration");
+        check(bool(manager->register_module_type({"pluginFixture", relocated})), "valid registration");
         const auto marker = valid.parent_path() / "plugin-destroyed.txt";
         std::filesystem::remove(marker);
         const auto mid = take(manager->start_module("pluginFixture", {take(osal::path_to_utf8(marker))}));

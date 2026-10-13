@@ -82,12 +82,12 @@ int main(int argc, char** argv) {
         auto manager = take(vinc::test::create_manager());
         ModuleType type;
         type.name = "helper";
-        type.module_base_name = "fault-child";
+
         type.library = std::filesystem::absolute(argv[1]);
         type.policy.max_restarts = 1;
         type.policy.restart_delay = std::chrono::milliseconds(100);
         check(bool(manager->register_module_type(type)), "register child");
-        const auto mid = take(manager->start_module(type.name));
+        const auto mid = take(manager->start_module(type.name, {"--name", "fault-child"}));
         check(bool(manager->wait_running(mid, control::Clock::now() + test_timeout)), "child ready");
         for (const auto point : {Point::BeforeSend, Point::AfterSend}) {
             injection = static_cast<int>(point);
@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
         const auto restart_deadline = control::Clock::now() + test_timeout;
         std::optional<ModuleSnapshot> restarted;
         do {
-            restarted = manager->inspect(type.module_base_name);
+            restarted = manager->inspect("fault-child");
             if (restarted && restarted->mid != mid && restarted->state == ModuleState::Running) {
                 break;
             }

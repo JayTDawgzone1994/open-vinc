@@ -141,7 +141,6 @@ Result<PythonDiscoveryReport> discover_python_modules(ModuleManager& manager,
 
         ModuleType type;
         type.name = *name;
-        type.module_base_name = *name;
         type.python = PythonLaunch{script, bootstrap, executable};
         auto registered = manager.register_module_type(std::move(type));
         if (!registered) {

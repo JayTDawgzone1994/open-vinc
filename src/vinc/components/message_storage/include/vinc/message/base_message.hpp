@@ -28,9 +28,14 @@ public:
         return _topic_name;
     }
 
-    // Same-host monotonic publication time in nanoseconds, not a UTC wall-clock date.
+    // Framework publication time: unsigned Unix nanoseconds from system_clock.
     uint64_t get_message_timestamp() const {
         return _message_timestamp;
+    }
+
+    // Same-host monotonic publication time; use for ordering and elapsed time.
+    uint64_t get_message_monotonic_timestamp() const {
+        return _message_monotonic_timestamp;
     }
 
     uint64_t get_topic_count() const noexcept {
@@ -70,6 +75,7 @@ private:
     std::string _topic_name = "unknown";
     std::string _publisher_name = "unknown";
     uint64_t _message_timestamp = 0;
+    uint64_t _message_monotonic_timestamp = 0;
     uint64_t _topic_count = 0;
     uint64_t _publisher_instance = 0;
 };

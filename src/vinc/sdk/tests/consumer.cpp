@@ -21,13 +21,13 @@ int main(int argc, char** argv) {
     auto manager_owner = vinc::ModuleManager::create();
 
     if (!manager_owner) {
-
+        std::cerr << vinc::error_to_string(manager_owner.error()) << '\n';
         return 10;
     }
 
     auto& manager = **manager_owner;
     auto registered =
-        manager.register_module_type({"sdkModule", std::filesystem::absolute(argv[1]), "sdkNode"});
+        manager.register_module_type({"sdkModule", std::filesystem::absolute(argv[1])});
     if (!registered) {
         return 3;
     }

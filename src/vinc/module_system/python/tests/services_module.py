@@ -18,6 +18,10 @@ def raises(kind, function):
 
 class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
     def on_start(self, args):
+        assert vinc.format_utc(0) == "1970-01-01T00:00:00.000000000Z"
+        assert vinc.format_utc(2**64 - 1) == "2554-07-21T23:34:33.709551615Z"
+        raises(TypeError, lambda: vinc.format_utc(-1))
+        raises(TypeError, lambda: vinc.format_utc(2**64))
         self.mode = args[0] if args else "normal"
         self.received = []
         self.snapshots = []
@@ -59,7 +63,12 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         assert message.publisher_name() == "nativeNode"
         assert message.publisher_instance() != self.get_mid()
         assert message.get_topic_count() > 0
-        assert message.get_message_timestamp() > 0
+        assert message.get_message_timestamp() > 1_000_000_000_000_000_000
+        assert message.get_message_monotonic_timestamp() > 0
+        assert vinc.format_utc(message.get_message_timestamp()).endswith("Z")
+        copied = message.copy()
+        assert copied.get_message_timestamp() == message.get_message_timestamp()
+        assert copied.get_message_monotonic_timestamp() == message.get_message_monotonic_timestamp()
         assert message.data().x == 42
         assert message.data().y == 84
         self.received.append(message)

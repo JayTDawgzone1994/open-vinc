@@ -322,7 +322,8 @@ Linux／macOS 尚未原生驗證。
 
 `<vinc/time.hpp>` provides `vinc::Deadline`, an alias for
 `std::chrono::steady_clock::time_point`. Link `vinc::common` to obtain its include path;
-the header itself depends only on `<chrono>` and adds no runtime service.
+the header also exposes the Unix/UTC utilities below. Common still depends only on the standard library
+and adds no runtime service or background thread.
 
 A deadline is an absolute cutoff for a local wait. Passing the same value through
 several steps preserves a total waiting budget. It is not a duration or wall-clock
@@ -518,3 +519,25 @@ config 的 log_* 預算與間隔僅服務新功能；本輪未把既有設定遷
 新增 ErrorDomain::Bag=12、NativeErrorSource::Sqlite=11。文字表由 Bag 元件註冊，
 common 不依賴 SQLite。config::bag_* 保存 queue／單筆預算、主資料庫大小上限、批次、探索／pump 間隔、
 metadata／查詢限制與 Recorder 收尾期限；定義和限制見 [Bag README](../bag/README.md)。
+
+## Unsigned Unix time and UTC formatting (2026-10-13)
+
+`Result<uint64_t> unix_nanoseconds() noexcept` samples `std::chrono::system_clock`.
+Its epoch is 1970-01-01 UTC; Unix time excludes leap seconds. A pre-epoch reading
+or unsigned-nanosecond overflow returns `Common::TimestampOutOfRange / ReadTime`.
+Conversion checks before multiplication; it never wraps a negative/signed overflow into a valid timestamp.
+Supported clock representations use integral ticks dividing a nanosecond-based second exactly;
+unsupported representations fail compilation rather than silently guessing their units.
+The OS clock's resolution and correctness are not guaranteed by the nanosecond unit.
+The uint64 output format does not extend system_clock's own native representable range.
+
+`std::string format_utc(uint64_t)` formats all values, including zero and UINT64_MAX,
+as `YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ` (1970 through 2554). It splits days/seconds
+before signed chrono conversion, so values beyond signed nanoseconds remain valid.
+No local timezone, timezone database, or OS date formatter is involved. Formatting
+may allocate/throw under the existing STL exception policy; it has no recoverable input failure.
+`Deadline` remains a monotonic local wait deadline. Do not interchange these clock domains.
+
+Implementation is in `src/time.cpp`; `detail/time.hpp` is a private checked conversion
+helper, also used by tests to exercise invalid clocks without changing the OS clock.
+Message publication contracts and version changes belong to [Message Bus](../message_bus/README.md#雙時間發布-metadata2026-10-13).

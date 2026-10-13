@@ -19,7 +19,8 @@ inline constexpr auto error_entries =
                ErrorCodeEntry{ErrorCode::Timeout, "Message Bus wait timed out"},
                ErrorCodeEntry{ErrorCode::Io, "Message Bus I/O failed"},
                ErrorCodeEntry{ErrorCode::InvalidData, "Invalid message data"},
-               ErrorCodeEntry{ErrorCode::WorkerFailed, "Message Bus worker failed"}};
+               ErrorCodeEntry{ErrorCode::WorkerFailed, "Message Bus worker failed"},
+               ErrorCodeEntry{ErrorCode::TimestampUnavailable, "Publication timestamp unavailable"}};
 inline constexpr auto operation_entries =
     std::array{ErrorOperationEntry{ErrorOperation::Create, "Create"},
                ErrorOperationEntry{ErrorOperation::Submit, "Submit"},

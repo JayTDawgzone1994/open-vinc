@@ -360,6 +360,17 @@ static_assert(!std::is_assignable_v<vinc::message::MessageString&, std::string_v
 static_assert(std::same_as<decltype(std::declval<vinc::MessageArray<std::string>&>().at(0)),
                            vinc::Result<std::string>>);
 
+// Reordering the constrained specialization must not expose image APIs to local objects.
+template <class T>
+concept HasSnapshot = requires(const T& value) {
+    value.snapshot();
+};
+static_assert(HasSnapshot<vinc::MessageArray<std::uint32_t>>);
+static_assert(HasSnapshot<vinc::MessageArray<vinc::Detection>>);
+static_assert(!HasSnapshot<vinc::MessageArray<std::string>>);
+static_assert(!HasSnapshot<vinc::MessageArray<std::unique_ptr<int>>>);
+static_assert(!HasSnapshot<vinc::MessageArray<vinc::MessageArray<std::string>>>);
+
 void array_access_tests() {
     vinc::MessageArray<vinc::Detection> records;
     ok(records.resize(2));

@@ -274,6 +274,10 @@ template<class T> void bind_message(py::module_& module, py::module_& views) {
         value.check();
         return value.value->get_message_timestamp();
     });
+    type.def("get_message_monotonic_timestamp", [](const Value& value) {
+        value.check();
+        return value.value->get_message_monotonic_timestamp();
+    });
     type.def("get_topic_count", [](const Value& value) {
         value.check();
         return value.value->get_topic_count();

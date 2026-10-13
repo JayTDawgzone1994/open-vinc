@@ -19,7 +19,7 @@ public:
     virtual ~ModuleSource() = default;
     virtual Result<void> prepare(const std::vector<std::string>& arguments,
                                  const RuntimeServices& services) = 0;
-    virtual Result<RuntimeModule> create(std::string name) = 0;
+    virtual Result<RuntimeModule> create() = 0;
     virtual void clear() noexcept = 0;
     virtual bool fatal_command_errors() const noexcept {
         return false;

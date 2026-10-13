@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
         policy.heartbeat_timeout = heartbeat_timeout;
         policy.startup_timeout = startup_timeout;
         check(bool(manager.register_module_type(
-                  {"messageBusTest", std::filesystem::absolute(argv[1]), "messageBusNode", policy})),
+                  {"messageBusTest", std::filesystem::absolute(argv[1]), policy})),
               "register helper");
         unsigned instance = 0;
         auto start = [&](std::vector<std::string> args) {

@@ -6,7 +6,8 @@
 class LockFixture final : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
     std::unique_ptr<vinc::detail::ContextLock> held_;
 public:
-    explicit LockFixture(std::string name) : BaseModule(std::move(name)) {}
+    LockFixture() : BaseModule("lock") {
+    }
     vinc::Result<std::int32_t> module_interface(std::vector<std::string> args) override {
         if (args.empty()) {
             return 0;

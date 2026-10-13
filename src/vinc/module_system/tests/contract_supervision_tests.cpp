@@ -118,7 +118,7 @@ void test_deadline_latching() {
 ModuleType type_for(const std::filesystem::path& helper) {
     ModuleType type;
     type.name = "contractFault";
-    type.module_base_name = "fatal-worker";
+
     type.library = helper;
     type.policy.heartbeat_interval = heartbeat_interval;
     type.policy.heartbeat_timeout = heartbeat_timeout;

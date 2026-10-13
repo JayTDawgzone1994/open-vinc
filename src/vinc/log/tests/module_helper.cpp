@@ -7,7 +7,8 @@ using namespace vinc;
 
 class LogModule final : public BaseModule<RunMode::FrameworkLoop> {
 public:
-    using BaseModule::BaseModule;
+    LogModule() : BaseModule("camera") {
+    }
 
     Result<void> on_start(const std::vector<std::string>&) override {
         std::printf("raw-start \xe4\xb8\xad\xe6\x96\x87\n");

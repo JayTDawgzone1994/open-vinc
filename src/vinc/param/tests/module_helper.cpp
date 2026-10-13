@@ -13,7 +13,8 @@ class ParamModule final : public BaseModule<RunMode::FrameworkLoop> {
     bool watcher_ = false;
 
 public:
-    using BaseModule::BaseModule;
+    ParamModule() : BaseModule("camera") {
+    }
 
     Result<std::string> on_name(std::vector<std::string>& args) override {
         check(!args.empty(), "name argument required");

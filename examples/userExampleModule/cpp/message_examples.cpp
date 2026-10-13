@@ -1,3 +1,4 @@
+#include <vinc/time.hpp>
 #include "message_examples.hpp"
 
 #include <iostream>
@@ -52,6 +53,8 @@ void describe(const vinc::UserExampleFrame& message) {
               << " publisher_id=" << message.publisher_instance()
               << " count=" << message.get_topic_count()
               << " timestamp_ns=" << message.get_message_timestamp()
+                      << " utc=" << vinc::format_utc(message.get_message_timestamp())
+                      << " monotonic_ns=" << message.get_message_monotonic_timestamp()
               << " samples=" << message.data().samples.size()
               << " note=" << message.data().note.str() << '\n';
     if (!message.data().groups.empty() && !message.data().groups[0].empty()) {

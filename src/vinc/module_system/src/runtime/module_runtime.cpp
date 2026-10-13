@@ -151,7 +151,7 @@ Result<Bootstrap> parse_bootstrap(const std::vector<std::string>& args) {
     }
 
     const bool invalid_stop_timeout = !*grace || *grace > maximum_stop_grace_ms;
-    if (invalid_stop_timeout || args[detail::bootstrap::base_name].empty()) {
+    if (invalid_stop_timeout) {
         return std::unexpected(Error{ErrorCode::InvalidBootstrap, ErrorOperation::Bootstrap});
     }
 
@@ -742,11 +742,11 @@ Result<void> run_hooks(const std::vector<std::string>& args, const Bootstrap& bo
                        const std::shared_ptr<message_bus::Client>& client, RuntimeInbox& inbox,
                        detail::ModuleSource& source) {
     auto module = invoke_hook(ErrorOperation::ConstructModule, [&]() -> Result<detail::RuntimeModule> {
-        auto instance = source.create(args[detail::bootstrap::base_name]);
+        auto instance = source.create();
         if (!instance) {
             return std::unexpected(instance.error());
         }
-        if (!(*instance) || (*instance)->get_module_name() != args[detail::bootstrap::base_name]) {
+        if (!(*instance)) {
             return std::unexpected(Error{ErrorCode::InvalidFactory, ErrorOperation::ConstructModule});
         }
         return instance;

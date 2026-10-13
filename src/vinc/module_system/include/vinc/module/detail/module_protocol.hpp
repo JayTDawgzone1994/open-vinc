@@ -28,20 +28,19 @@ constexpr std::size_t command_status_bytes = sizeof(std::uint32_t);
 
 // Positions exclude argv[0]. Changing this layout requires both launch endpoints to change.
 namespace bootstrap {
-constexpr char version_marker[] = "--vinc-module-v10";
+constexpr char version_marker[] = "--vinc-module-v12";
 constexpr std::size_t marker = 0;
 constexpr std::size_t endpoint = 1;
-constexpr std::size_t base_name = 2;
-constexpr std::size_t token = 3;
-constexpr std::size_t generation = 4;
-constexpr std::size_t heartbeat_interval = 5;
-constexpr std::size_t heartbeat_timeout = 6;
-constexpr std::size_t startup_timeout = 7;
-constexpr std::size_t stop_timeout = 8;
-constexpr std::size_t module_type = 9;
-constexpr std::size_t fault_storage = 10;
-constexpr std::size_t plugin_path = 11;
-constexpr std::size_t debug = 12;
-constexpr std::size_t argument_count = 13;
+constexpr std::size_t token = 2;
+constexpr std::size_t generation = 3;
+constexpr std::size_t heartbeat_interval = 4;
+constexpr std::size_t heartbeat_timeout = 5;
+constexpr std::size_t startup_timeout = 6;
+constexpr std::size_t stop_timeout = 7;
+constexpr std::size_t module_type = 8;
+constexpr std::size_t fault_storage = 9;
+constexpr std::size_t plugin_path = 10;
+constexpr std::size_t debug = 11;
+constexpr std::size_t argument_count = 12;
 }
 } // namespace vinc::detail

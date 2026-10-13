@@ -61,7 +61,7 @@ foreach(declaration IN ITEMS "uint8_t value = 256;" "int8_t value = -129;" "uint
     run_case(invalid_constant FALSE "constant")
 endforeach()
 foreach(declaration IN ITEMS "int[3] values;" "int[][][]] values;" "int[] values[];" "int schema;" "int value; int other;"
-    "int ReadOnly;" "int DataRef;" "int BadData_tRef;")
+    "int ReadOnly;" "int DataRef;" "int BadData_tRef;" "int get_message_monotonic_timestamp;")
     file(WRITE "${input}/Bad.msg" "${declaration}\n")
     run_case(invalid_declaration FALSE "error:")
 endforeach()
@@ -96,4 +96,40 @@ run_case(catalog_recovery TRUE "")
 file(READ "${output}/message_types.hpp" catalog)
 if(NOT catalog MATCHES "visit_types" OR NOT catalog MATCHES "operator.*<::vinc::Frame>")
     message(FATAL_ERROR "Missing generated compile-time type visitor")
+endif()
+
+# All directories form one schema set, including nested references and collision checks.
+set(extra "${root}/extra")
+file(MAKE_DIRECTORY "${extra}")
+file(WRITE "${extra}/Envelope.msg" "Frame frame;\n")
+function(run_multi name success diagnostic)
+    execute_process(COMMAND "${GENERATOR}" --input "${input}" --input "${extra}"
+        --input "${input}/." --output "${output}" --template "${template}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE log ERROR_VARIABLE errors TIMEOUT 20 ENCODING UTF-8)
+    file(WRITE "${root}/${name}.log" "${log}\n${errors}")
+    if(success)
+        if(NOT result STREQUAL "0" OR NOT EXISTS "${output}/Envelope.hpp")
+            message(FATAL_ERROR "${name}: ${log}${errors}")
+        endif()
+    elseif(result STREQUAL "0" OR EXISTS "${output}" OR NOT errors MATCHES "${diagnostic}")
+        message(FATAL_ERROR "${name}: expected clean failure: ${result} ${errors}")
+    endif()
+endfunction()
+run_multi(multiple_directories TRUE "")
+file(WRITE "${extra}/point.msg" "uint8_t value;\n")
+run_multi(cross_directory_collision FALSE "collide")
+file(REMOVE "${extra}/point.msg")
+file(WRITE "${input}/CrossCycle.msg" "Envelope envelope;\n")
+file(WRITE "${extra}/Envelope.msg" "CrossCycle cycle;\n")
+run_multi(cross_directory_cycle FALSE "cyclic")
+file(REMOVE "${input}/CrossCycle.msg")
+file(WRITE "${extra}/Envelope.msg" "Frame frame;\n")
+run_multi(multiple_directories_recovery TRUE "")
+
+# Every registered input is protected, not only the first --input argument.
+execute_process(COMMAND "${GENERATOR}" --input "${input}" --input "${extra}"
+    --output "${extra}" --template "${template}"
+    RESULT_VARIABLE overlap OUTPUT_QUIET ERROR_VARIABLE errors TIMEOUT 20 ENCODING UTF-8)
+if(overlap STREQUAL "0" OR NOT EXISTS "${extra}/Envelope.msg" OR NOT errors MATCHES "contains an input")
+    message(FATAL_ERROR "Second input directory was not protected: ${errors}")
 endif()

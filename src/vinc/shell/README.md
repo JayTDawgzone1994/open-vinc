@@ -85,8 +85,9 @@ Shell 的 UI／process_line／生命週期操作由同一控制執行緒使用�
 全程序同時只允許一個 OSAL Terminal 擁有標準輸入，第二個 open 回 Busy。
 
 ModuleManager 保留框架命令及初始化後的 Tcl 全域命令／autoload 名稱，直到 manager 析構；不持有指向 Shell 的 callback。
-ModuleType 與 `module_base_name` 使用保留字時直接拒絕，不靠 `_1` 避開；既有名稱衝突會在 Shell 初始化時回報。
-先建構 Shell 再登記模組可讓錯誤發生在登記當下。腳本自己的 `proc` 等名稱仍應避免遮蔽模組命令。
+ModuleType 使用保留字時在種類登記時拒絕；實例名稱由 Module source 的 `on_name` 提案，
+使用保留字時在中央核准名稱前拒絕，不靠 `_1` 避開。既有名稱衝突會在 Shell 初始化時回報。
+先建構 Shell 再登記模組可讓種類衝突在登記當下回報。腳本自己的 `proc` 等名稱仍應避免遮蔽模組命令。
 重新建立 Shell 不會呼叫已析構 Shell 的函式；ModuleType／實例名稱不會與這些內建命令衝突。
 既有 `register_micro_program` 仍可用，其 callback 是中央原生程式碼，需自行保證會返回；
 本次未將 legacy micro-program 改成獨立程序。

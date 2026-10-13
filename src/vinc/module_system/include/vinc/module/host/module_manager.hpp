@@ -64,11 +64,10 @@ struct PythonLaunch {
 };
 
 // A ModuleType describes a Plugin or Python entry; registering it does not launch.
-// module_base_name is a proposal for the child's on_name hook, never auto-suffixed.
+// Instance naming belongs to the Module source and its on_name hook.
 struct ModuleType {
     std::string name;
     std::filesystem::path library;
-    std::string module_base_name;
     ModulePolicy policy;
     std::optional<PythonLaunch> python;
 };

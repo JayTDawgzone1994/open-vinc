@@ -63,6 +63,33 @@ void stop(ModuleManager& manager, const std::string& name) {
 }
 }
 
+void check_recorded_times(const std::filesystem::path& path) {
+    sqlite3* database = nullptr;
+    const auto filename = take(vinc::osal::path_to_utf8(path / "recording.sqlite"));
+    check(sqlite3_open_v2(filename.c_str(), &database, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK,
+          "open dual-clock recording");
+    sqlite3_stmt* statement = nullptr;
+    check(sqlite3_prepare_v2(database,
+                            "SELECT source_utc_ns,source_monotonic_ns,receive_monotonic_ns FROM messages",
+                            -1, &statement, nullptr) == SQLITE_OK, "read distinct timestamp columns");
+    std::size_t count = 0;
+    while (sqlite3_step(statement) == SQLITE_ROW) {
+        // SQLite owns UTF-8 text until the next step/finalize; copy its bytes into
+        // a char string, which may alias any byte representation.
+        const std::string utc(reinterpret_cast<const char*>(sqlite3_column_text(statement, 0)));
+        const std::string monotonic(reinterpret_cast<const char*>(sqlite3_column_text(statement, 1)));
+        const std::string received(reinterpret_cast<const char*>(sqlite3_column_text(statement, 2)));
+        check(utc.size() == 20 && monotonic.size() == 20 && received.size() == 20,
+              "timestamps use fixed-width unsigned text");
+        check(std::stoull(utc) > 1'000'000'000'000'000'000ULL && std::stoull(monotonic) > 0 &&
+                  std::stoull(received) >= std::stoull(monotonic), "record actual publication and receive clocks");
+        ++count;
+    }
+    sqlite3_finalize(statement);
+    sqlite3_close(database);
+    check(count == 3, "all recorded messages retain both publication times");
+}
+
 int main(int argc, char** argv) {
     try {
         check(argc == 4, "plugin arguments");
@@ -76,11 +103,11 @@ int main(int argc, char** argv) {
             }
         };
         diagnostics = drain_output;
-        ModuleType recorder{"bagRecorder", std::filesystem::absolute(argv[1]), "recorder", {}};
+        ModuleType recorder{"bagRecorder", std::filesystem::absolute(argv[1]), {}};
         recorder.policy.stop_timeout = operation_budget;
         take(manager->register_module_type(recorder));
         take(manager->register_module_type(
-            {"messageBusTest", std::filesystem::absolute(argv[2]), "publisher", {}}));
+            {"messageBusTest", std::filesystem::absolute(argv[2]), {}}));
         const auto root = std::filesystem::temp_directory_path() / vinc::test::instance_name();
         check(std::filesystem::create_directory(root), "exclusive test directory");
         auto path_text = [&](const char* name) {
@@ -112,6 +139,7 @@ int main(int argc, char** argv) {
         command(*manager, "recorder", {"info", path_text("known")});
         auto known = take(bag::inspect(root / "known"));
         check(known.counters.written == 3 && known.topics.size() == 1, "all publishes recorded exactly once");
+        check_recorded_times(root / "known");
         check(known.sources.size() == 3 &&
                   known.sources.front().publisher_id != known.sources.back().publisher_id,
               "restart preserves source identity");

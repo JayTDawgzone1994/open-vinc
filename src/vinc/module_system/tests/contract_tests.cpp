@@ -90,7 +90,7 @@ void test_modules(const std::filesystem::path& helper) {
     auto manager = take(vinc::test::create_manager());
     ModulePolicy policy;
     policy.startup_timeout = test_deadline;
-    check(bool(manager->register_module_type({"helper", helper, "worker", policy})), "register helper");
+    check(bool(manager->register_module_type({"helper", helper, policy})), "register helper");
     const auto survivor = take(manager->start_module("helper", {"--name", "survivor"}));
     check(bool(manager->wait_running(survivor, control::Clock::now() + test_deadline)), "survivor ready");
     const auto marker = std::filesystem::temp_directory_path() / unique_name();
@@ -122,8 +122,8 @@ void test_modules(const std::filesystem::path& helper) {
     auto restart_manager = take(vinc::test::create_manager());
     policy.max_restarts = 1;
     policy.restart_delay = 100ms;
-    check(bool(restart_manager->register_module_type({"helper", helper, "restartFault", policy})), "restart policy");
-    const auto original_mid = take(restart_manager->start_module("helper"));
+    check(bool(restart_manager->register_module_type({"helper", helper, policy})), "restart policy");
+    const auto original_mid = take(restart_manager->start_module("helper", {"--name", "restartFault"}));
     check(bool(restart_manager->wait_running(original_mid, control::Clock::now() + test_deadline)), "restart ready");
     (void)restart_manager->command(original_mid, {"contract"}, control::Clock::now() + test_deadline);
     await([&] {

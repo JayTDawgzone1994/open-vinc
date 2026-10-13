@@ -1,5 +1,5 @@
-vinc_add_process_module(vinc_bag_recorder MODULE_TYPE_NAME bagRecorder MODULE_BASE_NAME recorder STOP_TIMEOUT_CONFIG bag_stop_timeout SOURCES recorder_module.cpp)
-target_link_libraries(vinc_bag_recorder PRIVATE vinc::bag vinc::messages)
+add_module(vinc_bag_recorder MODULE_TYPE_NAME bagRecorder STOP_TIMEOUT_CONFIG bag_stop_timeout SOURCES recorder_module.cpp)
+target_link_libraries(vinc_bag_recorder PRIVATE vinc::bag)
 if(BUILD_TESTING)
     add_subdirectory(../tests "${VINC_BUILD_ROOT}/vinc/bag/tests")
 endif()

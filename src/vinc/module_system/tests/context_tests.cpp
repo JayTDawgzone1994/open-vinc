@@ -36,7 +36,7 @@ void take(Result<void> result) {
 
 void test_case(const std::filesystem::path& plugin, const std::string& mode, bool success, bool stop) {
     auto manager = take(vinc::test::create_manager());
-    ModuleType type{"contextTest", plugin, "contextNode", {}};
+    ModuleType type{"contextTest", plugin, {}};
     type.policy.max_restarts = stop ? 0 : 1;
     type.policy.restart_delay = restart_delay;
     type.policy.stop_timeout = stop_grace;

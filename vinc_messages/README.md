@@ -28,3 +28,12 @@ Windows x64／MSVC Debug、Release 完整建置通過，各組態的 `ribosome.h
 隔離副本的生成回歸測試共 13 個情境通過，包含標頭編譯、輸入／模板失敗與恢復、
 完整建置及巢狀訊息；外部 SDK consumer 與 Module 建置通過，consumer 執行返回 0。
 本次未重跑其他 CTest；Linux／macOS 未驗證。
+
+## 外部訊息目錄
+
+SDK 公開 `add_message_dir(directory)`；內建目錄與外部登記目錄一起生成，允許跨目錄引用。
+每個目錄只收集直接包含的 `.msg`，型別名稱全域唯一，大小寫碰撞拒絕。
+所有一般 CMake 登記完成後才收集生成規則，使用者不必呼叫 finalize。
+新增／刪除檔案會更新 CMake 生成清單；生成器每次建置重跑，刪除的訊息不留下舊標頭。
+配置階段只登記，Ribosome 建置完成後才生成，所有連結 vinc::messages 的使用端等待生成。
+完整使用例見 [SDK 公開 functions](../src/vinc/sdk/README.md#公開-cmake-functions)。

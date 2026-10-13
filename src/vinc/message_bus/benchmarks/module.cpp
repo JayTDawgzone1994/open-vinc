@@ -224,7 +224,8 @@ class BenchmarkModule : public BaseModule<RunMode::Manual> {
     }
 
 public:
-    using BaseModule::BaseModule;
+    BenchmarkModule() : BaseModule("benchmarkNode") {
+    }
 
     Result<std::string> on_name(std::vector<std::string>& args) override {
         if (!parse(args, options_)) {

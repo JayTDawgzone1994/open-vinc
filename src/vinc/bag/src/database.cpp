@@ -5,12 +5,12 @@
 #include <sqlite3.h>
 #include <charconv>
 #include <utility>
-#include <chrono>
+#include <vinc/time.hpp>
 
 namespace vinc::bag {
 namespace {
 constexpr int application_id = 0x56424147; // VBAG; independent of message image version.
-constexpr int format_version = 1;
+constexpr int format_version = 2;
 constexpr std::uint64_t page_bytes = 4096;
 // SQLite's pinned format limit; multiply only after widening to uint64_t.
 constexpr std::uint64_t maximum_page_count = 4294967294ULL;
@@ -209,15 +209,16 @@ Result<void> initialize_schema(sqlite3* database) {
     auto schema = execute(database, R"SQL(
         BEGIN IMMEDIATE;
         PRAGMA application_id=1447182663;
-        PRAGMA user_version=1;
-        CREATE TABLE recording(id INTEGER PRIMARY KEY CHECK(id=1), start_utc_ns INTEGER NOT NULL,
+        PRAGMA user_version=2;
+        CREATE TABLE recording(id INTEGER PRIMARY KEY CHECK(id=1), start_utc_ns TEXT NOT NULL,
             completed INTEGER NOT NULL, received INTEGER NOT NULL, written INTEGER NOT NULL,
             queue_dropped INTEGER NOT NULL, oversized INTEGER NOT NULL, bus_lost INTEGER NOT NULL);
         CREATE TABLE topics(name TEXT NOT NULL, schema TEXT NOT NULL, type TEXT NOT NULL,
             supported INTEGER NOT NULL, PRIMARY KEY(name,schema));
         CREATE TABLE messages(id INTEGER PRIMARY KEY, topic TEXT NOT NULL, schema TEXT NOT NULL,
             publisher TEXT NOT NULL, publisher_id TEXT NOT NULL, sequence TEXT NOT NULL,
-            source_ns TEXT NOT NULL, receive_ns TEXT NOT NULL, image_version INTEGER NOT NULL, payload BLOB NOT NULL);
+            source_utc_ns TEXT NOT NULL, source_monotonic_ns TEXT NOT NULL, receive_monotonic_ns TEXT NOT NULL,
+            image_version INTEGER NOT NULL, payload BLOB NOT NULL);
         CREATE INDEX topic_messages ON messages(topic,schema);
     )SQL",
                           ErrorOperation::Create);
@@ -226,10 +227,12 @@ Result<void> initialize_schema(sqlite3* database) {
     }
 
     Statement recording(database, "INSERT INTO recording VALUES(1,?,0,0,0,0,0,0)");
-    const auto utc = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                         std::chrono::system_clock::now().time_since_epoch())
-                         .count();
-    recording.integer(1, utc);
+    const auto utc = vinc::unix_nanoseconds();
+    if (!utc) {
+        return std::unexpected(wrap_error(ErrorCode::TimestampUnavailable, ErrorOperation::Create, utc.error()));
+    }
+
+    recording.text(1, number(*utc));
     auto inserted = done(recording, ErrorOperation::Create);
     if (!inserted) {
         return inserted;
@@ -253,7 +256,7 @@ Result<void> read_header(sqlite3* database, Info& result) {
 
     std::uint64_t fields[7]{};
     for (int index = 0; index < 7; ++index) {
-        auto value = header.count(index);
+        auto value = index == 1 ? unsigned_column(header, index) : header.count(index);
         if (!value) {
             return std::unexpected(value.error());
         }
@@ -266,7 +269,7 @@ Result<void> read_header(sqlite3* database, Info& result) {
     }
 
     result.completed = fields[0] != 0;
-    result.start_utc_ns = static_cast<std::int64_t>(fields[1]);
+    result.start_utc_ns = fields[1];
     result.counters = {fields[2], fields[3], fields[4], fields[5], fields[6]};
     return {};
 }
@@ -274,8 +277,8 @@ Result<void> read_header(sqlite3* database, Info& result) {
 Result<void> read_topics(sqlite3* database, Info& result) {
     Statement topics(database,
                      "SELECT "
-                     "t.name,t.schema,t.type,t.supported,COUNT(m.id),COALESCE(MIN(m.source_ns),'"
-                     "00000000000000000000'),COALESCE(MAX(m.source_ns),'00000000000000000000') FROM topics t "
+                     "t.name,t.schema,t.type,t.supported,COUNT(m.id),COALESCE(MIN(m.source_utc_ns),'"
+                     "00000000000000000000'),COALESCE(MAX(m.source_utc_ns),'00000000000000000000') FROM topics t "
                      "LEFT JOIN messages m ON m.topic=t.name AND m.schema=t.schema GROUP BY t.name,t.schema");
     for (;;) {
         auto next = topics.step(ErrorOperation::Inspect);
@@ -403,16 +406,17 @@ Result<void> Database::topic(const Topic& value) {
 
 Result<void> Database::append(const Record& record, std::span<const std::byte> bytes) {
     const auto& message = *record.message;
-    Statement statement(db_, "INSERT INTO messages VALUES(NULL,?,?,?,?,?,?,?,?,?)");
+    Statement statement(db_, "INSERT INTO messages VALUES(NULL,?,?,?,?,?,?,?,?,?,?)");
     statement.text(1, message.topic_name());
     statement.text(2, number(message.type_hash()));
     statement.text(3, message.publisher_name());
     statement.text(4, number(message.publisher_instance()));
     statement.text(5, number(message.get_topic_count()));
     statement.text(6, number(message.get_message_timestamp()));
-    statement.text(7, number(record.receive_ns));
-    statement.integer(8, message::detail::format::version);
-    statement.blob(9, bytes);
+    statement.text(7, number(message.get_message_monotonic_timestamp()));
+    statement.text(8, number(record.receive_ns));
+    statement.integer(9, message::detail::format::version);
+    statement.blob(10, bytes);
     return done(statement, ErrorOperation::Write);
 }
 

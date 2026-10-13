@@ -1,3 +1,5 @@
+include_guard(GLOBAL)
+
 # Plugin targets never receive main or the Host's process services.
 function(vinc_add_module_plugin TARGET)
     add_library(${TARGET} MODULE ${ARGN})
@@ -10,17 +12,25 @@ function(vinc_add_module_plugin TARGET)
 endfunction()
 
 # Register an independently hosted Plugin in the build-tree catalog.
-function(vinc_add_process_module TARGET)
-    cmake_parse_arguments(MOD "" "MODULE_TYPE_NAME;MODULE_BASE_NAME;STOP_TIMEOUT_CONFIG" "SOURCES" ${ARGN})
-    if(NOT MOD_MODULE_TYPE_NAME OR NOT MOD_MODULE_BASE_NAME OR NOT MOD_SOURCES)
-        message(FATAL_ERROR "vinc_add_process_module requires MODULE_TYPE_NAME, MODULE_BASE_NAME and SOURCES")
+function(add_module TARGET)
+    cmake_parse_arguments(PARSE_ARGV 1 MOD "" "MODULE_TYPE_NAME;STOP_TIMEOUT_CONFIG" "SOURCES")
+    if(MOD_UNPARSED_ARGUMENTS OR MOD_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR "Invalid add_module arguments: ${MOD_UNPARSED_ARGUMENTS};${MOD_KEYWORDS_MISSING_VALUES}")
     endif()
-    if(NOT MOD_MODULE_TYPE_NAME MATCHES "^[A-Za-z_][A-Za-z0-9_]*$"
-       OR NOT MOD_MODULE_BASE_NAME MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
-        message(FATAL_ERROR "Build catalog names must be ASCII identifiers; runtime Module names use ASCII letters, digits, underscore or hyphen")
+    if(NOT MOD_MODULE_TYPE_NAME OR NOT MOD_SOURCES)
+        message(FATAL_ERROR "add_module requires MODULE_TYPE_NAME and SOURCES")
+    endif()
+    if(NOT MOD_MODULE_TYPE_NAME MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+        message(FATAL_ERROR "Build catalog ModuleType names must be ASCII identifiers")
+    endif()
+    get_property(types GLOBAL PROPERTY VINC_PROCESS_TYPES)
+    if(MOD_MODULE_TYPE_NAME IN_LIST types)
+        message(FATAL_ERROR "Duplicate ModuleType: ${MOD_MODULE_TYPE_NAME}")
     endif()
     vinc_add_module_plugin(${TARGET} ${MOD_SOURCES})
+    target_link_libraries(${TARGET} PRIVATE vinc::sdk vinc::messages)
     set_property(GLOBAL APPEND PROPERTY VINC_PROCESS_TARGETS ${TARGET})
+    set_property(GLOBAL APPEND PROPERTY VINC_PROCESS_TYPES "${MOD_MODULE_TYPE_NAME}")
     # Record the built Plugin's absolute path. This is a build-tree catalog,
     # not yet a relocatable installation manifest.
     set(policy_adjustment "")
@@ -37,7 +47,7 @@ function(vinc_add_process_module TARGET)
         auto registered = manager.register_module_type({
             "@MOD_MODULE_TYPE_NAME@",
             std::filesystem::path(u8"$<TARGET_FILE:@TARGET@>"),
-            "@MOD_MODULE_BASE_NAME@", policy});
+            policy});
         if (!registered) {
             return std::unexpected(registered.error());
         }

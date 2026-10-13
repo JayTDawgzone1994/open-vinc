@@ -7,7 +7,8 @@
 
 class UserManualModule final : public vinc::BaseModule<vinc::RunMode::Manual> {
 public:
-    using BaseModule::BaseModule;
+    UserManualModule() : BaseModule("manualCpp") {
+    }
 
     vinc::Result<void> on_start(const std::vector<std::string>& args) override {
         // Use "loop" for the framework's cancellable idle wait, otherwise pump one batch at a time.

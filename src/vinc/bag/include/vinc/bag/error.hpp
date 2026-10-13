@@ -13,7 +13,8 @@ enum class ErrorCode : std::int32_t {
     BusFailed = 8,
     StorageFailed = 9,
     AlreadyExists = 10,
-    WorkerFailed = 11
+    WorkerFailed = 11,
+    TimestampUnavailable = 12
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,

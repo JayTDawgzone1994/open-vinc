@@ -17,7 +17,7 @@ public:
 
     static Result<LoadedPlugin> load(const std::filesystem::path& path,
                                      const std::string& type, const RuntimeServices& services);
-    Result<PluginModule> create(std::string name) const;
+    Result<PluginModule> create() const;
 
 private:
     LoadedPlugin(osal::DynamicLibrary library, const PluginEntry* entry) noexcept;

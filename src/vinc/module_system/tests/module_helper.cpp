@@ -23,7 +23,8 @@ constexpr int normal_command_status = 42;
 
 class TestModule final : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
 public:
-    using BaseModule::BaseModule;
+    TestModule() : BaseModule("node") {
+    }
 
     vinc::Result<std::string> on_name(std::vector<std::string>& args) override {
         if (!args.empty() && args[0] == "name-hang") {

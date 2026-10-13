@@ -79,7 +79,8 @@ native topics
 
 預期看到 `READY`、`STORAGE_OK`、`CALLBACK` 與 `MESSAGE`。`publisher=` 是中央核准的 Module 名稱，
 `publisher_id=` 是 Publisher ID，**不是 MID**；MID 用 `get_mid()` 取得。
-timestamp 為同機 monotonic nanoseconds，不是日期時間。`get_last` 不推進 callback 游標，可重複取得同筆。
+timestamp 為 Unix nanoseconds，可用 `vinc::format_utc()`／Python `vinc.format_utc()` 顯示 UTC。
+`get_message_monotonic_timestamp()` 另提供同主機單調發布時間。`get_last` 不推進 callback 游標，可重複取得同筆。
 尚未有發布資料時，`last` 回錯誤；Module 仍活著。
 
 每個 Publisher 配置 8 slots、每筆 64 KiB；這些是本範例的容量選擇，未改框架 config。

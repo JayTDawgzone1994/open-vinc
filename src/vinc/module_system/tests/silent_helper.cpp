@@ -1,6 +1,7 @@
 // Deliberately defective peer: a valid handshake and Ready, then no heartbeat,
 // even though its socket and process remain alive. Only used by integration tests.
 #include <vinc/control/channel.hpp>
+#include <vinc/module/detail/module_protocol.hpp>
 #include <thread>
 #include <array>
 
@@ -13,26 +14,29 @@ constexpr std::size_t receive_buffer_bytes = 1024;
 }
 
 int main(int argc, char** argv) {
-    if (argc < 11) {
+    if (argc < static_cast<int>(vinc::detail::bootstrap::argument_count + 1)) {
         return 64;
     }
 
     using namespace vinc;
     using namespace std::chrono_literals;
+    const auto endpoint = osal::LocalEndpoint{argv[detail::bootstrap::endpoint + 1]};
     auto socket = osal::Socket::open(osal::AddressFamily::Local, osal::SocketType::Stream);
     if (!socket ||
-        !socket->connect_until(osal::LocalEndpoint{argv[2]}, control::Clock::now() + connect_timeout)) {
+        !socket->connect_until(endpoint, control::Clock::now() + connect_timeout)) {
         return 65;
     }
 
     control::Frame hello{control::Kind::Hello};
     control::put_u32(hello.payload, static_cast<std::uint32_t>(control::Role::Module));
-    control::put_u64(hello.payload, std::stoull(argv[5]));
-    if (!control::put_string(hello.payload, argv[4])) {
+    control::put_u64(hello.payload, std::stoull(argv[vinc::detail::bootstrap::generation + 1]));
+    if (!control::put_string(hello.payload, argv[vinc::detail::bootstrap::token + 1])) {
         return 66;
     }
-    control::put_u32(hello.payload, static_cast<std::uint32_t>(std::stoul(argv[6])));
-    control::put_u32(hello.payload, static_cast<std::uint32_t>(std::stoul(argv[7])));
+    const auto interval = std::stoul(argv[detail::bootstrap::heartbeat_interval + 1]);
+    const auto timeout = std::stoul(argv[detail::bootstrap::heartbeat_timeout + 1]);
+    control::put_u32(hello.payload, static_cast<std::uint32_t>(interval));
+    control::put_u32(hello.payload, static_cast<std::uint32_t>(timeout));
     control::put_u32(hello.payload, control::hello_version);
     control::put_u32(hello.payload, 1u);
     auto send_frame = [&](const control::Frame& frame) {
@@ -58,7 +62,7 @@ int main(int argc, char** argv) {
     }
 
     control::Frame claim{control::Kind::Request, 1, 3, 1};
-    if (!control::put_string(claim.payload, argv[3])) {
+    if (!control::put_string(claim.payload, "silentNode")) {
         return 66;
     }
     if (!send_frame(claim)) {
@@ -82,7 +86,7 @@ int main(int argc, char** argv) {
         for (const auto& frame : *frames) {
             if (frame.kind == control::Kind::Response && frame.domain == 1 && frame.operation == 3) {
                 control::Reader reader(frame.payload);
-                if (reader.u32() != 0 || reader.string() != argv[3] || !reader.done()) {
+                if (reader.u32() != 0 || reader.string() != "silentNode" || !reader.done()) {
                     return 66;
                 }
 
@@ -91,7 +95,7 @@ int main(int argc, char** argv) {
         }
     }
     control::Frame ready{control::Kind::Event, 1, 1};
-    if (!control::put_string(ready.payload, argv[3])) {
+    if (!control::put_string(ready.payload, "silentNode")) {
         return 66;
     }
     if (!send_frame(ready)) {

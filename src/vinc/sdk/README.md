@@ -32,14 +32,61 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE vinc::sdk)
 ```
 
-建立獨立 Module 使用 `vinc_add_process_module`，由 helper 建立 Plugin 動態庫，中央啟動 ModuleHost 載入：
+## 公開 CMake functions
+
+`add_subdirectory(path/to/open-vinc/src open-vinc)` 後，即可在使用者自己的 CMakeLists 呼叫：
 
 ```cmake
-vinc_add_process_module(camera
-    MODULE_TYPE_NAME Camera MODULE_BASE_NAME cameraNode SOURCES camera.cpp)
-# camera.cpp 若使用整合標頭，額外取得完整 SDK 的使用需求。
-target_link_libraries(camera PRIVATE vinc::sdk)
+add_message_dir("${CMAKE_CURRENT_SOURCE_DIR}/messages")
+add_message_dir("${CMAKE_CURRENT_SOURCE_DIR}/camera/messages")
+
+add_module(camera_module
+    MODULE_TYPE_NAME Camera
+    SOURCES camera.cpp camera_driver.cpp
+)
+target_include_directories(camera_module PRIVATE include)
 ```
+
+- `add_module(target MODULE_TYPE_NAME name SOURCES ...)` 建立 MODULE 動態庫，自動連結
+  `vinc::sdk`／`vinc::messages`，沿用 C++23、Plugin 可見性及 Windows CRT 契約。
+  target 是一般 CMake target，可另外呼叫 target_link_libraries／target_include_directories。
+  ModuleType 名稱須與 C++ `REGISTER_MODULE` 相同；同次組裝重複種類或 target 會拒絕。
+- 不再提供 `MODULE_BASE_NAME`。Plugin 以無參數建構子建立；Module source 可使用
+  `CameraModule() : BaseModule("cameraNode") {}` 提供預設提案，或覆寫 `on_name(args)`。
+  中央仍驗證名稱、拒絕重名並保留重啟名稱一致性。詳見 Module System。
+- Framework 內部亦可指定 `STOP_TIMEOUT_CONFIG`，值為既有 vinc::config 常數名稱；
+  一般使用者不必指定。這不是新增的執行期 policy API。
+- `add_message_dir(directory)` 登記該目錄直接包含的 `.msg`，不遞迴。相對路徑以呼叫端
+  CMakeLists 所在目錄解讀。不存在的目錄拒絕；相同 canonical 目錄去重。
+  內建 vinc_messages 目錄保留，可增加多個使用者目錄；所有訊息共用 vinc 命名空間。
+- 配置結束時統一收集一般 CMake 呼叫，外部父專案在 add_subdirectory 返回後登記仍有效；
+  不需手動 finalize。請在正常配置流程呼叫，不在使用者自己的 DEFER callback 中晚登記。
+- `.msg` 在配置時登記；Build 先編譯 Ribosome、統一生成標頭與型別清單，再編譯所有相依
+  使用端。不在 configure 期間偷做巢狀編譯。每次建置仍重新生成，沿用失敗封閉契約。
+  新增／刪除 `.msg` 由 CMake 追蹤，重名（含大小寫）拒絕；跨目錄引用由 Ribosome 解析。
+- 中央 catalog 延至外部父專案配置結束後收集，建置中央亦建置所有已登記 Plugin。
+  關閉 VINC_BUILD_APPS 時仍可建置 Plugin／訊息，但不產生中央；不是即時載入 Plugin。
+
+上述 functions 仍以原始碼套件提供；不要求使用者另外 include 私有 CMake 檔。
+舊 `vinc_add_process_module()` 名稱不保留。生成標頭沿用 `<vinc_messages/Name.hpp>`；
+Bag 與啟用時的 Python SDK 取得同一份合併型別清單，沒有新增 runtime schema registry。
+
+### 本輪驗證（2026-10-12）
+
+Windows x64、MSVC 19.51.36257、CMake 4.3.2、Ninja 1.13.2，啟用系統 Python 3.13：
+
+- Debug／Release 完整建置成功；Debug 完整 CTest 75/75 通過。
+- Release 完整 CTest 初次 74/75 通過；Socket Shell 測試將非同步 Log 通知的提示符
+  誤認為 help 回覆結尾。測試改為先辨認命令回覆，不修改 Shell runtime。
+  修正後 Release 連續 5 次、Debug 補跑 1 次均通過；其餘 74 項未因測試修正重跑。
+- 兩種組態的 sdk.external_consumer 均通過：父專案後註冊 Module 與訊息、跨目錄相依、
+  訊息修改／新增／刪除、無效 schema 失敗與復原、重複 ModuleType／大小寫訊息碰撞，
+  以及中央實際啟動外部 Module 並讀到更新後的訊息常數。
+- 生成器舊獨立來源副本腳本仍有過時假設，未列入本輪測試；見
+  [Ribosome 待處理事項](../ribosome/README.md#待處理事項)。Linux／macOS 本輪未驗證。
+
+本機紀錄位於 build/cmake-api-*-tests.log；Plugin entry 6／bootstrap v11 的相容性與
+重建要求見 [Module System](../module_system/README.md#source-擁有實例命名與公開-cmake-接線2026-10-12)。
 
 `vinc::sdk` 本身不提供 main、不生成使用者訊息；include 與連結不會啟動服務。
 中央 `Vinc` 啟動時自動初始化 Tcl 並開啟 Socket Shell，兩者都是預設功能，
@@ -50,7 +97,7 @@ SDK 對 Shell 只提供錯誤分類與 `SocketShellOptions` 設定資料；
 使用者透過中央 CLI 調整 IP、port 與 timeout，詳見 [Shell README](../shell/README.md)。
 框架建置使用 `vinc_deploy_tcl(target)`，預設部署到 target 實際輸出目錄，亦可明確指定目的地；
 部署 helper 的契約與平台限制見 [Tcl 整合](../../../library/tcl/README.md)。
-自訂訊息由各自的生成 target 提供；專案內建訊息使用 `vinc::messages`（既有 `vinc_messages` target 仍可用），
+登記的自訂訊息與專案內建訊息統一使用 `vinc::messages`（既有 `vinc_messages` target 仍可用），
 並另外 include `<vinc_messages/name.hpp>`。SDK 不包含 Ribosome 開發介面。
 目前交付方式為原始碼加 `add_subdirectory`；尚未提供安裝後的 `find_package(VINC)` 套件。
 
@@ -101,7 +148,7 @@ component/
 - Context／pump 已接入 BaseModule；公開入口包含 `<vinc/module/context.hpp>`。模式與生命週期見 Module System README。
 - Common RuntimeServices bridge 為框架內部接線，不加入 `vinc.hpp`；正式入口僅新增
   `common_error.hpp` 錯誤分類。Plugin／Host 綁定生命週期見 Common 與 Module System 文件。
-  `vinc_add_process_module` 已改為動態庫；正式 ModuleHost loader 與生命週期見 Module System。
+  `add_module` 建立動態庫；正式 ModuleHost loader 與生命週期見 Module System。
 
 ## 元件接線契約
 
@@ -278,3 +325,10 @@ ModuleParams 控制接線，中央擁有 ParamManager 與 TOML。
 vinc/vinc.hpp 包含 Log；Module 透過繼承的 context.log 使用。SDK target 帶入 fmt，
 不洩漏 spdlog headers／definitions；Plugin 不取得 Log Host／Manager 或 control service。
 Context 布局更新為 Plugin entry version 5／bootstrap v10。見 [Log](../log/README.md)。
+
+## 雙時間與 UTC（2026-10-13）
+
+`<vinc/vinc.hpp>` 已包含 `<vinc/time.hpp>`，可使用 `vinc::unix_nanoseconds()` 與
+`vinc::format_utc(uint64_t)`；API 契約見 [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13)。
+BaseMessage 的 Unix／單調發布時間變更需中央、Host、Plugin／SDK 使用端與 Python 擴充一起重建。
+目前 Plugin entry 7／bootstrap v12；payload 映像与訊息 schema hash 不變。

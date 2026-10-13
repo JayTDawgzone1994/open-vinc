@@ -19,7 +19,7 @@ Python Module 則由系統 Python 執行，共用相同的 Runtime／中央監�
 [Python Module](python/README.md)。已接入生命週期、Shell hooks、pump、typed Message Bus、Param 與 Log；
 訊息／例外／借用的 Python 語意由該文件維護，沒有額外的控制服務 owner。
 
-`vinc_add_process_module()` 現在建立 MODULE library；名稱仍表示獨立程序執行的 Module。
+`add_module()` 建立 MODULE library，Module 實例由獨立 Host 程序執行。
 `REGISTER_MODULE` 匯出唯一的 `vinc_module_plugin` 查詢入口，傳回版本／大小、ModuleType、
 initialize、create、destroy、clear 函式。宏本身沒有靜態註冊或建立使用者物件的副作用。
 create／destroy 配對均在 Plugin image 執行；Host 使用 Plugin deleter，不直接 delete Module。
@@ -82,7 +82,8 @@ Manager 的 launch／tick helper 由呼叫端持有 record lock，拆分 helper 
 #include <vinc/module/base_module.hpp>
 class Camera : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
 public:
-    using BaseModule::BaseModule;
+    Camera() : BaseModule("cameraNode") {
+    }
     vinc::Result<void> on_start(const std::vector<std::string>& args) override {
         return {};
     }
@@ -99,9 +100,8 @@ REGISTER_MODULE(Camera, "cameraModule")
 ```
 
 ```cmake
-vinc_add_process_module(camera
+add_module(camera
     MODULE_TYPE_NAME cameraModule
-    MODULE_BASE_NAME cameraNode
     SOURCES camera.cpp
 )
 ```
@@ -117,7 +117,8 @@ CMake 產生中央的模組目錄，Shell 不再把模組實作 whole-archive �
 
 ## 應用介面與所有權
 
-- 工廠以預設名稱建構模組，框架以帶有 Plugin destroy 函式的 `unique_ptr` 持有它；此時名稱尚未登記。
+- Plugin 工廠呼叫 Module 的無參數建構子；Module source 提供名稱提案或在 on_name 決定。
+  框架以帶有 Plugin destroy 函式的 `unique_ptr` 持有它；此時名稱尚未登記。
 - 建構後框架設定 MID，呼叫 `on_name(args)` 取得名稱提案；中央核准後才呼叫 `on_start(args)`，Result 成功才送 Ready。
 - `on_name` 可修改參數列表以消化命名選項，剩餘參數傳給 `on_start`。MID 可透過 `get_mid()` 讀取。
 - 建構、`on_name`、`on_start`、`main`、`on_stop` 與解構在子程序主執行緒執行。命令／補全與訂閱 callback 在 pump 呼叫端執行；Manual 自建 pump thread 時，應用須同步與主執行緒共享的資料。命名期間已有 heartbeat 與啟動期限保護。
@@ -183,7 +184,7 @@ Host 綁定既有認證 Session 的 Client 與本地 Runtime。C++ Context 物�
 Context 的 callback 登記與批次 metadata 在本地配置，訊息逐筆複製，不預先複製整批 payload。
 登記上限 `config::module_callback_limit` 預設 256，closed 登記在後續註冊／pump 時移除。
 Bus 批次接線使用指定的 `message_bus/detail/dispatch.hpp`；Bus 不反向依賴 Module System。
-同 topic 多來源維持現有 timestamp／Publisher rank 合併，沒有新增全域線性 FIFO 承諾。
+同 topic 多來源維持 monotonic_timestamp／Publisher rank 合併，沒有新增全域線性 FIFO 承諾。
 Param 已接入 `context.param`，共享版本補查與 callback 亦由 pump 派送，見 [Param README](../param/README.md)。
 timer 註冊與 Message Bus 跨程序資料通知仍未提供。
 
@@ -205,7 +206,7 @@ Finishing 啟動中央收尾期限；on_stop／Module 解構完成後才送 Comp
 會增加少量閒置喚醒；不新增執行緒，也不保證 OS 排程的硬期限。
 
 Host 經內部非模板 `detail::ModuleObject` 操作兩種公開 BaseModule，維持 Plugin 成對 create/destroy。
-Plugin entry version 為 5，bootstrap 標記為 `--vinc-module-v10`；舊 Plugin／Host 明確拒絕，
+Plugin entry version 為 7，bootstrap 標記為 `--vinc-module-v12`；舊 Plugin／Host 明確拒絕，
 中央、Host、Plugin 與 SDK 消費端須一同重建。同工具鏈／CRT 的 ABI 限制維持。
 RuntimeServices bridge 仍僅供 fatal，未加入一般 Context 服務。
 
@@ -283,7 +284,7 @@ Timeout 時仍持續監督，可以再次等待；成功代表受管理程序已
 
 ### Module v3 協定
 
-程序啟動標記為 `--vinc-module-v10`，在 Plugin 路徑之後加入本次啟動的 debug 旗標（0／1）。
+程序啟動標記為 `--vinc-module-v12`，在 Plugin 路徑之後加入本次啟動的 debug 旗標（0／1）。
 中央與 Host 須一同重新建置，不提供舊 bootstrap 轉接；以下 Socket 錯誤 payload 仍為既有 v3 格式。
 外層 Control Channel 的 v1 frame 不變；更新的是 Module payload 契約。
 
@@ -505,7 +506,7 @@ OS 強殺當成可攔截的 C++ 契約失敗；可恢復失敗仍走 Result。
 - ModuleManager 在每次 spawn 前建立排他、唯一命名的 SharedMemory。每個 MID 一份，
   中央既有監督迴圈只讀原子狀態，存活時不讀 payload。`vinc_module_contract` 是元件內部共用 target，讓中央／Runtime
   使用同一份紀錄 codec 與 OSAL owner；Common 不依賴它，也不依賴 OSAL。
-- 子程序先驗證 bootstrap v10、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
+- 子程序先驗證 bootstrap v12、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
   建立控制服務與呼叫使用者工廠／hooks。綁定活到 Runtime 服務停止後；解除綁定等待正在
   使用 context 的讀者離開，才解除映射。bootstrap 以前或綁定以前的故障仍沒有這份保證。
 - 故障呼叫端直接寫入預先配置的 bytes，發布 committed 狀態後 `_Exit(76)`。
@@ -683,7 +684,7 @@ Linux／macOS 未原生建置或執行；ELF symbol visibility 設定尚待該�
 
 ## Plugin Host 生命週期與故障隔離
 
-1. Host 驗證 bootstrap v10，映射 fatal storage，綁定自己的 RuntimeServices。
+1. Host 驗證 bootstrap v12，映射 fatal storage，綁定自己的 RuntimeServices。
 2. 建立 Control Service、Session、Bus Client 與既有 watchdog。
 3. 透過 OSAL DynamicLibrary 載入指定庫、驗證入口與種類，再初始化 Plugin bridge。
 4. Plugin create 建立 Module；沿用 MID、名稱核准、on_start、命令及 on_stop 流程。
@@ -827,3 +828,26 @@ Bag Recorder 是 Manual Module：main 呼叫 pumpOnce 與有界週期探索，�
 內建錄製 Module 的收尾期限使用 config::bag_stop_timeout（30 秒）；CMake module helper 的
 STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設或中央關閉政策。
 見 [Bag README](../bag/README.md)。
+
+## Source 擁有實例命名與公開 CMake 接線（2026-10-12）
+
+- `add_module()` 取代 `vinc_add_process_module()`，不接受 MODULE_BASE_NAME。
+  ModuleType 移除 module_base_name；中央 catalog 不再包含預設實例名稱。
+- C++ Plugin create 改為無參數，呼叫 Module 的無參數建構子。Module 可在建構子以
+  BaseModule("name") 提供預設提案，或覆寫 on_name。未提供名稱且 hook 返回空字串，
+  中央回報 InvalidName；不從種類／target 名稱推導實例名稱，不自動加尾碼。
+- `get_module_name()` 在中央核准前是 source 的提案，可能為空；完成 on_name／中央核准後
+  才是正式名稱。MID 仍由框架配置，Context 的服務使用時機不變。
+- Python source 不再收到中央提供的預設名稱；既有預設 on_name 仍要求 --name，
+  自訂 hook 仍可直接回傳 source 定義的名稱。中央不執行 Python 來預先取得名稱。
+- 重啟重新執行相同 source／啟動參數，由中央比對上次核准名稱；改名仍拒絕。
+  保留命令與名稱的衝突在 Module 提交名稱時拒絕，無需預先知道 source 的預設名稱。
+- Plugin entry **6**、bootstrap **v11** 移除原有名稱傳遞，舊 Plugin／Host 明確拒絕。
+  下方或前文歷史驗證中的版本號是當時版本；所有相連 C++ 程式與 Python 擴充須重新建置。
+- 完整 functions 使用方式與配置／生成時序見 [SDK README](../sdk/README.md#公開-cmake-functions)。
+
+## 雙時間 metadata ABI（2026-10-13）
+
+BaseMessage 新增單調發布時間，原 timestamp 改為 Unix 時間；Plugin entry 更新至 **7**，
+bootstrap marker 更新至 **v12**。中央、Host、Plugin 與 Python 擴充須一起重建；舊入口拒絕。
+一般控制協定與生命周期不變，欄位及失敗契約見 [Message Bus](../message_bus/README.md#雙時間發布-metadata2026-10-13)。

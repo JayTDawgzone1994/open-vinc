@@ -15,11 +15,6 @@ set_target_properties(shell PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${VINC_BUILD_ROOT}"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${VINC_BUILD_ROOT}"
 )
-get_property(PROCESS_TARGETS GLOBAL PROPERTY VINC_PROCESS_TARGETS)
-get_property(PROCESS_CATALOG GLOBAL PROPERTY VINC_PROCESS_CATALOG)
-if(PROCESS_TARGETS)
-    add_dependencies(shell ${PROCESS_TARGETS})
-endif()
 
 if(BUILD_TESTING AND VINC_BUILD_EXAMPLES)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/module-smoke.tcl"
@@ -39,9 +34,19 @@ if(BUILD_TESTING)
     set_tests_properties(bag.shell PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "bag: idle")
 endif()
 
-# Generate after collecting all process modules. Generator expressions resolve
-# each Plugin library path for this build configuration.
-set(catalog_template [=[
+# Finalize in the outer project, after external add_module calls have returned.
+set_property(GLOBAL PROPERTY VINC_CENTRAL_CATALOG_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+function(vinc_finalize_module_catalog)
+    get_property(catalog_directory GLOBAL PROPERTY VINC_CENTRAL_CATALOG_DIR)
+    get_property(PROCESS_TARGETS GLOBAL PROPERTY VINC_PROCESS_TARGETS)
+    get_property(PROCESS_CATALOG GLOBAL PROPERTY VINC_PROCESS_CATALOG)
+    if(PROCESS_TARGETS)
+        add_dependencies(shell ${PROCESS_TARGETS})
+    endif()
+
+    # Generate after collecting all process modules. Generator expressions resolve
+    # each Plugin library path for this build configuration.
+    set(catalog_template [=[
 #pragma once
 
 // Generated from the registered process-module targets. Edit the CMake sources instead.
@@ -54,12 +59,14 @@ inline Result<void> register_built_modules(ModuleManager& manager) {
 @PROCESS_CATALOG@    return {};
 }
 } // namespace vinc
-]=])
-string(CONFIGURE "${catalog_template}" catalog_contents @ONLY)
-file(GENERATE
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>/module_catalog.hpp"
-    CONTENT "${catalog_contents}"
-)
+    ]=])
+    string(CONFIGURE "${catalog_template}" catalog_contents @ONLY)
+    file(GENERATE
+        OUTPUT "${catalog_directory}/$<CONFIG>/module_catalog.hpp"
+        CONTENT "${catalog_contents}"
+    )
+endfunction()
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL vinc_finalize_module_catalog)
 
 if(MSVC)
     target_compile_options(shell PRIVATE /W4 /utf-8)

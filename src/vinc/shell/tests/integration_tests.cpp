@@ -93,7 +93,7 @@ void register_helper(ModuleManager& manager, const std::filesystem::path& execut
     policy.heartbeat_timeout = 1200ms;
     policy.startup_timeout = 5s;
     policy.stop_timeout = 1500ms;
-    check(bool(manager.register_module_type({"shellHelper", executable, "node", policy})), "register helper");
+    check(bool(manager.register_module_type({"shellHelper", executable, policy})), "register helper");
 }
 
 std::string start(ModuleManager& manager, const Workspace& files, const std::string& mode,
@@ -161,7 +161,7 @@ void test_restart_output_generation(const std::filesystem::path& executable) {
     policy.heartbeat_timeout = 1200ms;
     policy.max_restarts = 1;
     policy.restart_delay = 100ms;
-    check(bool(manager.register_module_type({"shellHelper", executable, "node", policy})),
+    check(bool(manager.register_module_type({"shellHelper", executable, policy})),
           "register restart helper");
     auto destination = manager.output_hub().subscribe();
     check(bool(destination), "restart output subscriber");

@@ -115,6 +115,31 @@ Result<message::Snapshot> stalled_encoder(const BaseMessage& value, std::uint64_
     return encode(value, limit);
 }
 
+void test_time_format(const std::filesystem::path& path) {
+    auto recorder = take(Recorder::create(path));
+    discover(*recorder);
+    queue(*recorder, 32);
+    take(recorder->wait());
+    recorder.reset();
+    sqlite3* database = nullptr;
+    const auto filename = take(osal::path_to_utf8(path / "recording.sqlite"));
+    check(sqlite3_open(filename.c_str(), &database) == SQLITE_OK, "open time metadata fixture");
+    // Exercise unsigned SQL storage/inspection above INT64_MAX without changing the OS clock.
+    check(sqlite3_exec(database,
+                      "UPDATE recording SET start_utc_ns='18446744073709551615';"
+                      "UPDATE messages SET source_utc_ns='18446744073709551615',"
+                      "source_monotonic_ns='00000000000000000010',receive_monotonic_ns='00000000000000000020'",
+                      nullptr, nullptr, nullptr) == SQLITE_OK, "write full unsigned timestamp fixture");
+    auto info = take(inspect(path));
+    check(info.start_utc_ns == UINT64_MAX && info.topics.front().first_timestamp == UINT64_MAX &&
+              info.topics.front().last_timestamp == UINT64_MAX, "UTC summaries retain uint64 range");
+    check(sqlite3_exec(database, "PRAGMA user_version=1", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "mark old Bag version");
+    auto old = inspect(path);
+    check(!old && old.error().is(ErrorCode::InvalidFormat), "old Bag rejected without inferring clock semantics");
+    sqlite3_close(database);
+}
+
 void test_queue(const std::filesystem::path& path) {
     Options options;
     options.message_bytes = mib;
@@ -315,6 +340,7 @@ int main(int argc, char** argv) {
         auto incomplete = take(vinc::bag::inspect(root / "aborted"));
         check(!incomplete.completed && incomplete.counters.written == 1,
               "drain valid messages without claiming success");
+        test_time_format(root / "time");
         test_queue(root / "queue");
         test_database_failure(root / "failure");
         test_database_limits(root);

@@ -6,7 +6,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincErrors.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincMsvcDependencies.cmake")
-add_library(vinc_common STATIC src/error.cpp src/contract.cpp src/runtime_services.cpp)
+add_library(vinc_common STATIC src/error.cpp src/contract.cpp src/runtime_services.cpp src/time.cpp)
 add_library(vinc::common ALIAS vinc_common)
 
 # The catalog is a separate composition target, never a dependency of common.
@@ -48,6 +48,11 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    add_executable(common_time_tests tests/time_tests.cpp)
+    target_link_libraries(common_time_tests PRIVATE vinc::common vinc::errors)
+    add_test(NAME common.time COMMAND common_time_tests)
+    set_tests_properties(common.time PROPERTIES TIMEOUT 10)
+
     add_executable(common_runtime_services_tests tests/runtime_services_tests.cpp)
     target_link_libraries(common_runtime_services_tests PRIVATE vinc::common vinc::errors)
     set_target_properties(common_runtime_services_tests PROPERTIES

@@ -4,6 +4,7 @@
 
 #include <vinc/message_bus/detail/protocol.hpp>
 #include <vinc/message/detail/framework_access.hpp>
+#include <vinc/time.hpp>
 #include <condition_variable>
 #include <cstring>
 #include <map>
@@ -13,6 +14,16 @@
 #endif
 
 namespace vinc::message_bus::detail {
+namespace {
+Result<std::uint64_t> publication_timestamp() noexcept {
+#ifdef VINC_MESSAGE_BUS_TESTING
+    return testing::publication_timestamp();
+#else
+    return vinc::unix_nanoseconds();
+#endif
+}
+}
+
 template <class F> auto guarded(ErrorOperation operation, F&& f) -> decltype(f()) {
     try {
         return f();
@@ -324,6 +335,7 @@ public:
         message._topic_name = topic;
         message._publisher_name = publisher.publisher;
         message._message_timestamp = metadata.timestamp;
+        message._message_monotonic_timestamp = metadata.monotonic_timestamp;
         message._topic_count = metadata.count;
         message._publisher_instance = publisher.id;
     }
@@ -424,7 +436,14 @@ vinc::Result<void> commit(const std::shared_ptr<PublisherCore>& publisher, const
             return std::unexpected(storage_error(image.error(), ErrorOperation::Commit));
         }
 
-        const auto timestamp = osal::monotonic_nanoseconds();
+        const auto timestamp = publication_timestamp();
+        if (!timestamp) {
+            loan->active.store(false);
+            return std::unexpected(wrap_error(ErrorCode::TimestampUnavailable, ErrorOperation::Commit,
+                                              timestamp.error()));
+        }
+
+        const auto monotonic_timestamp = osal::monotonic_nanoseconds();
         auto count = publisher->counter->next();
         if (!count) {
             loan->active.store(false);
@@ -432,7 +451,8 @@ vinc::Result<void> commit(const std::shared_ptr<PublisherCore>& publisher, const
         }
 
         auto published =
-            publisher->ring_buffer->publish(loan->reservation, image->bytes().size(), timestamp, *count);
+            publisher->ring_buffer->publish(loan->reservation, image->bytes().size(), *timestamp,
+                                            monotonic_timestamp, *count);
         loan->active.store(false);
         if (published) {
             publisher->outstanding.reset();
@@ -492,14 +512,21 @@ vinc::Result<void> push(const std::shared_ptr<PublisherCore>& publisher, message
             return std::unexpected(storage_error(image.error(), ErrorOperation::Push));
         }
 
-        const auto timestamp = osal::monotonic_nanoseconds();
+        const auto timestamp = publication_timestamp();
+        if (!timestamp) {
+            return std::unexpected(wrap_error(ErrorCode::TimestampUnavailable, ErrorOperation::Push,
+                                              timestamp.error()));
+        }
+
+        const auto monotonic_timestamp = osal::monotonic_nanoseconds();
         auto count = publisher->counter->next();
         if (!count) {
             return std::unexpected(count.error());
         }
 
         auto published =
-            publisher->ring_buffer->publish(*reservation, image->bytes().size(), timestamp, *count);
+            publisher->ring_buffer->publish(*reservation, image->bytes().size(), *timestamp,
+                                            monotonic_timestamp, *count);
         rollback.done = bool(published);
         return published;
     });

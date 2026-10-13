@@ -15,8 +15,8 @@ using osal::shared_compare_exchange;
 using osal::shared_fetch_add;
 using osal::shared_load;
 using osal::shared_store;
-// Version-one layout and admission bounds, shared by BusManager and mapped RingBuffer validation.
-inline constexpr std::uint64_t ring_buffer_layout_version = 1;
+// Version-two layout and admission bounds, shared by BusManager and mapped RingBuffer validation.
+inline constexpr std::uint64_t ring_buffer_layout_version = 2;
 inline constexpr std::uint32_t minimum_ring_buffer_slots = 2;
 inline constexpr std::uint32_t maximum_ring_buffer_slots = 65536;
 inline constexpr std::uint32_t maximum_ring_buffer_readers = 4096;
@@ -77,7 +77,8 @@ struct alignas(control_alignment) Slot {
     SharedWord timestamp;
     SharedWord count;
     SharedWord size;
-    std::uint64_t reserved[3]{};
+    SharedWord monotonic_timestamp;
+    std::uint64_t reserved[2]{};
 };
 
 // Each subscription owns one entry per ring buffer. Zero means idle; a ready gate token
@@ -92,6 +93,7 @@ static_assert(sizeof(RingBufferHeader) == 128 && sizeof(Slot) == 64 && sizeof(Re
 struct Metadata {
     std::uint64_t sequence = 0;
     std::uint64_t timestamp = 0;
+    std::uint64_t monotonic_timestamp = 0;
     std::uint64_t count = 0;
     std::uint64_t size = 0;
     std::uint64_t token = 0;
@@ -102,15 +104,15 @@ struct Metadata {
 // This cannot order against an earlier timestamp whose publisher has not exposed its slot yet.
 inline bool preferred(const Metadata& a, std::uint64_t a_rank, const Metadata& b, std::uint64_t b_rank,
                       bool latest) {
-    if (a.timestamp == b.timestamp) {
+    if (a.monotonic_timestamp == b.monotonic_timestamp) {
         return a_rank < b_rank;
     }
 
     if (latest) {
-        return a.timestamp > b.timestamp;
+        return a.monotonic_timestamp > b.monotonic_timestamp;
     }
 
-    return a.timestamp < b.timestamp;
+    return a.monotonic_timestamp < b.monotonic_timestamp;
 }
 
 // Exclusive writable extent for one unpublished generation. Its span is only usable
@@ -174,7 +176,7 @@ public:
     void clear_reader(std::uint32_t) noexcept; // only quiescent unsubscribe or confirmed process death
     vinc::Result<Reservation> reserve(const std::atomic<bool>& closed);
     vinc::Result<void> publish(const Reservation&, std::uint64_t image_size, std::uint64_t timestamp,
-                         std::uint64_t count);
+                         std::uint64_t monotonic_timestamp, std::uint64_t count);
     void abandon(const Reservation&) noexcept;
     std::optional<Metadata> candidate(std::uint64_t cursor, bool latest, std::uint64_t upper = UINT64_MAX);
     bool protect(const Metadata&, std::uint32_t reader);

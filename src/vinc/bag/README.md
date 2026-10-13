@@ -99,12 +99,16 @@ canonical Snapshot 並送 SQLite。沒有直接操作 RingBuffer 的錄製捷徑
 一份 Bag 是獨立目錄，內含 `recording.sqlite` 及 SQLite 交易所需檔案。
 原子建立目錄避免兩個 Recorder 共用同一路徑。建立失敗後的部分目錄保留供診斷，不能當完整 Bag。
 
-格式 v1 使用 application_id `0x56424147`／user_version=1：
+格式 v2 使用 application_id `0x56424147`／user_version=2；舊版與未知版本回 InvalidFormat，不自動轉換或刪除：
 
-- recording：開始 UTC nanoseconds、完成旗標、統計。
+- recording：開始 UTC nanoseconds（uint64，20 位 TEXT）、完成旗標、統計。
 - topics：topic、訊息類別名稱、schema hash、錄製時是否支援。
-- messages：topic/hash、Publisher 名稱與 ID、原始 topic count、原始 monotonic timestamp、
-  接收 monotonic timestamp、image_version=2 及 canonical BLOB。
+- messages：topic/hash、Publisher 名稱與 ID、原始 topic count、發布 `source_utc_ns`、
+  發布 `source_monotonic_ns`、接收 `receive_monotonic_ns`、image_version=2 及 canonical BLOB。
+  Recorder 保存收到的兩個發布時間，不重新取樣覆蓋它們。
+- `TopicSummary.first_timestamp/last_timestamp` 為已錄資料的最小／最大 Unix nanoseconds；
+  系統校時時不一定對應第一／最後插入的訊息。Shell info 顯示 UTC 日期；播放排序仍需使用單調時間。
+- `Info.start_utc_ns` 改為 uint64。建立時系統時間無法表示回 Bag TimestampUnavailable，保留 Common 原因。
 - 完整 uint64 metadata 使用固定 20 位十進位 TEXT，避免 SQLite signed INTEGER 截斷；payload 與 metadata 分開。
 
 採 DELETE rollback journal、synchronous=EXTRA、批次交易；未關閉 SQLite 同步保障。

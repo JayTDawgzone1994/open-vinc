@@ -55,8 +55,8 @@ Result<LoadedPlugin> LoadedPlugin::load(const std::filesystem::path& path,
     return LoadedPlugin(std::move(*library), entry);
 }
 
-Result<PluginModule> LoadedPlugin::create(std::string name) const {
-    auto created = entry_->create(std::move(name));
+Result<PluginModule> LoadedPlugin::create() const {
+    auto created = entry_->create();
     if (!created) {
         return std::unexpected(created.error());
     }

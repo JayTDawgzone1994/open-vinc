@@ -27,8 +27,8 @@ public:
         return {};
     }
 
-    Result<detail::PluginModule> create(std::string name) override {
-        return plugin_->create(std::move(name));
+    Result<detail::PluginModule> create() override {
+        return plugin_->create();
     }
 
     void clear() noexcept override {

@@ -7,7 +7,8 @@
 
 class ExampleModule final : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
 public:
-    using BaseModule::BaseModule;
+    ExampleModule() : BaseModule("exampleNode") {
+    }
 
     // This example chooses its own CLI convention; the framework does not parse --name.
     vinc::Result<std::string> on_name(std::vector<std::string>& args) override {

@@ -34,13 +34,13 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     const auto root = std::filesystem::temp_directory_path() / test::instance_name();
     take(detail::ManagerAccess::configure_params(*manager, root));
     take(detail::ManagerAccess::configure_log(*manager, root));
-    ModuleType native{"nativePeer", plugin, "nativeNode", {}};
+    ModuleType native{"nativePeer", plugin, {}};
     take(manager->register_module_type(native));
     auto native_mid = take(manager->start_module(native.name));
     take(manager->wait_started(native_mid));
     ModuleType type;
     type.name = "pythonServices";
-    type.module_base_name = "pythonNode";
+
     type.python = PythonLaunch{script, bootstrap, python};
     take(manager->register_module_type(type));
     auto mid = take(manager->start_module(type.name, {"--name", "pythonNode", mode}));

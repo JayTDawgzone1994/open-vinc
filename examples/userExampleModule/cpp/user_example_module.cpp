@@ -20,7 +20,8 @@ void report(const vinc::Error& error) {
 
 class UserExampleModule final : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
 public:
-    using BaseModule::BaseModule;
+    UserExampleModule() : BaseModule("userCpp") {
+    }
 
     vinc::Result<std::string> on_name(std::vector<std::string>& args) override {
         for (auto argument = args.begin(); argument != args.end(); ++argument) {

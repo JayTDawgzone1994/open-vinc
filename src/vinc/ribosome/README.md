@@ -131,7 +131,7 @@ UTF-16 參數，POSIX CLI 保留原生 path bytes。Windows 路徑不經 ANSI co
 生成器自有的路徑診斷輸出 UTF-8；不新增 OSAL runtime 相依。也支援測試／工具使用：
 
 ```text
-ribosome --input PATH --output PATH --template PATH
+ribosome --input PATH --input OTHER_PATH --output PATH --template PATH
 ```
 
 輸出資料夾應專供生成檔使用，每次生成先移除舊輸出，全部成功才從 sibling staging
@@ -242,3 +242,26 @@ Python 綁定亦使用此清單；生成 class 提供 `ribosome_visit_fields(vis
 `ribosome_visit_constants(visitor)`，分別交付編譯期欄位型別／索引和常數名稱／值。
 這些是生成器的接線介面，不加入 Python runtime 相依，也不改變 hash 或映像布局。
 Python 的界線、轉型及借用生命週期見 [Python Module](../module_system/python/README.md)。
+
+## 多目錄生成（2026-10-12）
+
+CLI 可重複 `--input`，第一個取代預設目錄、後續追加；同一 canonical 目錄去重。
+將所有目錄的直接 `.msg` 合併後統一解析，相依可跨目錄；名稱／大小寫碰撞與循環仍拒絕。
+輸出與所有輸入目錄、模板都檢查重疊，避免清理生成檔時移除使用者定義。
+一次生成完整 all_messages.hpp／message_types.hpp；schema 格式與 hash 計算未改。
+CMake 登記入口由本元件的 cmake/VincMessages.cmake 提供，見 [SDK](../sdk/README.md)。
+
+## 待處理事項
+
+- 2026-10-12 檢查發現舊獨立腳本 `tests/ribosome_generation.cmake` 的標頭數量仍是
+  訊息數 + 1，未納入既有 message_types.hpp，且只複製 tests/header_smoke，沒有完整
+  複製目前正式測試引用的 tests/support 等內容。新 CMake 入口在配置時拒絕不存在目錄，
+  該腳本的 missing_input 仍預期生成階段的錯誤及輸出清理；須同步更新這些測試假設。
+  此腳本未納入本輪執行；本輪使用 ribosome.schema 與 sdk.external_consumer 驗證多目錄、
+  真正的使用端編譯、生成失敗／復原及新增／刪除相依。後續修正獨立來源副本測試再執行。
+
+## 雙時間 API 名稱（2026-10-13）
+
+新增保留成員名 `get_message_monotonic_timestamp`，以及 vinc 命名空間的
+`format_utc`／`unix_nanoseconds`，避免生成名稱遮蔽正式 API。
+時間由 BaseMessage／Bus 維護，生成 payload 布局與 schema hash 不變。

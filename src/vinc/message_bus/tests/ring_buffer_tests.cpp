@@ -160,13 +160,13 @@ int main(int argc, char** argv) {
         check(take(counter->next()) == counter_children * increments_per_child + 1,
               "IPC counter has no lost updates");
         // Scenario: merge ordering uses timestamps and registration rank, never count.
-        Metadata equal_a{1, 100, 900};
-        Metadata equal_b{999, 100, 1};
+        Metadata equal_a{1, 1000, 100, 900};
+        Metadata equal_b{999, 1, 100, 1};
         check(preferred(equal_a, 1, equal_b, 2, false) && preferred(equal_a, 1, equal_b, 2, true),
               "ties use publisher rank, not counter");
-        equal_a.timestamp = 99;
+        equal_a.monotonic_timestamp = 99;
         check(preferred(equal_a, 9, equal_b, 1, false) && !preferred(equal_a, 9, equal_b, 1, true),
-              "timestamp is cross-publisher key");
+              "monotonic timestamp, not backward UTC, is the cross-publisher key");
         // Scenario: validate layout before opening the payload.
         Descriptor descriptor;
         descriptor.id = 1;
@@ -190,19 +190,25 @@ int main(int argc, char** argv) {
         invalid.bytes = UINT64_MAX;
         rejected = RingBuffer::open(invalid, false);
         check(!rejected && rejected.error().is(ErrorCode::Protocol), "descriptor size overflow rejected");
+        creator->header().version = 1;
+        rejected = RingBuffer::open(descriptor, false);
+        check(!rejected && rejected.error().is(ErrorCode::Protocol), "old timestamp layout rejected");
+        creator->header().version = ring_buffer_layout_version;
         check_partial_creation_cleanup(descriptor);
 
         // Scenario: an announced reader blocks reuse; stale generations cannot re-enter.
         std::atomic<bool> closed{false};
         auto first = take(writer->reserve(closed));
         first.bytes[0] = std::byte{11};
-        ok(writer->publish(first, 64, 100, 1));
+        ok(writer->publish(first, 64, 1000, 100, 1));
         auto first_metadata = reader->candidate(0, false);
         check(first_metadata && first_metadata->sequence == 1, "first candidate");
+        check(first_metadata->timestamp == 1000 && first_metadata->monotonic_timestamp == 100,
+              "independent clock fields survive shared memory");
         check(reader->protect(*first_metadata, 0), "protect first generation");
         auto second = take(writer->reserve(closed));
         second.bytes[0] = std::byte{22};
-        ok(writer->publish(second, 64, 101, 2));
+        ok(writer->publish(second, 64, 900, 101, 2));
         auto future = std::async(std::launch::async, [&] {
             return writer->reserve(closed);
         });
@@ -231,7 +237,7 @@ int main(int argc, char** argv) {
         auto latest = reader->candidate(0, true);
         check(latest && latest->sequence == 2, "latest survives outstanding loan");
         third.bytes[0] = std::byte{33};
-        ok(writer->publish(third, 64, 102, 3));
+        ok(writer->publish(third, 64, 800, 102, 3));
         auto oldest = reader->candidate(0, false);
         check(oldest && oldest->sequence == 2, "slow reader skips overwritten sequence");
         check(writer->stats(2).total_wait_ns > 0 && writer->stats(2).current_wait_ns == 0,
@@ -257,7 +263,7 @@ int main(int argc, char** argv) {
 
                 std::memset(result->bytes.data(), static_cast<int>(sequence % payload_pattern_modulus),
                             test_payload_bytes);
-                if (!stress->publish(*result, test_payload_bytes, sequence, sequence)) {
+                if (!stress->publish(*result, test_payload_bytes, sequence + 1000, sequence, sequence)) {
                     failed.store(true);
                     break;
                 }
@@ -288,6 +294,9 @@ int main(int argc, char** argv) {
                 continue;
             }
 
+            check(metadata->timestamp == metadata->sequence + 1000 &&
+                      metadata->monotonic_timestamp == metadata->sequence,
+                  "both clocks belong to the protected generation under concurrent overwrite");
             std::array<std::byte, test_payload_bytes> copy;
             std::memcpy(copy.data(), stress->payload(*metadata).data(), copy.size());
             stress->unprotect(0);
@@ -307,7 +316,7 @@ int main(int argc, char** argv) {
         // Scenario: odd byte budgets retain alignment; identifiers reject exhaustion.
         auto odd = take(RingBuffer::create(descriptor));
         auto odd_first = take(odd->reserve(closed));
-        ok(odd->publish(odd_first, 64, 1, 1));
+        ok(odd->publish(odd_first, 64, 1, 1, 1));
         auto odd_second = take(odd->reserve(closed));
         // Layout boundary: inspect pointer bits only to check the promised 8-byte alignment.
         check(odd_second.bytes.size() == 1025 &&

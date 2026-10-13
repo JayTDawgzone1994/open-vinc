@@ -1,4 +1,5 @@
 #include <vinc/bag/bag.hpp>
+#include <vinc/time.hpp>
 #include <vinc/module/base_module.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc_messages/message_types.hpp>
@@ -277,7 +278,8 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
 
             std::cout << entry.topic.name << " type=" << entry.topic.type << " hash=" << entry.topic.schema
                       << " supported_at_recording=" << entry.topic.supported << " records=" << entry.records
-                      << " first_ns=" << entry.first_timestamp << " last_ns=" << entry.last_timestamp << " "
+                      << " first_utc=" << vinc::format_utc(entry.first_timestamp)
+                      << " last_utc=" << vinc::format_utc(entry.last_timestamp) << " "
                       << state << '\n';
         }
 
@@ -291,7 +293,8 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
     }
 
 public:
-    using BaseModule::BaseModule;
+    RecorderModule() : BaseModule("recorder") {
+    }
 
     Result<std::string> on_name(std::vector<std::string>& args) override {
         // Shell includes the ModuleType target; direct Manager callers may omit it.

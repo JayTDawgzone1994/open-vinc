@@ -26,9 +26,14 @@ class ShellHelper : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
     }
 
 public:
-    using BaseModule::BaseModule;
+    ShellHelper() : BaseModule("node") {
+    }
 
     vinc::Result<std::string> on_name(std::vector<std::string>& arguments) override {
+        if (!arguments.empty() && arguments.front() == "shellHelper") {
+            arguments.erase(arguments.begin());
+        }
+
         if (arguments.size() >= 2 && arguments[0] == "--name") {
             auto name = arguments[1];
             arguments.erase(arguments.begin(), arguments.begin() + 2);

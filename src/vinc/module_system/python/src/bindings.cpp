@@ -5,6 +5,7 @@
 #include <vinc/module/detail/module_protocol.hpp>
 #include <vinc/module/error.hpp>
 #include <vinc/config.hpp>
+#include <vinc/time.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <iostream>
@@ -67,7 +68,7 @@ class PythonModule final : public detail::ModuleObject {
     }
 
 public:
-    explicit PythonModule(std::string name) : ModuleObject(std::move(name)) {
+    PythonModule() {
         state_->module = this;
         state_->context = &context;
     }
@@ -176,8 +177,8 @@ public:
         }
     }
 
-    Result<detail::RuntimeModule> create(std::string name) override {
-        detail::RuntimeModule module(new PythonModule(std::move(name)), [](detail::ModuleObject* value) noexcept {
+    Result<detail::RuntimeModule> create() override {
+        detail::RuntimeModule module(new PythonModule(), [](detail::ModuleObject* value) noexcept {
             delete static_cast<PythonModule*>(value);
         });
         auto initialized = static_cast<PythonModule*>(module.get())->initialize(type_);
@@ -223,6 +224,7 @@ void bind_errors(py::module_& module) {
         })
         .def_property_readonly("truncated", &Error::truncated);
     module.def("error_to_string", &error_to_string);
+    module.def("format_utc", &format_utc, py::arg("unix_nanoseconds"));
 }
 
 void bind_context(py::module_& module) {

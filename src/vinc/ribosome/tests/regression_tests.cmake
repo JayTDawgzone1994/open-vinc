@@ -9,7 +9,7 @@ file(WRITE "${input}/Bad.msg" [=[string value = "bad\x41";]=])
 run_case(string_escape FALSE "string escape")
 file(REMOVE "${input}/Bad.msg")
 
-foreach(name IN ITEMS Result Error ErrorRecord NativeError make_message ErrorCodeTraits ErrorOperationEnum message_bus)
+foreach(name IN ITEMS Result Error ErrorRecord NativeError make_message ErrorCodeTraits ErrorOperationEnum message_bus format_utc unix_nanoseconds)
     file(WRITE "${input}/${name}.msg" "int value;\n")
     run_case(reserved_namespace FALSE "reserved message name")
     file(REMOVE "${input}/${name}.msg")

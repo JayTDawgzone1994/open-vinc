@@ -256,7 +256,7 @@ void test_worker_isolation(const char* helper) {
     auto manager = take(vinc::test::create_manager());
     std::ostringstream output;
     auto local = take(Shell::create(*manager, output));
-    take(manager->register_module_type({"shellHelper", std::filesystem::absolute(helper), "alive", {}}));
+    take(manager->register_module_type({"shellHelper", std::filesystem::absolute(helper), {}}));
     const auto directory = std::filesystem::current_path() /
         ("shell-faults-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directory(directory);
@@ -267,7 +267,7 @@ void test_worker_isolation(const char* helper) {
             std::filesystem::remove_all(path, ignored);
         }
     } directory_guard{directory};
-    const auto module = take(manager->start_module("shellHelper", {"normal", take(osal::path_to_utf8(directory))}));
+    const auto module = take(manager->start_module("shellHelper", {"--name", "alive", "normal", take(osal::path_to_utf8(directory))}));
     take(manager->wait_started(module));
     shell::SocketShellOptions options;
     options.port = 0;

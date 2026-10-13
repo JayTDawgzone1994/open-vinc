@@ -394,6 +394,42 @@ Windows x64／MSVC 19.51.36257，Debug／Release 相關 target 重新建置通�
 其餘六條逐配置掃描在 MSVC iterator debugging 開啟時明確輸出 SKIP，原因見下方。
 未重跑其餘全專案測試；Linux／macOS 未建置或執行。
 
+### 2026-10-13 MSVC 19.44 snapshot 相容性修正
+
+原始 `storage.hpp` 在 MSVC 19.44.35229 出現 C2039／C2447：編譯器將主模板的
+`snapshot()` 定義錯誤配對到沒有該 API 的本機物件偏特化。五行、不依賴 VINC／STL
+的 constrained partial specialization 最小案例亦失敗；同案例在 19.51.36257 通過。
+現已將本機物件偏特化移到主模板 `snapshot()` 定義之後，並留下相容性註解。
+逐字比對確認搬移區塊內容不變，沒有改動函式行為、API、布局或錯誤契約。
+`tests/access_tests.cpp` 補上編譯期檢查：純量及生成 record 仍有 `snapshot()`，
+string、move-only 物件及巢狀本機陣列仍沒有該 API。
+
+19.44 工具鏈從 Microsoft 官方套件下載、核對 SHA-256 後隔離解壓，cl.exe 的
+Microsoft 簽章有效。已補齊正式連結庫，以下完整建置使用專案原本的 `/MDd`／`/MD`，
+未使用前輪局部實驗的 `/NODEFAULTLIB:OLDNAMES`，亦未修改既有 Visual Studio 安裝。
+環境為 Windows x64、Windows SDK 10.0.26100.0、CMake 4.3.2、Ninja 1.13.2，
+`VINC_BUILD_PYTHON=ON`，CPython 3.13.12。
+
+| 編譯器 | Debug 完整建置／相關測試 | Release 完整建置／相關測試 |
+| --- | --- | --- |
+| MSVC 19.44.35229 | 通過／21/21 | 通過／21/21 |
+| MSVC 19.51.36257 | 通過／21/21 | 通過／21/21 |
+
+四組使用獨立建置目錄；19.44 為全新配置及建置，19.51 為既有目錄的完整目標增量建置。
+測試包含 `message.*`、`message_bus.*`、`ribosome.*`、`module.python*`、
+`sdk.consumer` 及 `bag.*`，涵蓋生成訊息、跨程序資料路徑、Python 綁定與錄製。
+各組 CTest 使用 `-j 1 --output-on-failure`，篩選式為
+`^(message[.]|message_bus[.]|ribosome[.]|module[.]python|sdk[.]consumer$|bag[.])`。
+Debug 的部分配置失敗掃描仍依既有 MSVC iterator debugging 限制略過，Release 執行對應掃描；
+不將本次 21 項相關測試宣稱為全專案 75 項測試全數通過。
+
+19.44 的 Debug／Release 各有 10 筆既有 Shell 模板條件 C4127 警告：
+`shell/src/tcl_runtime.cpp` 的五處 `CommandKind` 判斷在一般及測試 target 各編譯一次。
+本輪不修改 Shell；19.51 本輪建置日誌未出現 C 系列編譯警告。
+Linux／macOS 及其他 19.44 修補版本未驗證。
+最小案例、套件來源／雜湊與隔離工具鏈位於 `build/msvc-1944-investigation`；
+四組完整建置及測試日誌為 `build/storage-1944-fix-{1944,1951}-{debug,release}-{build,tests}.log`。
+
 ## 待處理事項
 
 - **已確認工具鏈限制，例外政策維持原狀：MSVC Debug 的配置失敗。**
@@ -427,3 +463,12 @@ RuntimeServices 接線後，`tests/contract_probe.hpp` 改驗證 Common 的 fall
 Bag 僅使用生成訊息的 Snapshot API 產生 canonical 映像，並引用
 `message::detail::format::version` 保存相同的 image version。該常數的框架接線不授權
 Bag 修改布局或繞過驗證；schema hash 與映像仍由 Message Storage／Ribosome 維護。
+
+## 發布時間 metadata（2026-10-13）
+
+BaseMessage 的 `get_message_timestamp()` 改為 uint64 Unix nanoseconds，新增
+`get_message_monotonic_timestamp()` 保存同主機單調發布時間。兩者由 Bus 填入，唯讀；
+新建本機訊息預設皆為 0，是否發布不能只由 UTC 為 0 判斷（epoch 本身是合法日期）。
+copy construction 保留兩者；assign／deserialize 保留目的 metadata，payload 映像與 schema hash 不變。
+BaseMessage 的本機 C++ 布局變更需所有相連元件重建；發布與相容性契約見
+[Message Bus](../../message_bus/README.md#雙時間發布-metadata2026-10-13)。

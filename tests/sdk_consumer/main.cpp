@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
         return 4;
     }
 
-    auto registered = manager.register_module_type({"ExternalModule", *path, "externalNode"});
+    auto registered = manager.register_module_type({"ExternalModule", *path});
     if (!registered) {
         return 5;
     }

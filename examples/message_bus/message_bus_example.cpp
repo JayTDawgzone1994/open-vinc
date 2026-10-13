@@ -1,3 +1,4 @@
+#include <vinc/time.hpp>
 // Interactive example of copied local publication, direct shared-memory loans,
 // and copied subscription reads. All operations are invoked through ordinary module hooks.
 
@@ -30,7 +31,8 @@ class MessageBusExample final : public vinc::BaseModule<vinc::RunMode::Framework
     }
 
 public:
-    using BaseModule::BaseModule;
+    MessageBusExample() : BaseModule("messageBusNode") {
+    }
 
     vinc::Result<std::string> on_name(std::vector<std::string>& args) override {
         for (auto it = args.begin(); it != args.end(); ++it) {
@@ -107,7 +109,9 @@ public:
             auto& message = **result;
             std::cout << '[' << get_module_name() << "] value=" << message.data().y.at(0).value()
                       << " publisher=" << message.publisher_name() << " count=" << message.get_topic_count()
-                      << " timestamp_ns=" << message.get_message_timestamp() << '\n';
+                      << " timestamp_ns=" << message.get_message_timestamp()
+                      << " utc=" << vinc::format_utc(message.get_message_timestamp())
+                      << " monotonic_ns=" << message.get_message_monotonic_timestamp() << '\n';
             return 0;
         }
 
