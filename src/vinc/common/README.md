@@ -24,6 +24,10 @@ shared-mutex retry sleeps, not a maximum holding time; see the
 value-only payload, typed construction/matching, catalog contracts and formatting
 helpers. Each component owns its own `int32_t` error and operation enums.
 
+`ErrorDomain::Ui = 13` is reserved for the optional official Web UI Module.
+Its static catalog and `ui_*` configuration defaults belong to the
+[UI component contract](../ui/README.md); common does not depend on HTTP or Vue.
+
 ```cpp
 auto result = vinc::osal::IPv4Address::parse(text);
 if (!result) {
@@ -541,3 +545,9 @@ may allocate/throw under the existing STL exception policy; it has no recoverabl
 Implementation is in `src/time.cpp`; `detail/time.hpp` is a private checked conversion
 helper, also used by tests to exercise invalid clocks without changing the OS clock.
 Message publication contracts and version changes belong to [Message Bus](../message_bus/README.md#雙時間發布-metadata2026-10-13).
+
+## RPC 共用接線（2026-10-14）
+
+新增 ErrorDomain::Rpc = 14；元件自行維護錯誤／操作 catalog，common 不反向依賴 RPC runtime。
+config.hpp 的 rpc_* 設定集中控制共享／本地容量、待處理數與等待，預設值及限制見
+[RPC 資源與執行緒](../rpc/README.md#資源與執行緒)。未將既有設定遷入 Param。

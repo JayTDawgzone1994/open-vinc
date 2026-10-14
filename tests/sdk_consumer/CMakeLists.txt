@@ -15,6 +15,9 @@ set(parent_build_type "${CMAKE_BUILD_TYPE}")
 set(parent_crt "${CMAKE_MSVC_RUNTIME_LIBRARY}")
 set(BUILD_SHARED_LIBS ON)
 add_subdirectory("${VINC_SOURCE_DIR}/src" open-vinc)
+if(VINC_TEST_EMBEDDED_STARTUP)
+    vinc_configure_app(NAME EmbeddedApp STARTUP_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/startup.tcl")
+endif()
 
 # Keep mutable schemas in the test build directory. Reconfiguration must not
 # overwrite edits made by the incremental regression driver.

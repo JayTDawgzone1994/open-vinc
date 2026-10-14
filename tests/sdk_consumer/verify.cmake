@@ -24,7 +24,7 @@ run_checked(configure "${CMAKE_COMMAND}"
     -S "${VINC_SOURCE_DIR}/tests/sdk_consumer" -B "${TEST_BINARY_DIR}"
     -G "${GENERATOR}" "-DVINC_SOURCE_DIR=${VINC_SOURCE_DIR}"
     "-DCMAKE_CXX_COMPILER=${COMPILER}" "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}"
-    "-DCMAKE_BUILD_TYPE=${CONFIG}" -DVINC_TEST_DUPLICATE_MODULE=OFF)
+    "-DCMAKE_BUILD_TYPE=${CONFIG}" -DVINC_TEST_DUPLICATE_MODULE=OFF -DVINC_TEST_EMBEDDED_STARTUP=OFF)
 run_checked(build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
     --target external_consumer shell --parallel 4)
 include("${TEST_BINARY_DIR}/executables.cmake")
@@ -87,7 +87,7 @@ file(WRITE "${script}" "puts SDK_SCRIPT_READY\nExternalModule\nexternalNode sche
 function(run_central label executable)
     execute_process(COMMAND "${executable}" --shell-port 0 -S "${script}"
         WORKING_DIRECTORY "${TEST_BINARY_DIR}"
-        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 20)
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 20 ENCODING UTF-8)
     file(WRITE "${TEST_BINARY_DIR}/${label}.log" "${output}\n${errors}")
     if(NOT result STREQUAL "0" OR NOT output MATCHES "SDK_SCRIPT_READY"
             OR NOT output MATCHES "Socket Shell listening on 127\\.0\\.0\\.1:[1-9][0-9]*"
@@ -137,3 +137,65 @@ endif()
 run_checked(final_recovery "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}"
     --config "${CONFIG}" --target external_message_probe --parallel 4)
 run_checked(final_catalog "${message_probe}" 2 0)
+
+# Exercise the public application API from a parent directory after registration.
+set(embedded_input "${TEST_BINARY_DIR}/startup.tcl")
+file(WRITE "${embedded_input}" [=[
+if {[info script] ne {embedded:startup.tcl}} {error identity}
+source [file join $::vinc::app_dir companion.tcl]
+if {[info script] ne {embedded:startup.tcl}} {error restored_identity}
+puts {中文 😀}
+puts {embedded-revision-1 $literal [unchanged]; "quotes"}
+exit
+]=])
+run_checked(embedded_configure "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
+    -B "${TEST_BINARY_DIR}" -DVINC_TEST_EMBEDDED_STARTUP=ON)
+run_checked(embedded_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
+    --target shell --parallel 4)
+include("${TEST_BINARY_DIR}/executables.cmake")
+get_filename_component(embedded_directory "${central}" DIRECTORY)
+file(WRITE "${embedded_directory}/companion.tcl" "puts companion-loaded\nreturn\nerror unreachable\n")
+
+function(run_embedded label executable expected)
+    execute_process(COMMAND "${executable}" --shell-port 0
+        WORKING_DIRECTORY "${TEST_BINARY_DIR}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 20 ENCODING UTF-8)
+    file(WRITE "${TEST_BINARY_DIR}/${label}.log" "${output}\n${errors}")
+    if(NOT result STREQUAL "0" OR NOT output MATCHES "${expected}")
+        message(FATAL_ERROR "${label}: embedded startup failed (${result}): ${output}${errors}")
+    endif()
+    if(expected STREQUAL "embedded-revision-1" AND NOT output MATCHES "中文 😀")
+        message(FATAL_ERROR "Embedded UTF-8 did not survive generation and execution: ${output}")
+    endif()
+endfunction()
+run_embedded(embedded_initial "${central}" "embedded-revision-1")
+execute_process(COMMAND "${central}" -S missing.tcl
+    RESULT_VARIABLE rejected OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 10)
+if(NOT rejected STREQUAL "2" OR NOT "${output}${errors}" MATCHES "fixed embedded startup script")
+    message(FATAL_ERROR "Embedded application did not reject -S: ${output}${errors}")
+endif()
+
+set(embedded_relocated "${TEST_BINARY_DIR}/embedded relocated")
+file(MAKE_DIRECTORY "${embedded_relocated}")
+file(COPY "${central}" "${embedded_directory}/lib" "${embedded_directory}/companion.tcl"
+    DESTINATION "${embedded_relocated}")
+get_filename_component(embedded_name "${central}" NAME)
+run_embedded(embedded_relocated "${embedded_relocated}/${embedded_name}" "companion-loaded")
+
+# An input-only edit must update the executable without an explicit configure.
+file(WRITE "${embedded_input}" "puts embedded-revision-2\nexit\n")
+run_checked(embedded_incremental_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
+    --target shell --parallel 4)
+run_embedded(embedded_updated "${central}" "embedded-revision-2")
+string(ASCII 255 invalid_utf8)
+file(WRITE "${embedded_input}" "${invalid_utf8}")
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}" --target shell
+    RESULT_VARIABLE invalid_script OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 60)
+if(invalid_script STREQUAL "0" OR NOT "${output}${errors}" MATCHES "valid UTF-8")
+    message(FATAL_ERROR "Invalid startup encoding was not rejected: ${output}${errors}")
+endif()
+file(WRITE "${embedded_input}" "exit\n")
+run_checked(embedded_recovery_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
+    --target shell --parallel 4)
+run_checked(embedded_restore_configuration "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
+    -B "${TEST_BINARY_DIR}" -DVINC_TEST_EMBEDDED_STARTUP=OFF)

@@ -252,6 +252,13 @@ template<class T> void bind_message(py::module_& module, py::module_& views) {
         // Python's bytes constructor copies byte-addressable uint8_t storage.
         return py::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     });
+    type.def("_rpc_snapshot", [](const Value& value, std::uint64_t maximum) {
+        value.check();
+        auto image = unwrap(value.value->snapshot(maximum));
+        auto bytes = image.bytes();
+        // Python copies a byte image; no generated C++ object layout crosses the ABI.
+        return py::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    });
     type.def("deserialize", [](const Value& value, py::bytes image) {
         value.check();
         auto bytes = py::cast<std::string>(image);

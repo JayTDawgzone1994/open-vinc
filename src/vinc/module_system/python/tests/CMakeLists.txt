@@ -28,6 +28,12 @@ add_test(NAME module.python_messages COMMAND "${Python_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/message_tests.py" "${VINC_BUILD_ROOT}/python/$<CONFIG>")
 set_tests_properties(module.python_messages PROPERTIES TIMEOUT 30)
 
+if(MSVC)
+    add_test(NAME module.python_runtime COMMAND "${Python_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/runtime_tests.py" "${VINC_BUILD_ROOT}/python/$<CONFIG>")
+    set_tests_properties(module.python_runtime PROPERTIES TIMEOUT 120)
+endif()
+
 vinc_add_module_plugin(module_python_peer native_peer.cpp)
 target_link_libraries(module_python_peer PRIVATE vinc_messages)
 add_executable(module_python_services_tests services_tests.cpp)

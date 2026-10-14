@@ -2,6 +2,7 @@
 #include <vinc/log/detail/manager.hpp>
 #include <iostream>
 #include <vinc/param/detail/manager.hpp>
+#include <vinc/rpc/detail/manager.hpp>
 #include <vinc/module/detail/instance.hpp>
 #include <vinc/module/detail/lock_registry.hpp>
 #include <vinc/module/detail/instance_name.hpp>
@@ -128,6 +129,7 @@ Result<MID> new_mid() {
 // One logical Module across restarts. Record::mutex protects its current generation.
 // Keep pending_request after a caller timeout: the child may still be executing it.
 struct Record {
+    std::optional<control::Frame> rpc_deferred;
     std::mutex mutex;
     std::condition_variable changed;
 
@@ -403,6 +405,7 @@ struct ModuleManager::Impl {
     std::unique_ptr<output_hub::OutputHub> output;
     std::unique_ptr<message_bus::detail::BusManager> bus_manager;
     std::unique_ptr<param::detail::ParamManager> params;
+    std::unique_ptr<rpc::detail::RpcManager> rpc;
     std::unique_ptr<log::detail::Manager> logs;
     std::string instance_name;
     std::filesystem::path directory;
@@ -668,6 +671,7 @@ struct ModuleManager::Impl {
             record.session->close();
         }
         record.session.reset();
+        record.rpc_deferred.reset();
         close_listener(record);
 
         if (record.process) {
@@ -803,6 +807,7 @@ struct ModuleManager::Impl {
                 }
                 bus_manager->exited(record.snapshot.generation);
                 params->exited(record.snapshot.mid);
+                rpc->exited(record.snapshot.mid);
                 record.normal_completion = record.completed && !record.fault &&
                     (**exit_status).kind == osal::ExitKind::Code && (**exit_status).value == 0;
                 if (!record.user_stop && !record.fault && !record.normal_completion) {
@@ -826,6 +831,7 @@ struct ModuleManager::Impl {
 
         // Request graceful stop, then ask the OS to terminate after the deadline.
         if (record.user_stop || record.fault || record.finishing) {
+            rpc->stopping(record.snapshot.mid);
             if (record.snapshot.state != ModuleState::Stopping) {
                 record.snapshot.state = ModuleState::Stopping;
                 record.stop_deadline = now + record.module_type.policy.stop_timeout;
@@ -878,6 +884,17 @@ struct ModuleManager::Impl {
     // Caller retains Record::mutex across the entire batch. Name claims are only
     // queued here; register_name() later takes registry -> record locks in that order.
     void receive_control_frames(Record& record) {
+        if (record.rpc_deferred) {
+            auto submitted = rpc->submit(record.snapshot.mid, *record.rpc_deferred);
+            if (!submitted) {
+                if (submitted.error().is(rpc::ErrorCode::QueueFull)) {
+                    return;
+                }
+                record_failure(record, wrap_error(ErrorCode::RpcFailed, ErrorOperation::Receive,
+                                                  submitted.error()));
+            }
+            record.rpc_deferred.reset();
+        }
         // Bound each pass so a busy Module cannot monopolize the supervisor.
         if (record.session) {
             for (int messages_processed = 0; messages_processed < control_messages_per_pass;
@@ -922,6 +939,21 @@ struct ModuleManager::Impl {
                 } else if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
                            frame.operation == detail::attach_lock) {
                     receive_lock_request(record, frame);
+                } else if (frame.domain == rpc::detail::domain) {
+                    if (!record.name_confirmed) {
+                        record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::Receive));
+                        break;
+                    }
+                    auto submitted = rpc->submit(record.snapshot.mid, frame);
+                    if (!submitted) {
+                        if (submitted.error().is(rpc::ErrorCode::QueueFull)) {
+                            record.rpc_deferred = std::move(frame);
+                            break;
+                        }
+                        record_failure(record, wrap_error(ErrorCode::RpcFailed, ErrorOperation::Receive,
+                                                          submitted.error()));
+                        break;
+                    }
                 } else if (frame.domain == param::detail::domain) {
                     if (!record.name_confirmed || record.fault || record.user_stop || record.finishing) {
                         record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::AccessParam));
@@ -1167,6 +1199,7 @@ struct ModuleManager::Impl {
             record->snapshot.name = std::move(name);
             record->name_confirmed = true;
             params->admit(record->snapshot.mid, record->snapshot.name);
+            rpc->admit(record->snapshot.mid, record->snapshot.name, record->session);
             if (logs) {
                 logs->identify(record->snapshot.mid, record->snapshot.name, record->snapshot.pid);
             }
@@ -1365,6 +1398,7 @@ Result<std::unique_ptr<ModuleManager>> detail::ManagerAccess::create(std::string
                 wrap_error(ErrorCode::ParamFailed, ErrorOperation::Create, parameters.error()));
         }
         implementation->params = std::move(*parameters);
+        implementation->rpc = std::make_unique<rpc::detail::RpcManager>(implementation->instance);
         auto logs = log::detail::Manager::create(*implementation->channels, *implementation->output,
                                                  implementation->instance_name);
         if (logs) {
@@ -1477,6 +1511,7 @@ ModuleManager::~ModuleManager() {
         close_listener(*record);
     }
     impl_->params.reset();
+    impl_->rpc.reset();
 
     // Normal destructor-driven stop also drains observed generations. The
     // bounded fallback does not pretend that unobserved process exits occurred.

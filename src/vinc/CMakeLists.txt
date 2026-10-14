@@ -28,6 +28,7 @@ add_subdirectory(output_hub)         # Bounded process-output fanout and plain-t
 add_subdirectory(control_channel)
 add_subdirectory(log) # Shared framed Socket sessions
 add_subdirectory(param)           # Typed parameters, shared snapshots and central persistence
+add_subdirectory(rpc)             # Typed shared-memory request/reply services
 include(module_system/cmake/VincModule.cmake)
 add_subdirectory(message_bus)             # Shared-memory publish/subscribe
 add_subdirectory(bag)
@@ -41,6 +42,11 @@ add_subdirectory(sdk)
 if(BUILD_TESTING)
     add_subdirectory(param/tests)
     add_subdirectory(log/tests)
+    add_subdirectory(rpc/tests)
+endif()
+
+if(VINC_BUILD_APPS AND VINC_BUILD_UI)
+    add_subdirectory(ui)
 endif()
 
 # Every provider has registered C++ metadata; freeze one catalog for this build.

@@ -7,6 +7,24 @@
 #include <cstdint>
 
 namespace vinc::config {
+// RPC admission, storage and scheduling bounds; see rpc/README.md.
+inline constexpr std::uint64_t rpc_request_bytes = 64 * 1024;
+inline constexpr std::uint64_t rpc_response_bytes = 64 * 1024;
+inline constexpr std::uint32_t rpc_slots = 8;
+inline constexpr std::uint32_t rpc_slot_limit = 256;
+inline constexpr std::uint64_t rpc_shared_bytes = 256ULL * 1024 * 1024;
+inline constexpr std::uint64_t rpc_local_bytes = 64ULL * 1024 * 1024;
+inline constexpr std::size_t rpc_pending_limit = 64;
+inline constexpr std::size_t rpc_service_limit = 256;
+inline constexpr std::size_t rpc_control_limit = 4096;
+// Leave control-queue headroom for grants, completions, releases and registration.
+inline constexpr std::size_t rpc_active_limit = 1024;
+inline constexpr std::size_t rpc_name_bytes = 128;
+inline constexpr std::size_t rpc_reason_bytes = 256;
+inline constexpr auto rpc_call_timeout = std::chrono::seconds(5);
+inline constexpr auto rpc_max_call_timeout = std::chrono::hours(24);
+inline constexpr auto rpc_control_retry = std::chrono::milliseconds(5);
+
 // Param admission and persistence bounds; existing framework settings are not migrated to Param.
 inline constexpr std::size_t param_name_bytes = 256;
 inline constexpr std::size_t param_string_bytes = 256;
@@ -199,4 +217,23 @@ inline constexpr std::size_t bag_name_bytes = 256;
 namespace vinc::config {
 // Maximum diagnostic text emitted for one unhandled Python exception.
 inline constexpr std::size_t python_traceback_bytes = 32 * 1024;
+}
+
+namespace vinc::config {
+// UI keeps an immutable startup snapshot; browsers cannot grow this budget.
+inline constexpr std::uint16_t ui_port = 8080;
+inline constexpr std::size_t ui_file_bytes = 8 * 1024 * 1024;
+inline constexpr std::size_t ui_snapshot_bytes = 64 * 1024 * 1024;
+inline constexpr std::size_t ui_package_entries = 1024;
+inline constexpr std::size_t ui_plugin_limit = 64;
+inline constexpr std::size_t ui_panels_per_plugin = 16;
+inline constexpr std::size_t ui_manifest_bytes = 16 * 1024;
+inline constexpr std::size_t ui_identifier_bytes = 80;
+inline constexpr std::size_t ui_label_bytes = 128;
+inline constexpr std::size_t ui_http_workers = 2;
+inline constexpr std::size_t ui_http_queue = 16;
+inline constexpr auto ui_http_timeout = std::chrono::seconds{2};
+inline constexpr auto ui_start_timeout = std::chrono::seconds{5};
+inline constexpr auto ui_start_poll_interval = std::chrono::milliseconds{5};
+inline constexpr auto ui_stop_timeout = std::chrono::seconds{10};
 }

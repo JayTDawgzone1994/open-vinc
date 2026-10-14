@@ -18,17 +18,17 @@ target_link_libraries(vinc_module_contract PUBLIC vinc::osal)
 add_library(vinc_module STATIC src/runtime/base_module.cpp src/runtime/context.cpp)
 add_library(vinc::module ALIAS vinc_module)
 target_include_directories(vinc_module PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(vinc_module PUBLIC vinc::message_bus_client vinc::param vinc::log)
+target_link_libraries(vinc_module PUBLIC vinc::message_bus_client vinc::param vinc::log vinc::rpc)
 
 add_library(vinc_module_runtime STATIC src/runtime/module_runtime.cpp src/runtime/native_source.cpp src/runtime/plugin_loader.cpp src/runtime/module_locks.cpp src/runtime/module_params.cpp)
 add_library(vinc::module_runtime ALIAS vinc_module_runtime)
-target_link_libraries(vinc_module_runtime PUBLIC vinc::module vinc::message_bus vinc::control vinc_module_contract vinc::concurrency vinc::param_host vinc::log_host)
+target_link_libraries(vinc_module_runtime PUBLIC vinc::module vinc::message_bus vinc::control vinc_module_contract vinc::concurrency vinc::param_host vinc::log_host vinc::rpc_host)
 
 add_library(vinc_module_manager STATIC src/host/module_manager.cpp src/host/python_modules.cpp src/host/instance.cpp src/host/lock_registry.cpp)
 add_library(vinc::module_manager ALIAS vinc_module_manager)
 target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(vinc_module_manager PUBLIC vinc::common vinc::log vinc::param vinc::message_bus vinc::control vinc::output_hub PRIVATE vinc_module_contract vinc::concurrency vinc::param_manager vinc::log_manager)
+target_link_libraries(vinc_module_manager PUBLIC vinc::common vinc::log vinc::param vinc::message_bus vinc::control vinc::output_hub PRIVATE vinc_module_contract vinc::concurrency vinc::param_manager vinc::log_manager vinc::rpc_manager)
 
 # Linking this object target supplies main/wmain without consumers reaching into src/.
 add_library(vinc_module_entry OBJECT src/runtime/module_main.cpp)

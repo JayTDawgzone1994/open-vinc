@@ -1,0 +1,22 @@
+{
+    "name": "@open-vinc/ui-workspace",
+    "private": true,
+    "version": "0.1.0",
+    "type": "module",
+    "scripts": {
+        "typecheck": "vue-tsc --noEmit",
+        "test": "playwright test"
+    },
+    "dependencies": {
+        "vue": "3.5.44"
+    },
+    "devDependencies": {
+        "@playwright/test": "1.64.0",
+        "@types/node": "24.10.0",
+        "@vitejs/plugin-vue": "6.0.10",
+        "prettier": "3.6.2",
+        "typescript": "5.9.3",
+        "vite": "8.3.4",
+        "vue-tsc": "3.3.13"
+    }
+}

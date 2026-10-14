@@ -11,6 +11,9 @@
 #include <iostream>
 #include <charconv>
 #include <limits>
+#ifdef VINC_EMBEDDED_STARTUP
+#include <embedded_startup.hpp>
+#endif
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -29,9 +32,14 @@ constexpr std::uint32_t minimum_send_timeout_seconds = 1;
 constexpr std::uint32_t minimum_connections = 1;
 
 constexpr const char* usage =
-    "Usage: Vinc [--shell-ip IP] [--shell-port PORT] [--shell-disconnect-timeout SECONDS]\n"
-    "            [--shell-send-timeout SECONDS] [--shell-max-connections 1..8] [-S file.tcl [args...]]\n"
+    "Usage: application [--shell-ip IP] [--shell-port PORT] [--shell-disconnect-timeout SECONDS]\n"
+    "            [--shell-send-timeout SECONDS] [--shell-max-connections 1..8]\n"
     "            [--python PATH]\n"
+#ifdef VINC_EMBEDDED_STARTUP
+    "Startup script is embedded; -S is not accepted.\n"
+#else
+    "            [-S file.tcl [args...]]\n"
+#endif
     "Defaults: 127.0.0.1:5500, 30-second disconnect/send timeouts, 8 connections.\n"
     "Raw TCP, no authentication or encryption. Port 0 selects an ephemeral port.\n";
 
@@ -55,6 +63,13 @@ ParseAction parse_arguments(int argc, char** argv, StartupOptions& options) {
         if (name == "--help") {
             return ParseAction::ShowHelp;
         }
+
+#ifdef VINC_EMBEDDED_STARTUP
+        if (name == "-S") {
+            std::cerr << "This application has a fixed embedded startup script; -S is not accepted.\n";
+            return ParseAction::InvalidArguments;
+        }
+#endif
 
         ++index;
         if (index == argc || !*argv[index]) {
@@ -177,7 +192,11 @@ vinc::Result<void> run_services(const char* executable, StartupOptions& options)
               << ':' << endpoint->port << " (Raw TCP)\n"
               << std::flush;
 
+#ifdef VINC_EMBEDDED_STARTUP
+    return shell.run_source(vinc::shell::ScriptSource::embedded(std::string(vinc::app::startup_script)));
+#else
     return shell.run(std::move(options.script), std::move(options.script_arguments));
+#endif
 }
 }
 

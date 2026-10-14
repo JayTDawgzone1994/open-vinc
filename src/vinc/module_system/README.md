@@ -206,7 +206,7 @@ Finishing 啟動中央收尾期限；on_stop／Module 解構完成後才送 Comp
 會增加少量閒置喚醒；不新增執行緒，也不保證 OS 排程的硬期限。
 
 Host 經內部非模板 `detail::ModuleObject` 操作兩種公開 BaseModule，維持 Plugin 成對 create/destroy。
-Plugin entry version 為 7，bootstrap 標記為 `--vinc-module-v12`；舊 Plugin／Host 明確拒絕，
+Plugin entry version 為 8，bootstrap 標記為 `--vinc-module-v13`；舊 Plugin／Host 明確拒絕，
 中央、Host、Plugin 與 SDK 消費端須一同重建。同工具鏈／CRT 的 ABI 限制維持。
 RuntimeServices bridge 仍僅供 fatal，未加入一般 Context 服務。
 
@@ -284,7 +284,7 @@ Timeout 時仍持續監督，可以再次等待；成功代表受管理程序已
 
 ### Module v3 協定
 
-程序啟動標記為 `--vinc-module-v12`，在 Plugin 路徑之後加入本次啟動的 debug 旗標（0／1）。
+程序啟動標記為 `--vinc-module-v13`，在 Plugin 路徑之後加入本次啟動的 debug 旗標（0／1）。
 中央與 Host 須一同重新建置，不提供舊 bootstrap 轉接；以下 Socket 錯誤 payload 仍為既有 v3 格式。
 外層 Control Channel 的 v1 frame 不變；更新的是 Module payload 契約。
 
@@ -506,7 +506,7 @@ OS 強殺當成可攔截的 C++ 契約失敗；可恢復失敗仍走 Result。
 - ModuleManager 在每次 spawn 前建立排他、唯一命名的 SharedMemory。每個 MID 一份，
   中央既有監督迴圈只讀原子狀態，存活時不讀 payload。`vinc_module_contract` 是元件內部共用 target，讓中央／Runtime
   使用同一份紀錄 codec 與 OSAL owner；Common 不依賴它，也不依賴 OSAL。
-- 子程序先驗證 bootstrap v12、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
+- 子程序先驗證 bootstrap v13、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
   建立控制服務與呼叫使用者工廠／hooks。綁定活到 Runtime 服務停止後；解除綁定等待正在
   使用 context 的讀者離開，才解除映射。bootstrap 以前或綁定以前的故障仍沒有這份保證。
 - 故障呼叫端直接寫入預先配置的 bytes，發布 committed 狀態後 `_Exit(76)`。
@@ -684,7 +684,7 @@ Linux／macOS 未原生建置或執行；ELF symbol visibility 設定尚待該�
 
 ## Plugin Host 生命週期與故障隔離
 
-1. Host 驗證 bootstrap v12，映射 fatal storage，綁定自己的 RuntimeServices。
+1. Host 驗證 bootstrap v13，映射 fatal storage，綁定自己的 RuntimeServices。
 2. 建立 Control Service、Session、Bus Client 與既有 watchdog。
 3. 透過 OSAL DynamicLibrary 載入指定庫、驗證入口與種類，再初始化 Plugin bridge。
 4. Plugin create 建立 Module；沿用 MID、名稱核准、on_start、命令及 on_stop 流程。
@@ -851,3 +851,14 @@ STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設�
 BaseMessage 新增單調發布時間，原 timestamp 改為 Unix 時間；Plugin entry 更新至 **7**，
 bootstrap marker 更新至 **v12**。中央、Host、Plugin 與 Python 擴充須一起重建；舊入口拒絕。
 一般控制協定與生命周期不變，欄位及失敗契約見 [Message Bus](../message_bus/README.md#雙時間發布-metadata2026-10-13)。
+
+## RPC 接線（2026-10-14）
+
+Context 新增 register_rpc、call_rpc、rpc_stats；完整 typed API、容量／逾時／故障與 Python
+契約見 [RPC README](../rpc/README.md)。RPC 控制事件在 pump 固定批次派送，新增 callback
+不在同一輪無限追送；heartbeat 仍由獨立 watchdog 維護。逃出 callback 的例外鎖定 Module 故障。
+
+中央持有一個 RpcManager worker，ModuleHost 持有唯一 RPC Host 接線；Plugin 只保留 Context
+facade 與應用 closures。正常停止封住新工作，確認 OS 退出才回收死亡方共享槽位。
+中央 inbox 滿時保留當前控制 frame 延後重試，不丟棄 transfer 的完成／釋放通知。
+本次 Context 布局更新為 Plugin entry 8／bootstrap v13，需完整重建 Host、Plugin 與 SDK。

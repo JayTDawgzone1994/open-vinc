@@ -109,7 +109,8 @@ Proxy 的有效期依元素種類、節點及借用 lease 的契約決定；詳�
 中央操作介面統一稱為 **Shell**，元件目錄為 `src/vinc/shell/`，
 框架內部類別完整名稱為 `vinc::Shell`，由中央管理生命週期，不作為使用者的服務啟停 API。
 輔助型別仍在 `vinc::shell` 命名空間，`SocketShell`、`CommandRouter` 等保留職責名稱。
-中央程式叫 `Vinc.exe`／`Vinc`；使用入口與建置接線見 [Shell README](src/vinc/shell/README.md)。
+中央程式預設叫 `Vinc.exe`／`Vinc`；應用可透過 `vinc_configure_app` 設定輸出名稱，
+不因此更改中央身分 `VINC_NAME`。使用入口與建置接線見 [Shell README](src/vinc/shell/README.md)。
 
 ## Context 與 pump 的命名狀態
 
@@ -165,3 +166,10 @@ Publisher、Subscriber、請求、Socket session 與 OSAL 資源 ID 保留各自
 `monotonic_timestamp`／`get_message_monotonic_timestamp()` 表示同主機單調發布時間，供 Bus 排序。
 兩者皆為 uint64_t，由框架填入；採樣、格式化與版本契約見
 [Message Bus](src/vinc/message_bus/README.md#雙時間發布-metadata2026-10-13)。
+
+## RPC
+
+RPC 指 Module 透過 Context 使用的 typed request／response 服務。
+RpcManager 是中央服務登記、固定共享槽位與回收管理者；RpcStatus 是應用結果，
+與框架 Error 分開。服務名與目標 Module 名分開傳遞，完整契約見
+[RPC README](src/vinc/rpc/README.md)。

@@ -103,5 +103,6 @@ public:
 Error report_exception(py::error_already_set&, ErrorOperation, std::string_view, MID);
 void bind_services(py::module_& module);
 void bind_messages(py::module_& module);
+void bind_rpc(py::module_& module);
 void clear_resources(const std::shared_ptr<ContextState>& state);
 }

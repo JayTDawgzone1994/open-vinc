@@ -511,6 +511,29 @@ struct TclRuntime::Impl {
         }
     }
 
+    Result<void> install_app_directory(Tcl_Interp* interpreter_handle) {
+        auto directory = executable_directory();
+        if (!directory) {
+            return std::unexpected(wrap_error(ErrorCode::TclInitializationFailed,
+                                              ErrorOperation::InstallCommands, directory.error()));
+        }
+
+        auto encoded_directory = tcl_path(*directory);
+        if (!encoded_directory) {
+            return std::unexpected(wrap_error(ErrorCode::TclInitializationFailed,
+                                              ErrorOperation::InstallCommands, encoded_directory.error()));
+        }
+
+        ObjectOwner app_directory(Tcl_NewStringObj(encoded_directory->data(),
+                                                   static_cast<Tcl_Size>(encoded_directory->size())));
+        if (!Tcl_SetVar2Ex(interpreter_handle, "::vinc::app_dir", nullptr, app_directory.value, TCL_GLOBAL_ONLY)) {
+            return std::unexpected(
+                Error{ErrorCode::TclInitializationFailed, ErrorOperation::InstallCommands});
+        }
+
+        return {};
+    }
+
     // Commands and argument objects are interpreter-owned. The caller retains
     // the interpreter until all setup, evaluation and cancellation detachment finish.
     Result<void> install_commands(Tcl_Interp* interpreter_handle) {
@@ -529,7 +552,7 @@ struct TclRuntime::Impl {
         Tcl_CreateObjCommand2(interpreter_handle, "srun", command<CommandKind::Run>, this, nullptr);
         Tcl_CreateObjCommand2(interpreter_handle, "scancel", command<CommandKind::Cancel>, this, nullptr);
 
-        return {};
+        return install_app_directory(interpreter_handle);
     }
 
     Result<void> install_arguments(Tcl_Interp* interpreter_handle, const std::string& file,
@@ -563,9 +586,30 @@ struct TclRuntime::Impl {
         return {};
     }
 
+    int evaluate_source(Tcl_Interp* interpreter_handle, const ScriptSource& source, const std::string& file) {
+        if (!source.text) {
+            return Tcl_EvalFile(interpreter_handle, file.c_str());
+        }
+
+        // Public Tcl command establishes a diagnostic identity, not a real file.
+        // Nested source restores it. These objects are retained until synchronous
+        // evaluation returns; the interpreter retains its own script-name reference.
+        ObjectOwner info(Tcl_NewStringObj("info", -1));
+        ObjectOwner script(Tcl_NewStringObj("script", -1));
+        ObjectOwner name(Tcl_NewStringObj(file.data(), static_cast<Tcl_Size>(file.size())));
+        Tcl_Obj* command[] = {info.value, script.value, name.value};
+        const int installed = Tcl_EvalObjv(interpreter_handle, 3, command, TCL_EVAL_DIRECT);
+        if (installed != TCL_OK) {
+            return installed;
+        }
+
+        return Tcl_EvalEx(interpreter_handle, source.text->data(),
+                          static_cast<Tcl_Size>(source.text->size()), 0);
+    }
+
     // Create, evaluate and destroy this interpreter on the same worker thread.
     // No variables, procedures or timers are carried into the next script run.
-    ScriptReport run(const std::filesystem::path& path, const std::vector<std::string>& arguments) {
+    ScriptReport run(const ScriptSource& source, const std::vector<std::string>& arguments) {
         // Finalize only this worker's Tcl state, after interpreter destruction.
         struct TclThreadGuard {
             ~TclThreadGuard() {
@@ -575,7 +619,7 @@ struct TclRuntime::Impl {
 
         ScriptDiagnostic diagnostic;
         try {
-            const auto encoded = tcl_path(path);
+            const auto encoded = tcl_path(source.path);
             if (!encoded) {
                 return {std::unexpected(
                             wrap_error(ErrorCode::ScriptFailed, ErrorOperation::RunScript, encoded.error())),
@@ -616,7 +660,11 @@ struct TclRuntime::Impl {
                 }
             } publication_guard{*this};
 
-            int code = canceled.load() ? TCL_ERROR : Tcl_EvalFile(interpreter_handle.get(), file.c_str());
+            int code = TCL_ERROR;
+            if (!canceled.load()) {
+                code = evaluate_source(interpreter_handle.get(), source, file);
+            }
+
             if (shutdown.load()) {
                 return {ScriptCompletion{true}, std::move(diagnostic)};
             }
@@ -655,6 +703,11 @@ TclRuntime::~TclRuntime() {
 
 Result<void> TclRuntime::start(std::filesystem::path path, std::vector<std::string> arguments,
                                Dispatch dispatch) {
+    return start_source({std::move(path), std::nullopt}, std::move(arguments), std::move(dispatch));
+}
+
+Result<void> TclRuntime::start_source(ScriptSource source, std::vector<std::string> arguments,
+                                    Dispatch dispatch) {
     if (active()) {
         return std::unexpected(Error{ErrorCode::Busy, ErrorOperation::StartScript});
     }
@@ -665,8 +718,8 @@ Result<void> TclRuntime::start(std::filesystem::path path, std::vector<std::stri
     impl_->dispatch = std::move(dispatch);
     try {
         impl_->job =
-            std::async(std::launch::async, [this, path = std::move(path), arguments = std::move(arguments)] {
-                return impl_->run(path, arguments);
+            std::async(std::launch::async, [this, source = std::move(source), arguments = std::move(arguments)] {
+                return impl_->run(source, arguments);
             });
     } catch (const std::system_error& failure) {
         return std::unexpected(

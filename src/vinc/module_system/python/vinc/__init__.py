@@ -1,11 +1,18 @@
 """VINC Python Module SDK. Importing this package creates no framework session."""
 from enum import Enum
 import sys
+from . import _build
+
+if sys.platform == "win32" and _build.MSVC_RUNTIME:
+    from ._windows_runtime import prepare as _prepare_runtime
+    _prepare_runtime()
+    del _prepare_runtime
+
 from ._native import Error, ErrorRecord, NativeError, PumpStats, error_to_string, format_utc
-from ._native import messages, message_bus, param, log
+from ._native import messages, message_bus, param, log, rpc
 
 # Public package aliases for the statically bound extension submodules.
-for _name in ("messages", "message_bus", "param", "log"):
+for _name in ("messages", "message_bus", "param", "log", "rpc"):
     sys.modules[f"{__name__}.{_name}"] = globals()[_name]
 del _name
 

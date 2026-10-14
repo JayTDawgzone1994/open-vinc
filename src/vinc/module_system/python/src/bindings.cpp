@@ -275,6 +275,7 @@ PYBIND11_MODULE(_native, module) {
     bind_context(module);
     bind_services(module);
     bind_messages(module);
+    bind_rpc(module);
     module.def("_run", [](std::vector<std::string> args) {
         // A process has exactly one admission/lifetime; never reconnect with a
         // different MID or reuse wrappers after the first runtime has retired.

@@ -1,0 +1,81 @@
+section {
+    padding: 54px 60px;
+    color: #dce6ed;
+    font:
+        15px/1.6 system-ui,
+        sans-serif;
+}
+.eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: #7dd8bd;
+    font-weight: 600;
+}
+h1 {
+    font-size: clamp(28px, 3vw, 42px);
+    letter-spacing: -0.04em;
+    font-weight: 550;
+    margin: 14px 0;
+}
+.intro {
+    color: #98a7b7;
+    margin-bottom: 34px;
+}
+.card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 540px;
+    background: #141e29;
+    border: 1px solid #283543;
+    border-radius: 12px;
+    padding: 26px 30px;
+}
+.count {
+    font-size: 48px;
+    margin: 8px 0 0;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+button {
+    color: #071b15;
+    background: #80d9bb;
+    border: 0;
+    border-radius: 7px;
+    padding: 12px 20px;
+    font: inherit;
+    cursor: pointer;
+}
+button:hover {
+    background: #a3efd4;
+}
+.hint {
+    color: #8192a4;
+    font-size: 13px;
+}
+.details {
+    margin-top: 42px;
+    max-width: 600px;
+    font-size: 12px;
+}
+.details div {
+    border-top: 1px solid #23303c;
+    padding: 13px 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    color: #8495a7;
+}
+.details span {
+    color: #bdcbd8;
+    overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+    section {
+        padding: 26px 20px;
+    }
+    .details div {
+        flex-direction: column;
+        gap: 3px;
+    }
+}

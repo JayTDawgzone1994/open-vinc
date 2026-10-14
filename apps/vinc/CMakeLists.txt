@@ -1,5 +1,13 @@
 # Assemble the central executable and its catalog after examples register.
 add_executable(shell src/main.cpp)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincApp.cmake")
+if(BUILD_TESTING)
+    add_test(NAME app.embedding COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/embedding-test"
+        "-DEMBED_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedScript.cmake"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/embedding.cmake")
+    set_tests_properties(app.embedding PROPERTIES TIMEOUT 30)
+endif()
 set_target_properties(shell PROPERTIES OUTPUT_NAME Vinc)
 vinc_deploy_tcl(shell)
 add_custom_command(TARGET shell POST_BUILD

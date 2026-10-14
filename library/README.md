@@ -47,3 +47,18 @@ submodule 是來源管理方式；套件的建置、連結及執行時資源部�
 
 [SQLite](sqlite/README.md) 3.54.0 使用官方固定 amalgamation，原樣保存並核對雜湊及 SOURCE_ID。
 它是 Bag 的私有 static 相依；一般建置不下載，SDK 不暴露 SQLite 標頭。
+
+## Web UI 私有相依
+
+- [cpp-httplib](cpp-httplib/README.md) v0.61.0：HTTP server，MIT。
+- [nlohmann/json](json/README.md) v3.12.0：plugin manifest／catalog，MIT。
+- [PicoSHA2](picosha2/README.md) v1.0.1：套件 SHA-256，MIT。
+
+三者固定 submodule commit；wrapper 僅提供 SYSTEM include 與必要連結，未執行上游 CMake、
+未修改來源或全域編譯選項。HTTP 只在 UI Module 程序使用；一般 SDK 無新增 HTTP runtime 相依。
+UI 生成部署的 `app/third-party.txt` 包含這三者及打包 Vue runtime 的原始授權文字。
+
+前端 Vue 3.5.44、Vite 8.3.4、TypeScript 5.9.3 與開發工具由
+`src/vinc/ui/web/package-lock.json` 固定版本／integrity；npm ci 明確還原到被 Git 忽略的 node_modules。
+這些 npm 套件不另以 submodule 或複製來源維護；不修改其內容。
+Node/npm 只在建置／測試時需要，部署只帶生成靜態資源，詳見 [UI 文件](../src/vinc/ui/README.md)。

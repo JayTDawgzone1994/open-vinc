@@ -199,8 +199,12 @@ struct Shell::Impl {
     }
 
     void start_script(std::filesystem::path path, std::vector<std::string> args = {}) {
+        start_script_source({std::move(path), std::nullopt}, std::move(args));
+    }
+
+    void start_script_source(shell::ScriptSource source, std::vector<std::string> args) {
         clear_prompt();
-        auto started = script.start(local_script_session, std::move(path), std::move(args));
+        auto started = script.start_source(local_script_session, std::move(source), std::move(args));
         show(started ? "Script running. scancel cancels the global script."
                      : vinc::error_to_string(started.error()));
     }
@@ -706,6 +710,10 @@ Result<std::int32_t> Shell::process_line(const std::string& line) {
 }
 
 Result<void> Shell::run(std::filesystem::path startup_script, std::vector<std::string> script_args) {
+    return run_source({std::move(startup_script), std::nullopt}, std::move(script_args));
+}
+
+Result<void> Shell::run_source(shell::ScriptSource startup_script, std::vector<std::string> script_args) {
     if (impl_->closing.load()) {
         impl_->wait_shutdown();
         if (impl_->run_failure) {
@@ -741,7 +749,7 @@ Result<void> Shell::run(std::filesystem::path startup_script, std::vector<std::s
     // turn a finished or failed script into an automatic framework shutdown.
     const bool headless_deployment = (!startup_script.empty() || impl_->remote) && !terminal->interactive();
     if (!startup_script.empty()) {
-        impl_->start_script(std::move(startup_script), std::move(script_args));
+        impl_->start_script_source(std::move(startup_script), std::move(script_args));
     }
 
     impl_->show("VINC ready. Type help; exit or Ctrl+C shuts down all modules.");

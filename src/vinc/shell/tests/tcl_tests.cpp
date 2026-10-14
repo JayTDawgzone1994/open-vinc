@@ -134,7 +134,7 @@ void test_module_wait_cancellation(Files& files, shell::TclRuntime& runtime, cha
           "waiting fixture cleanup");
 }
 
-void test_startup_error_returns_to_shell(Files& files, char** argv) {
+void test_startup_error_returns_to_shell(Files& files, char** argv, bool embedded = false) {
     auto manager_owner = vinc::test::create_manager();
     if (!manager_owner) {
         throw std::runtime_error(vinc::error_to_string(manager_owner.error()));
@@ -173,7 +173,13 @@ void test_startup_error_returns_to_shell(Files& files, char** argv) {
             input.send("\x03");
         }
     });
-    check(shell.run(startup), "Shell run");
+    if (embedded) {
+        std::ifstream input_file(startup, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(input_file)), std::istreambuf_iterator<char>());
+        check(shell.run_source(shell::ScriptSource::embedded(std::move(text))), "embedded Shell run");
+    } else {
+        check(shell.run(startup), "Shell run");
+    }
     feeder.join();
     check(ok.load(), "startup feeder");
     check(std::filesystem::exists(files.path / "node.checked"), "real module gets Tcl arguments unchanged");
@@ -471,6 +477,56 @@ void test_framework_error_options(Files& files, shell::TclRuntime& runtime) {
           "invalid builtin arguments do not become generic script failures");
 }
 
+void test_embedded_source(shell::TclRuntime& runtime) {
+    const auto original_directory = std::filesystem::current_path();
+    auto dispatch = [](const auto&, std::stop_token) -> Result<shell::CommandReply> {
+        return shell::CommandReply{};
+    };
+    auto run = [&](std::string contents) {
+        check(runtime.start_source(shell::ScriptSource::embedded(std::move(contents)), {}, dispatch),
+              "start embedded script");
+        check(eventually([&] {
+            return runtime.ready();
+        }), "embedded script completed");
+        return runtime.finish();
+    };
+    check(run(R"(
+if {$argc != 0 || $argv ne {}} {error arguments}
+if {$argv0 ne {embedded:startup.tcl} || [info script] ne $argv0} {error identity}
+if {[file normalize $::vinc::app_dir] ne [file dirname [file normalize [info nameofexecutable]]]} {
+    error app_directory
+}
+puts {中文 😀 $literal [unchanged]; "quoted"}
+return
+error unreachable
+)").outcome, "embedded Unicode, identity, directory and return");
+    check(runtime.take_output().find("中文 😀 $literal [unchanged]") != std::string::npos,
+          "embedded text is evaluated without extra substitution");
+    check(std::filesystem::current_path() == original_directory, "embedded execution does not change cwd");
+    check(run("").outcome, "empty embedded script is valid");
+    const auto failure = run("set ok 1\nerror embedded-failure\n");
+    check(!failure.outcome && failure.diagnostic.file == "embedded:startup.tcl" &&
+              failure.diagnostic.line == 2, "embedded error reports source and original line");
+    std::atomic<bool> entered{false};
+    check(runtime.start_source(shell::ScriptSource::embedded("ready\nwhile {1} {catch {while {1} {}}}"), {},
+        [&](const auto&, std::stop_token) -> Result<shell::CommandReply> {
+            entered.store(true);
+            return shell::CommandReply{};
+        }), "start embedded cancellation");
+    check(eventually([&] {
+        return entered.load();
+    }), "embedded loop entered");
+    check(runtime.cancel(), "cancel embedded script");
+    check(eventually([&] {
+        return runtime.ready();
+    }), "embedded cancellation completed");
+    const auto canceled = runtime.finish();
+    check(!canceled.outcome && canceled.outcome.error().is(shell::ErrorCode::Cancelled),
+          "embedded cancellation bypasses catch");
+    const auto exited = run("catch {exit}\nerror unreachable\n");
+    check(exited.outcome && exited.outcome->shutdown, "embedded exit requests orderly shutdown");
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         return 2;
@@ -480,11 +536,16 @@ int main(int argc, char** argv) {
         check(shell::initialize_tcl(argv[0]), "initialize Tcl");
         Files files;
         shell::TclRuntime runtime;
+        test_embedded_source(runtime);
         test_framework_error_options(files, runtime);
         test_renamed_commands(files, runtime);
         test_runtime_language_and_reuse(files, runtime);
         test_module_wait_cancellation(files, runtime, argv);
         test_startup_error_returns_to_shell(files, argv);
+        {
+            Files embedded_files;
+            test_startup_error_returns_to_shell(embedded_files, argv, true);
+        }
         test_foreground_script_cancellation(files);
         test_startup_interrupt(files, argv);
         std::cout << "Tcl integration tests passed\n";

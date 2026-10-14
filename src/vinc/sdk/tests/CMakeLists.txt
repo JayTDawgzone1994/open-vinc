@@ -25,6 +25,9 @@ set(public_headers
     vinc/param/params.hpp
     vinc/param/types.hpp
     vinc/param/error.hpp
+    vinc/rpc/client.hpp
+    vinc/rpc/types.hpp
+    vinc/rpc/error.hpp
     vinc/module/context.hpp
     vinc/module/error.hpp
     vinc/module/mid.hpp

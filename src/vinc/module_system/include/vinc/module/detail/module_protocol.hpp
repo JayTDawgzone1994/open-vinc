@@ -28,7 +28,7 @@ constexpr std::size_t command_status_bytes = sizeof(std::uint32_t);
 
 // Positions exclude argv[0]. Changing this layout requires both launch endpoints to change.
 namespace bootstrap {
-constexpr char version_marker[] = "--vinc-module-v12";
+constexpr char version_marker[] = "--vinc-module-v13";
 constexpr std::size_t marker = 0;
 constexpr std::size_t endpoint = 1;
 constexpr std::size_t token = 2;

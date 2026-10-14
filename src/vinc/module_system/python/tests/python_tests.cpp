@@ -252,6 +252,48 @@ void lifecycle(const std::filesystem::path& python, const std::filesystem::path&
 
     auto imported = take(manager->start_module("loaderror", {"--name", "badImport"}));
     check(!manager->wait_started(imported), "import error isolated from central");
+#if defined(_WIN32) && defined(_MSC_VER)
+    {
+        // Exercise a failure before _native is loaded. The temporary SDK has
+        // no native binary, so successful rejection cannot depend on its code.
+        struct TemporarySdk {
+            std::filesystem::path path;
+
+            ~TemporarySdk() {
+                std::error_code ignored;
+                std::filesystem::remove_all(path, ignored);
+            }
+        } sdk{std::filesystem::temp_directory_path() /
+              ("vinc-runtime-test-" + std::to_string(std::random_device{}()))};
+        const auto package = sdk.path / "vinc";
+        std::filesystem::create_directories(package);
+        for (const auto* filename : {"__init__.py", "_build.py", "_windows_runtime.py", "bootstrap.py"}) {
+            std::filesystem::copy_file(bootstrap.parent_path() / filename, package / filename);
+        }
+
+        {
+            std::ofstream metadata(package / "_msvc_runtime.json");
+            metadata << R"({"format":99})";
+            check(bool(metadata), "write invalid Runtime metadata fixture");
+        }
+
+        ModuleType incompatible;
+        incompatible.name = "runtimeMismatch";
+        incompatible.python = PythonLaunch{fixtures / "framework/framework.py", package / "bootstrap.py", python};
+        take(manager->register_module_type(incompatible));
+        const auto survivor = take(manager->start_module("framework", {"--name", "runtimeSurvivor"}));
+        take(manager->wait_started(survivor));
+        auto rejected = take(manager->start_module(incompatible.name, {"--name", "rejectedRuntime"}));
+        check(!manager->wait_started(rejected), "Runtime preflight failure rejects module startup");
+        const auto record = finished(*manager, rejected);
+        check(record.state == ModuleState::Failed && record.last_exit && record.last_exit->value == 70,
+              "Runtime preflight exits through Python bootstrap, not access violation");
+
+        check(take(manager->command(survivor, {"status"}, Clock::now() + command_timeout)) == 42,
+              "central and existing module survive Runtime preflight failure");
+        take(manager->stop_module(survivor, Clock::now() + test_timeout));
+    }
+#endif
     ModuleType retry;
     retry.name = "retryType";
 

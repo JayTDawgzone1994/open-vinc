@@ -22,6 +22,7 @@
 #include <bit>
 #include <charconv>
 #include <condition_variable>
+#include <vinc/rpc/detail/host.hpp>
 #include <cstdlib>
 #include <deque>
 #include <iostream>
@@ -35,10 +36,11 @@ namespace vinc {
 class detail::ModuleMessageBusAccess {
 public:
     static void attach(detail::ModuleObject& module, std::shared_ptr<message_bus::Client> client,
-                       ContextRuntime& runtime, param::detail::Access& params, log::detail::Access* logs) {
+                       ContextRuntime& runtime, param::detail::Access& params, log::detail::Access* logs, rpc::detail::Access& rpc) {
         module.context.client_ = std::move(client);
         module.context.runtime_ = &runtime;
         param::detail::ClientAccess::bind(module.context.param, params);
+        rpc::detail::ClientAccess::bind(module.context.rpc_, rpc);
         if (logs) {
             log::detail::ClientAccess::bind(module.context.log, *logs);
         }
@@ -105,6 +107,7 @@ struct Bootstrap {
 struct RuntimeInbox {
     log::detail::Host* logs = nullptr;
     detail::ModuleParams* params = nullptr;
+    rpc::detail::Host* rpc = nullptr;
     detail::ModuleLocks* locks = nullptr; // Host owner outlives inbox/watchdog/hooks.
     std::mutex mutex;
     std::condition_variable changed;
@@ -206,6 +209,9 @@ Result<std::shared_ptr<control::Session>> connect_to_central(control::Service& s
     if (inbox.locks) {
         inbox.locks->stop();
         inbox.params->stop();
+        if (inbox.rpc) {
+            inbox.rpc->stop();
+        }
     }
     try {
         control::Frame report{control::Kind::Request, detail::lifecycle, detail::report_failure};
@@ -253,6 +259,14 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
             }
             if (terminal) {
                 watchdog_failure(session, inbox, *terminal, child_exit::application_exception, stop_deadline);
+            }
+            if (inbox.rpc) {
+                auto progress = inbox.rpc->progress();
+                if (!progress) {
+                    watchdog_failure(session, inbox,
+                        wrap_error(ErrorCode::RpcFailed, ErrorOperation::Send, progress.error()),
+                        child_exit::central_lost, stop_deadline);
+                }
             }
             if (inbox.logs) {
                 inbox.logs->poll();
@@ -338,6 +352,14 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                 }
                 inbox.debug_released = true;
                 inbox.changed.notify_all();
+            } else if (frame->domain == rpc::detail::domain) {
+                auto received = inbox.rpc->receive(std::move(*frame));
+                if (!received) {
+                    watchdog_failure(session, inbox,
+                        wrap_error(ErrorCode::RpcFailed, ErrorOperation::Receive, received.error()),
+                        child_exit::central_lost, stop_deadline);
+                }
+                inbox.changed.notify_all();
             } else if (frame->domain == param::detail::domain) {
                 auto received = inbox.params->receive(std::move(*frame));
                 if (!received) {
@@ -363,6 +385,9 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                 }
                 inbox.locks->stop();
                 inbox.params->stop();
+                if (inbox.rpc) {
+                    inbox.rpc->stop();
+                }
                 std::lock_guard lock(inbox.mutex);
                 if (!inbox.stopping) {
                     inbox.stopping = true;
@@ -597,12 +622,16 @@ public:
     void wait() override {
         std::unique_lock lock(inbox_.mutex);
         inbox_.changed.wait_for(lock, config::module_pump_idle_interval, [&] {
-            return inbox_.stopping.load() || !inbox_.requests.empty();
+            return inbox_.stopping.load() || !inbox_.requests.empty() ||
+                   (inbox_.rpc && inbox_.rpc->ready());
         });
     }
     void fail(const Error& error) override {
         inbox_.locks->stop();
         inbox_.params->stop();
+        if (inbox_.rpc) {
+            inbox_.rpc->stop();
+        }
         std::lock_guard lock(inbox_.mutex);
         if (!inbox_.terminal_failure) {
             inbox_.terminal_failure = error;
@@ -641,6 +670,9 @@ struct RuntimeGuard {
     ~RuntimeGuard() {
         inbox.locks->stop();
         inbox.params->stop();
+        if (inbox.rpc) {
+            inbox.rpc->stop();
+        }
         inbox.finished.store(true);
         message_bus::detail::RuntimeAccess::shutdown(client);
         session->close();
@@ -712,6 +744,9 @@ Result<void> run_started_hooks(detail::ModuleObject& module, std::vector<std::st
     }
     inbox.locks->stop();
     inbox.params->stop();
+    if (inbox.rpc) {
+        inbox.rpc->stop();
+    }
     if (completed_locally && running) {
         running = completion_exchange(session, inbox, detail::finishing);
     }
@@ -763,7 +798,7 @@ Result<void> run_hooks(const std::vector<std::string>& args, const Bootstrap& bo
     }
     HostContext context_runtime(**module, session, inbox, source.fatal_command_errors());
     inbox.params->identify((*module)->get_module_name());
-    detail::ModuleMessageBusAccess::attach(**module, client, context_runtime, *inbox.params, inbox.logs);
+    detail::ModuleMessageBusAccess::attach(**module, client, context_runtime, *inbox.params, inbox.logs, *inbox.rpc);
     auto result = run_started_hooks(**module, startup_args, session, inbox);
     // Destroy user state and callback closures while both Host adapter and Plugin exist.
     module->reset();
@@ -852,9 +887,11 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
         auto logs = log::detail::Host::connect(**service, args[detail::bootstrap::endpoint], options);
         detail::ModuleLocks locks(session, bootstrap->generation);
         detail::ModuleParams params(session, locks);
+        rpc::detail::Host rpc(session);
         RuntimeInbox inbox;
         inbox.logs = logs.get();
         inbox.params = &params;
+        inbox.rpc = &rpc;
         inbox.locks = &locks;
         inbox.stop_grace = std::chrono::milliseconds(bootstrap->grace);
         RuntimeGuard guard{inbox, session, **client, {}};

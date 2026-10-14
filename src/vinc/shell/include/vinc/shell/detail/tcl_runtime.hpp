@@ -4,6 +4,7 @@
 // The Shell owns control calls and drains output; the worker calls the supplied command dispatcher.
 
 #include <vinc/shell/detail/command_router.hpp>
+#include <vinc/shell/detail/script_source.hpp>
 #include <atomic>
 #include <filesystem>
 #include <functional>
@@ -45,6 +46,7 @@ public:
     // Returns Busy while a previous job is still owned, even if it has completed.
     // Call finish() to collect that result before starting another script.
     Result<void> start(std::filesystem::path path, std::vector<std::string> arguments, Dispatch dispatch);
+    Result<void> start_source(ScriptSource source, std::vector<std::string> arguments, Dispatch dispatch);
     // Request cooperative Tcl unwind. Already-issued module commands are not undone;
     // blocking native code can delay cancellation until control returns to Tcl.
     bool cancel();

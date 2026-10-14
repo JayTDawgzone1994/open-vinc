@@ -102,6 +102,14 @@ Result<PumpStats> Context::pump_batch() {
         item.boundary = std::move(*captured);
     }
 
+    auto rpc_work = rpc_.pump();
+    if (!rpc_work) {
+        auto error = wrap_error(ErrorCode::RpcFailed, ErrorOperation::Pump, rpc_work.error());
+        runtime_->fail(error);
+        return std::unexpected(error);
+    }
+    result.callbacks += rpc_work->requests + rpc_work->completions;
+
     auto parameters = param.pump();
     if (!parameters) {
         if (!living()) {

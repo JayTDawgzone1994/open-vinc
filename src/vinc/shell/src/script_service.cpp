@@ -44,6 +44,11 @@ void ScriptService::poll() {
 
 Result<void> ScriptService::start(std::uint64_t owner, std::filesystem::path path,
                                   std::vector<std::string> arguments) {
+    return start_source(owner, {std::move(path), std::nullopt}, std::move(arguments));
+}
+
+Result<void> ScriptService::start_source(std::uint64_t owner, ScriptSource source,
+                                       std::vector<std::string> arguments) {
     std::lock_guard lock(mutex_);
     poll();
     if (stopping_) {
@@ -64,7 +69,7 @@ Result<void> ScriptService::start(std::uint64_t owner, std::filesystem::path pat
 
     mail_.try_emplace(owner);
     try {
-        auto started = runtime_.start(std::move(path), std::move(arguments),
+        auto started = runtime_.start_source(std::move(source), std::move(arguments),
                                       [this](const auto& command, std::stop_token stop) {
                                           return router_.execute(command, stop);
                                       });

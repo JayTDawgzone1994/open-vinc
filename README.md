@@ -28,6 +28,14 @@ Values are shared through protected A/B snapshots and saved explicitly to TOML u
 `vinc_data/<VINC_NAME>/params.toml` beside Vinc. See the [Param guide](src/vinc/param/README.md).
 Existing framework configuration is not automatically migrated to this service.
 
+## Web UI workspace
+
+The official `webUi` Module is built by default, but does not start automatically.
+Run `webUi` in the Vinc Shell, then open `http://127.0.0.1:8080/`.
+It provides internal tabs, a DOM-based plugin SDK, content-bound trust prompts and
+an official example panel. Module/log/topic/parameter management panels are future work.
+See [Web UI](src/vinc/ui/README.md) and [Plugin development](src/vinc/ui/PLUGIN.md).
+
 ## Core Architecture
 
 The new [OSAL Process layer](src/vinc/osal/README.md) exposes one C++23 API for
@@ -80,12 +88,15 @@ VINC relies on a strict CMake dependency chain to ensure that the Ribosome messa
 
 ```bash
 git submodule update --init --recursive
+npm ci --prefix src/vinc/ui/web
 cmake -S src -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/debug
 ctest --test-dir build/debug --output-on-failure
 ```
 
 Use a separate build directory with `-DCMAKE_BUILD_TYPE=Release` for Release.
+The default UI build requires Node.js (validated with 24.19.0) and npm at build time only.
+Use `-DVINC_BUILD_UI=OFF` to build without the Web UI; SDK-only consumers do not require Node.
 The Tcl integration currently requires a single-configuration generator; see the
 [Tcl integration guide](library/tcl/README.md) for platform and deployment details.
 

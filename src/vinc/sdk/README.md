@@ -89,6 +89,9 @@ Windows x64、MSVC 19.51.36257、CMake 4.3.2、Ninja 1.13.2，啟用系統 Pytho
 重建要求見 [Module System](../module_system/README.md#source-擁有實例命名與公開-cmake-接線2026-10-12)。
 
 `vinc::sdk` 本身不提供 main、不生成使用者訊息；include 與連結不會啟動服務。
+需要直接開啟即可執行固定部署腳本的應用，可使用 `vinc_configure_app(NAME ... STARTUP_SCRIPT ...)`，
+由中央提供 main 並嵌入腳本；建置順序、名稱與部署契約見
+[中央應用設定](../../../apps/vinc/README.md#打包應用程式的啟動腳本)。
 中央 `Vinc` 啟動時自動初始化 Tcl 並開啟 Socket Shell，兩者都是預設功能，
 使用者不負責呼叫初始化或服務啟停函式；Module 子程序也不建立中央 Shell。
 上例關閉 `VINC_BUILD_APPS` 是只建置 SDK 消費端；需要中央執行檔時保留該選項為 ON。
@@ -331,4 +334,12 @@ Context 布局更新為 Plugin entry version 5／bootstrap v10。見 [Log](../lo
 `<vinc/vinc.hpp>` 已包含 `<vinc/time.hpp>`，可使用 `vinc::unix_nanoseconds()` 與
 `vinc::format_utc(uint64_t)`；API 契約見 [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13)。
 BaseMessage 的 Unix／單調發布時間變更需中央、Host、Plugin／SDK 使用端與 Python 擴充一起重建。
-目前 Plugin entry 7／bootstrap v12；payload 映像与訊息 schema hash 不變。
+目前 Plugin entry 8／bootstrap v13；payload 映像与訊息 schema hash 不變。
+
+## RPC SDK（2026-10-14）
+
+vinc::sdk 與 vinc/vinc.hpp 提供 RPC 的型別、錯誤及 Context 模板 API。
+一般使用端以繼承的 Context register_rpc／call_rpc 使用，不能自行建立中央服務。
+vinc::rpc 是 Plugin facade／映像讀寫 target；vinc::rpc_host 與 vinc::rpc_manager 僅供框架接線。
+ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件。
+完整契約見 [RPC](../rpc/README.md)，範例見 [examples/rpc](../../../examples/rpc/README.md)。

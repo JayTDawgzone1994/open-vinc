@@ -17,6 +17,9 @@
 #include <vinc/param/params.hpp>
 #include <vinc/param/types.hpp>
 #include <vinc/param/error.hpp>
+#include <vinc/rpc/client.hpp>
+#include <vinc/rpc/types.hpp>
+#include <vinc/rpc/error.hpp>
 #include <vinc/module/mid.hpp>
 #include <vinc/module/contract_report.hpp>
 #include <vinc/module/host/module_manager.hpp>

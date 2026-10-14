@@ -127,8 +127,10 @@ Open-VINC 是可在不同專案與作業系統重複使用的通用軟體框架�
 - [Shell](src/vinc/shell/README.md)、[Socket Shell](src/vinc/shell/SOCKET.md)、[OutputHub](src/vinc/output_hub/README.md)：腳本、遠端操作與輸出管理。
 - [SDK 與元件目錄](src/vinc/sdk/README.md)：整合入口、target 與框架接線契約。
 - [Common](src/vinc/common/README.md)：錯誤介面與暫時設定標頭的實作現況。
+- [RPC](src/vinc/rpc/README.md)：Context typed request／response、固定共享槽位、pump 批次與故障回收。
 - [Param](src/vinc/param/README.md)：具型別參數、Context 快取與 pump、A/B 共享映像、權限與 TOML 保存。
 - [Bag Recorder](src/vinc/bag/README.md)：錄製 Module、SQLite 格式、容量與丟失統計；Player 尚未實作。
+- [Web UI](src/vinc/ui/README.md)、[UI Plugin](src/vinc/ui/PLUGIN.md)：官方 UI Module、瀏覽器工作區與 plugin 信任／生命週期；管理面板尚未接線。
 
 ## 過時內容提醒
 

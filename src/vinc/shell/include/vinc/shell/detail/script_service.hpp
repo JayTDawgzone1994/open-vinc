@@ -22,6 +22,7 @@ public:
     }
 
     Result<void> start(std::uint64_t owner, std::filesystem::path path, std::vector<std::string> arguments);
+    Result<void> start_source(std::uint64_t owner, ScriptSource source, std::vector<std::string> arguments);
     bool cancel(std::uint64_t owner = 0); // 0 means the global job, otherwise match its owner.
     bool active(std::uint64_t owner = 0);
     Delivery take(std::uint64_t owner);

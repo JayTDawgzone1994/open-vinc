@@ -7,7 +7,8 @@ namespace vinc::module_system::detail {
 inline constexpr auto error_entries = std::array{
     ErrorCodeEntry{ErrorCode::PythonUnavailable, "Python executable unavailable"},
     ErrorCodeEntry{ErrorCode::PythonDiscoveryFailed, "Python module discovery failed"},
-    ErrorCodeEntry{ErrorCode::PythonException, "Unhandled Python exception"},
+    ErrorCodeEntry{ErrorCode::RpcFailed, "RPC failed"},
+               ErrorCodeEntry{ErrorCode::PythonException, "Unhandled Python exception"},
     ErrorCodeEntry{ErrorCode::InvalidArgument, "Invalid module argument"},
     ErrorCodeEntry{ErrorCode::InvalidPolicy, "Invalid module policy"},
     ErrorCodeEntry{ErrorCode::InvalidName, "Invalid module name"},

@@ -24,7 +24,9 @@ enum class ErrorDomain : std::uint32_t {
     Common = 9,
     Param = 10,
     Log = 11,
-    Bag = 12
+    Bag = 12,
+    Ui = 13,
+    Rpc = 14
 };
 
 // Each source identifies a numeric namespace, including its originating platform.

@@ -29,6 +29,8 @@ python/vinc/
     __init__.py
     bootstrap.py
     _build.py
+    _windows_runtime.py
+    _msvc_runtime.json                 # Windows/MSVC only; generated with _native
     _native.<平台與Python版本後綴>.pyd / .so
 licenses/pybind11/LICENSE
 data/module/<ModuleType>/<ModuleType>.py
@@ -41,6 +43,62 @@ data/module/<ModuleType>/<ModuleType>.py
 `Vinc --python /absolute/path/to/python` 可指定 Python 或 venv，CLI 亦可接受相對路徑並在中央啟動時轉成絕對路徑。
 省略時，在啟動 Module 當下依 PATH 順序尋找 Windows `python.exe` 或 POSIX `python3`。
 不使用建置時選定的 Python 位置作為部署端的隱含預設，不在第一個 Python 不相容時偷偷換另一個環境。
+
+### Windows MSVC Runtime 載入前檢查
+
+`import vinc` 在載入 `_native` 前，以 Python／Windows API 檢查該擴充需要的 MSVC Runtime。
+中央 bootstrap 本來就先 import Vinc 再載入使用者 Module；外部 Python 應在 WinRT 等原生套件前
+import Vinc。這不建立框架 session，也不新增背景執行緒。
+
+- `_msvc_runtime.json` 由建置後的 `dumpbin /DEPENDENTS` 取得 MSVCP140、VCRUNTIME140、CONCRT140
+  家族的實際匯入名稱，包含 Debug 名稱與 STL sidecar。以同一 MSVC 工具鏈的 `crtversion.h`
+  四段版本作保守最低基準，另記工具鏈與組態；不從建置電腦 System32 或編譯器 `19.xx` 推算。
+  這是部署基準，不宣稱是每個所用函式的最低可運作版本。無法辨識工具鏈資料／相依時建置失敗。
+- 目前生成器針對標準 MSVC `bin/Host<arch>/<arch>/cl.exe` 目錄布局；不假裝支援未驗證的
+  Windows 替代工具鏈。更新原生擴充時須一起部署整個 `python/vinc`，不能只換 `.pyd`。
+- 已載入的必要同名 DLL 全部檢查；只要其中一份低於基準或主版本不同，即拋 `ImportError`。
+  符合基準的 Python 目錄／其他位置 DLL 可沿用，不強制所有 DLL 都在 System32。
+- 未載入的 Release DLL 只從 Windows API 取得的系統目錄選取，先驗證全部候選，再依序預載，
+  每次載入後重新檢查依賴帶入的 DLL；handle 保留至程序結束。不修改全域 PATH 或 DLL 搜尋設定。
+- Debug 依實際 Debug CRT 相依檢查；系統目錄沒有時，允許已配置的 Python 執行檔目錄與
+  開發環境絕對 PATH 目錄，排除工作目錄及相對 PATH。Debug CRT 是開發相依，不由 Vinc 打包，
+  也不以一般 Release Redistributable 取代。缺少時明確拒絕。
+- 缺少 DLL、讀不到版本、metadata 缺少／損壞、預載失敗都明確拒絕載入 `_native`。
+  不替換、卸載或修補已載入的 DLL，不自動安裝套件或 clean build。
+- 外部程式可捕捉 `ImportError` 並停止使用 Vinc。中央啟動時，bootstrap 將診斷寫到 stderr，
+  以 70 退出；中央沿用啟動失敗政策，其他 Module 繼續運作。
+
+**Python 本身也可能先載入較舊 VCRUNTIME140。** 此時只調整 `import vinc` 順序不能補救，
+也不能只安裝系統新版卻留下 Python 實際選用的舊副本；需由部署者修正／更新 Python 的 Runtime
+相依並重新啟動程序。錯誤顯示實際路徑、版本與需求。Vinc 不自動修改 Python 安裝。
+
+這項檢查是啟動相容性防護，不是程序級安全沙箱。依賴清單是連結時的直接匯入，不涵蓋使用者
+日後動態載入的所有相依；不能阻止其他 native thread 並行載入／卸載 DLL，也不保證第三方稍後
+以完整路徑強行載入另一份 DLL 的行為。建議在啟動其他工作執行緒前 import Vinc。
+仍需正常管理系統／第三方套件部署，原生崩潰的具體函式要以 native stack 確認。
+
+#### 本輪驗證（2026-10-14）
+
+- Windows x64／MSVC 19.51：Debug、Release 完整建置成功；Python lifecycle、messages、Runtime
+  防護、services、RPC Python、Module Shell、Python Shell，兩種組態各 7/7 CTest 通過。
+- Release 防護測試 13/13 通過，使用解壓到測試目錄的官方 `winrt-runtime 3.2.1`
+  cp313-win_amd64 wheel 與 typing_extensions 4.16.0。A：Vinc 與訊息測試成功；B：WinRT
+  先載入被明確拒絕；C／D：Vinc／預載先執行，WinRT Array 與 Vinc 訊息操作在同程序成功；
+  E：手動載入舊 MSVCP140 後，被拒於 `_native` 匯入前。未在本機重跑探針 OCR。
+- Debug 防護測試 11 項通過、2 項 Release 專用 WinRT／舊 DLL 案例跳過；Debug 的失敗政策
+  有模擬測試，實際 Debug CRT 的列舉、版本與正常匯入亦通過。沒有真實舊 Debug CRT 測試證據。
+- 中央測試確認 preflight 失敗的 Module 以 70 退出，原本運作中的 Module 仍可回應命令。
+  metadata 損壞的診斷由 bootstrap stderr 保留。刪除生成 manifest 後，Ninja 增量建置可補回
+  相同內容；無需 clean build。
+- 本機原始 CPython 3.13.12 自帶 VCRUNTIME140 14.42.34438，實測被新工具鏈的 Release 基準
+  14.51.36244 明確拒絕。成功路徑使用 `build/runtime-investigation/python` 的隔離 CPython
+  3.13.12 副本，搭配 VS 提供的 14.51.36247 Release Runtime；正式 Python／WinRT 安裝未修改。
+  本機 Debug／Release 建置快取的 Python_EXECUTABLE 已改指此隔離副本。
+- `module.python_runtime` 的真實舊 DLL／WinRT 案例需要測試環境變數
+  `VINC_TEST_OLD_MSVC_RUNTIME`（舊 DLL 完整路徑）與 `VINC_TEST_WINRT_DIR`（解壓套件根目錄）。
+  未提供時會明確 skip，不自動下載或安裝第三方套件。一般 CTest 不依賴 WinRT。
+- Linux／macOS 未實機驗證；此防護僅由 Windows MSVC 建置啟用。MSVC 19.44 尚未在本機重建
+  本輪修改，外部提供的 19.44 崩潰報告不算本輪實作的驗證。
 
 ## 掃描與 ModuleType
 
@@ -109,7 +167,7 @@ Context 無公開建構子，來自框架建立的 BaseModule；成功 import �
 PythonSource 提供 Python 物件適配。共同 Runtime 先準備認證、fatal bridge、Bus／Param／Log 接線及 watchdog，
 再載入使用者程式。Module 銷毀後停止服務，最後 clear source，仍早於 fatal bridge 失效。
 Python 擴充包含唯一 Runtime owner；不另啟動一個 ModuleHost 幫 Python 轉送。
-Python 初次接入時未改變 Native Plugin 入口；目前雙時間 metadata 使用 Plugin entry 7／bootstrap v12。
+Python 初次接入時未改變 Native Plugin 入口；目前含 RPC 的 Context 使用 Plugin entry 8／bootstrap v13。
 Python Source 以無參數 create 建立 wrapper，不從中央取得預設實例名稱；on_name 契約不變。
 
 ## 驗證與後續
@@ -227,8 +285,29 @@ Linux／macOS 未實機驗證。
 
 ## 待處理事項
 
+- 2026-10-14 外部問題的具體原生崩潰位置仍待確認：v0.1.1（8faee632）、MSVC 19.44 擴充
+  在 WinRT 3.2.1 先帶入 MSVCP140.dll 14.29.30157 後 import 時發生 0xC0000005。
+  外部報告確認 Vinc／新版 Runtime 先載入可通過 native tests 與 OCR；本機已下載官方 wheel
+  驗證新防護對舊 DLL 先載入的拒絕，以及反向順序的共存。UNC 報告仍無法存取，尚無
+  native stack／dump，不能認定封包解碼或特定 mutex 已確認有錯。
+  [Microsoft 相容性要求](https://learn.microsoft.com/en-us/cpp/porting/binary-compat-2015-2017)
+  規定 Runtime 不得早於所用工具鏈；[STL 17.10 紀錄](https://github.com/microsoft/STL/wiki/VS-2022-Changelog#vs-2022-1710)
+  亦說明違反版本要求可能造成 mutex null dereference。固定 pybind11 的初始化路徑使用
+  std::mutex，因此屬具體候選原因，仍須原生堆疊確認。本輪已加入上述載入前拒絕與預載，
+  不需要先證實是哪個 C++ 函式才能拒絕不支援的 Runtime。沒有 CRT 切換、相容巨集或第三方 DLL 替換。
+
 - 2026-10-12 範例 review 確認：`tests/services_module.py` 的 received_message 使用
   `publisher_instance() != self.get_mid()` 作斷言。Publisher ID 與 Module MID 是不同識別空間，
   數值可能恰好相同，不能以不相等當正確性條件。目前測試配置通過不代表此假設有效；
   建議後續改為驗證 Publisher 身分與已知發布者對應，不比較跨種類數值。
   本輪修正示範的 `publisher_id` 顯示名稱，新範例測試不採此假設；既有測試留待修正。
+
+## Python RPC（2026-10-14）
+
+Context 現在提供 register_rpc、call_rpc、rpc_stats，與 C++ 共用 Host／共享記憶體協定。
+同步 admission 失敗拋 VincError，非同步完成使用 completed(reply, error)；框架失敗時 error
+是 VincError，成功 reply 為 (RpcStatus, Response)。Handler 回傳 RpcStatus，completion 回傳 None。
+Callback 都在 pump 執行；未處理 Python 例外保留診斷並使該 Module 失敗。
+
+API 與限制見 [RPC](../../rpc/README.md)，對照範例見
+[examples/rpc](../../../../examples/rpc/README.md)。

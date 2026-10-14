@@ -3,6 +3,7 @@
 #include <vinc/module/error.hpp>
 #include <vinc/param/params.hpp>
 #include <vinc/log/log.hpp>
+#include <vinc/rpc/client.hpp>
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -14,6 +15,7 @@ class ModuleMessageBusAccess;
 class ContextRuntime;
 struct ContextLockAccess;
 struct ContextLanguageAccess;
+struct ContextRpcAccess;
 }
 
 struct PumpStats {
@@ -27,6 +29,7 @@ struct PumpStats {
 // authority comes from the Host's authenticated session, never from a copied MID.
 class Context {
     friend struct detail::ContextLanguageAccess;
+    friend struct detail::ContextRpcAccess;
     friend struct detail::ContextLockAccess;
     friend class detail::ModuleObject;
     friend class detail::ModuleMessageBusAccess;
@@ -42,6 +45,7 @@ class Context {
     std::mutex subscriptions_mutex_;
     std::vector<std::shared_ptr<Subscription>> subscriptions_;
     std::atomic_flag pumping_ = ATOMIC_FLAG_INIT;
+    rpc::Client rpc_;
 
     Result<std::reference_wrapper<message_bus::Client>> client();
     void retire_closed(std::vector<std::shared_ptr<Subscription>>& retired);
@@ -49,6 +53,19 @@ class Context {
     Result<PumpStats> pump_batch();
 
 public:
+    rpc::Stats rpc_stats() const {
+        return rpc_.stats();
+    }
+    template<class Request, class Response, class Handler>
+    Result<void> register_rpc(std::string name, rpc::ServiceOptions options, Handler handler) {
+        return rpc_.register_rpc<Request, Response>(std::move(name), options, std::move(handler));
+    }
+    template<class Request, class Response, class Completion>
+    Result<void> call_rpc(std::string target, std::string service, const Request& request,
+                          rpc::CallOptions options, Completion completion) {
+        return rpc_.call_rpc<Request, Response>(std::move(target), std::move(service), request,
+                                               options, std::move(completion));
+    }
     param::Params param;
     log::Logger log;
 

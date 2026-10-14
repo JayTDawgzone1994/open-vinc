@@ -14,7 +14,7 @@ if(MSVC AND NOT python_platform MATCHES "^win-")
     message(FATAL_ERROR "MSVC bindings require Windows CPython, not the MinGW Python ABI; set Python_EXECUTABLE")
 endif()
 add_subdirectory("${VINC_REPOSITORY_ROOT}/library/pybind11" "${CMAKE_CURRENT_BINARY_DIR}/pybind11")
-pybind11_add_module(vinc_python_native MODULE NO_EXTRAS src/bindings.cpp src/services.cpp src/messages.cpp)
+pybind11_add_module(vinc_python_native MODULE NO_EXTRAS src/bindings.cpp src/services.cpp src/messages.cpp src/rpc.cpp)
 target_include_directories(vinc_python_native PRIVATE include)
 target_link_libraries(vinc_python_native PRIVATE vinc::module_runtime vinc::errors vinc_messages)
 target_compile_features(vinc_python_native PRIVATE cxx_std_23)
@@ -29,12 +29,28 @@ set(python_package_dir "${VINC_BUILD_ROOT}/python/$<CONFIG>/vinc")
 set_target_properties(vinc_python_native PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${python_package_dir}"
     RUNTIME_OUTPUT_DIRECTORY "${python_package_dir}")
-foreach(file IN ITEMS __init__.py bootstrap.py)
+foreach(file IN ITEMS __init__.py bootstrap.py _windows_runtime.py)
     file(GENERATE OUTPUT "${python_package_dir}/${file}"
         INPUT "${CMAKE_CURRENT_SOURCE_DIR}/vinc/${file}")
 endforeach()
+set(python_msvc_runtime False)
+if(MSVC)
+    set(python_msvc_runtime True)
+    set(runtime_metadata_script "${CMAKE_CURRENT_SOURCE_DIR}/cmake/runtime_metadata.py")
+    # Re-link when metadata generation changes; BYPRODUCTS also repairs deletion
+    # of the manifest when only vinc_python_native is explicitly built.
+    get_filename_component(msvc_binary_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(msvc_toolset_dir "${msvc_binary_dir}/../../.." ABSOLUTE)
+    set_property(TARGET vinc_python_native APPEND PROPERTY LINK_DEPENDS
+        "${runtime_metadata_script}" "${msvc_toolset_dir}/include/crtversion.h")
+    add_custom_command(TARGET vinc_python_native POST_BUILD
+        COMMAND "${Python_EXECUTABLE}" "${runtime_metadata_script}"
+            --compiler "${CMAKE_CXX_COMPILER}" --native "$<TARGET_FILE:vinc_python_native>"
+            --config "$<CONFIG>" --output "${python_package_dir}/_msvc_runtime.json"
+        BYPRODUCTS "${python_package_dir}/_msvc_runtime.json" VERBATIM)
+endif()
 file(GENERATE OUTPUT "${python_package_dir}/_build.py" CONTENT
-    "VERSION = (${Python_VERSION_MAJOR}, ${Python_VERSION_MINOR})\nPOINTER_BYTES = ${CMAKE_SIZEOF_VOID_P}\nPLATFORM = '${python_platform}'\n")
+    "VERSION = (${Python_VERSION_MAJOR}, ${Python_VERSION_MINOR})\nPOINTER_BYTES = ${CMAKE_SIZEOF_VOID_P}\nPLATFORM = '${python_platform}'\nMSVC_RUNTIME = ${python_msvc_runtime}\n")
 
 # Deployment is attached to the final application target, so relocated SDKs work.
 function(vinc_deploy_python target)

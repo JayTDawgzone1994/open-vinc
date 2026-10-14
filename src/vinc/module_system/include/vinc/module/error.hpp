@@ -63,7 +63,8 @@ enum class ErrorCode : std::int32_t {
     LogFailed = 58,
     PythonUnavailable = 59,
     PythonDiscoveryFailed = 60,
-    PythonException = 61
+    PythonException = 61,
+    RpcFailed = 62
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,

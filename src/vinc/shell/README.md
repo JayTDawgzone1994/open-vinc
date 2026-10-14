@@ -15,7 +15,8 @@ SDK 只包含 `<vinc/shell/socket_shell_options.hpp>` 的設定資料與錯誤 e
 
 元件目錄與主檔名統一為 `shell`，框架內部類別為 `vinc::Shell`。
 輔助型別的 `vinc::shell` 命名空間、`vinc_shell`／`vinc::shell` library target 保持原名。
-中央程式 target 為 `shell`，輸出檔名仍為 `Vinc.exe`／`Vinc`；不提供舊名稱相容別名。
+中央程式 target 為 `shell`，預設輸出檔名為 `Vinc.exe`／`Vinc`；可由應用配置更名。
+內嵌啟動腳本的 CMake 入口與 CLI 政策見 [中央應用設定](../../../apps/vinc/README.md#打包應用程式的啟動腳本)。
 
 ### 本機命令流程閱讀入口
 
@@ -213,6 +214,10 @@ srun examples/scripts/cancel-demo.tcl
 參數透過 Tcl `argv`／`argc` 提供，`argv0` 為腳本路徑。
 每次執行使用獨立變數、proc 與事件環境；一次只執行一份腳本。
 `source` 可在同一次環境引入檔案，嵌套 `srun` 則回 Busy。
+框架內部 `ScriptSource` 可攜帶檔案路徑或擁有的內嵌文字；兩者共用 ScriptService mailbox、
+工作執行緒、取消、派送及錯誤原因鏈。文字跨非同步邊界由工作持有，不借用呼叫端暫存內容。
+內嵌入口以 `embedded:startup.tcl` 提供 `argv0`／`info script` 及錯誤來源，並非磁碟檔案。
+每份腳本都可透過 `::vinc::app_dir` 取得 EXE 所在目錄；內嵌入口無 argv 參數。
 路徑相對於程序目前工作目錄，不自動 `cd`。相對於腳本所在目錄引入檔案可寫：
 
 ```tcl
@@ -258,6 +263,9 @@ Tcl 核心靜態連結，初始化腳本、編碼資料及授權放在 `Vinc` �
 部署時須一併保留該目錄。現有自動生成的模組目錄仍記錄建置時的模組絕對路徑；Tcl 資源可搬移不代表整套模組部署已支援任意搬移。
 
 ## 驗證
+
+內嵌腳本（2026-10-14）的 Windows Debug／Release 各 12 項整合驗證，包含既有 Shell
+回歸及新增來源／取消／行號測試，見 [中央驗證紀錄](../../../apps/vinc/README.md#驗證)。
 
 - `shell.unit`：引號／空字串／跳脫、Windows 路徑、補全 roundtrip、中文刪除、歷史草稿、
   Shell 重建的 callback 生命週期、命名保留、原生回傳碼與候選清單。
