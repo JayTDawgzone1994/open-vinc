@@ -1,0 +1,79 @@
+# ==========================================
+# 專案自訂項目 (User Specified)
+# ==========================================
+build/
+
+# ==========================================
+# macOS 垃圾檔案 (macOS Garbage Files)
+# ==========================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.Trashes
+VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# ==========================================
+# IDE / 編輯器 (VS Code & JetBrains)
+# ==========================================
+# VS Code
+.vscode/*
+*/.vscode
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.history/
+*.code-workspace
+
+# JetBrains (CLion, PyCharm 等)
+.idea/
+
+# ==========================================
+# 編譯產物與暫存檔 (Compiled Artifacts & Temporaries)
+# ==========================================
+# 目的檔與程式庫
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# 執行檔
+*.exe
+*.out
+*.app
+
+# 記錄檔與快取
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# ==========================================
+# 常用語言環境 (Python / Node / C++)
+# ==========================================
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# CMake 相關 (如果專案有手動執行 cmake)
+CMakeCache.txt
+CMakeFiles/
+CMakeSettings.json
+cmake_install.cmake

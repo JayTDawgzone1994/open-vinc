@@ -1,0 +1,42 @@
+cmake_minimum_required(VERSION 3.20)
+file(MAKE_DIRECTORY "${TEST_DIRECTORY}")
+set(input "${TEST_DIRECTORY}/input.tcl")
+set(output "${TEST_DIRECTORY}/embedded.hpp")
+
+function(embed expected)
+    execute_process(COMMAND "${CMAKE_COMMAND}" "-DINPUT=${input}" "-DOUTPUT=${output}"
+        -P "${EMBED_SCRIPT}" RESULT_VARIABLE result OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+    if(expected STREQUAL "success")
+        if(NOT result STREQUAL "0")
+            message(FATAL_ERROR "Valid script rejected: ${stdout}${stderr}")
+        endif()
+    elseif(result STREQUAL "0" OR NOT "${stdout}${stderr}" MATCHES "UTF-8")
+        message(FATAL_ERROR "Invalid UTF-8 accepted or wrong failure: ${stdout}${stderr}")
+    endif()
+endfunction()
+
+file(WRITE "${input}" "")
+embed(success)
+file(READ "${output}" empty_header)
+if(NOT empty_header MATCHES "sizeof\\(startup_bytes\\) - 1")
+    message(FATAL_ERROR "Empty scripts must retain explicit byte length")
+endif()
+
+string(ASCII 239 187 191 bom)
+file(WRITE "${input}" "${bom}puts {中文 😀 $value [command]; \\\"}\r\nreturn\r")
+embed(success)
+file(READ "${output}" normalized)
+if(normalized MATCHES "\\\\xef.*\\\\xbb.*\\\\xbf" OR normalized MATCHES "\\\\x0d")
+    message(FATAL_ERROR "BOM or CR was retained in generated script bytes")
+endif()
+foreach(sequence IN ITEMS "192;128" "224;128;128" "237;160;128" "244;144;128;128" "245;128;128;128"
+                          "128" "255" "240;159;152" "226;65;172")
+    string(ASCII ${sequence} invalid)
+    file(WRITE "${input}" "${invalid}")
+    embed(failure)
+endforeach()
+
+# Recover after failure and cover a script exceeding MSVC's string literal limit.
+string(REPEAT "# large-script comment\n" 3000 large_script)
+file(WRITE "${input}" "${large_script}exit\n")
+embed(success)

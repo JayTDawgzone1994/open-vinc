@@ -1,0 +1,649 @@
+// Shared Socket reactor for session handshake, heartbeat and bounded control queues.
+// Public calls enqueue/dequeue under a peer lock; one worker owns actual socket I/O.
+
+#include <vinc/time.hpp>
+#include <vinc/control/channel.hpp>
+#include <algorithm>
+#include <array>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+
+#if defined(VINC_CONTROL_CHANNEL_TESTING)
+#include "channel_test_hooks.hpp"
+#endif
+
+namespace vinc::control {
+namespace detail {
+constexpr std::size_t queue_bytes_limit = 256 * 1024;
+constexpr std::size_t queue_count_limit = 64;
+
+// Peer::mutex protects both public queue access and reactor state.
+// The weak Engine link lets a retained Session fail cleanly after Service destruction.
+struct Peer {
+    mutable std::mutex mutex;
+    std::condition_variable changed;
+    std::weak_ptr<Engine> engine;
+    osal::Socket socket;
+    std::optional<osal::SocketRegistration> registration;
+    Options options;
+    State state = State::Handshaking;
+    bool closing = false;
+    std::optional<Error> failure;
+    vinc::Deadline handshake_end;
+    vinc::Deadline last_heartbeat;
+    vinc::Deadline next_heartbeat;
+    std::uint64_t sent_sequence = 0;
+    std::uint64_t received_sequence = 0;
+    Decoder decoder;
+    QueueStats queue_stats;
+    std::deque<Bytes> outgoing;
+    std::deque<Frame> incoming;
+    std::size_t outgoing_bytes = 0;
+    std::size_t incoming_bytes = 0;
+    Bytes active_frame;
+    std::size_t send_offset = 0;
+    bool active_is_application = false;
+};
+
+struct Engine {
+    explicit Engine(osal::SocketPoller socket_poller, std::size_t limit)
+        : poller(std::move(socket_poller)), max_sessions(limit) {
+    }
+
+    osal::SocketPoller poller;
+    // Protect membership and stopping, not socket I/O. Never acquire this while
+    // holding a peer lock; code that needs both takes the engine lock first.
+    std::mutex mutex;
+    std::vector<std::shared_ptr<Peer>> peers;
+    std::size_t max_sessions;
+    bool stopping = false;
+    std::jthread worker;
+};
+}
+
+namespace {
+// Per-peer work limits keep one busy socket from monopolizing the I/O worker.
+constexpr std::size_t receive_chunk_bytes = 4096;
+constexpr int receive_attempts_per_turn = 8;
+constexpr int send_attempts_per_turn = 8;
+constexpr std::size_t ready_events_per_wait = 256;
+constexpr std::size_t service_session_limit = 4096;
+constexpr std::size_t token_bytes_limit = 256;
+constexpr auto maximum_session_timeout = std::chrono::hours(24);
+
+Error error(ErrorCode code, ErrorOperation operation) {
+    return {code, operation};
+}
+
+void wake(detail::Peer& peer) {
+    if (auto engine = peer.engine.lock()) {
+        (void)engine->poller.wake();
+    }
+}
+
+// Preserve the first failure; later cleanup must not overwrite the diagnostic cause.
+void fail(detail::Peer& peer, Error reason) {
+    if (!peer.failure) {
+        peer.failure = std::move(reason);
+    }
+    peer.closing = true;
+}
+
+// I/O worker only, with Peer::mutex held. Retain received frames for callers to drain.
+void dispose(detail::Engine& engine, detail::Peer& peer) {
+    if (peer.registration) {
+        (void)engine.poller.remove(*peer.registration);
+        peer.registration.reset();
+    }
+    (void)peer.socket.close();
+    peer.state = State::Closed;
+    peer.outgoing.clear();
+    peer.active_frame.clear();
+    peer.outgoing_bytes = 0;
+    peer.changed.notify_all();
+}
+
+Result<Frame> hello(const Options& options) {
+    Frame result{Kind::Hello};
+    put_u32(result.payload, static_cast<std::uint32_t>(options.role));
+    put_u64(result.payload, options.generation);
+    auto encoded = put_string(result.payload, options.token);
+    if (!encoded) {
+        return std::unexpected(encoded.error());
+    }
+    put_u32(result.payload, static_cast<std::uint32_t>(options.heartbeat_interval.count()));
+    put_u32(result.payload, static_cast<std::uint32_t>(options.heartbeat_timeout.count()));
+    put_u32(result.payload, hello_version);
+    put_u32(result.payload, options.heartbeat_timeout_enabled ? 1u : 0u);
+    return result;
+}
+
+bool has_session_fields(const Frame& frame) {
+    return frame.domain == 0 && frame.operation == 0 && frame.request == 0;
+}
+
+bool has_application_identity(const Frame& frame) {
+    if (!frame.domain) {
+        return false;
+    }
+
+    if ((frame.kind == Kind::Request || frame.kind == Kind::Response) && !frame.request) {
+        return false;
+    }
+
+    if (frame.kind == Kind::Event && frame.request) {
+        return false;
+    }
+
+    return true;
+}
+
+// Validate the expected role, generation and token before accepting application frames.
+// Only heartbeat frames refresh liveness; ordinary traffic is not a replacement heartbeat.
+void incoming(detail::Peer& peer, Frame frame, vinc::Deadline now) {
+    if (frame.kind == Kind::Hello) {
+        Reader reader(frame.payload);
+        const auto role = reader.u32();
+        const auto generation = reader.u64();
+        const auto token = reader.string();
+        const auto interval = reader.u32();
+        const auto timeout = reader.u32();
+        const auto version = reader.u32();
+        const auto expiry = reader.u32();
+        const auto expected_role = peer.options.role == Role::Central ? Role::Module : Role::Central;
+        const bool identity_matches = role == static_cast<std::uint32_t>(expected_role) &&
+                                      generation == peer.options.generation && token == peer.options.token;
+        const bool heartbeat_matches = interval == peer.options.heartbeat_interval.count() &&
+                                       timeout == peer.options.heartbeat_timeout.count();
+        if (peer.state != State::Handshaking || !has_session_fields(frame) || !identity_matches ||
+            !reader.done() || !heartbeat_matches || version != hello_version ||
+            expiry != (peer.options.heartbeat_timeout_enabled ? 1u : 0u)) {
+            fail(peer, error(ErrorCode::Protocol, ErrorOperation::Handshake));
+            return;
+        }
+
+        peer.state = State::Open;
+        peer.last_heartbeat = now;
+        peer.next_heartbeat = now;
+        peer.changed.notify_all();
+        return;
+    }
+
+    if (peer.state != State::Open) {
+        fail(peer, error(ErrorCode::Protocol, ErrorOperation::Handshake));
+        return;
+    }
+
+    if (frame.kind == Kind::Heartbeat) {
+        Reader reader(frame.payload);
+        const auto sequence = reader.u64();
+        if (!has_session_fields(frame) || !reader.done() || sequence <= peer.received_sequence) {
+            fail(peer, error(ErrorCode::Protocol, ErrorOperation::Heartbeat));
+            return;
+        }
+
+        peer.received_sequence = sequence;
+        peer.last_heartbeat = now;
+        return;
+    }
+
+    if (!has_application_identity(frame)) {
+        fail(peer, error(ErrorCode::Protocol, ErrorOperation::Receive));
+        return;
+    }
+
+    const auto size = header_size + frame.payload.size();
+    if (peer.incoming.size() >= detail::queue_count_limit ||
+        peer.incoming_bytes + size > detail::queue_bytes_limit) {
+        if (peer.options.receive_overflow == ReceiveOverflow::DropNewest) {
+            ++peer.queue_stats.dropped_frames;
+            peer.queue_stats.dropped_bytes += size;
+            return;
+        }
+        fail(peer, error(ErrorCode::Backpressure, ErrorOperation::Receive));
+        return;
+    }
+
+    peer.incoming_bytes += size;
+    peer.incoming.push_back(std::move(frame));
+    peer.changed.notify_all();
+}
+
+// These phases run only on the I/O worker with Peer::mutex held by advance's caller.
+// Keep the lock across all phases: public queue operations must not observe half a transition.
+void receive_frames(detail::Peer& peer, vinc::Deadline now) {
+    // Bound work per peer so a busy socket cannot monopolize the shared reactor.
+    std::array<std::byte, receive_chunk_bytes> bytes;
+    for (int attempt = 0; attempt < receive_attempts_per_turn && !peer.closing; ++attempt) {
+        auto received = peer.socket.try_receive(bytes);
+        if (!received) {
+            if (!(received.error().is(vinc::osal::ErrorCode::WouldBlock))) {
+                fail(peer, wrap_error(ErrorCode::Io, ErrorOperation::Receive, received.error()));
+            }
+            break;
+        }
+
+        if (received->eof) {
+            fail(peer, error(ErrorCode::Closed, ErrorOperation::Receive));
+            break;
+        }
+
+        auto frames = peer.decoder.feed(std::span<const std::byte>(bytes).first(received->bytes));
+        if (!frames) {
+            fail(peer, frames.error());
+            break;
+        }
+
+        for (auto& frame : *frames) {
+            incoming(peer, std::move(frame), now);
+            if (peer.closing) {
+                break;
+            }
+        }
+    }
+}
+
+void check_session_deadlines(detail::Peer& peer, vinc::Deadline now) {
+    if (peer.state == State::Handshaking && now >= peer.handshake_end) {
+        fail(peer, error(ErrorCode::HandshakeTimeout, ErrorOperation::Handshake));
+    }
+    if (peer.state == State::Open && peer.options.heartbeat_timeout_enabled &&
+        now - peer.last_heartbeat >= peer.options.heartbeat_timeout) {
+        fail(peer, error(ErrorCode::HeartbeatTimeout, ErrorOperation::Heartbeat));
+    }
+}
+
+void send_frames(detail::Peer& peer, vinc::Deadline now) {
+    for (int attempt = 0; attempt < send_attempts_per_turn && !peer.closing; ++attempt) {
+        if (peer.active_frame.empty()) {
+            peer.send_offset = 0;
+            peer.active_is_application = false;
+            // Prioritize heartbeat between complete frames. Never interleave bytes into a
+            // partially sent application frame, because the receiver sees one ordered stream.
+            if (peer.state == State::Open && now >= peer.next_heartbeat) {
+                Frame heartbeat{Kind::Heartbeat};
+                put_u64(heartbeat.payload, ++peer.sent_sequence);
+                auto encoded = encode(heartbeat);
+                if (!encoded) {
+                    fail(peer, encoded.error());
+                    return;
+                }
+                peer.active_frame = std::move(*encoded);
+                peer.next_heartbeat = now + peer.options.heartbeat_interval;
+            } else if (peer.state == State::Open && !peer.outgoing.empty()) {
+                peer.active_frame = std::move(peer.outgoing.front());
+                peer.outgoing.pop_front();
+                peer.active_is_application = true;
+            } else {
+                break;
+            }
+        }
+        const auto remaining = std::span<const std::byte>(peer.active_frame).subspan(peer.send_offset);
+#if defined(VINC_CONTROL_CHANNEL_TESTING)
+        auto sent = test::try_send(peer.socket, remaining);
+#else
+        auto sent = peer.socket.try_send(remaining);
+#endif
+        if (!sent) {
+            if (!(sent.error().is(vinc::osal::ErrorCode::WouldBlock))) {
+                fail(peer, wrap_error(ErrorCode::Io, ErrorOperation::Send, sent.error()));
+            }
+            break;
+        }
+
+        if (!*sent) {
+            break;
+        }
+
+        peer.send_offset += *sent;
+        if (peer.send_offset == peer.active_frame.size()) {
+            // Count an application frame until its final byte leaves the local queue.
+            if (peer.active_is_application) {
+                peer.outgoing_bytes -= peer.active_frame.size();
+            }
+            peer.active_frame.clear();
+            peer.send_offset = 0;
+        }
+    }
+}
+
+void advance(detail::Engine& engine, detail::Peer& peer, vinc::Deadline now) {
+    if (peer.state == State::Closed) {
+        return;
+    }
+
+    if (peer.closing) {
+        dispose(engine, peer);
+        return;
+    }
+
+    if (!peer.registration) {
+        auto registration = engine.poller.add(peer.socket, osal::SocketEvents::Readable);
+        if (!registration) {
+            fail(peer, wrap_error(ErrorCode::Io, ErrorOperation::Attach, registration.error()));
+            dispose(engine, peer);
+            return;
+        }
+
+        peer.registration = *registration;
+    }
+    receive_frames(peer, now);
+    check_session_deadlines(peer, now);
+    send_frames(peer, now);
+
+    if (peer.closing) {
+        dispose(engine, peer);
+        return;
+    }
+
+    auto interests = osal::SocketEvents::Readable;
+    if (!peer.active_frame.empty() || (peer.state == State::Open && !peer.outgoing.empty())) {
+        interests = interests | osal::SocketEvents::Writable;
+    }
+    auto changed = engine.poller.modify(*peer.registration, interests);
+    if (!changed) {
+        fail(peer, wrap_error(ErrorCode::Io, ErrorOperation::Poll, changed.error()));
+        dispose(engine, peer);
+    }
+}
+
+// Use the nearest session deadline as the poll timeout. Each peer has a work budget
+// so one busy connection cannot prevent the others from advancing.
+void run(detail::Engine& engine, std::stop_token stop) noexcept {
+    auto terminal_error = error(ErrorCode::Closed, ErrorOperation::Close);
+    try {
+        while (!stop.stop_requested()) {
+            std::vector<std::shared_ptr<detail::Peer>> peers;
+            {
+                std::lock_guard lock(engine.mutex);
+                peers = engine.peers;
+            }
+            auto deadline = (vinc::Deadline::max)();
+            for (auto& peer : peers) {
+                std::lock_guard lock(peer->mutex);
+                advance(engine, *peer, Clock::now());
+                if (peer->state == State::Handshaking) {
+                    deadline = (std::min)(deadline, peer->handshake_end);
+                }
+                if (peer->state == State::Open) {
+                    if (peer->options.heartbeat_timeout_enabled) {
+                        deadline = (std::min)(deadline, peer->last_heartbeat + peer->options.heartbeat_timeout);
+                    }
+                    // A partially sent frame cannot be preempted. Do not spin on an overdue heartbeat.
+                    if (peer->active_frame.empty()) {
+                        deadline = (std::min)(deadline, peer->next_heartbeat);
+                    }
+                }
+            }
+            {
+                std::lock_guard lock(engine.mutex);
+                std::erase_if(engine.peers, [](const auto& peer) {
+                    std::lock_guard peer_lock(peer->mutex);
+                    return peer->state == State::Closed;
+                });
+            }
+            std::array<osal::SocketReadyEvent, ready_events_per_wait> ready;
+#if defined(VINC_CONTROL_CHANNEL_TESTING)
+            auto events = test::wait_until(engine.poller, ready, deadline, stop);
+#else
+            auto events = engine.poller.wait_until(ready, deadline, stop);
+#endif
+            if (!events && !events.error().is(vinc::osal::ErrorCode::Timeout) &&
+                !events.error().is(vinc::osal::ErrorCode::Cancelled)) {
+                terminal_error = wrap_error(ErrorCode::Io, ErrorOperation::Poll, events.error());
+                break;
+            }
+        }
+    } catch (...) {
+        terminal_error = error(ErrorCode::WorkerFailed, ErrorOperation::Close);
+        // Close every session below; exceptions must never escape the I/O thread.
+    }
+    // Lock order is Engine::mutex then Peer::mutex whenever both are needed.
+    std::lock_guard lock(engine.mutex);
+    engine.stopping = true;
+    // The last iteration's snapshot may omit concurrent attachments. Apply the
+    // terminal cause to current membership only after closing the attach gate.
+    for (auto& peer : engine.peers) {
+        std::lock_guard peer_lock(peer->mutex);
+        fail(*peer, terminal_error);
+        dispose(engine, *peer);
+    }
+    engine.peers.clear();
+}
+
+// Own the poller locally until Engine construction succeeds. Allocation failure
+// unwinds through the OSAL handle; no worker has started at this point.
+Result<std::shared_ptr<detail::Engine>> create_engine(std::size_t max_sessions) {
+    auto poller = osal::SocketPoller::create(max_sessions);
+    if (!poller) {
+        return std::unexpected(wrap_error(ErrorCode::Io, ErrorOperation::Create, poller.error()));
+    }
+
+    return std::make_shared<detail::Engine>(std::move(*poller), max_sessions);
+}
+
+// Service must already own Engine. Its destructor stops and joins this worker
+// before releasing Engine, so the raw pointer cannot outlive its owner.
+void start_worker(detail::Engine& engine) {
+    engine.worker = std::jthread([engine_ptr = &engine](std::stop_token stop) {
+        run(*engine_ptr, stop);
+    });
+}
+
+bool valid_session_options(const Options& options) {
+    const bool valid_identity =
+        !options.token.empty() && options.token.size() <= token_bytes_limit && options.generation != 0;
+    const bool valid_heartbeat = options.heartbeat_interval.count() > 0 &&
+                                 options.heartbeat_timeout > options.heartbeat_interval &&
+                                 options.heartbeat_timeout <= maximum_session_timeout;
+    const bool valid_handshake =
+        options.handshake_timeout.count() > 0 && options.handshake_timeout <= maximum_session_timeout;
+    const bool valid_role = options.role == Role::Central || options.role == Role::Module;
+    const bool valid_queue = options.reserved_send_frames < detail::queue_count_limit &&
+                             options.reserved_send_bytes < detail::queue_bytes_limit &&
+                             (options.receive_overflow == ReceiveOverflow::CloseSession ||
+                              options.receive_overflow == ReceiveOverflow::DropNewest);
+    return valid_identity && valid_heartbeat && valid_handshake && valid_role && valid_queue;
+}
+
+// Prepare a peer before publishing it to the worker. On any failure, local RAII
+// ownership releases the socket and encoded Hello; no poller registration exists yet.
+Result<std::shared_ptr<detail::Peer>> prepare_peer(osal::Socket socket, Options options,
+                                                   const std::shared_ptr<detail::Engine>& engine) {
+    auto peer = std::make_shared<detail::Peer>();
+    peer->socket = std::move(socket);
+    peer->options = std::move(options);
+    peer->engine = engine;
+    peer->handshake_end = Clock::now() + peer->options.handshake_timeout;
+    auto greeting = hello(peer->options);
+    if (!greeting) {
+        return std::unexpected(greeting.error());
+    }
+    auto encoded = encode(*greeting);
+    if (!encoded) {
+        return std::unexpected(encoded.error());
+    }
+    peer->active_frame = std::move(*encoded);
+    return peer;
+}
+}
+
+Session::Session(std::shared_ptr<detail::Peer> peer) : peer_(std::move(peer)) {
+}
+
+State Session::state() const {
+    std::lock_guard lock(peer_->mutex);
+    return peer_->state;
+}
+
+std::optional<Error> Session::error() const {
+    std::lock_guard lock(peer_->mutex);
+    return peer_->failure;
+}
+
+Result<void> Session::wait_open(vinc::Deadline deadline) {
+    std::unique_lock lock(peer_->mutex);
+    if (!peer_->changed.wait_until(lock, deadline, [&] {
+            return peer_->state != State::Handshaking;
+        })) {
+        return std::unexpected(control::error(ErrorCode::Timeout, ErrorOperation::WaitOpen));
+    }
+
+    if (peer_->state != State::Open) {
+        return std::unexpected(*peer_->failure);
+    }
+
+    return {};
+}
+
+QueueStats Session::queue_stats() const {
+    std::lock_guard lock(peer_->mutex);
+    return peer_->queue_stats;
+}
+
+Result<void> Session::send(Frame frame, bool use_reserved_capacity) {
+    const bool application_kind =
+        frame.kind == Kind::Request || frame.kind == Kind::Response || frame.kind == Kind::Event;
+    if (!application_kind || !has_application_identity(frame) || frame.payload.size() > max_payload) {
+        return std::unexpected(control::error(ErrorCode::InvalidArgument, ErrorOperation::Send));
+    }
+
+    auto encoded = encode(frame);
+    if (!encoded) {
+        return std::unexpected(encoded.error());
+    }
+
+    auto bytes = std::move(*encoded);
+    {
+        std::lock_guard lock(peer_->mutex);
+        if (peer_->closing || peer_->state != State::Open) {
+            // An explicit close is not another fault. Preserve all other stored
+            // causes, including native diagnostics, without modifying the peer.
+            const auto normal_close = control::error(ErrorCode::Closed, ErrorOperation::Close);
+            if (peer_->failure && *peer_->failure != normal_close) {
+                return std::unexpected(wrap_error(ErrorCode::Closed, ErrorOperation::Send, *peer_->failure));
+            }
+
+            return std::unexpected(control::error(ErrorCode::Closed, ErrorOperation::Send));
+        }
+
+        const bool active_application = peer_->active_is_application && !peer_->active_frame.empty();
+        const auto queued_count = peer_->outgoing.size() + static_cast<std::size_t>(active_application);
+        const auto count_limit =
+            detail::queue_count_limit - (use_reserved_capacity ? 0 : peer_->options.reserved_send_frames);
+        const auto byte_limit =
+            detail::queue_bytes_limit - (use_reserved_capacity ? 0 : peer_->options.reserved_send_bytes);
+        if (queued_count >= count_limit || peer_->outgoing_bytes + bytes.size() > byte_limit) {
+            return std::unexpected(control::error(ErrorCode::Backpressure, ErrorOperation::Send));
+        }
+
+        peer_->outgoing.push_back(std::move(bytes));
+        peer_->outgoing_bytes += peer_->outgoing.back().size();
+    }
+    wake(*peer_);
+    return {};
+}
+
+Result<std::optional<Frame>> Session::try_receive() {
+    std::lock_guard lock(peer_->mutex);
+    if (!peer_->incoming.empty()) {
+        auto result = std::move(peer_->incoming.front());
+        peer_->incoming.pop_front();
+        peer_->incoming_bytes -= header_size + result.payload.size();
+        return std::optional<Frame>(std::move(result));
+    }
+
+    if (peer_->state == State::Closed) {
+        return std::unexpected(*peer_->failure);
+    }
+
+    return std::optional<Frame>{};
+}
+
+Result<Frame> Session::receive_until(vinc::Deadline deadline) {
+    std::unique_lock lock(peer_->mutex);
+    if (!peer_->changed.wait_until(lock, deadline, [&] {
+            return !peer_->incoming.empty() || peer_->state == State::Closed;
+        })) {
+        return std::unexpected(control::error(ErrorCode::Timeout, ErrorOperation::WaitReceive));
+    }
+
+    if (peer_->incoming.empty()) {
+        return std::unexpected(*peer_->failure);
+    }
+
+    auto frame = std::move(peer_->incoming.front());
+    peer_->incoming.pop_front();
+    peer_->incoming_bytes -= header_size + frame.payload.size();
+    return frame;
+}
+
+void Session::close() {
+    {
+        std::lock_guard lock(peer_->mutex);
+        fail(*peer_, control::error(ErrorCode::Closed, ErrorOperation::Close));
+    }
+    wake(*peer_);
+}
+
+Service::Service(std::shared_ptr<detail::Engine> engine) : engine_(std::move(engine)) {
+}
+
+Result<std::unique_ptr<Service>> Service::create(std::size_t max_sessions) {
+    if (!max_sessions || max_sessions > service_session_limit) {
+        return std::unexpected(error(ErrorCode::InvalidArgument, ErrorOperation::Create));
+    }
+
+    auto engine = create_engine(max_sessions);
+    if (!engine) {
+        return std::unexpected(engine.error());
+    }
+
+    auto result = std::unique_ptr<Service>(new Service(*engine));
+    try {
+        start_worker(**engine);
+    } catch (const std::system_error& error) {
+        return std::unexpected(
+            Error{ErrorCode::WorkerFailed, ErrorOperation::StartWorker, osal::native_error(error.code())});
+    }
+    return result;
+}
+
+Service::~Service() {
+    engine_->worker.request_stop();
+    (void)engine_->poller.wake();
+    if (engine_->worker.joinable()) {
+        engine_->worker.join();
+    }
+}
+
+Result<std::shared_ptr<Session>> Service::attach(osal::Socket socket, Options options) {
+    if (!socket || !valid_session_options(options)) {
+        return std::unexpected(error(ErrorCode::InvalidArgument, ErrorOperation::Attach));
+    }
+
+    auto prepared = prepare_peer(std::move(socket), std::move(options), engine_);
+    if (!prepared) {
+        return std::unexpected(prepared.error());
+    }
+    auto peer = std::move(*prepared);
+    auto session = std::shared_ptr<Session>(new Session(peer));
+    {
+        std::lock_guard lock(engine_->mutex);
+        if (engine_->stopping) {
+            return std::unexpected(error(ErrorCode::Closed, ErrorOperation::Attach));
+        }
+
+        if (engine_->peers.size() >= engine_->max_sessions) {
+            return std::unexpected(error(ErrorCode::Backpressure, ErrorOperation::Attach));
+        }
+
+        // Publication transfers socket I/O responsibility to the worker.
+        engine_->peers.push_back(peer);
+    }
+    wake(*peer);
+    return session;
+}
+} // namespace vinc::control

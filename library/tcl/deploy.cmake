@@ -1,0 +1,26 @@
+# Build-time copy only. Lock the resolved destination so distinct target-directory
+# expressions cannot write the same scripts/licenses concurrently.
+cmake_minimum_required(VERSION 3.20)
+if(NOT IS_ABSOLUTE "${SOURCE}" OR NOT EXISTS "${SOURCE}/library/init.tcl")
+    message(FATAL_ERROR "Tcl deployment requires the pinned source directory")
+endif()
+if(NOT IS_ABSOLUTE "${DESTINATION}")
+    message(FATAL_ERROR "Tcl deployment requires an absolute destination")
+endif()
+set(resource_root "${DESTINATION}/lib")
+file(MAKE_DIRECTORY "${resource_root}")
+# Real paths also coordinate callers that spell the same directory differently.
+get_filename_component(resource_root "${resource_root}" REALPATH)
+set(copy_lock_timeout_seconds 60)
+file(LOCK "${resource_root}/.vinc-tcl-deploy.lock" GUARD PROCESS
+    TIMEOUT ${copy_lock_timeout_seconds} RESULT_VARIABLE locked)
+if(NOT locked STREQUAL "0")
+    message(FATAL_ERROR "Cannot acquire Tcl resource deployment lock: ${locked}")
+endif()
+set(resource_dir "${resource_root}/tcl9.1")
+file(COPY "${SOURCE}/library/" DESTINATION "${resource_dir}")
+configure_file("${SOURCE}/license.terms" "${resource_dir}/license.terms" COPYONLY)
+file(MAKE_DIRECTORY "${resource_dir}/licenses")
+configure_file("${SOURCE}/utf8proc/LICENSE.md" "${resource_dir}/licenses/utf8proc.txt" COPYONLY)
+configure_file("${SOURCE}/libtommath/LICENSE" "${resource_dir}/licenses/libtommath.txt" COPYONLY)
+configure_file("${SOURCE}/compat/zlib/LICENSE" "${resource_dir}/licenses/zlib.txt" COPYONLY)

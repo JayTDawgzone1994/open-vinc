@@ -1,0 +1,10 @@
+{
+    "id": "vinc.topics",
+    "name": "Topics",
+    "version": "0.1.0",
+    "apiVersion": 1,
+    "entry": "index.js",
+    "panels": [
+        { "id": "topics", "title": "Topic Monitor", "multiple": false }
+    ]
+}

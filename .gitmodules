@@ -1,0 +1,24 @@
+[submodule "tcl"]
+	path = library/tcl/upstream
+	url = https://github.com/tcltk/tcl.git
+[submodule "tomlplusplus"]
+	path = library/tomlplusplus/upstream
+	url = https://github.com/marzer/tomlplusplus.git
+[submodule "library/fmt/upstream"]
+	path = library/fmt/upstream
+	url = https://github.com/fmtlib/fmt.git
+[submodule "library/spdlog/upstream"]
+	path = library/spdlog/upstream
+	url = https://github.com/gabime/spdlog.git
+[submodule "library/pybind11/upstream"]
+	path = library/pybind11/upstream
+	url = https://github.com/pybind/pybind11.git
+[submodule "library/cpp-httplib/upstream"]
+	path = library/cpp-httplib/upstream
+	url = https://github.com/yhirose/cpp-httplib.git
+[submodule "library/json/upstream"]
+	path = library/json/upstream
+	url = https://github.com/nlohmann/json.git
+[submodule "library/picosha2/upstream"]
+	path = library/picosha2/upstream
+	url = https://github.com/okdshin/PicoSHA2.git

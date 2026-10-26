@@ -1,0 +1,4 @@
+3.54.0
+https://www.sqlite.org/2026/sqlite-amalgamation-3540000.zip
+SHA3-256 7b670a62fdfbd672b75fef004cb703c8a3e87d3a5cc7d675b4a08337004a2d93
+SOURCE_ID 2026-10-09 15:46:58 be8d059e9a49089ab2dce5ed26dd87aaf598fdc5fbe0b107c0dd758464bcd5e3

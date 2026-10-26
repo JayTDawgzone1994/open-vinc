@@ -1,0 +1,41 @@
+{
+  "platform": "Windows-11-10.0.26200-SP0",
+  "machine": "AMD64",
+  "python": "3.14.4 (main, Apr 11 2026, 07:13:00)  [MINGW GCC 15.2.0 64 bit (AMD64)]",
+  "logical_cpus": 16,
+  "processor": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+  "command": [
+    "src/vinc/message_bus/benchmarks/run.py",
+    "--exe",
+    "build/windows-msvc-release/vinc/message_bus/benchmarks/bus_benchmark.exe",
+    "--plugin",
+    "build/windows-msvc-release/vinc/message_bus/benchmarks/bus_benchmark_plugin.dll",
+    "--output",
+    "build/bus-benchmark-20261006",
+    "--samples",
+    "1000"
+  ],
+  "start_local": "2026-10-06 12:58:23 \u53f0\u5317\u6a19\u6e96\u6642\u9593",
+  "shared_budget_bytes": 4294967296,
+  "exe": "build/windows-msvc-release/vinc/message_bus/benchmarks/bus_benchmark.exe",
+  "plugin": "build/windows-msvc-release/vinc/message_bus/benchmarks/bus_benchmark_plugin.dll",
+  "percentile_method": "nearest rank, ceil(p*n); received samples only",
+  "resource_window": "per-process startup-to-report; includes warmup and idle setup/drain",
+  "rss": "process-lifetime peak; shared pages may be counted by both processes",
+  "cmake": [
+    "CMAKE_BUILD_TYPE:STRING=Release",
+    "CMAKE_CXX_COMPILER:UNINITIALIZED=cl",
+    "CMAKE_CXX_FLAGS_RELEASE:STRING=/O2 /Ob2 /DNDEBUG",
+    "CMAKE_GENERATOR:INTERNAL=Ninja"
+  ],
+  "git_head": "12cdbae48e71b7df48a50a0a56fa3e53c90ec839",
+  "binary_sha256": {
+    "bus_benchmark.exe": "d42bf40118c0f9dc52809abdd152654e5eae9faad29115599aac3a6647de3c8f",
+    "bus_benchmark_plugin.dll": "225c5ea3b1112bb4c82b3338c1d7295e150e1ef9e8e87cf42fe37d0181f556f3"
+  },
+  "physical_memory_bytes": 34277642240,
+  "cpu_physical_cores": 8,
+  "compiler": "MSVC 19.51.36257.0",
+  "cmake_version": "4.3.2",
+  "source_state": "Base revision plus this uncommitted benchmark implementation"
+}

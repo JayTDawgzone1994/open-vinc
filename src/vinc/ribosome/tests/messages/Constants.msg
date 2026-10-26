@@ -1,0 +1,17 @@
+double decimal = 010;
+double eight = 08;
+double fraction = 0.10000000000000001;
+double smallest = 4.9406564584124654e-324;
+double largest = 1.7976931348623157e308;
+double negative_zero = -0;
+float single = 0.1f;
+float smallest_single = 1.401298464324817e-45;
+float largest_single = 3.4028234663852886e38;
+float not_a_number = nan;
+string embedded = "a\0b";
+string digits = "\0127";
+string escapes = "\n\r\t\"\\";
+string empty = "";
+string placeholders = "${VALUE} ${DO_MESSAGE_CLASS} ${DO_INCLUDE_DEPENDENT_MESSAGES}";
+string utf8 = "訊息🚀";
+int Base = 7;

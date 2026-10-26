@@ -1,0 +1,89 @@
+#pragma once
+
+#include <vinc/error_catalog.hpp>
+#include <vinc/osal/error.hpp>
+#include <array>
+
+namespace vinc::osal::detail {
+// This native formatter has no Process/Socket/service dependency.
+std::string native_error_text(const NativeError& error);
+
+inline constexpr auto error_entries = std::array{
+    ErrorCodeEntry{ErrorCode::InvalidArgument, "Invalid argument"},
+    ErrorCodeEntry{ErrorCode::NotFound, "Not found"},
+    ErrorCodeEntry{ErrorCode::PermissionDenied, "Permission denied"},
+    ErrorCodeEntry{ErrorCode::ResourceExhausted, "Resource exhausted"},
+    ErrorCodeEntry{ErrorCode::Unsupported, "Unsupported operation"},
+    ErrorCodeEntry{ErrorCode::Timeout, "Timed out"},
+    ErrorCodeEntry{ErrorCode::Cancelled, "Cancelled"},
+    ErrorCodeEntry{ErrorCode::ServiceClosed, "Service closed"},
+    ErrorCodeEntry{ErrorCode::Busy, "Busy"},
+    ErrorCodeEntry{ErrorCode::ObservationLost, "Process observation lost"},
+    ErrorCodeEntry{ErrorCode::SystemError, "System error"},
+    ErrorCodeEntry{ErrorCode::Closed, "Closed"},
+    ErrorCodeEntry{ErrorCode::PeerClosed, "Peer closed"},
+    ErrorCodeEntry{ErrorCode::WouldBlock, "Would block"},
+    ErrorCodeEntry{ErrorCode::AddressInUse, "Address in use"},
+    ErrorCodeEntry{ErrorCode::AddressNotAvailable, "Address not available"},
+    ErrorCodeEntry{ErrorCode::ConnectionRefused, "Connection refused"},
+    ErrorCodeEntry{ErrorCode::ConnectionReset, "Connection reset"},
+    ErrorCodeEntry{ErrorCode::NotConnected, "Not connected"},
+    ErrorCodeEntry{ErrorCode::MessageTooLarge, "Message too large"},
+    ErrorCodeEntry{ErrorCode::NetworkUnreachable, "Network unreachable"},
+    ErrorCodeEntry{ErrorCode::AlreadyExists, "Already exists"},
+    ErrorCodeEntry{ErrorCode::InvalidEncoding, "Invalid Unicode encoding"},
+};
+inline constexpr auto operation_entries = std::array{
+    ErrorOperationEntry{ErrorOperation::InitializeService, "InitializeService"},
+    ErrorOperationEntry{ErrorOperation::Spawn, "Spawn"},
+    ErrorOperationEntry{ErrorOperation::Observe, "Observe"},
+    ErrorOperationEntry{ErrorOperation::Wait, "Wait"},
+    ErrorOperationEntry{ErrorOperation::Terminate, "Terminate"},
+    ErrorOperationEntry{ErrorOperation::Forget, "Forget"},
+    ErrorOperationEntry{ErrorOperation::Shutdown, "Shutdown"},
+    ErrorOperationEntry{ErrorOperation::CreatePipe, "CreatePipe"},
+    ErrorOperationEntry{ErrorOperation::AdoptPipe, "AdoptPipe"},
+    ErrorOperationEntry{ErrorOperation::ReadPipe, "ReadPipe"},
+    ErrorOperationEntry{ErrorOperation::WritePipe, "WritePipe"},
+    ErrorOperationEntry{ErrorOperation::CancelIo, "CancelIo"},
+    ErrorOperationEntry{ErrorOperation::WaitIo, "WaitIo"},
+    ErrorOperationEntry{ErrorOperation::CreateSocket, "CreateSocket"},
+    ErrorOperationEntry{ErrorOperation::ParseAddress, "ParseAddress"},
+    ErrorOperationEntry{ErrorOperation::ResolveAddress, "ResolveAddress"},
+    ErrorOperationEntry{ErrorOperation::BindSocket, "BindSocket"},
+    ErrorOperationEntry{ErrorOperation::ListenSocket, "ListenSocket"},
+    ErrorOperationEntry{ErrorOperation::AcceptSocket, "AcceptSocket"},
+    ErrorOperationEntry{ErrorOperation::ConnectSocket, "ConnectSocket"},
+    ErrorOperationEntry{ErrorOperation::SendSocket, "SendSocket"},
+    ErrorOperationEntry{ErrorOperation::ReceiveSocket, "ReceiveSocket"},
+    ErrorOperationEntry{ErrorOperation::ShutdownSocket, "ShutdownSocket"},
+    ErrorOperationEntry{ErrorOperation::CloseSocket, "CloseSocket"},
+    ErrorOperationEntry{ErrorOperation::QuerySocket, "QuerySocket"},
+    ErrorOperationEntry{ErrorOperation::SetSocketOption, "SetSocketOption"},
+    ErrorOperationEntry{ErrorOperation::GetSocketOption, "GetSocketOption"},
+    ErrorOperationEntry{ErrorOperation::RegisterSocket, "RegisterSocket"},
+    ErrorOperationEntry{ErrorOperation::WaitSocket, "WaitSocket"},
+    ErrorOperationEntry{ErrorOperation::WakeSocket, "WakeSocket"},
+    ErrorOperationEntry{ErrorOperation::CreateSharedMemory, "CreateSharedMemory"},
+    ErrorOperationEntry{ErrorOperation::OpenSharedMemory, "OpenSharedMemory"},
+    ErrorOperationEntry{ErrorOperation::MapSharedMemory, "MapSharedMemory"},
+    ErrorOperationEntry{ErrorOperation::UnmapSharedMemory, "UnmapSharedMemory"},
+    ErrorOperationEntry{ErrorOperation::CloseSharedMemory, "CloseSharedMemory"},
+    ErrorOperationEntry{ErrorOperation::UnlinkSharedMemory, "UnlinkSharedMemory"},
+    ErrorOperationEntry{ErrorOperation::OpenTerminal, "OpenTerminal"},
+    ErrorOperationEntry{ErrorOperation::ReadTerminal, "ReadTerminal"},
+    ErrorOperationEntry{ErrorOperation::RandomBytes, "RandomBytes"},
+    ErrorOperationEntry{ErrorOperation::CreateFileLock, "CreateFileLock"},
+    ErrorOperationEntry{ErrorOperation::OpenFileLock, "OpenFileLock"},
+    ErrorOperationEntry{ErrorOperation::LockFileLock, "LockFileLock"},
+    ErrorOperationEntry{ErrorOperation::UnlockFileLock, "UnlockFileLock"},
+    ErrorOperationEntry{ErrorOperation::PathFromUtf8, "PathFromUtf8"},
+    ErrorOperationEntry{ErrorOperation::PathToUtf8, "PathToUtf8"},
+    ErrorOperationEntry{ErrorOperation::OpenLibrary, "OpenLibrary"},
+    ErrorOperationEntry{ErrorOperation::FindSymbol, "FindSymbol"},
+    ErrorOperationEntry{ErrorOperation::CloseLibrary, "CloseLibrary"},
+};
+inline constexpr ErrorCatalog error_catalog{ErrorDomain::Osal, "OSAL", error_entries, operation_entries,
+                                            native_error_text};
+static_assert(valid_catalog(error_catalog));
+}

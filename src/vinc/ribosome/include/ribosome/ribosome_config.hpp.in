@@ -1,0 +1,9 @@
+#pragma once
+#include <string_view>
+
+namespace vinc {
+// CMake substitutes schema and build-output defaults at configure time; CLI paths can override them.
+constexpr std::u8string_view kDefaultInputPath = u8"@ribosome_input_literal@";
+constexpr std::u8string_view kDefaultOutputPath = u8"@ribosome_output_literal@";
+constexpr std::u8string_view kDefaultTemplatePath = u8"@ribosome_template_literal@";
+}
