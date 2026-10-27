@@ -37,7 +37,9 @@ inline void take(Result<void> value) {
 
 struct Directory {
     std::filesystem::path path =
-        std::filesystem::temp_directory_path() /
+        // macOS temporary paths may traverse /var -> /private/var. The Log
+        // contract rejects symlink ancestors, so use the real test directory.
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) /
         ("vinc-log-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 
     Directory() {

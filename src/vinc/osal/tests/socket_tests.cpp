@@ -237,8 +237,21 @@ void datagrams(AddressFamily family) {
             "truncation visible");
     expect(receiver.try_receive_from(small), vinc::osal::ErrorCode::WouldBlock, "datagram tail discarded");
     take(sender.send_to_until({}, target, after()), "zero datagram to empty buffer");
-    require(take(receiver.receive_from_until({}, after()), "empty receive buffer").data.bytes == 0,
+    auto zero_capacity = take(receiver.receive_from_until({}, after()), "empty receive buffer");
+    require(zero_capacity.data.bytes == 0 && !zero_capacity.data.eof && !zero_capacity.data.truncated &&
+                zero_capacity.sender == source,
             "zero-length UDP valid");
+    // Cover payloads that exactly fill the scratch byte as well as exceed it.
+    for (const auto payload : {std::span<const std::byte>(message).first(1),
+                               std::span<const std::byte>(message)}) {
+        take(sender.send_to_until(payload, target, after()), "nonempty datagram to empty buffer");
+        auto discarded = take(receiver.receive_from_until({}, after()), "discard datagram payload");
+        require(discarded.data.bytes == 0 && !discarded.data.eof && discarded.data.truncated &&
+                    discarded.sender == source,
+                "empty buffer preserves sender and reports discarded payload");
+        expect(receiver.try_receive_from(small), vinc::osal::ErrorCode::WouldBlock,
+               "empty buffer consumes the whole datagram");
+    }
     require(take(sender.try_connect(target), "connect UDP") == ConnectProgress::Connected, "UDP association");
     take(sender.send_until(message, after()), "connected UDP send");
     std::array<std::byte, 64> large;
@@ -353,8 +366,12 @@ void cancellations_and_failures() {
             "cancel did not close socket");
     auto blocked = take(Socket::open(AddressFamily::IPv4, SocketType::Stream), "refusal target");
     take(blocked.bind(loopback(AddressFamily::IPv4)), "reserve unlistened port");
+    auto refusal_address = take(blocked.local_address(), "refusal address");
+    // Darwin drops SYNs for a bound, non-listening TCP socket. Close it so
+    // this scenario exercises refusal rather than the connect deadline.
+    take(blocked.close(), "release refusal port");
     auto client = take(Socket::open(AddressFamily::IPv4, SocketType::Stream), "refused client");
-    auto failed = client.connect_until(take(blocked.local_address(), "refusal address"), after());
+    auto failed = client.connect_until(refusal_address, after());
     expect(failed, vinc::osal::ErrorCode::ConnectionRefused,
            "connect reports refusal, not success on writable");
     require(!client, "failed connect_until releases socket");

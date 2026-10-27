@@ -7,7 +7,7 @@ heartbeat 或 message bus。雙向通訊由兩條單向 Pipe 組合。
 Windows 後端使用私有單向 named pipe 與 overlapped I/O／IOCP；Linux 使用
 匿名 nonblocking pipe 與 epoll；macOS 使用匿名 nonblocking pipe 與 kqueue。
 公開介面不暴露原生 handle／fd，不使用 socket，不新增第三方套件。
-Windows 已實際驗證；Linux／macOS 已更新後端，但仍待目標平台建置與測試。
+Windows 有既有驗證紀錄；本次 macOS 驗證與三平台待驗證範圍見文末。
 
 ## 邊界與公開介面
 
@@ -57,6 +57,9 @@ auto write = service->submit_write(pipe->writer, std::move(data), deadline);
 
 - `IoBuffer` 擁有自己的儲存空間。提交拒絕或提交前配置拋出例外時，不移走 buffer；
   成功接受後，舊指標／span 不再供呼叫端使用。
+- 首次提交若在原生端點設定／事件監看綁定階段失敗，外層操作為 `ReadPipe`／
+  `WritePipe`，原因鏈保留 `AdoptPipe` 與原生診斷。操作未接受，不產生完成事件、
+  不啟動 I/O、不占用操作／buffer 名額；端點仍可重試提交。
 - 每個接受的操作產生一筆完成事件，歸還原 buffer。服務解構放棄結果時會安全丟棄。
 - 每個端點同時最多一筆操作，未收集的完成事件也占用該端點及操作名額；再次提交為 `Busy`。
 - 收發是 **some** 語意：成功時可能只傳輸部分資料。零長度 buffer 為 `InvalidArgument`。
@@ -82,6 +85,13 @@ auto write = service->submit_write(pipe->writer, std::move(data), deadline);
 程序退出與 EOF 不等價：程序可先關閉端點而繼續執行，其他程序的副本也可能
 延後 EOF。正常結束寫入應先收集所有 write 完成結果，再關閉 writer，讓 reader
 繼續讀到 EOF。關閉 reader 會使後續寫入觀察到斷管。
+
+三平台共同保證：經 `PipeService` 執行的斷管寫入不會因該次 I/O 的 SIGPIPE
+終止宿主或呼叫宿主的 signal handler；觀察到斷管時回報 `PeerClosed`。
+這同樣適用於子程序接手後經 PipeService 使用的 writer。服務不改寫宿主全域
+signal handler 或呼叫端執行緒的訊號遮罩。若成功傳輸、取消或本端關閉先完成，
+仍遵循各自的完成／競爭契約，不要求每筆操作一律回報 `PeerClosed`。
+此保證不涵蓋子程序直接寫入原生 stdout／stderr；邊界見 [輸出擷取](OUTPUT.md)。
 
 `close()` 可重複呼叫，只發起關閉；不保證排空未完成的操作，也不終止程序。
 新提交回報 `Closed`，未完成操作會取消；原生 I/O 真正完成後才釋放端點與 buffer。
@@ -183,8 +193,15 @@ macOS 使用 pipe + fcntl 設定旗標，不能對宿主自行發動的並行 fo
 一般 close 為非同步，端點名額在原生清理後回收。建立、接手或保留服務容量可拋出
 標準 C++ 配置例外，不宣稱所有 API 為 noexcept。
 
-事件迴圈掃描有界操作清單，尚無大量端點的效能量測。POSIX 只在 I/O 工作執行緒
-封鎖 SIGPIPE，斷管寫入回報結果，不改寫宿主全域 signal handler。
+事件迴圈掃描有界操作清單，尚無大量端點的效能量測。POSIX 在 I/O 工作執行緒
+封鎖 SIGPIPE；macOS 另在端點首次提交 I/O 時設定 `F_SETNOSIGPIPE`，讓斷管寫入
+回報 `PeerClosed`。Darwin 的斷管訊號送給程序，僅封鎖 worker 的訊號不足以保護宿主；
+原生行為見 [Apple XNU 的 EPIPE 處理](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/sys_generic.c)。
+不改寫宿主全域 signal handler；直接交給子程序的 stdout／stderr writer 未提交給
+PipeService，不設定此旗標，保留原生斷管行為。
+macOS 旗標屬於原生 open-file description，原生複本會共享設定；目前公開 API
+不提供任意複製／匯入原生端點，且交付僅接受未使用端點。未來若擴充這些能力，
+需重新審查此隔離邊界。
 `monitor_error()` 回報基礎設施錯誤，停止接受新工作並進行清理；若無法確認原生
 操作已結束，仍保留其記憶體，shutdown 可逾時。
 
@@ -207,7 +224,46 @@ ctest --test-dir build/osal --output-on-failure
 生成程式的數值轉型警告仍存在，未在本次修改。
 
 Windows 工具鏈：x64 MSVC 19.44、SDK 10.0.26100、CMake 3.31.6、Ninja 1.12.1。
-Linux／macOS 仍需實際建置與行為驗證，不以 Windows 測試代替三平台支援證據。
+上述為歷史 Windows 驗證，不代替本次變更的跨平台驗證。
+
+### 斷管與提交失敗契約測試（2026-10-27）
+
+- `osal.pipe_attach_failure`：以測試專用原生替身執行真正的共用 scheduler，
+  對 read／write 注入初始化失敗，檢查公開 operation、單一原因鏈、Linux／Darwin／
+  Win32 原生診斷的保留、buffer 位址／內容／容量不變、沒有 I/O 或完成事件，
+  以及單一操作與 buffer 名額下的重複失敗／成功重試。這不是原生 fcntl／IOCP 故障注入。
+- `osal.pipe_contract.local-default`、`inherited-default`：以真實管道驗證本地及
+  繼承 writer 重複斷管後仍存活，每筆操作恰有一個 `PeerClosed` 完成結果，歸還原 buffer。
+- `osal.pipe_contract.local-custom`、`inherited-custom`（POSIX）：服務建立、I/O 與
+  shutdown 前後確認宿主 handler／呼叫端遮罩不變，OSAL 斷管不呼叫宿主 handler，
+  另以無關原生管道確認宿主原有 SIGPIPE 行為仍有效。
+- `osal.pipe_contract.stdio-stdout-default`、`stdio-stderr-default`：父端先提交／取消讀取，
+  確認 capture reader 已設定並實際關閉後，才經另一條管道通知子程序直接寫標準串流。
+  POSIX 預設 SIGPIPE 終止子程序；Windows 檢查原生斷管錯誤。
+- `osal.pipe_contract.stdio-stdout-ignore`、`stdio-stderr-ignore`（POSIX）：子程序自行
+  忽略 SIGPIPE 後，原生寫入回 `EPIPE`。子程序啟動時亦檢查預設處置與未封鎖的 SIGPIPE。
+
+會觸發訊號的情境在獨立子程序執行；父程序管理退出、逾時及失敗回收，CTest 設有
+外層逾時。管道握手／EOF 建立操作順序，不依賴 sleep。共同契約測試在三平台使用
+同一份 C++ 程式，POSIX 訊號檢查只存在於測試的原生邊界。
+
+本次 macOS 26.3.1(a)／arm64（OS build `25D771280a`）；完整工具鏈與原始碼版本
+統一記錄於[已驗證環境](../../../README.md#macos-validation)。
+完整專案 Debug 建置成功；OSAL 與 OutputHub 回歸 **24/24 通過**（10.42 秒），
+包含上述新增 9 項 CTest。未執行本次 Release 或全專案所有 CTest。
+反向驗證亦確認：暫時移除提交錯誤包裝時，故障測試失敗；暫時停用 macOS
+F_SETNOSIGPIPE 時，本地／繼承端點的預設／自訂 handler 四項測試全部失敗。
+恢復修正並重新建置後，才執行上述最終 24 項回歸。
+
+執行上述測試及既有 Pipe／輸出擷取回歸：
+
+```sh
+ctest --test-dir build/osal -R '^osal\.(pipe|pipe_stream|process_output|pipe_attach_failure|pipe_contract\..*)$' --output-on-failure
+```
+
+Windows／Linux 本次原生建置與測試尚待執行；不以 macOS 成功或替身測試作為
+另外兩平台的通過證據。原生端點設定失敗尚未直接注入，以上故障測試驗證的是
+共用提交邊界收到失敗後的行為。
 
 原生契約參考：
 

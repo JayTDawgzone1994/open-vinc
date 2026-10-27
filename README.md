@@ -274,6 +274,38 @@ For example, the [Topic Monitor validation recorded on 2026-10-25](src/vinc/ui/R
 
 例如上述 2026-10-25 的 Topic Monitor 驗證包含 Windows Debug／Release 各 12 項相關 CTest、前端型別檢查與 5 項 Chromium 測試，不是全專案或跨平台認證。
 
+<a id="macos-validation"></a>
+
+**Validated macOS environment (2026-10-27) / macOS 已驗證環境（2026-10-27）**
+
+| Item / 項目 | Validated version / 已驗證版本 |
+| --- | --- |
+| macOS | **26.3.1(a)**, OS build `25D771280a` |
+| Architecture / 架構 | Apple Silicon / `arm64` |
+| Compiler / 編譯器 | Apple Clang **21.0.0** (`clang-2100.1.1.101`) |
+| Standard library / 標準函式庫 | libc++ **21.1.6** (`_LIBCPP_VERSION=210106`) |
+| macOS SDK | **26.5** |
+| Build tools / 建置工具 | CMake **4.4.4**, Ninja **1.13.2** (`1.13.2.git.kitware.jobserver-pipe-1`) |
+| Web UI build tools / Web UI 建置工具 | Node.js **24.22.0**, npm **11.19.1** |
+| Configuration / 組態 | Debug; apps, examples and Web UI enabled; Python disabled / 啟用 apps、examples、Web UI；停用 Python |
+| Source / 原始碼 | Base commit `13204c20a361` plus local macOS fixes and Pipe contract tests / 基礎 commit 加上本機 macOS 修正與 Pipe 契約測試 |
+
+This records a tested configuration, not a minimum macOS deployment version or a released version of Open-VINC. Minimum macOS compatibility and Intel/x86_64 support have not been established by this run.
+
+此表記錄實際通過驗證的組合；macOS 最低部署版本仍未確立，也不代表已發布的 Open-VINC 版本。本次未驗證 Intel／x86_64 Mac。
+
+The initial clean default Debug build including the Web UI succeeded. All 82 CTests passed across the full run (79 passed) and the corrected Socket/Log test rerun (3 passed). Frontend type checking also passed. Manual Vinc execution verified example Module commands, Web UI HTML/JS/CSS HTTP 200 responses, enabled file logging, and complete shutdown. Logs are under `build/macos-debug-fixed-*.log`.
+
+初次乾淨的預設 Debug 建置（含 Web UI）成功；完整 CTest 首輪通過 79 項，修正 Socket／Log 測試情境後重跑其餘 3 項通過，合計 82 項均通過。前端型別檢查亦通過。另實際啟動 Vinc，確認範例 Module 命令、Web UI HTML／JS／CSS 的 HTTP 200 回應、檔案 Log 啟用及完整關閉。紀錄位於 `build/macos-debug-fixed-*.log`。
+
+After the Pipe submission-error wrapping and contract-test additions, the full Debug project rebuilt successfully and **24/24 OSAL and OutputHub CTests passed**, including 9 new tests. This follow-up did not rerun the full project suite; do not add the two runs' counts together. [Pipe validation details](src/vinc/osal/PIPE.md#斷管與提交失敗契約測試2026-10-27) record the scope and negative controls. Local logs: `build/macos-pipe-contract-final-build.log` and `build/macos-pipe-contract-final-ctest.log`.
+
+補齊 Pipe 提交錯誤包裝與契約測試後，完整 Debug 專案再次建置成功，**OSAL 與 OutputHub 的 24/24 項 CTest 通過**，包含新增 9 項測試。此後續回歸沒有重跑全專案套件，兩輪測試數不可直接相加；範圍與反向驗證詳見 [Pipe 驗證紀錄](src/vinc/osal/PIPE.md#斷管與提交失敗契約測試2026-10-27)。本機紀錄為 `build/macos-pipe-contract-final-build.log` 與 `build/macos-pipe-contract-final-ctest.log`。
+
+Release, optional Python bindings, browser automation, and other operating systems were not tested in these macOS runs. Use a fresh build directory when upgrading from the original `vinc/` binary-tree layout, which collided with `Vinc` on case-insensitive filesystems; intermediate framework artifacts now live under `framework/`.
+
+上述 macOS 驗證未涵蓋 Release、選用 Python 綁定、瀏覽器自動化或其他 OS。原本 `vinc/` 中間產物目錄與 `Vinc` 在不區分大小寫的檔案系統衝突，現改放 `framework/`；從舊布局升級時請使用新的建置目錄。
+
 - **ABI and deployment:** native Plugins require matching toolchain, standard library, configuration, layout, and Windows CRT. There is no installed `find_package(VINC)` SDK or complete relocatable Plugin/UI package yet. / **ABI 與部署：**原生 Plugin 須符合工具鏈、標準庫、組態、布局及 Windows CRT 契約；尚無安裝式 `find_package(VINC)` SDK 或完整可重定位的 Plugin／UI 部署包。
 - **UI scope:** Topic Monitor is read-only. Module control, Param editing, Log panels, dependency graphs, 3D panels, and browser management RPC are not wired. Trusted plugins share page privileges, not a sandbox. / **UI 範圍：**Topic Monitor 為唯讀；Module 控制、Param 編輯、Log 面板、依賴圖、3D 面板與瀏覽器管理 RPC 尚未接線。受信任 plugin 共用頁面權限，不是隔離沙箱。
 - **Future capabilities:** native Plugin hot discovery/loading, dynamic message schemas, Bag Player, and framework-to-framework multi-machine transport are not implemented. / **未來能力：**尚未實作原生 Plugin 熱探索／載入、動態訊息 schema、Bag Player 與框架對框架的多機傳輸。

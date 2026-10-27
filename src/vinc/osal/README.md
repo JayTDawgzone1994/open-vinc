@@ -80,6 +80,7 @@ Integrated operation boundaries:
 - Socket creation, post-accept native setup, connect peer queries, hostname resolution, and Poller creation preserve the outer API operation and underlying step.
 - Preliminary resource failures in `spawn_with_pipe()`, `spawn_with_pipes()`, and `spawn_with_output()` report Spawn; inherited-endpoint adoption reports AdoptPipe. Direct failures do not add redundant same-name causes.
 - Windows Pipe random failure is CreatePipe ← RandomBytes; process helpers produce Spawn ← CreatePipe ← RandomBytes, subject to configured capacity/omission.
+- Pipe submission setup failures retain ReadPipe/WritePipe outside AdoptPipe, with native diagnostics and caller buffer ownership preserved; see [Pipe contracts and tests](PIPE.md).
 
 - Socket 的 accept／connect／send／receive 等 `*_until()` 保留其公開操作，
   下層 Poller 的初始化、登記、等待或喚醒失敗保留於原因鏈；直接呼叫 Poller 仍回報 Poller 操作。
@@ -89,6 +90,8 @@ Integrated operation boundaries:
   繼承端點接手失敗以 AdoptPipe 回報。直接的 Spawn／AdoptPipe 失敗不再增加同名原因。
 - Windows Pipe 亂數失敗為 CreatePipe ← RandomBytes；經程序建立便利 API 回報時，
   為 Spawn ← CreatePipe ← RandomBytes（依設定容量保留或標記省略）。
+- Pipe 首次提交設定失敗保留 ReadPipe／WritePipe ← AdoptPipe 與原生診斷，且不移走
+  呼叫端 buffer；斷管與訊號隔離的共同契約及驗證記錄見 [Pipe](PIPE.md)。
 
 These changes preserve Timeout/Cancelled codes, check order, cancellation results, cleanup, and exception boundaries. Callers branch on the current layer; causes provide diagnostics rather than a dependency on internal implementation steps.
 
@@ -455,6 +458,10 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
 
 2026-09-18 的歷史驗證環境為 Windows x64、MSVC 19.44、SDK 10.0.26100、CMake 3.31.6、Ninja 1.12.1；當次未在 Linux／macOS 原生建置或執行。程式碼存在不代表三平台驗證完成；後續證據須標明版本與測試範圍。
 
+**Native macOS validation, 2026-10-27:** macOS 26.3.1(a), arm64, Debug. The full project rebuilt successfully after the Pipe changes; all 24 OSAL/OutputHub CTests passed, including 9 new contract/fault tests. See the [validated environment and source revision](../../../README.md#macos-validation) and [Pipe test details](PIPE.md#斷管與提交失敗契約測試2026-10-27). This does not establish minimum macOS compatibility, Intel Mac support, Release results, or current Windows/Linux results.
+
+**2026-10-27 macOS 原生驗證：** macOS 26.3.1(a)、arm64、Debug。Pipe 修改後完整專案建置成功，OSAL／OutputHub 的 24 項 CTest 全數通過，包含新增 9 項契約／故障測試。完整工具鏈與原始碼版本見[已驗證環境](../../../README.md#macos-validation)，測試明細見 [Pipe](PIPE.md#斷管與提交失敗契約測試2026-10-27)。本次結果不代表最低 macOS 相容版本、Intel Mac、Release 或本次 Windows／Linux 驗證通過。
+
 <a id="2026-10-04-可讀性收尾第一輪"></a>
 
 ### Readability closeout, stage 1 (2026-10-04) / 2026-10-04 可讀性收尾：第一輪
@@ -523,6 +530,9 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
 <a id="待處理事項"></a>
 
 ## Outstanding issues and resolved findings / 待處理事項與已解決發現
+
+- **Pipe SIGPIPE and submission setup errors (2026-10-27):** macOS-managed Pipe I/O uses F_SETNOSIGPIPE before admission; setup failure now retains ReadPipe/WritePipe outside AdoptPipe. Native child stdio keeps its existing policy. Cross-platform contract tests and deterministic scheduler fault tests are registered with CTest. See [Pipe](PIPE.md) for macOS results and pending Windows/Linux verification; synthetic setup failure does not establish native fcntl/IOCP failure coverage.
+- **Pipe 斷管與提交錯誤（2026-10-27）：** macOS 在接受 Pipe I/O 前設定 F_SETNOSIGPIPE；設定失敗的公開 operation 已修正為 ReadPipe／WritePipe，原因鏈保留 AdoptPipe。原生子程序 stdio 保留既有政策。CTest 已加入共同契約及 scheduler 故障測試；macOS 結果、待補的 Windows／Linux 原生驗證與原生故障注入限制見 [Pipe](PIPE.md)。
 
 - **FileLock ownership after native unlock failure (2026-10-05):** FileLockGuard::unlock retains the Guard/local occupied flag on backend failure, proving only retained cleanup responsibility, not continued native ownership. [UnlockFileEx](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-unlockfileex), [Linux flock](https://man7.org/linux/man-pages/man2/flock.2.html), and [macOS flock](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html) do not guarantee unchanged ownership for every failure. Retryable Guard state alone does not establish safe payload access. No failure-after-release case has been reproduced and no revised policy is approved. The user deferred implementation; [root TODO](../../../TODO.md) tracks it. Since 2026-10-08 Concurrency no longer uses FileLock, but this OSAL gap remains. Decide known/unknown ownership, cleanup, retry, and fault policy before changes; the superseded Concurrency refactor did not fix FileLock.
 - **POSIX internal-fd/stdio isolation:** Linux/macOS monitors, POSIX FileLock/SharedMemory originally could retain fd 0/1/2 after the host closed stdio. Spawn Inherit preserves these via adddup2(fd, fd), which on Linux clears CLOEXEC ([glibc](https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/spawni.c)); CLOEXEC alone was insufficient. A child could write internal resources or retain a FileLock open description after owner death. The implemented descriptor helper relocates these resources and Linux pidfd before delivery/registration; failure preserves native errors and closes fds. Name rollback removes only new undistributed resources, not opened ones. POSIX osal.descriptor covers closed stdio, mapping/locking, child Null streams, exhausted-fd rollback/retry, and no child-extended ownership. That round did not compile/run Linux/macOS and had no WSL. Relocation addresses retained occupancy, not the separate concurrent window below.
