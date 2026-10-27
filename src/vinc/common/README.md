@@ -736,3 +736,10 @@ Message publication contracts and version changes belong to [Message Bus](../mes
 新增 ErrorDomain::Rpc = 14；元件自行維護錯誤／操作 catalog，common 不反向依賴 RPC runtime。
 config.hpp 的 rpc_* 設定集中控制共享／本地容量、待處理數與等待，預設值及限制見
 [RPC 資源與執行緒](../rpc/README.md#資源與執行緒)。未將既有設定遷入 Param。
+
+Module Graph's `ui_graph_*` limits are defined here but owned and documented by the
+[UI contract](../ui/README.md#module-graph-2026-10-27--module-關係圖). They do not move
+existing configuration to Param. Control wire page sizes remain protocol constants.
+
+Module Graph 的 `ui_graph_*` 暫存設定由 UI 契約維護；本輪未搬移既有 config 到 Param。
+控制封包分頁大小仍是各元件的協定常數。

@@ -1,6 +1,7 @@
 #pragma once
 #include <vinc/message_bus/detail/dispatch.hpp>
 #include <vinc/module/error.hpp>
+#include <vinc/module/module_info.hpp>
 #include <vinc/param/params.hpp>
 #include <vinc/log/log.hpp>
 #include <vinc/rpc/client.hpp>
@@ -72,6 +73,24 @@ public:
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
     bool living() const noexcept;
+    // Read-only pages have exclusive cursors and one caller-supplied deadline.
+    // Concurrent registry changes can appear between pages. No global snapshot is promised.
+    Result<ModulePage> list_modules(MID after, Deadline deadline);
+    Result<message_bus::TopicConnectionsPage> list_topic_connections(
+        message_bus::ConnectionCursor after, Deadline deadline) {
+        auto access = client();
+        if (!access) {
+            return std::unexpected(access.error());
+        }
+
+        auto result = access->get().list_topic_connections(std::move(after), deadline);
+        if (!result) {
+            return std::unexpected(wrap_error(module_system::ErrorCode::BusFailed,
+                module_system::ErrorOperation::AccessMessageBus, result.error()));
+        }
+
+        return result;
+    }
     Result<PumpStats> pumpOnce();
     Result<void> pumpLoop();
 

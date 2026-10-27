@@ -206,3 +206,14 @@ Result<void> Context::pumpLoop() {
     return {};
 }
 }
+
+namespace vinc {
+Result<ModulePage> Context::list_modules(MID after, Deadline deadline) {
+    if (!runtime_ || !living()) {
+        return std::unexpected(Error{module_system::ErrorCode::NotRunning,
+            module_system::ErrorOperation::ListModules});
+    }
+
+    return runtime_->list_modules(after, deadline);
+}
+}

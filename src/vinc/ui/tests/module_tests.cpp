@@ -76,6 +76,63 @@ template<class Predicate> Json wait_topic(httplib::Client& client, const httplib
     throw std::runtime_error("observed topic disappeared from local reply");
 }
 
+void graph(vinc::ModuleManager& manager, httplib::Client& client, const char* source) {
+    auto unauthorized = client.Get("/api/graph");
+    check(unauthorized && unauthorized->status == 401, "graph requires browser capability");
+    const auto headers = authorize(client);
+    take(manager.register_module_type({"uiGraphSource", std::filesystem::absolute(source), {}}));
+    std::vector<vinc::MID> modules;
+    constexpr unsigned isolated_modules = 9; // Force Module query pagination, not only Bus pagination.
+    for (unsigned index = 0; index < isolated_modules; ++index) {
+        const auto mid = take(manager.start_module("uiGraphSource", {"isolated" + std::to_string(index), "empty"}));
+        take(manager.wait_running(mid, Clock::now() + operation_budget));
+        modules.push_back(mid);
+    }
+    const auto source_mid = take(manager.start_module("uiGraphSource"));
+    take(manager.wait_running(source_mid, Clock::now() + operation_budget));
+    const auto response = client.Get("/api/graph", headers);
+    check(response && response->status == 200, "complete real Module graph request");
+    const auto snapshot = Json::parse(response->body);
+    check(snapshot["apiVersion"] == 1 && snapshot["atomicSnapshot"] == false, "graph consistency contract");
+    check(snapshot["modules"].size() >= isolated_modules + 2, "isolated Modules and multiple Module pages retained");
+    unsigned publishers = 0;
+    unsigned subscribers = 0;
+    unsigned orphan = 0;
+    for (const auto& connection : snapshot["connections"]) {
+        if (connection["topic"] == "graph/shared") {
+            check(connection["mid"] == std::to_string(source_mid), "authenticated owner MID");
+            if (connection["role"] == "publish") {
+                ++publishers;
+            } else {
+                ++subscribers;
+            }
+        } else if (connection["topic"] == "graph/noPublisher") {
+            ++orphan;
+        }
+    }
+    check(publishers == 2 && subscribers == 40 && orphan == 1, "all roles and registrations across same-topic pages");
+    take(manager.stop_module(source_mid, Clock::now() + operation_budget));
+    auto retired = wait_json(client, headers, "/api/graph", [](const auto& data) {
+        for (const auto& connection : data.at("connections")) {
+            if (connection.at("topic") == "graph/shared") {
+                return false;
+            }
+        }
+        return true;
+    });
+    bool retained = false;
+    for (const auto& module : retired["modules"]) {
+        if (module["mid"] == std::to_string(source_mid)) {
+            retained = module["state"] == static_cast<unsigned>(vinc::ModuleState::Stopped);
+        }
+    }
+    check(retained, "stopped Module record retained with no stale connections");
+    for (const auto mid : modules) {
+        take(manager.stop_module(mid, Clock::now() + operation_budget));
+    }
+    std::cout << "Graph: real Context, pagination, owner IDs, isolated Modules and retirement passed\n";
+}
+
 void monitor(vinc::ModuleManager& manager, httplib::Client& client, const char* source, const char* helper) {
     auto unauthorized = client.Get("/api/topics");
     check(unauthorized && unauthorized->status == 401, "diagnostics require capability");
@@ -157,7 +214,7 @@ void monitor(vinc::ModuleManager& manager, httplib::Client& client, const char* 
 
 int main(int argc, char** argv) {
     try {
-        check(argc == 5, "plugin, assets and topic fixture arguments");
+        check(argc == 6, "plugin, assets and topic fixture arguments");
         auto manager = take(vinc::test::create_manager());
         vinc::ModuleType type{"webUi", std::filesystem::absolute(argv[1]), {}};
         type.policy.stop_timeout = vinc::config::ui_stop_timeout;
@@ -186,6 +243,7 @@ int main(int argc, char** argv) {
         check(response && response->status == 200, "ModuleHost serves HTTP");
         check(take(manager->command(mid, {"status"}, deadline)) == 0, "Shell hook works through pump");
         monitor(*manager, client, argv[3], argv[4]);
+        graph(*manager, client, argv[5]);
         const auto old_headers = authorize(client);
         take(manager->stop_module(mid, Clock::now() + operation_budget));
         auto stopped = manager->inspect(mid);

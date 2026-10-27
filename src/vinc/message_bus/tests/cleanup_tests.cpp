@@ -1,3 +1,4 @@
+#include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/control/channel.hpp>
 // Exercise actual Bus code and Socket sessions at allocation failure boundaries.
 // Fault checkpoints throw only in this test executable; data-path tests use real mappings.
@@ -549,6 +550,37 @@ void test_registration_capacity_reuse() {
     ok(manager->drain_until(deadline()));
 }
 
+void test_readonly_timeout() {
+    Connection connection;
+    constexpr auto query_budget = std::chrono::milliseconds{50};
+    auto call = std::async(std::launch::async, [&] {
+        return connection.client->list_topic_connections({}, control::Clock::now() + query_budget);
+    });
+    auto request = take(connection.central->receive_until(deadline()));
+    auto expired = call.get();
+    check(!expired, "read-only query times out");
+    check(connection.module->state() == control::State::Open, "query timeout retains control session");
+    connection.reply(request, take(detail::encode_connections({})));
+    auto retry = std::async(std::launch::async, [&] {
+        return connection.client->list_topic_connections({}, deadline());
+    });
+    auto next = take(connection.central->receive_until(deadline()));
+    connection.reply(next, take(detail::encode_connections({})));
+    check(take(retry.get()).connections.empty(), "late reply retired; subsequent query succeeds");
+    constexpr auto retirement_budget = std::chrono::milliseconds{30};
+    for (std::size_t index = 0; index <= config::message_bus_pending_requests; ++index) {
+        auto dropped = connection.client->list_topic_connections({}, control::Clock::now() + retirement_budget);
+        check(!dropped, "lost reply times out");
+        take(connection.central->receive_until(deadline()));
+    }
+    auto recovered = std::async(std::launch::async, [&] {
+        return connection.client->list_topic_connections({}, deadline());
+    });
+    auto recovered_frame = take(connection.central->receive_until(deadline()));
+    connection.reply(recovered_frame, take(detail::encode_connections({})));
+    check(take(recovered.get()).connections.empty(), "lost replies never exhaust pending capacity");
+}
+
 void test_exit_cleanup(FaultPoint point) {
     Connection owner;
     Connection failed_observer;
@@ -644,6 +676,7 @@ int main() {
         test_malformed_discovery();
         test_client_topic_separators();
         test_manager_topic_separators();
+        test_readonly_timeout();
         test_send_failure();
         test_advertise_failure(FaultPoint::ResponseCopy);
         test_advertise_failure(FaultPoint::DescriptorDecode);

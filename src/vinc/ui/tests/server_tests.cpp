@@ -2,6 +2,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include <filesystem>
+#include <atomic>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -84,14 +85,21 @@ int main(int argc, char** argv) {
         const httplib::Headers bearer{{"Authorization", "Bearer " + token}};
         auto unconfigured = client.Get("/api/topics", bearer);
         check(unconfigured && unconfigured->status == 503, "server without Context adapter reports unavailable");
+        auto graph_unauthorized = client.Get("/api/graph");
+        check(graph_unauthorized && graph_unauthorized->status == 401, "graph capability required");
+        auto graph_unconfigured = client.Get("/api/graph", bearer);
+        check(graph_unconfigured && graph_unconfigured->status == 503, "graph adapter absent");
+        auto graph_query = client.Get("/api/graph?topic=unexpected", bearer);
+        check(graph_query && graph_query->status == 400, "graph accepts no query arguments");
         auto foreign_session = client.Get("/api/session", httplib::Headers{{"X-Vinc-UI", "1"}, {"Origin", "http://attacker.example"}});
         check(foreign_session && foreign_session->status == 403, "foreign origin cannot bootstrap capability");
         const auto catalog = get_catalog(client);
-        check(catalog["plugins"].size() == 3, "duplicate and future plugins rejected");
+        check(catalog["plugins"].size() == 4, "duplicate and future plugins rejected");
         check(catalog["diagnostics"].size() == 3, "rejection diagnostics retained");
         const auto external = catalog["plugins"][0];
         const auto official = catalog["plugins"][1];
-        check(catalog["plugins"][2]["id"] == "vinc.topics" && catalog["plugins"][2]["official"], "Topic Monitor is build-pinned official");
+        check(catalog["plugins"][3]["id"] == "vinc.topics" && catalog["plugins"][3]["official"], "Topic Monitor is build-pinned official");
+        check(catalog["plugins"][2]["id"] == "vinc.graph" && catalog["plugins"][2]["official"], "graph package hash trusted");
         check(external["id"] == "test.external" && external["official"] == false, "manifest cannot self-assert trust");
         check(official["id"] == "vinc.example" && official["official"] == true, "build-pinned official hash");
         auto index = client.Get("/");
@@ -101,6 +109,10 @@ int main(int argc, char** argv) {
                   notices->body.find("2009 Florian Loitsch") != std::string::npos &&
                   notices->body.find("2008-2009 Bjoern Hoehrmann") != std::string::npos,
               "browser license page retains incorporated-code attribution");
+        check(notices->body.find("@vue-flow/core 1.48.2") != std::string::npos &&
+              notices->body.find("d3-ease 3.0.1") != std::string::npos &&
+              notices->body.find("Redistribution and use") != std::string::npos,
+              "graph dependencies and transitive licenses delivered");
         auto license = client.Get("/licenses/open-vinc/LICENSE");
         check(license && license->status == 200 &&
                   license->body.find("Apache License") != std::string::npos,
@@ -130,6 +142,27 @@ int main(int argc, char** argv) {
         write(fixture.root / "plugins/vinc.example/index.js", "export const changed = true;");
         server = take(vinc::ui::Server::start({fixture.root, "127.0.0.1", port}));
         check(get_catalog(client)["plugins"][1]["official"] == false, "modified official package requires trust");
+        server.reset();
+        std::atomic<unsigned> graph_calls{0};
+        std::atomic<bool> graph_timeout{false};
+        vinc::ui::Options graph_options{fixture.root, "127.0.0.1", port};
+        graph_options.read_graph = [&]() -> vinc::Result<std::string> {
+            ++graph_calls;
+            const auto code = graph_timeout.load() ? vinc::ui::ErrorCode::Timeout : vinc::ui::ErrorCode::Busy;
+            return std::unexpected(vinc::Error{code, vinc::ui::ErrorOperation::Graph});
+        };
+        server = take(vinc::ui::Server::start(std::move(graph_options)));
+        auto graph_session = client.Get("/api/session", httplib::Headers{{"X-Vinc-UI", "1"}});
+        check(graph_session && graph_session->status == 200, "graph capability bootstrap");
+        const auto graph_token = Json::parse(graph_session->body)["token"].get<std::string>();
+        const httplib::Headers graph_bearer{{"Authorization", "Bearer " + graph_token}};
+        auto head = client.Head("/api/graph", graph_bearer);
+        check(head && head->status == 200 && graph_calls == 0, "HEAD does not collect graph");
+        auto busy = client.Get("/api/graph", graph_bearer);
+        check(busy && busy->status == 429, "busy graph query status");
+        graph_timeout = true;
+        auto timed_out = client.Get("/api/graph", graph_bearer);
+        check(timed_out && timed_out->status == 504 && graph_calls == 2, "graph timeout status");
         server.reset();
         auto invalid = vinc::ui::Server::start({fixture.root / "missing", "127.0.0.1", 0});
         check(!invalid && invalid.error().is(vinc::ui::ErrorCode::InvalidPackage), "missing app fails with UI error");

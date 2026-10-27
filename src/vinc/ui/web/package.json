@@ -8,6 +8,8 @@
         "test": "playwright test"
     },
     "dependencies": {
+        "@dagrejs/dagre": "2.0.4",
+        "@vue-flow/core": "1.48.2",
         "vue": "3.5.44"
     },
     "devDependencies": {

@@ -1,3 +1,5 @@
+#include <vinc/message_bus/detail/protocol.hpp>
+#include <vinc/module/detail/module_query_protocol.hpp>
 #include <vinc/module/detail/python_launch.hpp>
 #include <vinc/log/detail/manager.hpp>
 #include <iostream>
@@ -167,6 +169,7 @@ struct Record {
     bool startup_rejected = false;
     std::uint64_t last_fault_request = detail::name_registration_request;
     std::optional<control::Frame> name_request;
+    std::optional<control::Frame> module_query;
 
     // At most one command or completion request may be in flight.
     bool pending_waiter = false;
@@ -505,6 +508,7 @@ struct ModuleManager::Impl {
             record.snapshot.mid; // Existing wire/Message Bus generation uses this same identity.
         record.name_confirmed = false;
         record.name_request.reset();
+        record.module_query.reset();
         record.snapshot.pid = 0;
         record.termination_requested = false;
         record.fault = false;
@@ -939,6 +943,21 @@ struct ModuleManager::Impl {
                 } else if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
                            frame.operation == detail::attach_lock) {
                     receive_lock_request(record, frame);
+                } else if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
+                           frame.operation == detail::list_modules) {
+                    if (!record.name_confirmed || !frame.request) {
+                        record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::ListModules));
+                        break;
+                    }
+                    if (record.module_query) {
+                        control::Frame response{control::Kind::Response, detail::lifecycle,
+                            detail::list_modules, frame.request};
+                        response.payload = detail::encode_failure(Error{ErrorCode::Busy, ErrorOperation::ListModules});
+                        (void)record.session->send(std::move(response));
+                    } else {
+                        // Collection needs other Record locks; defer until tick releases this lock.
+                        record.module_query = std::move(frame);
+                    }
                 } else if (frame.domain == rpc::detail::domain) {
                     if (!record.name_confirmed) {
                         record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::Receive));
@@ -979,9 +998,17 @@ struct ModuleManager::Impl {
                         break;
                     }
 
+                    const auto operation = frame.operation;
+                    const auto request = frame.request;
                     auto submitted = bus_manager->submit(record.snapshot.generation, record.snapshot.name,
                                                          record.session, std::move(frame));
-                    if (!submitted) {
+                    if (!submitted && operation == message_bus::detail::ListTopicConnections &&
+                        submitted.error().is(message_bus::ErrorCode::CapacityExceeded)) {
+                        control::Frame response{control::Kind::Response, message_bus::detail::message_bus_domain,
+                            operation, request};
+                        response.payload = message_bus::detail::encode_failure(submitted.error());
+                        (void)record.session->send(std::move(response));
+                    } else if (!submitted) {
                         record_failure(record, wrap_error(ErrorCode::BusFailed, ErrorOperation::Receive,
                                                           submitted.error()));
                         break;
@@ -1132,6 +1159,72 @@ struct ModuleManager::Impl {
         record.changed.notify_all();
     }
 
+    Result<control::Bytes> collect_modules(const control::Frame& request) {
+        control::Reader reader(request.payload);
+        const auto version = reader.u32();
+        const auto after = reader.u64();
+        if (!reader.done() || version != detail::module_query_version || after >= central_owner) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::ListModules});
+        }
+
+        ModulePage page;
+        page.modules.reserve(detail::modules_per_page + 1);
+        for (const auto& candidate : snapshot_records()) {
+            std::lock_guard record_lock(candidate->mutex);
+            const auto& snapshot = candidate->snapshot;
+            if (snapshot.mid <= after) {
+                continue;
+            }
+
+            const auto position = std::lower_bound(page.modules.begin(), page.modules.end(), snapshot.mid,
+                [](const ModuleInfo& module, MID mid) { return module.mid < mid; });
+            if (position == page.modules.end() && page.modules.size() > detail::modules_per_page) {
+                continue;
+            }
+
+            page.modules.insert(position, ModuleInfo{snapshot.mid, snapshot.name,
+                snapshot.module_type, snapshot.state});
+            if (page.modules.size() > detail::modules_per_page + 1) {
+                page.modules.pop_back();
+            }
+        }
+        if (page.modules.size() > detail::modules_per_page) {
+            page.modules.pop_back();
+            page.next = page.modules.back().mid;
+        }
+        return detail::encode_modules(page);
+    }
+
+    void process_module_query(const std::shared_ptr<Record>& record) {
+        std::optional<control::Frame> request;
+        std::shared_ptr<control::Session> session;
+        {
+            std::lock_guard record_lock(record->mutex);
+            request.swap(record->module_query);
+            session = record->session;
+        }
+        if (!request || !session) {
+            return;
+        }
+
+        // Only one Record mutex is held at a time. A query allocation failure is
+        // a recoverable diagnostic failure, not a failure of the Module supervisor.
+        Result<control::Bytes> body;
+        try {
+            body = collect_modules(*request);
+        } catch (const std::bad_alloc&) {
+            body = std::unexpected(Error{ErrorCode::ResourceExhausted, ErrorOperation::ListModules});
+        }
+        control::Frame response{control::Kind::Response, detail::lifecycle, detail::list_modules, request->request};
+        if (body) {
+            control::put_u32(response.payload, detail::result_success);
+            response.payload.insert(response.payload.end(), body->begin(), body->end());
+        } else {
+            response.payload = detail::encode_failure(body.error());
+        }
+        (void)session->send(std::move(response));
+    }
+
     void register_name(const std::shared_ptr<Record>& record) {
         std::lock_guard registry_lock(mutex);
         std::lock_guard record_lock(record->mutex);
@@ -1236,6 +1329,7 @@ struct ModuleManager::Impl {
                     }
                     // Release the record before taking registry -> record locks.
                     register_name(record);
+                    process_module_query(record);
                 } catch (const std::system_error& error) {
                     std::lock_guard record_lock(record->mutex);
                     record_failure(*record, Error{ErrorCode::SupervisorFailed, ErrorOperation::Supervise,

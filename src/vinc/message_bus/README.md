@@ -767,3 +767,38 @@ Related Debug/Release Bus/Context/Module/UI suites passed; exact scope/logs/plat
 
 本輪 Debug／Release 的 Bus、Context、Module 與 UI 相關回歸均通過；完整測試範圍、
 紀錄與未驗證平台統一見 [UI 驗證](../ui/README.md#topic-monitor-實際驗證)。
+
+<a id="read-only-connections"></a>
+
+## Read-only connections / 唯讀連線查詢（2026-10-27）
+
+`Client::list_topic_connections(ConnectionCursor after, Deadline)` returns
+`Result<TopicConnectionsPage>`. The exclusive cursor sorts by (topic name, role,
+registration ID); empty topic starts/ends the scan. Up to 32 raw registrations per
+page keep the existing 16 KiB control envelope bounded, including pagination within
+one large topic. Roles are Publisher=1 and Subscriber=2. Each record includes the
+schema hash and authenticated owner MID. Subscriber-only topics are included.
+There is no shared-memory mapping, statistics sampling, payload read, new subscriber,
+or background topology timer. Existing `list_topics` / `inspect_topics` behavior is unchanged.
+
+新增查詢以（Topic 完整名稱、角色、登記 ID）遞增排除式游標分頁，每頁最多 32 筆，
+單一 Topic 也可跨頁；空 Topic 為起點／終點。包含 Subscriber-only Topic、schema 與
+已驗證 owner MID。不 mapping 資料、不取樣統計、不讀訊息、不新增訂閱或背景計時器。
+既有 `list_topics`／`inspect_topics` 行為不變。
+
+Operation 0x0209 uses query payload version 1 and validates cursors, row count, roles,
+MIDs, ordering, trailing data and version. Registry changes between pages may omit
+newly inserted earlier keys; this is a best-effort current scan, not a global snapshot.
+A timed-out read keeps the Session usable. A retired-query watermark discards old unclaimed read-only replies (including duplicates)
+after validating their response envelope. Timeout releases pending capacity immediately;
+lost responses cannot accumulate pending slots. Mutation reply handling stays strict.
+No automatic retry is performed. Query send backpressure and central queue saturation
+return failures instead of applying the mutation-timeout shutdown policy. A congested
+central response may be dropped, leaving the caller to time out. Malformed control
+frames and genuinely lost Sessions retain existing protocol/lifecycle handling.
+
+新操作 0x0209／payload v1 驗證游標、筆數、角色、MID、順序、尾端資料與版本。
+分頁間登記可能變動，早於游標的新登記可能等下次才看到。唯讀逾時保留 Session；
+單一退休查詢水位在驗證 envelope 後丟棄舊的無等待者唯讀回覆（含重複回覆）。
+逾時立即釋放 pending 額度，不因遺失回覆持續累積；mutation 回覆仍嚴格配對。不自動重試。傳送壅塞／中央佇列滿不套用 mutation
+逾時的關閉政策；中央回覆壅塞可丟棄，由呼叫端逾時。畸形控制封包及真正斷線仍照既有契約處理。

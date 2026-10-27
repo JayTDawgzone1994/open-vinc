@@ -1,6 +1,7 @@
 #include <vinc/module/base_module.hpp>
 #include <vinc/ui/server.hpp>
 #include <vinc/ui/detail/topic_monitor.hpp>
+#include <vinc/ui/detail/graph.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc_ui_paths.hpp>
 #include <charconv>
@@ -65,6 +66,10 @@ public:
         options.read_topics = [monitor = monitor_](const std::string& topic) {
             return monitor->read(topic);
         };
+        graph_ = std::make_shared<vinc::ui::detail::GraphRequests>([this](vinc::Deadline deadline) {
+            return vinc::ui::detail::collect_graph(context, deadline);
+        });
+        options.read_graph = [graph = graph_] { return graph->request(); };
         auto started = vinc::ui::Server::start(std::move(options));
         if (!started) {
             return std::unexpected(started.error());
@@ -83,6 +88,7 @@ public:
                 return std::unexpected(pumped.error());
             }
 
+            graph_->process();
             monitor_->poll();
             std::this_thread::sleep_for(vinc::config::ui_monitor_poll_interval);
         }
@@ -104,7 +110,11 @@ public:
     }
 
     vinc::Result<void> on_stop() override {
+        if (graph_) {
+            graph_->stop();
+        }
         server_.reset();
+        graph_.reset();
         monitor_.reset();
         return {};
     }
@@ -116,6 +126,7 @@ private:
     }
     std::unique_ptr<vinc::ui::Server> server_;
     std::shared_ptr<vinc::ui::detail::TopicMonitor> monitor_;
+    std::shared_ptr<vinc::ui::detail::GraphRequests> graph_;
 };
 }
 REGISTER_MODULE(UiModule, "webUi")
