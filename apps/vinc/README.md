@@ -186,7 +186,7 @@ Each configuration compared 34 CLI inputs/exit codes/stdout/stderr against the p
 非法編碼會顯示具體錯誤並以參數錯誤結束啟動，不再建立 char8_t view。
 Windows 的一般 argv UTF-16／UTF-8 轉換仍留在 wmain，不把一般參數當成路徑處理。
 Windows Debug／Release 均已驗證中文／emoji 的部署目錄、Tcl 資源與腳本檔名。
-Linux／macOS 尚未驗證。
+此段保留當時 Windows 路徑案例紀錄；目前各平台的建置與執行範圍見[平台驗證報告](../../README.md#validation-and-limits)。
 
 <a id="待處理事項"></a>
 

@@ -65,7 +65,10 @@ create 成功後才交付路徑。一般工作資源可每輪使用新名稱；�
 
 `osal.file_lock` 僅連結 OSAL，涵蓋獨立開啟競爭、同 handle 忙碌、跨 thread guard
 交付／解構、pending 取消、期限、guard 保留 handle，以及真實子程序退出／強制終止後回收。
-Linux／macOS 後端仍待原生建置與實機驗證，不以 Windows 測試代替。
+目前三平台原生結果見 [OSAL 平台驗證](README.md#current-platform-validation)：
+Windows Debug／Release 的 23 項回歸、macOS 的 OSAL／OutputHub 24 項回歸，
+以及 Ubuntu 24.04／WSL 2 的四項回歸均包含 `osal.file_lock`。
+Linux 的 descriptor 修正另有真實 `EMFILE`／回滾追蹤及故意破壞清理的負向對照。
 
 2026-10-02：Windows x64／MSVC 完整專案 Debug／Release 各 25 套 CTest 全通過。
 另以 `src/vinc/osal` 單獨配置、建置並通過 `osal.file_lock`，確認不依賴 VINC 上層同步庫。

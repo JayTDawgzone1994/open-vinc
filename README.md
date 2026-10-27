@@ -274,6 +274,46 @@ For example, the [Topic Monitor validation recorded on 2026-10-25](src/vinc/ui/R
 
 例如上述 2026-10-25 的 Topic Monitor 驗證包含 Windows Debug／Release 各 12 項相關 CTest、前端型別檢查與 5 項 Chromium 測試，不是全專案或跨平台認證。
 
+<a id="windows-validation"></a>
+
+**Validated Windows environment (2026-10-27) / Windows 已驗證環境（2026-10-27）**
+
+| Item / 項目 | Validated version / 已驗證版本 |
+| --- | --- |
+| OS / 作業系統 | Windows, build **26200**, x64 |
+| Compiler and standard library / 編譯器與標準函式庫 | MSVC **19.51.36257.0**, toolset / 工具集 **14.51.36231** |
+| Windows SDK | **10.0.26100.0** |
+| Build tools / 建置工具 | CMake **4.3.2**, Ninja **1.13.2** |
+| Configuration / 組態 | Debug and Release; apps, examples, Python and Web UI enabled / 啟用 apps、examples、Python 與 Web UI |
+| Source / 原始碼 | Commit **`ab236857480bdf85e81129361f517fc72fcd6935`** |
+
+Full Debug and Release project builds succeeded. The selected OSAL, OutputHub and Log suites passed **23/23 in each configuration** (11.76 s / 8.72 s). Coverage includes Process, Pipe, submission-error wrapping, four Pipe contract cases, Socket, SharedMemory, FileLock, OutputHub integration/faults, and Log unit/process/transport. The deterministic `osal.pipe_attach_failure` test also passed separately in both configurations; it does not establish actual Windows IOCP failure injection. These were selected regression suites, not full-project CTest runs. Local logs: `build/windows-macos-followup-debug-ctest.log` and `build/windows-macos-followup-release-ctest.log`.
+
+Debug／Release 全專案建置成功；選定的 OSAL、OutputHub 與 Log 測試兩種組態各 **23/23 通過**（11.76／8.72 秒）。範圍包含 Process、Pipe、提交錯誤包裝、四個 Pipe 契約案例、Socket、SharedMemory、FileLock、OutputHub 整合／故障，以及 Log 單元／程序／傳輸。確定性 `osal.pipe_attach_failure` 亦於兩種組態分別重跑通過，但不代表已注入 Windows IOCP 的真實失敗。這是選定套件的回歸，並非全專案 CTest。上述本機 log 保存完整結果。
+
+<a id="linux-validation"></a>
+
+**Validated Linux environment (2026-10-27) / Linux 已驗證環境（2026-10-27）**
+
+| Item / 項目 | Validated version / 已驗證版本 |
+| --- | --- |
+| Distribution / 發行版 | Ubuntu **24.04.5 LTS**, WSL 2, x86_64 |
+| Kernel / 核心 | **6.18.54.1-microsoft-standard-WSL2** |
+| Compiler / 編譯器 | GCC / G++ **13.3.0** (`13.3.0-6ubuntu2~24.04.1`) |
+| C library / C 函式庫 | glibc **2.39** |
+| C++ standard library / C++ 標準函式庫 | libstdc++ headers / 標頭 **13.3.0**; runtime package / 執行時套件 **14.2.0-4ubuntu2~24.04.1** |
+| Build tools / 建置工具 | CMake **3.28.3**, Ninja **1.11.1** |
+| Configuration / 組態 | Standalone OSAL Debug, non-root user, build directory on the WSL Linux filesystem / 獨立 OSAL Debug、非 root 帳號，建置目錄位於 WSL Linux 檔案系統 |
+| Source / 原始碼 | Commit **`ab236857480bdf85e81129361f517fc72fcd6935`** plus the descriptor test fix / 加上 descriptor 測試修正 |
+
+The OSAL library and four selected test targets built successfully; **`osal.descriptor`, `osal.process`, `osal.shared_memory` and `osal.file_lock` passed 4/4**. Direct descriptor execution, an inherited-fd-3 launcher, and 20 consecutive descriptor CTest runs passed. `strace` verified real low-fd acquisition, `EMFILE` during relocation, cleanup of new names, and preservation of existing names after failed open. Five deliberately broken variants in isolated source copies were detected, and the restored copy passed. See the [descriptor findings](src/vinc/osal/README.md#待處理事項) for the original CTest fixture defect and negative controls. Logs and traces are under `build/wsl-ubuntu2404-descriptor-review/`.
+
+OSAL library 與四個選定測試目標建置成功；**`osal.descriptor`、`osal.process`、`osal.shared_memory`、`osal.file_lock` 共 4/4 通過**。descriptor 直接執行、繼承 fd 3 的啟動方式，以及連續 20 次 CTest 均通過。`strace` 確認真正的低 fd 建立、搬移時 `EMFILE`、新建名稱回收與 open 失敗保留既有名稱；隔離副本中五個刻意破壞的版本均被攔下，還原後通過。原始 CTest fixture 問題與負向對照詳見 [descriptor 紀錄](src/vinc/osal/README.md#待處理事項)，本機 log 與 trace 保存於上述目錄。
+
+This Linux report covers the stated OSAL paths. It does not establish a full-project Linux build, Release results, Ubuntu 22.04 deployment compatibility, or resolution of the separately deferred fd creation/spawn race. Earlier Ubuntu 22.04 / GCC 12.3 execution evidence was reported separately; it is not counted as part of this four-suite WSL run.
+
+此 Linux 報告涵蓋上述 OSAL 路徑；全專案 Linux 建置、Release、Ubuntu 22.04 部署相容性與另列的 fd 建立／spawn 競爭問題，不在這四套 WSL 結果的範圍內。先前另有 Ubuntu 22.04／GCC 12.3 的執行驗證回報，不併入本輪測試數。
+
 <a id="macos-validation"></a>
 
 **Validated macOS environment (2026-10-27) / macOS 已驗證環境（2026-10-27）**
@@ -307,7 +347,7 @@ Release, optional Python bindings, browser automation, and other operating syste
 上述 macOS 驗證未涵蓋 Release、選用 Python 綁定、瀏覽器自動化或其他 OS。原本 `vinc/` 中間產物目錄與 `Vinc` 在不區分大小寫的檔案系統衝突，現改放 `framework/`；從舊布局升級時請使用新的建置目錄。
 
 - **ABI and deployment:** native Plugins require matching toolchain, standard library, configuration, layout, and Windows CRT. There is no installed `find_package(VINC)` SDK or complete relocatable Plugin/UI package yet. / **ABI 與部署：**原生 Plugin 須符合工具鏈、標準庫、組態、布局及 Windows CRT 契約；尚無安裝式 `find_package(VINC)` SDK 或完整可重定位的 Plugin／UI 部署包。
-- **UI scope:** Topic Monitor is read-only. Module control, Param editing, Log panels, dependency graphs, 3D panels, and browser management RPC are not wired. Trusted plugins share page privileges, not a sandbox. / **UI 範圍：**Topic Monitor 為唯讀；Module 控制、Param 編輯、Log 面板、依賴圖、3D 面板與瀏覽器管理 RPC 尚未接線。受信任 plugin 共用頁面權限，不是隔離沙箱。
+- **UI scope:** Read-only Topic Monitor and a manually refreshed Module Graph are available. Module control, Param editing, Log panels, 3D panels, and browser management RPC are not wired. Trusted plugins share page privileges, not a sandbox. / **UI 範圍：**已提供唯讀 Topic Monitor 與手動刷新的唯讀 Module Graph；Module 控制、Param 編輯、Log 面板、3D 面板與瀏覽器管理 RPC 尚未接線。受信任 plugin 共用頁面權限，不是隔離沙箱。
 - **Future capabilities:** native Plugin hot discovery/loading, dynamic message schemas, Bag Player, and framework-to-framework multi-machine transport are not implemented. / **未來能力：**尚未實作原生 Plugin 熱探索／載入、動態訊息 schema、Bag Player 與框架對框架的多機傳輸。
 - **Failure isolation:** process boundaries limit crash propagation, but do not promise security sandboxing or hard real-time behavior. Heartbeat detects only limited liveness; resource bounds and shared-memory recovery remain explicit contracts. / **故障隔離：**程序邊界可限制 crash 連帶影響，不等於安全沙箱或硬即時保證；heartbeat 只能有限度偵測存活，資源上限與共享記憶體回收仍依明定契約。
 

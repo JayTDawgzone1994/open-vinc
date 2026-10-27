@@ -468,7 +468,7 @@ Root CTest runs control.channel/module.process/module.shell. Process cases cover
 以及重啟等待期間保留名稱、新 MID 與舊 MID 隔離。OutputHub 名稱交接另有事件與文字輸出測試。
 命名遷移另驗證 ModuleType 啟動入口與 Module 命令／補全入口沒有混用、
 種類登記與已啟動模組的查詢，以及 Snapshot 的 `module_type`／`mid`／generation 對應。
-Linux／macOS 尚待原生建置與行為驗證；未進行效能量測。
+後續各平台建置與行為驗證見[平台報告](../../../README.md#validation-and-limits)；本段沒有進行效能量測。
 
 2026-10-03 readability pass: Windows x64/MSVC full Debug/Release builds and 25/25 suites each passed (79.83/40.44 seconds), covering lifecycle, Control, Bus, Shell/Socket/Tcl. Scenarios/wait values were unchanged. Linux/macOS were not run.
 
@@ -695,7 +695,7 @@ Debug 上述整組已重跑；Release 另重建並重跑該測試 1/1 通過（0
 
 No native Linux/macOS build/run was performed in that pass. Injection does not establish coverage of every OS failure or scheduling condition.
 
-Linux／macOS 尚未原生建置或執行；注入結果不代表所有 OS 故障與排程均已驗證。
+後續平台證據見[平台報告](../../../README.md#validation-and-limits)；注入結果不代表所有 OS 故障與排程均已驗證。
 
 <a id="測試路徑轉換收尾2026-10-05"></a>
 
@@ -706,7 +706,7 @@ tests/module_helper.cpp startup/stop markers use [OSAL path helpers](../osal/REA
 `tests/module_helper.cpp` 的啟動／停止 marker 路徑改用
 [OSAL 路徑 helper](../osal/README.md#utf-8-與原生路徑)，不再透過 char8_t 指標讀取 char 儲存區。
 失敗由 StartHook 的 Result 保留 OSAL 原因。Windows Debug／Release 的 module.process 均通過，
-包含在本輪各 20/20 相關測試內。Linux／macOS 尚未驗證。
+包含在本輪各 20/20 相關測試內。後續平台與測試範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="契約故障共享紀錄"></a>
 
@@ -1058,12 +1058,12 @@ Debug 首輪為 54/55，shell.console 的既有 fixture 寫死 .exe 路徑，改
 checkpoint 加入正式 Host。Bootstrap v4 不提供相容模式，正式接線使用新增庫路徑的 v5。
 這是該輪歷史版本；目前為 entry 8／bootstrap v13。
 
-Ninja link closures confirm Module/SDK Plugins exclude vinc_control, Module Runtime, Manager, and Shell, while retaining control_protocol, Bus client, and utilities. dumpbin confirms Bus example exports only vinc_module_plugin. Linux/macOS loading/PIC/visibility branches still need native validation.
+Ninja link closures confirm Module/SDK Plugins exclude vinc_control, Module Runtime, Manager, and Shell, while retaining control_protocol, Bus client, and utilities. dumpbin confirms Bus example exports only vinc_module_plugin. Later native build and Module execution evidence is recorded in the [platform reports](../../../README.md#validation-and-limits), with revision-specific coverage.
 
 檢查 Ninja 實際 link closure：Module 與 SDK Plugin 不含 vinc_control、Module Runtime、
 Manager 或 Shell；仍有 vinc_control_protocol、Bus client 及必要工具。
 `dumpbin /exports` 確認 Message Bus 範例 DLL 只有 `vinc_module_plugin` 匯出。
-Linux／macOS 的載入分支與 PIC／visibility 設定尚未實機建置或驗證。
+後續原生建置與 Module 執行證據見[平台驗證報告](../../../README.md#validation-and-limits)，各項覆蓋以報告的原始碼版本為準。
 
 <a id="module-除錯支援2026-10-06"></a>
 
@@ -1132,11 +1132,11 @@ Initial native tests closed debug event process/thread handles too early, breaki
 
 首輪原生測試提早關閉 debug event 的 process/thread handles，造成 detach 失敗；已改由 debug session 管理，兩種組態通過。首輪外部 Debug SDK 沿用舊 object，清理後重建成功；後續 [MSVC／Ninja 增量建置修復](../sdk/README.md#msvcninja-增量建置修復2026-10-06) 已修正相依前綴追蹤。既有受影響產物需重新配置並 clean rebuild 一次，不再列為未解疑慮。
 
-Local logs: build/debug-support-final-build.log, build/debug-support-release-final-build.log, build/debug-support-debug-final-tests.log, build/debug-support-release-tests.log. Linux/macOS debugger cases and manual Visual Studio GUI/PDB source breakpoints were not validated.
+Local logs: build/debug-support-final-build.log, build/debug-support-release-final-build.log, build/debug-support-debug-final-tests.log, build/debug-support-release-tests.log. Later native build/test evidence is in the [platform reports](../../../README.md#validation-and-limits). Manual GDB/LLDB attachment and Visual Studio GUI/PDB source breakpoints are outside those reports.
 
 紀錄：`build/debug-support-final-build.log`、`build/debug-support-release-final-build.log`、
 `build/debug-support-debug-final-tests.log`、`build/debug-support-release-tests.log`。
-Linux／macOS 尚未建置或執行 debugger 測試；Visual Studio GUI／PDB source breakpoint 未人工實測。
+後續原生建置與測試證據見[平台報告](../../../README.md#validation-and-limits)；GDB／LLDB 實際附加與 Visual Studio GUI／PDB 原始碼斷點的人工操作不在該報告範圍內。
 
 <a id="contextpump-實作驗證2026-10-06"></a>
 

@@ -222,14 +222,14 @@ npx playwright install chromium
 npm test
 ```
 
-Recorded 2026-10-14: Windows x64/MSVC 19.51/Node 24.19.0, ui.server/module/shell passed Debug/Release. Four Chromium scenarios/typecheck and desktop/mobile screenshots passed; Debug Module/Bus/Bag Shell regressions passed. APPS/EXAMPLES/PYTHON/TESTING-off SDK composition had no UI/Node/HTTP dependency. No native Linux/macOS verification.
+Recorded 2026-10-14: Windows x64/MSVC 19.51/Node 24.19.0, ui.server/module/shell passed Debug/Release. Four Chromium scenarios/typecheck and desktop/mobile screenshots passed; Debug Module/Bus/Bag Shell regressions passed. APPS/EXAMPLES/PYTHON/TESTING-off SDK composition had no UI/Node/HTTP dependency. Later macOS UI build, type checking and manual HTTP results are in the [macOS report](../../../README.md#macos-validation); that report does not include browser automation, and the four-suite Linux WSL run does not cover UI.
 
 本機 2026-10-14：Windows x64、MSVC 19.51、Node 24.19.0。
 Debug／Release 的 `ui.server`、`ui.module`、`ui.shell` 均通過。
 Chromium 四組瀏覽器案例與 Vue／TypeScript 型別檢查通過，檢視桌面與手機寬度截圖。
 Debug 既有 `module.shell`、`message_bus.shell`、`bag.shell` 亦通過。
 另以 APPS／EXAMPLES／PYTHON／TESTING 關閉的純 SDK 配置確認沒有 UI／Node／HTTP 相依。
-Linux／macOS 尚未實機驗證，不宣稱已通過。
+後續 macOS 已完成 UI 建置、型別檢查與 HTTP 人工驗證，見[macOS 報告](../../../README.md#macos-validation)；該報告未含瀏覽器自動化，Linux WSL 四套回歸亦未涵蓋 UI。
 
 <a id="待處理事項"></a>
 

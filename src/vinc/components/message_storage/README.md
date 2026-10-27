@@ -453,7 +453,7 @@ message.storage retains array/capacity/corruption cases. Real generated classes 
 
 Other suites were not run in that round; Linux/macOS needed native validation. Two message tests retained assertion/check counts and diagnostic order; five .msg fixtures were unchanged.
 
-本輪未執行其餘測試；Linux／macOS 尚待實機驗證。兩份訊息測試保留原有斷言／檢查呼叫數
+本輪未執行其餘測試；後續平台結果見[平台驗證報告](../../../../README.md#validation-and-limits)。兩份訊息測試保留原有斷言／檢查呼叫數
 及診斷順序，5 個 `.msg` fixture 未修改。
 
 <a id="components-目錄搬移驗證2026-10-05"></a>

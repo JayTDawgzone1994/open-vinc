@@ -135,7 +135,7 @@ Windows x64 MSVC Debug／Release 全部 23 個 CTest 套件通過。
 新增真實 TCP 測試涵蓋分段與 CRLF 輸入、非法／超長命令、8 連線輸出訂閱及第 9 個拒絕、
 IPv6、跨 Session 腳本互斥、恢復碼輪替、斷線取消歸屬、慢客戶端逾時、模組程序操作及退出尾端輸出。
 另以 Vinc 執行檔驗證預設 port、非互動 stdin EOF、CLI 設定、port 衝突先於部署、錯誤 port 與遠端退出。
-Linux／macOS 尚待實機建置與行為驗證；PuTTY GUI 尚未實測。
+後續平台建置與行為驗證見[平台報告](../../../README.md#validation-and-limits)；PuTTY GUI 仍無人工操作紀錄。
 
 
 ## Log 顯示

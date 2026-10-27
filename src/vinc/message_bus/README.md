@@ -378,14 +378,14 @@ Shared accounting includes active ring controls/aligned payload and 8-byte/topic
 `PublisherStats::shared_bytes` 是該 RingBuffer 的配置，未含共用 topic counter。
 因此它們不是整個系統的 RSS／commit 上限，也不是所有物件都已析構的證明。
 
-OSAL owns atomics/time; rings do not belong in SharedMemory. Windows uses Interlocked64, POSIX compile-time 64-bit always-lock-free atomics. Whole APIs include allocation/synchronization and **are not claimed lock-free**. Scope is same-host/version 64-bit, not cross-compiler ABI/security/hard real-time. Production Instance records names before creation and cleans recorded old epochs at startup; standalone random-name tests/unrecorded legacy orphans have no such guarantee. Windows has measured evidence; native Linux/macOS/fault validation remains revision-specific. [Paced benchmarks](benchmarks/README.md) are not saturation throughput.
+OSAL owns atomics/time; rings do not belong in SharedMemory. Windows uses Interlocked64, POSIX compile-time 64-bit always-lock-free atomics. Whole APIs include allocation/synchronization and **are not claimed lock-free**. Scope is same-host/version 64-bit, not cross-compiler ABI/security/hard real-time. Production Instance records names before creation and cleans recorded old epochs at startup; standalone random-name tests/unrecorded legacy orphans have no such guarantee. Platform evidence is recorded with source revisions and suite scope in the [platform reports](../../../README.md#validation-and-limits). [Paced benchmarks](benchmarks/README.md) are not saturation throughput.
 
 共享原子與時間封裝在 OSAL；Message Bus 不把 RingBuffer 塞進 SharedMemory API。
 Windows 使用 Interlocked64；Linux／macOS 使用編譯器原子操作並靜態要求 64-bit always-lock-free。
 發布可見性與 slot 協定使用原子 word，整個 `commit`／Message Bus API 含配置與同步，**不宣稱整體 lock-free**。
 目前支援設計範圍為同主機、同版本 framework、64-bit 程序；沒有跨編譯器 ABI／安全沙箱／硬即時保證。
 正式 Instance 接線已有建立前名稱記錄及下次啟動清理；未注入服務的獨立測試與未留下紀錄的舊 orphan 不在保證內，見下方名稱服務章節。
-Windows x64 為實測平台；Linux／macOS 尚待原生建置與故障驗證。
+各平台的實測版本與套件範圍見[平台驗證報告](../../../README.md#validation-and-limits)；原生故障注入仍依各項案例紀錄。
 有節奏的延遲／資料率量測見 [Benchmark](benchmarks/README.md)；尚未測量飽和吞吐量。
 
 Synchronization reasoning/protocol/tests: [DESIGN](DESIGN.md).
@@ -722,12 +722,12 @@ push／commit 取樣與失敗回滾、跨程序 metadata、舊布局／Bag 版�
 並重跑 `common.time`、`message_bus.cleanup`、`message_bus.ring_buffer`，3/3 通過；
 其餘三組 27 項回歸包含該斷言。
 
-Only 27 of 76 CTests were run. Debug retains iterator-debug allocation skips; Release scans them. 19.44 retained existing Shell C4127 warnings. No native Linux/macOS for that change.
+Only 27 of 76 CTests were run. Debug retains iterator-debug allocation skips; Release scans them. 19.44 retained existing Shell C4127 warnings. Later platform evidence is recorded in the [platform reports](../../../README.md#validation-and-limits).
 
 本輪執行的是 76 項 CTest 中的 27 項相關測試，未宣稱全套重跑。
 MSVC Debug 的 `message.access` 仍依既有 iterator-debug 條件略過配置失敗掃描，Release 執行該路徑。
 19.44 建置仍有 Shell `tcl_runtime.cpp` 的既有 C4127 警告，本輪未修改該部分。
-Linux／macOS 尚未驗證本輪變更。
+後續平台結果與測試範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="唯讀診斷與-reader-計數2026-10-25"></a>
 

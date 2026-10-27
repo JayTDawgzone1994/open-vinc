@@ -413,7 +413,7 @@ Debug／Release 完整專案建置通過，包含 SDK 個別公開標頭編譯�
 provider symbol 後的增量查詢；容量 fixture 重新建置深度 2／5，並拒絕深度 1。
 已核對 Ninja 對生成來源具有真正的 copy 指令，不再是空命令。
 以上是 catalog／table 修改完成時的驗證；後續致命回報接線的驗證另列於本頁末段。
-Linux／macOS 尚未原生驗證。
+目前各平台的建置與測試範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="shared-time-type"></a>
 
