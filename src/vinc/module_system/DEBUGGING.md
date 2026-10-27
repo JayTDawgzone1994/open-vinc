@@ -47,7 +47,8 @@ Ctrl+C／exit 仍完整關閉中央及其所有 Module；即使停在斷點，�
   附加權限依 OS 與開發工具設定。[LLDB 官方說明](https://lldb.llvm.org/use/tutorial.html)
 
 Windows 自動測試會透過原生 Debug API 附加真正 Host、停在 breakpoint、繼續並 detach。
-這不等於 Visual Studio GUI 操作與 PDB 原始碼斷點已人工驗證；Linux／macOS 尚待實機驗證。
+一般原生建置與測試結果見[平台驗證報告](../../../README.md#validation-and-limits)。
+外部 debugger 的人工操作另計：Visual Studio GUI／PDB 原始碼斷點，以及 Linux GDB／macOS LLDB 的實際附加操作，仍無本次人工驗證紀錄。
 
 ## 政策與限制
 

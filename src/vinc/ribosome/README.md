@@ -245,9 +245,9 @@ SHA-256 的區塊大小、輪數、位移與常數表仍由雜湊實作維護。
 - `message.generated`：實際生成 class 的功能與跨程序資料驗證。
 - `tests/ribosome_generation.cmake`：獨立來源副本中的建置失敗、復原、逐一標頭編譯與正式模板的巢狀訊息實例化。
 
-Windows Debug/Release have native evidence; Linux/macOS still require component-specific native verification.
+Windows Debug/Release and macOS Debug build/test evidence is recorded in the [platform reports](../../../README.md#validation-and-limits). The four-suite Linux WSL run covers OSAL rather than Ribosome.
 
-Windows Debug／Release 有原生驗證；Linux／macOS 尚未實機驗證。
+Windows Debug／Release 與 macOS Debug 的建置／測試證據見[平台驗證報告](../../../README.md#validation-and-limits)。Linux WSL 四套回歸涵蓋 OSAL，不含 Ribosome。
 
 <a id="可讀性整理驗證2026-10-04"></a>
 
@@ -342,7 +342,7 @@ Ribosome 的 Release target，使用含 Unicode 的 CMake 預設輸入／輸出�
 No full-project rerun or isolated-script rerun in that round; Linux/macOS/MinGW unverified. Added cases are in production component tests.
 
 未重跑全專案所有 CTest 或 `tests/ribosome_generation.cmake` 的完整來源副本流程；
-Linux／macOS、MinGW 尚未實機驗證。新增案例已納入元件正式測試。
+後續平台證據見[平台驗證報告](../../../README.md#validation-and-limits)；MinGW 仍無本次原生驗證紀錄。新增案例已納入元件正式測試。
 
 <a id="編譯期訊息清單2026-10-12"></a>
 

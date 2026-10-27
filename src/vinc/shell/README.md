@@ -421,7 +421,7 @@ Historical initial validation: Windows x64/MSVC 19.51.36257/SDK 10.0.26100.0/CMa
 
 初版歷史紀錄：當時在 Windows x64／MSVC 19.51.36257、Windows SDK 10.0.26100.0、CMake 4.3.2、Ninja 1.13.2
 完成建置與測試：Debug 20/20、Release 20/20 全數通過。
-Linux／macOS 後端尚未進行原生建置與行為驗證。
+後續各平台的建置與測試範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="shell-命名統一驗證2026-10-04"></a>
 

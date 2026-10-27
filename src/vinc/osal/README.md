@@ -98,7 +98,7 @@ These changes preserve Timeout/Cancelled codes, check order, cancellation result
 這些變更不改變 Timeout／Cancelled 等錯誤碼、等待順序、取消結果、回收及例外邊界。
 呼叫端以目前層作程式判斷；原因鏈供診斷，不需依賴內部失敗步驟來控制流程。
 
-Recorded 2026-10-04: Windows x64/MSVC 19.51.36257, SDK 10.0.26100.0, CMake 4.3.2, Ninja 1.13.2. Full Debug/Release builds and public headers passed, with **30/30** CTests each. Clean standalone OSAL Release including Common passed **11/11**; standalone Common without an OSAL provider passed **2/2**. Negative catalog/CMake cases and explicit shared error fields decoded after child exit were tested. This was a test-only codec, not production Module/Bus changes. NTSTATUS tests used synthetic values, not real BCrypt failure injection. Linux/macOS source changes were not built/run in that round.
+Recorded 2026-10-04: Windows x64/MSVC 19.51.36257, SDK 10.0.26100.0, CMake 4.3.2, Ninja 1.13.2. Full Debug/Release builds and public headers passed, with **30/30** CTests each. Clean standalone OSAL Release including Common passed **11/11**; standalone Common without an OSAL provider passed **2/2**. Negative catalog/CMake cases and explicit shared error fields decoded after child exit were tested. This was a test-only codec, not production Module/Bus changes. NTSTATUS tests used synthetic values, not real BCrypt failure injection. Current platform results are listed in [Current platform validation](#current-platform-validation).
 
 本輪驗證（2026-10-04）：Windows x64／MSVC 19.51.36257、Windows SDK 10.0.26100.0、
 CMake 4.3.2、Ninja 1.13.2。完整 Debug／Release 建置及公開標頭編譯成功，全套 CTest
@@ -107,7 +107,7 @@ CMake 4.3.2、Ninja 1.13.2。完整 Debug／Release 建置及公開標頭編譯�
 與 CMake 接線的負向案例，以及子程序退出後，由父程序解讀共享記憶體中的錯誤欄位。
 該編碼是測試專用格式，沒有修改 Module／Message Bus 的正式協定。
 原生 NTSTATUS 保留來源與數值，測試使用合成值，未注入 BCryptGenRandom 的實際失敗。
-Linux／macOS 已更新來源，但尚未建置或執行驗證。
+目前平台結果見[目前平台驗證](#current-platform-validation)。
 
 <a id="utf-8-與原生路徑"></a>
 
@@ -161,7 +161,7 @@ return open_resource(*path);
 
 ### Path conversion validation (2026-10-05) / 路徑轉換驗證（2026-10-05）
 
-`osal.path` covers Chinese/emoji round trips, actual files, empty/relative/prefix preservation, invalid UTF-8/Big5/NUL/native encodings, isolated UTF-16 surrogates on Windows, and invalid native bytes/legal backslash filenames on POSIX. Independent SDK header compilation includes path.hpp. Shell checks local/remote Unicode scripts, deployment directories, and OSAL causes. Windows x64/MSVC 19.51.36257, SDK 10.0.26100.0, CMake 4.3.2, Ninja 1.13.2: full Debug/Release builds/headers passed; related CTests **20/20** each (34.80 s / 34.44 s). No Linux/macOS native run, native-allocation fault injection, or >INT_MAX string allocation was performed.
+`osal.path` covers Chinese/emoji round trips, actual files, empty/relative/prefix preservation, invalid UTF-8/Big5/NUL/native encodings, isolated UTF-16 surrogates on Windows, and invalid native bytes/legal backslash filenames on POSIX. Independent SDK header compilation includes path.hpp. Shell checks local/remote Unicode scripts, deployment directories, and OSAL causes. Windows x64/MSVC 19.51.36257, SDK 10.0.26100.0, CMake 4.3.2, Ninja 1.13.2: full Debug/Release builds/headers passed; related CTests **20/20** each (34.80 s / 34.44 s). Current platform results are listed in [Current platform validation](#current-platform-validation). Native-allocation fault injection and >INT_MAX string allocation were not performed.
 
 新增 `osal.path`：中文／emoji 往返、實際開檔、空值、相對路徑與前綴保留、非法 UTF-8、
 Big5 bytes、NUL、無法輸出的原生編碼。Windows 案例含孤立 UTF-16 surrogate；
@@ -169,7 +169,7 @@ POSIX 案例含非法原生 bytes 與合法反斜線檔名。SDK 每個標頭獨
 Shell 整合另驗證本機／遠端 Unicode 腳本、Unicode 部署目錄與 OSAL 原因鏈。
 Windows x64／MSVC 19.51.36257、Windows SDK 10.0.26100.0、CMake 4.3.2、Ninja 1.13.2：
 Debug／Release 完整建置與公開標頭編譯成功；相關 CTest 各 20/20 通過
-（Debug 34.80 秒、Release 34.44 秒）。Linux／macOS 尚未實機驗證。
+（Debug 34.80 秒、Release 34.44 秒）。目前平台結果見[目前平台驗證](#current-platform-validation)。
 未注入原生轉換 API 的配置故障，亦未配置超過 INT_MAX 的測試字串。
 
 <a id="統一操作契約"></a>
@@ -454,9 +454,23 @@ Tests cover immediate exit, retained results, forced termination, multiple waite
 額外 handle／fd 不被繼承、異常退出、並行建立、重複回收、容量及關閉流程。
 Windows 另測試退出碼 259；POSIX 檢查子程序已被回收。
 
-Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMake 3.31.6, Ninja 1.12.1. The Linux/macOS backends had not been built/run natively in that validation. Source presence is not proof of three-platform coverage; later evidence must identify its revision and suite.
+<a id="current-platform-validation"></a>
 
-2026-09-18 的歷史驗證環境為 Windows x64、MSVC 19.44、SDK 10.0.26100、CMake 3.31.6、Ninja 1.12.1；當次未在 Linux／macOS 原生建置或執行。程式碼存在不代表三平台驗證完成；後續證據須標明版本與測試範圍。
+### Current platform validation / 目前平台驗證
+
+| Platform / 平台 | Recorded scope and result / 已記錄範圍與結果 |
+| --- | --- |
+| [Windows](../../../README.md#windows-validation) | Full Debug/Release builds; selected OSAL/OutputHub/Log CTests **23/23 each** / 全專案建置、選定套件兩種組態各 **23/23** |
+| [Linux](../../../README.md#linux-validation) | Ubuntu 24.04 / WSL 2 standalone OSAL Debug; descriptor/Process/SharedMemory/FileLock **4/4**, descriptor repeat **20/20**, five negative controls / 獨立 OSAL Debug、四套通過、重跑與負向對照通過 |
+| [macOS](../../../README.md#macos-validation) | Full Debug build; initial full-project validation and follow-up OSAL/OutputHub **24/24** / 完整 Debug 建置、初次全專案驗證與後續 **24/24** |
+
+The linked reports own environment versions, source revisions, logs, and coverage limits. The dated records below preserve individual changes' validation history; they do not replace this current summary. Real native failure injection and the deferred creation/spawn race remain separate concerns.
+
+環境版本、原始碼版本、log 與覆蓋限制以連結的報告為準。以下日期紀錄保留各次修改的歷史驗證，不代表目前平台總狀態；真實原生故障注入與暫緩的建立／spawn 競爭問題仍分別追蹤。
+
+Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMake 3.31.6, Ninja 1.12.1. Current platform results are summarized above.
+
+2026-09-18 的歷史驗證環境為 Windows x64、MSVC 19.44、SDK 10.0.26100、CMake 3.31.6、Ninja 1.12.1；目前各平台結果見上方摘要。
 
 **Native macOS validation, 2026-10-27:** macOS 26.3.1(a), arm64, Debug. The full project rebuilt successfully after the Pipe changes; all 24 OSAL/OutputHub CTests passed, including 9 new contract/fault tests. See the [validated environment and source revision](../../../README.md#macos-validation) and [Pipe test details](PIPE.md#斷管與提交失敗契約測試2026-10-27). This does not establish minimum macOS compatibility, Intel Mac support, Release results, or current Windows/Linux results.
 
@@ -531,11 +545,14 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
 
 ## Outstanding issues and resolved findings / 待處理事項與已解決發現
 
-- **Pipe SIGPIPE and submission setup errors (2026-10-27):** macOS-managed Pipe I/O uses F_SETNOSIGPIPE before admission; setup failure now retains ReadPipe/WritePipe outside AdoptPipe. Native child stdio keeps its existing policy. Cross-platform contract tests and deterministic scheduler fault tests are registered with CTest. See [Pipe](PIPE.md) for macOS results and pending Windows/Linux verification; synthetic setup failure does not establish native fcntl/IOCP failure coverage.
-- **Pipe 斷管與提交錯誤（2026-10-27）：** macOS 在接受 Pipe I/O 前設定 F_SETNOSIGPIPE；設定失敗的公開 operation 已修正為 ReadPipe／WritePipe，原因鏈保留 AdoptPipe。原生子程序 stdio 保留既有政策。CTest 已加入共同契約及 scheduler 故障測試；macOS 結果、待補的 Windows／Linux 原生驗證與原生故障注入限制見 [Pipe](PIPE.md)。
+- **Descriptor rollback fixture, resolved (2026-10-27):** On Ubuntu 24.04 / WSL 2, GCC 13.3 and CMake 3.28.3, the original `osal.descriptor` passed directly but failed under CTest. `strace` confirmed that CTest's log occupied inherited fd 3; the fixture obtained fd 4 and rejected it before setting the resource limit or exercising rollback. The fixture now limits new descriptor numbers to `filler + 1`, verifies non-stdio exhaustion with `EMFILE`, and explicitly checks limit restoration. Anonymous shared diagnostics preserve child assertions without consuming a descriptor. Additional cases inherit occupied low descriptors and a sparse high descriptor. Direct execution, an explicit inherited-fd-3 launcher, and CTest passed; the descriptor test also passed 20 consecutive CTest runs. Related Linux descriptor/Process/SharedMemory/FileLock tests passed **4/4**. Tracing confirmed low-fd acquisition, relocation failure, close/unlink of new resources, and preservation of existing names after failed open. Five isolated negative controls (the old fixture assumption, omitted FileLock/SharedMemory create rollback, and erroneous unlink on either open failure) all failed as expected; restoring the copied sources passed. Production OSAL code was not changed. This validates these rollback paths, not all Linux behavior or the separately deferred creation/spawn race. Existing macOS validation remains recorded in the [validated environment](../../../README.md#macos-validation); this fixture revision was exercised on Ubuntu 24.04.
+- **Descriptor 回滾測試準備邏輯，已修正（2026-10-27）：** Ubuntu 24.04／WSL 2、GCC 13.3、CMake 3.28.3 上，原版直接執行通過，CTest 則失敗。`strace` 確認 CTest 日誌占用繼承的 fd 3，測試取得 fd 4 後，在設定資源上限及驗證回滾之前就誤判失敗。現在依實際 `filler + 1` 設限，明確驗證非標準串流 fd 已耗盡並回報 `EMFILE`，也檢查上限還原是否成功。匿名共享診斷保留子程序 assertion，且不占用 fd；新增繼承低編號與不連續高編號 fd 的案例。直接執行、明確繼承 fd 3、CTest 均通過，descriptor 另連跑 20 次通過；Linux descriptor／Process／SharedMemory／FileLock 共 **4/4** 通過。追蹤確認低 fd 建立、搬移失敗、新資源 close／unlink，以及 open 失敗保留既有名稱。隔離副本的五個負向對照（舊 fixture 假設、兩種 create 回滾缺漏、兩種 open 誤刪名稱）均被測試攔下，還原後通過。正式 OSAL 未修改；本次結論限於這些路徑，不代表所有 Linux 行為或另列的建立／spawn 競爭窗口已驗證。macOS 已有的驗證結果見[已驗證環境](../../../README.md#macos-validation)；本次 fixture 修訂於 Ubuntu 24.04 執行驗證。
+
+- **Pipe SIGPIPE and submission setup errors (2026-10-27):** macOS-managed Pipe I/O uses F_SETNOSIGPIPE before admission; setup failure now retains ReadPipe/WritePipe outside AdoptPipe. Native child stdio keeps its existing policy. Cross-platform contract tests and deterministic scheduler fault tests are registered with CTest. See [Pipe](PIPE.md) for macOS and Windows results and the remaining Linux Pipe-specific coverage; synthetic setup failure does not establish native fcntl/IOCP failure coverage.
+- **Pipe 斷管與提交錯誤（2026-10-27）：** macOS 在接受 Pipe I/O 前設定 F_SETNOSIGPIPE；設定失敗的公開 operation 已修正為 ReadPipe／WritePipe，原因鏈保留 AdoptPipe。原生子程序 stdio 保留既有政策。CTest 已加入共同契約及 scheduler 故障測試；macOS／Windows 結果、Linux Pipe 專項的剩餘覆蓋與原生故障注入限制見 [Pipe](PIPE.md)。
 
 - **FileLock ownership after native unlock failure (2026-10-05):** FileLockGuard::unlock retains the Guard/local occupied flag on backend failure, proving only retained cleanup responsibility, not continued native ownership. [UnlockFileEx](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-unlockfileex), [Linux flock](https://man7.org/linux/man-pages/man2/flock.2.html), and [macOS flock](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html) do not guarantee unchanged ownership for every failure. Retryable Guard state alone does not establish safe payload access. No failure-after-release case has been reproduced and no revised policy is approved. The user deferred implementation; [root TODO](../../../TODO.md) tracks it. Since 2026-10-08 Concurrency no longer uses FileLock, but this OSAL gap remains. Decide known/unknown ownership, cleanup, retry, and fault policy before changes; the superseded Concurrency refactor did not fix FileLock.
-- **POSIX internal-fd/stdio isolation:** Linux/macOS monitors, POSIX FileLock/SharedMemory originally could retain fd 0/1/2 after the host closed stdio. Spawn Inherit preserves these via adddup2(fd, fd), which on Linux clears CLOEXEC ([glibc](https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/spawni.c)); CLOEXEC alone was insufficient. A child could write internal resources or retain a FileLock open description after owner death. The implemented descriptor helper relocates these resources and Linux pidfd before delivery/registration; failure preserves native errors and closes fds. Name rollback removes only new undistributed resources, not opened ones. POSIX osal.descriptor covers closed stdio, mapping/locking, child Null streams, exhausted-fd rollback/retry, and no child-extended ownership. That round did not compile/run Linux/macOS and had no WSL. Relocation addresses retained occupancy, not the separate concurrent window below.
+- **POSIX internal-fd/stdio isolation:** Linux/macOS monitors, POSIX FileLock/SharedMemory originally could retain fd 0/1/2 after the host closed stdio. Spawn Inherit preserves these via adddup2(fd, fd), which on Linux clears CLOEXEC ([glibc](https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/spawni.c)); CLOEXEC alone was insufficient. A child could write internal resources or retain a FileLock open description after owner death. The implemented descriptor helper relocates these resources and Linux pidfd before delivery/registration; failure preserves native errors and closes fds. Name rollback removes only new undistributed resources, not opened ones. POSIX osal.descriptor covers closed stdio, mapping/locking, child Null streams, exhausted-fd rollback/retry, and no child-extended ownership. For current validation, see the descriptor fixture findings above for Ubuntu 24.04 / WSL 2 and the [existing macOS report](../../../README.md#macos-validation). Relocation addresses retained occupancy, not the separate concurrent window below.
 - **Deferred POSIX concurrent creation/spawn:** relocation is not one native operation. Another thread can spawn after open/pipe/socket receives a low fd but before relocation, causing accidental inheritance or invalid-source launch failure. Pipe/Socket and newly covered resources all remain exposed. Interleavings are identified in code but not reproduced with controlled scheduling or fixed; the user deferred changes and [TODO](../../../TODO.md) retains tracking. Resuming requires scope confirmation/authorization. **Unapproved proposal:** one private process-local mutex around fd creation, relocation, and rollback; under the same mutex spawn duplicates inherited streams outside Pipe bootstrap fd ranges and records missing streams as /dev/null, then releases the lock before spawn, using RAII copies. This must cover Pipe, Socket/accept, FileLock, SharedMemory, monitors, and pidfd, not just relocation. Decisions include lock contention and up to three temporary fds per spawn, and whether protection covers only directly managed OSAL resources. Third-party open/close/dup2 and libc resolver-created sockets are uncoordinated. Filling missing parent stdio with /dev/null during single-thread startup is another unapproved alternative because it mutates host state. Future Linux/macOS tests must pause after low-fd acquisition, interleave spawn, check Inherit/Null/Capture, exhaustion/rollback, lock order/deadlock. Linux VM/WSL2 and Mac/macOS CI can run separately; Windows regressions cannot replace POSIX race tests. There is no measured fix result.
 - **Windows Pipe random diagnostics, resolved:** NativePipe::create_pair previously discarded BCrypt NTSTATUS. It now shares random_bytes and wraps CreatePipe ← RandomBytes with native data. Windows osal.pipe_random_failure replaces the provider at link time and exercises real PipeService creation, repeated errors, admission recovery, and later success. No production test hook or real BCrypt fault injection was added.
 
@@ -566,7 +583,7 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
   FileLock／SharedMemory 的搬移失敗只移除本次新建且尚未交付的名稱，不移除 open 的既有資源。
   新增 POSIX 專用 `osal.descriptor`：關閉標準串流後建立／開啟資源、映射與鎖仍可使用、
   子程序標準串流改接空裝置、fd 額滿時回滾及同名重試、持鎖者直接退出後子程序不延長占用。
-  **驗證限制：** Linux／macOS 測試尚未編譯或執行；目前主機沒有可用 WSL。
+  **目前驗證：** Ubuntu 24.04／WSL 2 的 descriptor 與相關原生測試已通過，詳見上方 fixture 修正紀錄；macOS 既有建置與測試結果見[已驗證環境](../../../README.md#macos-validation)。
   此修正處理資源建立完成後的持續占用，並行建立／spawn 的窗口另見下項。
 - **POSIX 關閉標準串流時的並行建立／spawn（2026-10-05 新發現）：**
   搬移 fd 不是單一原生操作。另一執行緒可能在 open／pipe／socket 等取得低編號 fd 後、
@@ -674,8 +691,8 @@ Operations OpenLibrary=46, FindSymbol=47, CloseLibrary=48 were appended. Windows
 Windows 保留 GetLastError；POSIX dlerror 是文字而非 errno，目前僅保留操作與通用錯誤分類，
 不偽造 native 數字。詳細 POSIX loader 診斷是尚待設計的限制；本輪不改 Common Error 布局。
 
-Recorded Windows coverage comes from Module System module.plugin: full Debug/Release suites passed **55/55** each, including actual load/symbols, move/close, Chinese/spaced paths. POSIX loading was not natively verified in that round; see [Module System](../module_system/README.md).
+Recorded Windows coverage comes from Module System module.plugin: full Debug/Release suites passed **55/55** each, including actual load/symbols, move/close, Chinese/spaced paths. For later platform evidence, see [Current platform validation](#current-platform-validation) and [Module System](../module_system/README.md).
 
 本輪 Windows DynamicLibrary 行為由 Module System 的 `module.plugin` 測試涵蓋，
 Debug／Release 全套各 55/55 通過；包含實際載入／符號、move／close、中文／空白路徑。
-POSIX backend 尚未實機驗證；結果與限制見 [Module System](../module_system/README.md)。
+後續平台結果見[目前平台驗證](#current-platform-validation)，載入範圍與限制見 [Module System](../module_system/README.md)。

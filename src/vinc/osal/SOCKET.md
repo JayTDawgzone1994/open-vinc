@@ -189,9 +189,11 @@ UTF-8 本機路徑、路徑清理、對端被終止，以及反覆啟停的資�
 Multicast 驗證選項與 IPv4 loopback 介面的加入／離開，不代表實際網路上的群播交付驗證。
 測試使用短的獨立本機 socket 路徑；過長的建置工作目錄可能超過 AF_UNIX 限制。
 
-Windows 實測環境：OS build 26200、MSVC 19.44、SDK 10.0.26100、CMake 3.31.6、
-Ninja 1.12.1。Linux／macOS 後端尚未原生建置與執行；Windows 最低支援版本也仍需
-另行驗證，不能把在本機通過視為所有版本皆通過。TCP／UDP 需要本機 loopback 可用，
+早期 Windows 實測環境為 OS build 26200、MSVC 19.44、SDK 10.0.26100、CMake 3.31.6、
+Ninja 1.12.1。目前 Windows Debug／Release 的 23 項回歸與 macOS Debug 的
+OSAL／OutputHub 24 項回歸均包含 `osal.socket`，完整版本與結果見
+[OSAL 平台驗證](README.md#current-platform-validation)。本次 Linux WSL 四套回歸未涵蓋 Socket。
+Windows 最低支援版本仍需另行驗證，不能把在本機通過視為所有版本皆通過。TCP／UDP 需要本機 loopback 可用，
 測試不依賴外部網路服務。
 
 原生契約參考：

@@ -261,9 +261,16 @@ F_SETNOSIGPIPE 時，本地／繼承端點的預設／自訂 handler 四項測�
 ctest --test-dir build/osal -R '^osal\.(pipe|pipe_stream|process_output|pipe_attach_failure|pipe_contract\..*)$' --output-on-failure
 ```
 
-Windows／Linux 本次原生建置與測試尚待執行；不以 macOS 成功或替身測試作為
-另外兩平台的通過證據。原生端點設定失敗尚未直接注入，以上故障測試驗證的是
-共用提交邊界收到失敗後的行為。
+**Windows 後續驗證（2026-10-27）：** 同一版本完整 Debug／Release 建置成功，
+OSAL／OutputHub／Log 各 **23/23** 通過，包含 `osal.pipe`、`osal.pipe_stream`、
+`osal.process_output`、`osal.pipe_attach_failure` 與四個 Windows 適用的 Pipe 契約案例。
+`osal.pipe_attach_failure` 另於 Debug／Release 分別重跑通過；它驗證共用 scheduler 的
+提交失敗與重試，不代表已重現 `CreateIoCompletionPort` 的真實原生失敗。
+完整環境、版本與 log 見 [Windows 驗證報告](../../../README.md#windows-validation)。
+
+目前 [Linux WSL 報告](../../../README.md#linux-validation)涵蓋 descriptor／Process／
+SharedMemory／FileLock，尚未納入上述 Pipe 專項測試；這是該報告的具體覆蓋缺口。
+macOS 原生端點設定失敗亦尚未直接注入；以上故障替身驗證的是共用提交邊界收到失敗後的行為。
 
 原生契約參考：
 

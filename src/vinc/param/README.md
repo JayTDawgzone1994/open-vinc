@@ -368,7 +368,7 @@ Two shared slots serve all parameters and consume one module_lock_limit mutex. E
 - Windows x64／MSVC 19.51：Debug 全套 CTest **64/64 通過**（224.37 秒）；
   最後補強請求容量與外層 operation 後，重新建置並重跑 Param **3/3 通過**。
   Release 最終完整建置及全套 CTest **64/64 通過**（189.44 秒）。
-  Linux／macOS 尚待實機建置及行為驗證。
+  後續平台建置與行為驗證範圍見[平台報告](../../../README.md#validation-and-limits)。
 - 已確認限制：作業系統／檔案系統 I/O 卡住時，C++ 同步磁碟工作無法安全強制取消；
   呼叫者等待有界且不占 heartbeat，但 join worker 的關閉仍可能等候原生 I/O 返回。
   未將 worker 另放隔離程序，也沒有以無證據的硬期限宣稱處理此 OS 限制。

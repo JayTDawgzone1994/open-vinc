@@ -209,6 +209,10 @@ Shell 關閉時另列出累計截斷／讀取失敗數，即使個別通知曾�
 
 ## Validation scope / 驗證範圍
 
+Current native results: Windows Debug/Release full builds succeeded, with OutputHub integration/faults included in **23/23** OSAL/OutputHub/Log tests per configuration. macOS Debug also passed both OutputHub suites in its **24/24** OSAL/OutputHub regression. Environment, revision and logs are in the [platform reports](../../../README.md#validation-and-limits). The Linux WSL four-suite OSAL validation did not include OutputHub.
+
+目前原生結果：Windows Debug／Release 完整建置成功，OutputHub 整合／故障測試包含於兩種組態各 **23/23** 的 OSAL／OutputHub／Log 回歸；macOS Debug 的 **24/24** OSAL／OutputHub 回歸亦包含這兩套。環境、版本與 log 見[平台驗證報告](../../../README.md#validation-and-limits)。Linux WSL 四套 OSAL 驗證未涵蓋 OutputHub。
+
 output_hub.integration covers large dual streams, slow subscribers, global budgets, mute/resume, no subscribers, launch failure, generations, drain timeouts, UTF-8/controls/long lines/gaps. A helper retaining a Writer simulates post-exit pipe state for timeout tests and is explicitly terminated/cleaned.
 
 `output_hub.integration` 測試大型雙路資料、慢接收者、總額度、停用／恢復、無接收者、
@@ -223,11 +227,11 @@ monitor 診斷及 I/O 完成結果；正式 library 不包含注入入口。確�
 服務故障、原因鏈、獨立讀取失敗不被覆蓋、EOF 優先及失敗後仍可完成收尾。
 這是 Hub 邊界的確定性故障測試，不代表已觸發各 OS 的真實 monitor 故障或所有配置失敗點。
 
-Real-Module shell.integration checks initialization/commands/crash/restart/on_stop tails; Windows hidden-console tests check partial-input redraw and continued use. Linux/macOS still require native validation. [Socket Shell](../shell/SOCKET.md) uses Hub; structured logging/file storage are now implemented separately in [Log](../log/README.md), not inside Hub.
+Real-Module shell.integration checks initialization/commands/crash/restart/on_stop tails; Windows hidden-console tests check partial-input redraw and continued use. Current Windows and macOS results are recorded in the [platform reports](../../../README.md#validation-and-limits); the four-suite Linux WSL run did not include OutputHub. [Socket Shell](../shell/SOCKET.md) uses Hub; structured logging/file storage are now implemented separately in [Log](../log/README.md), not inside Hub.
 
 `shell.integration` 使用真實模組驗證初始化、命令、崩潰／重啟與 on_stop 尾端資料；
 `shell.console` 在 Windows 隱藏終端驗證背景輸出後的部分命令重繪與繼續執行。
-Linux／macOS 尚待實機建置與執行。Socket Shell 已接上 OutputHub，見
+Windows／macOS 已有[平台驗證報告](../../../README.md#validation-and-limits)；Linux WSL 四套回歸未涵蓋 OutputHub。Socket Shell 已接上 OutputHub，見
 [Socket Shell 文件](../shell/SOCKET.md)。結構化 Vinc Log 與檔案保存已由獨立 [Log 元件](../log/README.md) 實作，不屬於 Hub 本身。
 
 <a id="程式閱讀順序"></a>
@@ -317,12 +321,12 @@ Three confirmed findings were fixed:
 3. PipeService 建立移入 factory 原有例外邊界，配置失敗回報
    `ResourceExhausted / Create`，沿用 RAII 回收，不擴大其他 API 的例外處理範圍。
 
-Windows x64/MSVC 19.51.36257, SDK 10.0.26100, CMake 4.3.2, Ninja 1.13.2: related rebuilds and **6/6** Debug/Release tests (OutputHub integration/faults, process_output, Module process, Shell integration/socket). Injection limits are described above; no native Linux/macOS validation.
+Windows x64/MSVC 19.51.36257, SDK 10.0.26100, CMake 4.3.2, Ninja 1.13.2: related rebuilds and **6/6** Debug/Release tests (OutputHub integration/faults, process_output, Module process, Shell integration/socket). Injection limits are described above; current platform evidence is in the [platform reports](../../../README.md#validation-and-limits).
 
 Windows x64（MSVC 19.51.36257、SDK 10.0.26100、CMake 4.3.2、Ninja 1.13.2）
 相關目標重新建置；Debug／Release 各 **6/6** 測試通過：`output_hub.integration`、
 `output_hub.faults`、`osal.process_output`、`module.process`、`shell.integration`、
-`shell.socket`。故障注入範圍與限制見上方「驗證範圍」；Linux／macOS 尚未實機驗證。
+`shell.socket`。故障注入範圍與限制見上方「驗證範圍」；目前平台證據見[平台報告](../../../README.md#validation-and-limits)。
 
 <a id="先前驗證紀錄"></a>
 
