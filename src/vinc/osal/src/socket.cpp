@@ -78,7 +78,10 @@ vinc::Result<ReceiveResult> receive_native(SocketState& state, std::span<std::by
 
     return ReceiveResult{transferred, state.type == SocketType::Stream && transferred == 0, false};
 #else
-    iovec vector{bytes, buffer.size()};
+    // Darwin may omit the sender address for a zero-capacity recvmsg. Receive
+    // into a scratch byte instead, consuming one datagram and reporting any
+    // discarded payload as truncation without exposing bytes outside the span.
+    iovec vector{bytes, buffer.empty() ? 1 : buffer.size()};
     msghdr message{};
     message.msg_iov = &vector;
     message.msg_iovlen = 1;
@@ -98,9 +101,10 @@ vinc::Result<ReceiveResult> receive_native(SocketState& state, std::span<std::by
         source->size = message.msg_namelen;
     }
 
-    return ReceiveResult{static_cast<std::size_t>(transferred),
+    const auto received_bytes = static_cast<std::size_t>(transferred);
+    return ReceiveResult{std::min(received_bytes, buffer.size()),
                          state.type == SocketType::Stream && transferred == 0,
-                         (message.msg_flags & MSG_TRUNC) != 0};
+                         received_bytes > buffer.size() || (message.msg_flags & MSG_TRUNC) != 0};
 #endif
 }
 

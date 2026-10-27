@@ -1,5 +1,5 @@
 // POSIX Pipe backend using nonblocking descriptors and readiness notification.
-// Only the dedicated Pipe worker performs I/O; SIGPIPE handling stays local to that thread.
+// Only the dedicated Pipe worker performs I/O; process-global signal handlers stay unchanged.
 
 #include <vinc/osal/detail/posix/pipe_platform.hpp>
 #include <atomic>
@@ -119,6 +119,9 @@ vinc::Result<void> PipeMonitor::initialize_worker() noexcept {
 
 struct NativePipeImpl {
     Fd endpoint;
+#if defined(VINC_OSAL_MACOS)
+    bool signal_safe = false;
+#endif
 };
 
 NativePipe::NativePipe(std::unique_ptr<NativePipeImpl> impl) : impl_(std::move(impl)) {
@@ -150,6 +153,17 @@ vinc::Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
 }
 
 vinc::Result<void> NativePipe::attach(PipeMonitor&) {
+#if defined(VINC_OSAL_MACOS)
+    if (!impl_->signal_safe) {
+        // Darwin sends pipe SIGPIPE to the process, so the worker's mask alone
+        // is insufficient. Configure only endpoints submitted to this service;
+        // captured child stdout/stderr writers retain their native behavior.
+        if (fcntl(impl_->endpoint.value, F_SETNOSIGPIPE, 1) < 0) {
+            return std::unexpected(native_error(vinc::osal::ErrorOperation::AdoptPipe, errno));
+        }
+        impl_->signal_safe = true;
+    }
+#endif
     return {};
 }
 

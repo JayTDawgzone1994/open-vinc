@@ -8,6 +8,7 @@
 #include <bcrypt.h>
 #else
 #include <cerrno>
+#include <sys/random.h>
 #include <unistd.h>
 #endif
 

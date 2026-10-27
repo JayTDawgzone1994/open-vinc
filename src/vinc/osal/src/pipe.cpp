@@ -1,4 +1,5 @@
 #include <vinc/osal/detail/native_error.hpp>
+#include <vinc/osal/detail/operation_error.hpp>
 // Common Pipe scheduler: accept owned buffers, advance native I/O, then return completions.
 // Endpoint close requests cancellation; native completion determines when storage is safe to free.
 
@@ -446,7 +447,7 @@ vinc::Result<IoId> PipeService::submit(detail::PipeEnd& pipe, IoBuffer&& buffer,
     operation->deadline = deadline;
     auto attached = pipe.record_->native->attach(*state_->monitor);
     if (!attached) {
-        return std::unexpected(attached.error());
+        return std::unexpected(detail::operation_error(operation_code, attached.error()));
     }
     pipe.record_->used = true;
     operation->buffer = std::move(buffer); // all fallible allocations have completed
