@@ -6,7 +6,7 @@ import path from "node:path";
 const build = path.resolve(process.env.VINC_UI_BUILD ?? "../../../../build/windows-msvc-debug");
 const executable = path.join(
     build,
-    "vinc/ui/vinc_ui_test_server" + (process.platform === "win32" ? ".exe" : ""),
+    "framework/ui/vinc_ui_test_server" + (process.platform === "win32" ? ".exe" : ""),
 );
 let processServer: ChildProcessWithoutNullStreams;
 let root: string;
@@ -69,8 +69,8 @@ async function addPlugin(id: string, source: string): Promise<void> {
 
 test.beforeAll(async () => {
     root = await mkdtemp(path.join(build, "ui-browser-"));
-    await cp(path.join(build, "vinc/ui/dist/app"), path.join(root, "app"), { recursive: true });
-    await cp(path.join(build, "vinc/ui/dist/plugins"), path.join(root, "plugins"), { recursive: true });
+    await cp(path.join(build, "framework/ui/dist/app"), path.join(root, "app"), { recursive: true });
+    await cp(path.join(build, "framework/ui/dist/plugins"), path.join(root, "plugins"), { recursive: true });
     await addPlugin(
         "test.lifecycle",
         `
