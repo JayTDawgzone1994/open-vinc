@@ -33,6 +33,23 @@ Give each rule one primary maintenance location according to the responsibilitie
 - Even with implementation authorization, pause the affected work when a new major architectural issue is discovered. Obtain explicit agreement before implementing that part. Necessary read-only investigation may continue.
 - Communicate with the user in Traditional Chinese. Clearly report changes, validation, and limitations. Do not present proposals as decisions or describe a design-only or unverified capability as complete.
 
+## Git Workflow: Topic Branches and the `push` Instruction
+
+- Use a short-lived topic branch for each coherent feature, fix, or documentation change. Keep its implementation, tests, and documentation together; a topic may contain multiple commits. Do not maintain permanent platform development branches such as `mac_develop`. Windows, Linux, and macOS validate the same topic branch and commit.
+- The default PR target is `develop`; `main` is the release integration branch. Follow an explicit user-specified target when provided. Never commit or push task changes directly to `main` or `develop`.
+- **An explicit instruction to `push` authorizes the complete publication workflow below without further confirmation or a separate `開工`/`動工`.** It publishes the current task's authorized changes; it does not authorize unrelated implementation work, merging, or enabling auto-merge. Discussing or quoting the word `push`, including requests to document this rule, does not trigger publication.
+
+When the user instructs you to push:
+
+1. Inspect the working tree, current branch, remote, and existing PR. Identify the current task's changes and preserve unrelated work; do not blindly stage everything.
+2. Fetch the target branch. Reuse an existing unmerged topic branch/PR for this task, or create a descriptively named branch from the current remote target, such as `fix/pipe-sigpipe-contract`. Preserve and carry the task's local changes onto it, resolve relevant conflicts, and inspect the resulting diff against the target. Do not discard changes or rewrite published history without authorization. Never reuse a merged topic branch for new work.
+3. Run the checks appropriate to the changes and record the actual environment, results, and any missing platform coverage. Existing evidence can be reused when the tested content remains applicable. If unresolved failures prevent readiness, report them and open the PR as a draft with those failures clearly documented.
+4. Stage only the task's files or hunks and create clear, logically scoped commits. If the changes are already committed, do not manufacture an empty commit. Push the topic branch and set its upstream as needed; do not force-push by default.
+5. Create a GitHub Pull Request (the user's "merge request") targeting `develop`, or update the existing PR for this branch. Describe the problem, final behavior, validation, and remaining verification. Do not create duplicate PRs. Attach the PR to the current task when the app supports it, and return its URL, branch name, commit ID, and validation summary to the user for review. Opening the PR does not authorize posting separate messages or review requests to other people.
+6. Leave the PR for the user to review and decide whether to merge. After a user-approved merge is confirmed, the topic branch can be deleted once it has no remaining work; subsequent tasks start from the updated target branch.
+
+If credentials, permissions, or remote state block a step, preserve completed work and report the exact blocker and the remaining steps. Do not claim a push or PR creation succeeded without confirmation from the remote service.
+
 ## Project Goal
 
 Open-VINC is a general-purpose software framework that can be reused across projects and operating systems, providing a common foundation for robots, drones, games, and other software. Its core goals are **cross-platform operation, speed, low overhead, maintainability, modern technology, and engineering rigor**.
