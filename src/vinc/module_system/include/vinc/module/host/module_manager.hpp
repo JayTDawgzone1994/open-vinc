@@ -10,6 +10,7 @@
 #include <vinc/module/error.hpp>
 #include <vinc/message_bus/message_bus.hpp>
 #include <vinc/module/mid.hpp>
+#include <vinc/module/module_info.hpp>
 #include <vinc/module/contract_report.hpp>
 #include <filesystem>
 #include <functional>
@@ -31,15 +32,7 @@ struct microProgram {
     CommandFunction main_func;
     AutoCompleteFunction autoComplete_func;
 };
-enum class ModuleState {
-    Queued,
-    Starting,
-    Running,
-    Stopping,
-    RestartWaiting,
-    Stopped,
-    Failed
-};
+
 
 // Explicit per-launch policy. Build configuration never selects debugging automatically.
 struct ModuleStartOptions {

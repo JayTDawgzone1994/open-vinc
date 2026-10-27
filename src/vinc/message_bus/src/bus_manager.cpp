@@ -4,6 +4,7 @@
 #include <vinc/time.hpp>
 #include <vinc/message_bus/detail/protocol.hpp>
 #include <vinc/message_bus/detail/diagnostics_protocol.hpp>
+#include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <vinc/control/channel.hpp>
 #include <condition_variable>
@@ -112,6 +113,13 @@ struct BusManager::Impl {
             frame.payload.insert(frame.payload.end(), body->begin(), body->end());
         } else {
             frame.payload = encode_failure(body.error());
+        }
+
+        if (item.frame.operation == ListTopicConnections) {
+            // A congested diagnostic reply may time out at its caller; it must
+            // not turn a read-only refresh into a forced Module disconnection.
+            (void)item.session->send(std::move(frame));
+            return;
         }
 
         send(item.owner, std::move(frame));
@@ -494,8 +502,56 @@ struct BusManager::Impl {
         return encode_diagnostics(page);
     }
 
+    vinc::Result<control::Bytes> list_connections(const Work& item) {
+        control::Reader reader(item.frame.payload);
+        const auto version = reader.u32();
+        const auto after = read_cursor(reader);
+        if (!reader.done() || version != connections_version || !valid_cursor(after)) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ListTopicConnections});
+        }
+
+        TopicConnectionsPage page;
+        // One worker owns the registry. Stop at the first extra row; a single
+        // topic with thousands of subscriptions still fits bounded wire pages.
+        auto append = [&](const std::string& topic, std::uint64_t schema, ConnectionRole role,
+                          std::uint64_t id, std::uint64_t owner) {
+            ConnectionCursor key{topic, role, id};
+            if (!cursor_before(after, key)) {
+                return true;
+            }
+            if (page.connections.size() == connections_per_page) {
+                page.next = page.connections.back().key;
+                return false;
+            }
+
+            page.connections.push_back({std::move(key), schema, owner});
+            return true;
+        };
+        for (auto it = topics.lower_bound(after.topic); it != topics.end(); ++it) {
+            const auto& [name, topic] = *it;
+            for (const auto& [id, ring] : topic.publishers) {
+                if (!append(name, topic.schema, ConnectionRole::Publisher, id, ring->descriptor.owner)) {
+                    return encode_connections(page);
+                }
+            }
+            for (const auto& [id, subscriber] : topic.subscribers) {
+                if (!append(name, topic.schema, ConnectionRole::Subscriber, id, subscriber.owner)) {
+                    return encode_connections(page);
+                }
+            }
+        }
+
+        return encode_connections(page);
+    }
+
     vinc::Result<control::Bytes> execute(const Work& item) {
         switch (item.frame.operation) {
+        case ListTopicConnections:
+            try {
+                return list_connections(item);
+            } catch (const std::bad_alloc&) {
+                return std::unexpected(Error{ErrorCode::ResourceExhausted, ErrorOperation::ListTopicConnections});
+            }
         case InspectTopics:
             return inspect_topics(item);
         case ListTopics:

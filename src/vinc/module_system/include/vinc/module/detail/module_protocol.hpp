@@ -17,6 +17,7 @@ constexpr std::uint16_t debug_continue = 6;
 constexpr std::uint16_t finishing = 7;
 constexpr std::uint16_t completed = 8;
 constexpr std::uint16_t attach_lock = 9;
+constexpr std::uint16_t list_modules = 10;
 constexpr std::uint32_t lock_protocol_version = 1;
 constexpr std::uint64_t completion_request = UINT64_MAX;
 constexpr std::uint32_t primary_failure = 0;
@@ -28,7 +29,7 @@ constexpr std::size_t command_status_bytes = sizeof(std::uint32_t);
 
 // Positions exclude argv[0]. Changing this layout requires both launch endpoints to change.
 namespace bootstrap {
-constexpr char version_marker[] = "--vinc-module-v13";
+constexpr char version_marker[] = "--vinc-module-v14";
 constexpr std::size_t marker = 0;
 constexpr std::size_t endpoint = 1;
 constexpr std::size_t token = 2;

@@ -4,6 +4,7 @@
 
 #include <vinc/message_bus/detail/protocol.hpp>
 #include <vinc/message_bus/detail/diagnostics_protocol.hpp>
+#include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/message/detail/framework_access.hpp>
 #include <vinc/time.hpp>
 #include <condition_variable>
@@ -48,6 +49,7 @@ struct Transport {
     std::mutex mutex;
     std::condition_variable changed;
     std::uint64_t next_request = 1;
+    std::uint64_t retired_query = 0;
     bool closed = false;
     std::map<std::uint64_t, Pending> pending;
     std::map<std::uint64_t, std::map<std::uint64_t, Attachment>> topology;
@@ -64,8 +66,14 @@ struct Transport {
         changed.notify_all();
     }
 
-    vinc::Result<control::Bytes> request(std::uint16_t operation, control::Bytes bytes) {
+    vinc::Result<control::Bytes> request(std::uint16_t operation, control::Bytes bytes,
+                                       Deadline deadline = (Deadline::max)()) {
         std::unique_lock lock(mutex);
+        const bool read_only = operation == ListTopicConnections;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return std::unexpected(Error{ErrorCode::Timeout, ErrorOperation::Request});
+        }
+
         if (closed) {
             return std::unexpected(vinc::make_error(ErrorCode::Closed, ErrorOperation::Request));
         }
@@ -77,37 +85,53 @@ struct Transport {
         const auto id = next_request++;
         pending.emplace(id, Pending{operation, {}});
         // This guard is destroyed before lock. An exception after admission may
-        // leave the remote outcome unknown, so close rather than permit replay.
+        // leave a mutation outcome unknown. Only read-only queries can retire
+        // their caller without closing the session.
         struct PendingCleanup {
             Transport& transport;
             std::uint64_t id;
+            bool read_only;
             bool settled = false;
 
             ~PendingCleanup() {
+                if (read_only) {
+                    // Read replies have no mutation outcome to recover. One watermark
+                    // retires old replies without leaking pending capacity after timeout.
+                    transport.retired_query = (std::max)(transport.retired_query, id);
+                }
                 transport.pending.erase(id);
-                if (!settled) {
+                if (!settled && !read_only) {
                     transport.fail_locked();
                 }
 #ifdef VINC_MESSAGE_BUS_TESTING
                 testing::pending_remaining(transport.pending.size());
 #endif
             }
-        } cleanup{*this, id};
+        } cleanup{*this, id, read_only};
 #ifdef VINC_MESSAGE_BUS_TESTING
         testing::checkpoint(testing::FaultPoint::RequestSend);
 #endif
         auto sent = connection.send({control::Kind::Request, message_bus_domain, operation, id, std::move(bytes)});
         if (!sent) {
+            if (read_only && !sent.error().is(control::ErrorCode::Closed)) {
+                // Nothing was admitted to the transport, so no late reply is possible.
+                cleanup.settled = true;
+                return std::unexpected(wrap_error(ErrorCode::Io, ErrorOperation::Request, sent.error()));
+            }
+
             fail_locked();
             return std::unexpected(vinc::wrap_error(ErrorCode::Closed, ErrorOperation::Request, sent.error()));
         }
 
         const bool response_received =
-            changed.wait_until(lock, std::chrono::steady_clock::now() + config::message_bus_request_timeout, [&] {
+            changed.wait_until(lock, (std::min)(deadline,
+                std::chrono::steady_clock::now() + config::message_bus_request_timeout), [&] {
                 return closed || pending.at(id).response.has_value();
             });
         if (!response_received || closed) {
-            fail_locked();
+            if (!read_only || closed) {
+                fail_locked();
+            }
             return std::unexpected(vinc::make_error(
                 response_received ? ErrorCode::Closed : ErrorCode::Timeout, ErrorOperation::Request));
         }
@@ -162,6 +186,16 @@ struct Transport {
         control::Reader reader(frame.payload);
         if (frame.kind == control::Kind::Response) {
             auto found = pending.find(frame.request);
+            if (found == pending.end() && frame.operation == ListTopicConnections &&
+                frame.request != 0 && frame.request <= retired_query) {
+                // Ignore an unclaimed old read-only reply, including duplicates. Its
+                // envelope must still be valid; no topology or mutation state is applied.
+                if (!decode_response(frame.payload)) {
+                    fail_locked();
+                    return false;
+                }
+                return true;
+            }
             if (found == pending.end() || found->second.operation != frame.operation ||
                 found->second.response) {
                 fail_locked();
@@ -853,6 +887,28 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
 
         cleanup.done = true;
         return core;
+    });
+}
+
+Result<TopicConnectionsPage> Client::list_topic_connections(ConnectionCursor after, Deadline deadline) {
+    return detail::guarded(ErrorOperation::ListTopicConnections, [&]() -> Result<TopicConnectionsPage> {
+        if (!detail::valid_cursor(after)) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::ListTopicConnections});
+        }
+
+        control::Bytes payload;
+        control::put_u32(payload, detail::connections_version);
+        auto encoded = detail::encode_cursor(payload, after);
+        if (!encoded) {
+            return std::unexpected(encoded.error());
+        }
+
+        auto response = impl_->transport->request(detail::ListTopicConnections, std::move(payload), deadline);
+        if (!response) {
+            return std::unexpected(wrap_error(ErrorCode::Io, ErrorOperation::ListTopicConnections, response.error()));
+        }
+
+        return detail::decode_connections(*response, after);
     });
 }
 

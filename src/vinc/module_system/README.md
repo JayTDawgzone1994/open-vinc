@@ -299,10 +299,10 @@ Finishing 啟動中央收尾期限；on_stop／Module 解構完成後才送 Comp
 本地 watchdog 以 `config::module_runtime_poll_interval`（預設 20ms）檢查本地主入口停止／故障，
 會增加少量閒置喚醒；不新增執行緒，也不保證 OS 排程的硬期限。
 
-Host operates both BaseModule modes through internal non-template detail::ModuleObject, preserving paired Plugin create/destroy. Current Plugin entry version is 8; bootstrap is --vinc-module-v13. Old Plugins/Hosts reject explicitly; rebuild central, Host, Plugin, and SDK consumers together under matching toolchain/CRT. RuntimeServices remains fatal-only.
+Host operates both BaseModule modes through internal non-template detail::ModuleObject, preserving paired Plugin create/destroy. Current Plugin entry version is 9; bootstrap is --vinc-module-v14. Old Plugins/Hosts reject explicitly; rebuild central, Host, Plugin, and SDK consumers together under matching toolchain/CRT. RuntimeServices remains fatal-only.
 
 Host 經內部非模板 `detail::ModuleObject` 操作兩種公開 BaseModule，維持 Plugin 成對 create/destroy。
-Plugin entry version 為 8，bootstrap 標記為 `--vinc-module-v13`；舊 Plugin／Host 明確拒絕，
+Plugin entry version 為 9，bootstrap 標記為 `--vinc-module-v14`；舊 Plugin／Host 明確拒絕，
 中央、Host、Plugin 與 SDK 消費端須一同重建。同工具鏈／CRT 的 ABI 限制維持。
 RuntimeServices bridge 仍僅供 fatal，未加入一般 Context 服務。
 
@@ -1051,7 +1051,7 @@ Windows x64／MSVC 19.51（toolset 14.51.36231，compiler 19.51.36257）、Windo
 既有 Module 啟停／重啟、雙向 heartbeat、fatal report 與有界監督、Bus 發布／訂閱／
 退出回收、Shell／Tcl／Socket Shell、獨立 SDK consumer 皆經正式 Host／Plugin 路徑驗證。
 
-Initial Debug 54/55 exposed a shell.console fixture hardcoding .exe; changing it to .dll yielded full success. Fault writer stays in a dedicated test Host while Module is a Plugin; production Host has no fault checkpoint. Historical bootstrap v4 was rejected in favor of library-path v5 at this stage; current versions are entry 8/bootstrap v13.
+Initial Debug 54/55 exposed a shell.console fixture hardcoding .exe; changing it to .dll yielded full success. Fault writer stays in a dedicated test Host while Module is a Plugin; production Host has no fault checkpoint. Historical bootstrap v4 was rejected in favor of library-path v5 at this stage; current versions are entry 9/bootstrap v14.
 
 Debug 首輪為 54/55，shell.console 的既有 fixture 寫死 .exe 路徑，改為 .dll 後全套通過。
 故障注入 fixture 將 report writer 留在專用 Host，Module 本體另編為 Plugin；未把故障
@@ -1214,7 +1214,7 @@ Context 增加 context.log；Host 持有 adapter 與獨立 Log Session，Plugin 
 中央 Manager 擁有 collector／writer；Framework entry 自動設定保存路徑。
 正常停止先排空 OutputHub，再停止 Log，最後釋放 Control Service。
 Log 建立失敗可診斷，不當作 Module 啟停失敗；fatal report 仍獨立。
-該次 Context 布局更新為 Plugin entry version 5／bootstrap v10（目前為 entry 8／v13），需完整重新建置相連程式。
+該次 Context 布局更新為 Plugin entry version 5／bootstrap v10（目前為 entry 9／v14），需完整重新建置相連程式。
 API、backpressure、fence 與容量見 [Log](../log/README.md)。
 
 <a id="recorder-接線2026-10-12"></a>
@@ -1293,3 +1293,39 @@ context.inspect_topics(after) uses the existing Host Client/authenticated Sessio
 Bus 的失敗以 ModuleSystem BusFailed／AccessMessageBus 包裝，保留下層原因。
 沒有新增 Context 欄位、worker、RPC singleton 或獨立控制服務；詳見 [Bus 契約](../message_bus/README.md#唯讀診斷與-reader-計數2026-10-25)。
 UI HTTP worker 不呼叫此 API，由 UI Manual main 更新本機快取。現有 pump／heartbeat／停止契約不變。
+
+## Read-only Module queries / 唯讀 Module 查詢（2026-10-27）
+
+`Context::list_modules(MID after, Deadline)` returns `Result<ModulePage>`. `after=0`
+starts a scan; `next=0` ends it. A page contains at most eight `ModuleInfo` entries
+(MID, name, ModuleType, ModuleState), sorted by strictly increasing MID. Retained
+stopped/failed records and Modules without Bus registrations appear; launch arguments,
+paths, credentials and unstarted ModuleTypes never appear. Names can be empty until
+registration. Each authenticated Context can read these diagnostics; this is not
+administrative authority. The new C++ diagnostic API is not a Python binding yet.
+
+`Context::list_modules` 回傳最多 8 筆精簡身分資料，以 MID 遞增分頁；0 為初始／結束游標。
+保留停止／失敗及沒有連線的 Module；名稱登記前可為空，不暴露路徑、參數、憑證或未啟動的
+ModuleType。所有已驗證的 Context 均可唯讀查詢，不增加管理權。本輪新增 C++ 診斷 API，
+尚未提供對應 Python 綁定。
+
+The Host-owned `ModuleQueries` admits one request, uses the existing watchdog receiver,
+and reports Busy/Timeout/Cancelled without killing a healthy Module. Late replies are
+retired. The supervisor defers collection until releasing the requester Record mutex;
+it copies registry owners under the registry mutex and locks only one Record at a time.
+Pages are independently sampled, with no global atomicity or restart-history promise.
+The caller supplies one deadline across pages. `Context::list_topic_connections` wraps
+Bus errors into ModuleSystem; its pagination/timeout contract belongs to the
+[Message Bus README](../message_bus/README.md#read-only-connections).
+
+Host 只允許一筆查詢，沿用 watchdog 接收；Busy、Timeout、Cancelled 不讓健康 Module 死掉，
+晚到回覆丟棄。中央先離開 requester Record 鎖才收集，任何時刻最多持有一個 Record 鎖。
+各頁獨立取樣，不保證全域原子性；呼叫端跨頁共用期限。Context 的 Bus 查詢會包回 ModuleSystem 錯誤。
+
+ContextRuntime's virtual interface changed: rebuild all connected C++ components,
+SDK consumers and Python native extensions. Plugin entry version is 9 and bootstrap
+version is v14, explicitly rejecting old combinations. No ABI compatibility promise
+has been added.
+
+ContextRuntime 虛擬介面改變，中央、Host、Plugin、SDK consumer 與 Python 原生擴充均須重建。
+Plugin entry 9／bootstrap v14 明確拒絕舊組合，未新增 ABI 相容保證。

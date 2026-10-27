@@ -133,7 +133,8 @@ inline constexpr auto operation_entries =
                ErrorOperationEntry{ErrorOperation::AccessLog, "AccessLog"},
                ErrorOperationEntry{ErrorOperation::AccessParam, "AccessParam"},
                ErrorOperationEntry{ErrorOperation::ParamCallback, "ParamCallback"},
-               ErrorOperationEntry{ErrorOperation::RecoverLock, "RecoverLock"}};
+               ErrorOperationEntry{ErrorOperation::RecoverLock, "RecoverLock"},
+               ErrorOperationEntry{ErrorOperation::ListModules, "ListModules"}};
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::ModuleSystem, "ModuleSystem", error_entries,
                                             operation_entries};
 static_assert(valid_catalog(error_catalog));

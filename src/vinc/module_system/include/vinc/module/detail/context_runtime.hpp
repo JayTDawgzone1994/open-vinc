@@ -9,6 +9,7 @@ class ContextRuntime {
 public:
     virtual ~ContextRuntime() = default;
     virtual bool living() const noexcept = 0;
+    virtual Result<ModulePage> list_modules(MID after, Deadline deadline) = 0;
     virtual Result<std::uint64_t> commands() = 0;
     virtual void wait() = 0;
     virtual void fail(const Error&) = 0;

@@ -131,7 +131,8 @@ enum class ErrorOperation : std::int32_t {
     ParamCallback = 62,
     AccessLog = 63,
     DiscoverPython = 64,
-    LoadPython = 65
+    LoadPython = 65,
+    ListModules = 66
 };
 }
 

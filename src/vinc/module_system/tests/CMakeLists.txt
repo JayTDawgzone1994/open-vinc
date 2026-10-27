@@ -1,3 +1,7 @@
+add_executable(module_query_tests query_tests.cpp)
+target_link_libraries(module_query_tests PRIVATE vinc::module_runtime vinc::errors)
+add_test(NAME module.queries COMMAND module_query_tests)
+set_tests_properties(module.queries PROPERTIES TIMEOUT 25)
 add_executable(module_lock_protocol_tests lock_protocol_tests.cpp)
 target_link_libraries(module_lock_protocol_tests PRIVATE vinc::module_runtime vinc::errors)
 add_test(NAME module.lock_protocol COMMAND module_lock_protocol_tests)

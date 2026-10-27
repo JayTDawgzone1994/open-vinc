@@ -55,6 +55,7 @@ struct Server::Impl {
     std::uint16_t bound_port = 0;
     std::string session_token;
     std::function<Result<std::string>(const std::string&)> read_topics;
+    std::function<Result<std::string>()> read_graph;
 
     ~Impl() {
         stop();
@@ -113,6 +114,41 @@ struct Server::Impl {
             }
 
             response.set_content("{\"token\":\"" + session_token + "\"}", "application/json");
+        });
+        http.Get("/api/graph", [this](const auto& request, auto& response) {
+            if (!authorized(request)) {
+                response.status = 401;
+                return;
+            }
+
+            if (!request.params.empty()) {
+                response.status = 400;
+                return;
+            }
+
+            if (!read_graph) {
+                response.status = 503;
+                return;
+            }
+
+            if (request.method == "HEAD") {
+                response.status = 200;
+                return;
+            }
+
+            auto data = read_graph();
+            if (!data) {
+                response.status = 503;
+                if (data.error().is(ErrorCode::Busy)) {
+                    response.status = 429;
+                } else if (data.error().is(ErrorCode::Timeout)) {
+                    response.status = 504;
+                }
+                response.set_content("Graph refresh failed: " + error_to_string(data.error()), "text/plain");
+                return;
+            }
+
+            response.set_content(std::move(*data), "application/json");
         });
         http.Get("/api/topics", [this](const auto& request, auto& response) {
             topic_request(request, response, false);
@@ -277,6 +313,7 @@ Result<std::unique_ptr<Server>> Server::start(Options options) {
     auto impl = std::make_unique<Impl>();
     impl->assets = std::move(*assets);
     impl->read_topics = std::move(options.read_topics);
+    impl->read_graph = std::move(options.read_graph);
     auto session = impl->initialize_session();
     if (!session) {
         return std::unexpected(session.error());

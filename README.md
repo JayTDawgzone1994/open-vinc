@@ -40,7 +40,7 @@ English and Traditional Chinese are paired below. Commands and code blocks are s
 | Shell and scripts | Console, Raw TCP Socket Shell, Tcl scripts, cancellation, and embedded startup scripts. / 互動終端、Raw TCP Socket Shell、Tcl 腳本、中斷與啟動腳本打包。 |
 | Logging | Central capture of stdout/stderr and structured Error/Warn/Info/Debug records with time and Module identity. / 中央擷取 stdout／stderr，保存含時間與 Module 身分的 Error／Warn／Info／Debug 結構化紀錄。 |
 | Bag Recorder | SQLite recording of selected or all discovered topics, bounded queues, and loss statistics. Payload recording requires compiled-in types. Player is not implemented. / 以 SQLite 錄製指定或探索到的全部 topic，具備有界佇列與損失統計；payload 限建置時已知型別，Player 尚未實作。 |
-| Web UI | Optional-to-start Module, plugin workspace, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 預設不啟動的官方 Module、plugin 工作區，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
+| Web UI | Optional-to-start Module, plugin workspace, manual-refresh Module Graph, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 預設不啟動的官方 Module、plugin 工作區、手動刷新 Module Graph，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
 
 <a id="architecture"></a>
 
@@ -150,9 +150,9 @@ webUi
 ui status
 ```
 
-Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor**. `webUi` is built by default but starts only when requested. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
+Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. `webUi` is built by default but starts only when requested. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
 
-開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor**。`webUi` 預設建置，需明確啟動才會執行。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
+開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。`webUi` 預設建置，需明確啟動才會執行。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
 
 <a id="develop-a-module"></a>
 

@@ -13,6 +13,8 @@ struct Options {
     // Framework integration only: HTTP workers invoke a bounded local-cache reader,
     // never Context or application hooks. Empty topic requests the diagnostic list.
     std::function<Result<std::string>(const std::string& topic)> read_topics;
+    // Enqueue one bounded job and wait; Context access stays on the Module main thread.
+    std::function<Result<std::string>()> read_graph;
 };
 
 // Owns immutable assets and HTTP workers. No central authority is exposed in v1.

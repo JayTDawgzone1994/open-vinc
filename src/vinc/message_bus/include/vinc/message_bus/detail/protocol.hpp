@@ -32,11 +32,12 @@ enum Operation : std::uint16_t {
     Attach = 0x0205,
     Detach = 0x0206,
     ListTopics = 0x0207,
-    InspectTopics = 0x0208
+    InspectTopics = 0x0208,
+    ListTopicConnections = 0x0209
 };
 
 inline bool supported_operation(std::uint16_t operation) noexcept {
-    return operation >= Advertise && operation <= InspectTopics;
+    return operation >= Advertise && operation <= ListTopicConnections;
 }
 
 inline vinc::Result<void> encode_descriptor(control::Bytes& bytes, const Descriptor& descriptor) {

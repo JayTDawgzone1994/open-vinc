@@ -42,7 +42,7 @@ async function rejectSymlinks(target) {
 
 // These two generated directories are owned by the build. Other plugin packages
 // are user-owned and are never copied over or removed by deployment.
-for (const name of ["app", "plugins/vinc.example", "plugins/vinc.topics"]) {
+for (const name of ["app", "plugins/vinc.example", "plugins/vinc.topics", "plugins/vinc.graph"]) {
     const target = path.join(destination, name);
     await rejectSymlinks(target);
     await rm(target, { recursive: true, force: true });

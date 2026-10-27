@@ -255,6 +255,12 @@ inline constexpr std::size_t ui_preview_nodes = 256;
 inline constexpr std::size_t ui_preview_depth = 16;
 inline constexpr std::size_t ui_preview_string_bytes = 256;
 inline constexpr std::size_t ui_topic_snapshot_bytes = 4 * 1024 * 1024;
+// Manual graph queries: one end-to-end deadline and complete-response limits.
+inline constexpr auto ui_graph_timeout = std::chrono::seconds{10};
+inline constexpr std::size_t ui_graph_modules = 256;
+inline constexpr std::size_t ui_graph_topics = 1024;
+inline constexpr std::size_t ui_graph_connections = 16384;
+inline constexpr std::size_t ui_graph_response_bytes = 8 * 1024 * 1024;
 inline constexpr std::size_t ui_session_token_bytes = 32;
 inline constexpr std::size_t ui_topic_name_bytes = 256;
 }

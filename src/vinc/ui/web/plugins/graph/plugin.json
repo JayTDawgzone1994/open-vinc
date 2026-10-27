@@ -1,0 +1,8 @@
+{
+    "id": "vinc.graph",
+    "name": "Module Graph",
+    "version": "0.1.0",
+    "apiVersion": 1,
+    "entry": "index.js",
+    "panels": [{ "id": "graph", "title": "Module Graph", "multiple": false }]
+}

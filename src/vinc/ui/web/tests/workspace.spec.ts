@@ -6,7 +6,7 @@ import path from "node:path";
 const build = path.resolve(process.env.VINC_UI_BUILD ?? "../../../../build/windows-msvc-debug");
 const executable = path.join(
     build,
-    "vinc/ui/vinc_ui_test_server" + (process.platform === "win32" ? ".exe" : ""),
+    "framework/ui/vinc_ui_test_server" + (process.platform === "win32" ? ".exe" : ""),
 );
 let processServer: ChildProcessWithoutNullStreams;
 let root: string;
@@ -69,8 +69,8 @@ async function addPlugin(id: string, source: string): Promise<void> {
 
 test.beforeAll(async () => {
     root = await mkdtemp(path.join(build, "ui-browser-"));
-    await cp(path.join(build, "vinc/ui/dist/app"), path.join(root, "app"), { recursive: true });
-    await cp(path.join(build, "vinc/ui/dist/plugins"), path.join(root, "plugins"), { recursive: true });
+    await cp(path.join(build, "framework/ui/dist/app"), path.join(root, "app"), { recursive: true });
+    await cp(path.join(build, "framework/ui/dist/plugins"), path.join(root, "plugins"), { recursive: true });
     await addPlugin(
         "test.lifecycle",
         `
@@ -246,4 +246,93 @@ test("Topic Monitor renders diagnostics, safe previews, pause and stale states",
     await expect(page.locator(".topics-panel .connection")).toContainText("Disconnected");
     await page.getByRole("button", { name: "Close Topic Monitor", exact: true }).click();
     await expect(page.locator(".topics-panel")).toHaveCount(0);
+});
+
+test("Module Graph refreshes only on request and preserves manual arrangement", async ({ page }) => {
+    const failures: string[] = [];
+    page.on("pageerror", (error) => failures.push(error.message));
+    let requests = 0;
+    let fail = false;
+    const snapshot: any = {
+        apiVersion: 1, atomicSnapshot: false, capturedAt: 1793088000000,
+        modules: [
+            { mid: "1", name: "cameraFront", type: "camera", state: 2 },
+            { mid: "2", name: "detector", type: "vision", state: 2 },
+            { mid: "3", name: "idleModule", type: "worker", state: 5 },
+        ],
+        connections: [
+            { mid: "1", topic: "camera/frames", role: "publish", id: "1", schema: "10" },
+            { mid: "1", topic: "camera/frames", role: "publish", id: "2", schema: "10" },
+            { mid: "2", topic: "camera/frames", role: "subscribe", id: "3", schema: "10" },
+            { mid: "2", topic: "vision/results", role: "publish", id: "4", schema: "11" },
+            { mid: "9007199254740999", topic: "vision/results", role: "subscribe", id: "5", schema: "11" },
+        ],
+    };
+    await page.route("**/api/graph", (route) => {
+        requests++;
+        return fail ? route.fulfill({ status: 503, body: "Query unavailable" }) :
+            route.fulfill({ json: snapshot });
+    });
+    await page.goto(url);
+    await page.locator(".open-panel").filter({ hasText: "Module Graph" }).click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page.locator(".vue-flow__node")).toHaveCount(6);
+    await expect(page.locator(".vue-flow__edge")).toHaveCount(4);
+    await expect(page.locator(".graph-note").first()).toContainText("Updated");
+    await expect(page.getByText("publish ×2", { exact: true })).toBeVisible();
+    await expect(page.locator(".vue-flow__node").filter({ hasText: "Unresolved MID" })).toBeInViewport();
+    const camera = page.locator(".vue-flow__node").filter({ hasText: "cameraFront" });
+    const initialPosition = await camera.getAttribute("style");
+    const before = await camera.boundingBox();
+    expect(before).not.toBeNull();
+    await page.mouse.move(before!.x + 50, before!.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(before!.x + 100, before!.y + 110, { steps: 8 });
+    await page.mouse.up();
+    const position = await camera.getAttribute("style");
+    expect(position).not.toBe(initialPosition);
+    const viewport = await page.locator(".vue-flow__transformationpane").getAttribute("style");
+    snapshot.modules.push({ mid: "4", name: "newModule", type: "worker", state: 2 });
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.locator(".vue-flow__node")).toHaveCount(7);
+    expect(await camera.getAttribute("style")).toBe(position);
+    expect(await page.locator(".vue-flow__transformationpane").getAttribute("style")).toBe(viewport);
+    expect(requests).toBe(2);
+    // Exceed the existing Topic Monitor polling interval; graph must remain idle.
+    await page.waitForTimeout(1300);
+    expect(requests).toBe(2);
+    await page.getByRole("button", { name: "Fit view", exact: true }).click();
+    await page.locator(".vue-flow__node").filter({ hasText: "Unresolved MID" }).click();
+    await expect(page.locator(".graph-details")).toContainText("9007199254740999");
+    await expect(page.locator(".graph-details")).toContainText("Identity unavailable");
+    await page.getByPlaceholder("Module, MID or Topic").fill("camera");
+    await expect(camera).toBeVisible();
+    await page.getByPlaceholder("Module, MID or Topic").fill("");
+    await page.getByRole("button", { name: "Auto-layout", exact: true }).click();
+    await page.getByRole("button", { name: "Fit view", exact: true }).click();
+    await page.screenshot({ path: path.join(build, "ui-graph-desktop.png"), fullPage: true });
+    fail = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.locator(".graph-error")).toContainText("Previous graph retained");
+    await expect(page.locator(".vue-flow__node")).toHaveCount(7);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(build, "ui-graph-mobile.png"), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    fail = false;
+    // A finite but unrepresentable timestamp must not replace the previous graph.
+    snapshot.capturedAt = 1e20;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.locator(".graph-error")).toContainText("Invalid graph response");
+    await expect(page.locator(".vue-flow__node")).toHaveCount(7);
+    snapshot.capturedAt = 1793088000000;
+    snapshot.modules = [];
+    snapshot.connections = [];
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.locator(".graph-empty")).toBeVisible();
+    await expect(page.locator(".vue-flow__node")).toHaveCount(0);
+    await page.getByRole("button", { name: "Close Module Graph", exact: true }).click();
+    const closedRequests = requests;
+    await page.waitForTimeout(1300);
+    expect(requests).toBe(closedRequests);
+    expect(failures).toEqual([]);
 });
