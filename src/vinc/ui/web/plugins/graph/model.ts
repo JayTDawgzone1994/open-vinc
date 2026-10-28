@@ -1,10 +1,25 @@
 import { Position, type Edge, type Node } from "@vue-flow/core";
 
+export interface NotificationHealth {
+    degraded: boolean;
+    targetMid: string;
+    failures: string;
+    reopenAttempts: string;
+    recoveries: string;
+    firstFailure: string;
+    lastError: string;
+}
 export interface ModuleInfo {
     mid: string;
     name: string;
     type: string;
     state: number;
+    notifications: {
+        observed: boolean;
+        receiver: NotificationHealth;
+        localSender: NotificationHealth;
+        publisherRoutes: NotificationHealth;
+    };
 }
 export interface Connection {
     mid: string;
@@ -14,7 +29,7 @@ export interface Connection {
     schema: string;
 }
 export interface Snapshot {
-    apiVersion: 1;
+    apiVersion: 2;
     capturedAt: number;
     atomicSnapshot: false;
     modules: ModuleInfo[];
@@ -28,7 +43,7 @@ export interface NodeData {
     connections: Connection[];
 }
 
-// API v1 browser ceilings match the server defaults documented in UI README.
+// API v2 browser ceilings match the server defaults documented in UI README.
 const maximumModules = 256;
 const maximumConnections = 16384;
 const maximumTopics = 1024;
@@ -41,10 +56,11 @@ const maximumDateMillis = 8_640_000_000_000_000;
 export function validate(value: unknown): Snapshot {
     const data = value as Snapshot;
     const identity = (id: unknown) => typeof id === "string" && /^[1-9][0-9]{0,19}$/.test(id);
-    const text = (name: unknown) => typeof name === "string" && name.length <= maximumNameLength && !name.includes("\0");
+    const text = (name: unknown) =>
+        typeof name === "string" && name.length <= maximumNameLength && !name.includes("\0");
     if (
         !data ||
-        data.apiVersion !== 1 ||
+        data.apiVersion !== 2 ||
         data.atomicSnapshot !== false ||
         !Number.isSafeInteger(data.capturedAt) ||
         data.capturedAt < 0 ||
@@ -69,6 +85,32 @@ export function validate(value: unknown): Snapshot {
             modules.has(module.mid)
         ) {
             throw new Error("Invalid Module identity");
+        }
+        const notifications = module.notifications;
+        const decimal = (value: unknown) => typeof value === "string" && /^(0|[1-9][0-9]{0,19})$/.test(value);
+        if (!notifications || typeof notifications.observed !== "boolean") {
+            throw new Error("Invalid notification observation");
+        }
+        for (const health of [
+            notifications.receiver,
+            notifications.localSender,
+            notifications.publisherRoutes,
+        ]) {
+            if (
+                !health ||
+                typeof health.degraded !== "boolean" ||
+                ![
+                    health.targetMid,
+                    health.failures,
+                    health.reopenAttempts,
+                    health.recoveries,
+                    health.firstFailure,
+                ].every(decimal) ||
+                typeof health.lastError !== "string" ||
+                health.lastError.length > 8192
+            ) {
+                throw new Error("Invalid notification diagnostics");
+            }
         }
         modules.add(module.mid);
     }
@@ -102,6 +144,19 @@ export function validate(value: unknown): Snapshot {
 
 export const states = ["Queued", "Starting", "Running", "Stopping", "Restart waiting", "Stopped", "Failed"];
 
+export function notificationState(module: ModuleInfo): string {
+    if (module.state === 6 || module.state === 4) {
+        return "red";
+    }
+    if (module.state !== 2 || !module.notifications.observed) {
+        return "gray";
+    }
+    const status = module.notifications;
+    return status.receiver.degraded || status.localSender.degraded || status.publisherRoutes.degraded
+        ? "yellow"
+        : "green";
+}
+
 export function buildGraph(snapshot: Snapshot): { nodes: Node<NodeData>[]; edges: Edge[] } {
     const nodes = new Map<string, Node<NodeData>>();
     const edges = new Map<string, Edge>();
@@ -113,7 +168,7 @@ export function buildGraph(snapshot: Snapshot): { nodes: Node<NodeData>[]; edges
             id: moduleId(module.mid),
             position: { x: 0, y: 0 },
             label,
-            class: "module-node",
+            class: `module-node notification-${notificationState(module)}`,
             data: { kind: "module", label, mid: module.mid, module, connections: [] },
         });
     }

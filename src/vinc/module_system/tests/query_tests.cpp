@@ -15,6 +15,48 @@ constexpr auto short_timeout = std::chrono::milliseconds{30};
 Deadline deadline() {
     return control::Clock::now() + timeout;
 }
+void notification_codec() {
+    ModuleNotifications notifications;
+    notifications.observed = true;
+    auto& health = notifications.receiver;
+    health.degraded = true;
+    health.failures = 7;
+    health.reopen_attempts = 3;
+    health.first_failure = 123456789;
+    const auto native = Error::from_raw(static_cast<ErrorDomain>(999), -1, -2,
+        NativeError{static_cast<NativeErrorSource>(999), -123});
+    health.last_error = wrap_error(module_system::ErrorCode::NotificationFailed,
+        module_system::ErrorOperation::WaitNotification, native);
+    for (std::size_t index = 0; index < config::error_chain_max_depth + 1; ++index) {
+        health.last_error = wrap_error(module_system::ErrorCode::NotificationFailed,
+            module_system::ErrorOperation::WaitNotification, *health.last_error);
+    }
+    notifications.local_sender = health;
+    notifications.publisher_routes = health;
+    ModulePage page;
+    for (std::uint32_t index = 0; index < detail::modules_per_page; ++index) {
+        page.modules.push_back({index + 1, std::string(detail::query_name_bytes, 'n'),
+            std::string(detail::query_name_bytes, 't'), ModuleState::Running, notifications});
+    }
+    auto encoded = take(detail::encode_modules(page));
+    check(encoded.size() + detail::result_tag_bytes <= control::max_payload, "notification page respects wire budget");
+    auto decoded = take(detail::decode_modules(encoded, 0));
+    check(decoded.modules.front().notifications.receiver.last_error == health.last_error,
+        "notification diagnostics retain unknown native codes and causes");
+    for (std::size_t length = 0; length < encoded.size(); ++length) {
+        check(!detail::decode_modules(std::span<const std::byte>(encoded).first(length), 0),
+            "truncated health pages rejected");
+    }
+    auto obsolete = encoded;
+    obsolete[3] = std::byte{1};
+    check(!detail::decode_modules(obsolete, 0), "old query version rejected");
+    control::Bytes report;
+    detail::encode_notifications(report, notifications);
+    report[3] = std::byte{2};
+    control::Reader reader(report);
+    check(!detail::decode_notifications(reader), "unknown notification report rejected");
+}
+
 void run() {
     auto service = take(control::Service::create(2));
     auto sockets = channel_test::connected_sockets();
@@ -62,6 +104,7 @@ void run() {
 }
 int main() {
     try {
+        notification_codec();
         run();
         std::cout << "Module read-only query tests passed\n";
         return 0;

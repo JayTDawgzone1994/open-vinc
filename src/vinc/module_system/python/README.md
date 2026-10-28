@@ -255,7 +255,7 @@ Private ModuleSource creates native Plugins through paired create/destroy or Pyt
 PythonSource 提供 Python 物件適配。共同 Runtime 先準備認證、fatal bridge、Bus／Param／Log 接線及 watchdog，
 再載入使用者程式。Module 銷毀後停止服務，最後 clear source，仍早於 fatal bridge 失效。
 Python 擴充包含唯一 Runtime owner；不另啟動一個 ModuleHost 幫 Python 轉送。
-Python 初次接入時未改變 Native Plugin 入口；目前含 RPC 的 Context 使用 Plugin entry 8／bootstrap v13。
+Python 初次接入時未改變 Native Plugin 入口；目前 Context 使用 Plugin entry 10／bootstrap v16。
 Python Source 以無參數 create 建立 wrapper，不從中央取得預設實例名稱；on_name 契約不變。
 
 <a id="驗證與後續"></a>
@@ -451,3 +451,15 @@ See [RPC](../../rpc/README.md) and [comparison examples](../../../../examples/rp
 
 API 與限制見 [RPC](../../rpc/README.md)，對照範例見
 [examples/rpc](../../../../examples/rpc/README.md)。
+
+## Notification bootstrap update / 通知啟動接線更新
+
+The Python native adapter uses the same **v16** bootstrap and Host notification
+lifetime as the C++ ModuleHost. Central creates the endpoint; Runtime opens both
+notification handles before importing the user's Module source. Failure rejects
+that Module's startup and preserves the OSAL cause. Rebuild the native adapter
+with central/Host. No Python API or extra thread is added. pumpLoop now uses the same Host notification wait and 10 ms fallback as C++; see [Pump wakeup](../PUMP_WAKEUP.md).
+See [Module notification ownership](../INSTANCE.md#notification-ownership-2026-10-28--通知資源所有權).
+
+Python 原生接線共用 v16 bootstrap；使用者 Module 載入前先開啟中央建立的通知資源，
+失敗只拒絕該 Module 啟動。須與中央／Host 一起重建；Python API 不變；pumpLoop 共用 Host 通知等待及 10 ms 補查，不增加執行緒。

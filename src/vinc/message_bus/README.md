@@ -13,6 +13,10 @@ Sequential delivery runs through Context pump callbacks; get_last reads the late
 
 依序接收透過 Context pump 派送 callback；`get_last()` 提供最新值。沒有額外資料 Socket 通知。
 
+Successful publications now signal callback destinations directly through OSAL notifications. Host pumpLoop waits on them with a 10 ms fallback; get_last-only readers create no route. Failure/retry/UI contracts and validation are maintained in [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+發布成功後直接透過 OSAL 通知 callback 所屬 Module；pumpLoop 等待通知並保留 10 ms 補查，純 get_last 不建路由。故障／重試／UI 契約及驗證見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
+
 The opt-in [benchmark](benchmarks/README.md) measures 1–128 MiB push/loan paths with a4 GiB shared budget per case, without changing defaults/pump settings.
 
 跨程序延遲量測工具見 [Benchmark](benchmarks/README.md)：1～128 MiB、push／loan 兩條路徑，
@@ -465,9 +469,9 @@ Result alias 與 `to_error()`；呼叫端以 `error.is(message_bus::ErrorCode::.
   錯誤遷移輪次沒有全面攔截 STL 例外或宣告所有操作不拋例外。
 - 通知送出與析構路徑維持既有關閉會話政策，未新增背景故障查詢介面。
 
-Current control protocol is Bus v2: high operation byte 2, original operations 1–6 in the low byte, plus later list/inspect operations below. Old/unknown versions reject before queue/topology, without adapters. Frame stays v1; current bootstrap is v13, ring layout v3, Storage image v2. Historical migration preserved its then-current bootstrap/ring versions, not those values forever. Rebuild all connected participants.
+Current control protocol is Bus v3: high operation byte 3, original operations 1–6 in the low byte, plus list/inspect/connection and callback-notification operations. Old/unknown versions reject before queue/topology, without adapters. Frame stays v1; current bootstrap is v16, ring layout v3, Storage image v2. Historical migration preserved its then-current bootstrap/ring versions, not those values forever. Rebuild all connected participants.
 
-目前 Bus 控制協定為 v2，高 byte 為 2，低 byte 保留原 1–6，並擴充下方清單／診斷操作。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v13、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
+目前 Bus 控制協定為 v3，高 byte 為 3，低 byte 保留原 1–6，另含清單／診斷／連線及 callback 通知操作。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v16、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
 
 Failure responses explicitly encode current error/causes/count/truncation/native fields; same-layer remote Bus errors pass through. Unknown codes stay numeric; malformed packets close Sessions. Text resolves in local catalogs, never object-layout transport. [DESIGN](DESIGN.md) owns bytes. detail/error_protocol is only Bus codec/runtime/test integration, independent of Module-private protocol; Module wraps Bus failures at its boundary.
 

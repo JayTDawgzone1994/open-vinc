@@ -183,13 +183,34 @@ test("Topic Monitor renders diagnostics, safe previews, pause and stale states",
     let stale = false;
     let previewReads = 0;
     const topic = () => ({
-        name: "camera/frame", type: "UserExampleFrame", schema: "18446744073709551615", known_type: true,
-        hz: 30.5, status: state, reason: "Writer waiting for reader copy", subscribers: 1,
-        lost: "2", overwrites: "1", oversized: "0",
-        publishers: [{ id: "18446744073709551615", mid: "12", name: "camera", hz: 30.5,
-            slots: 4, requested_slots: 4, message_bytes: "4096", shared_bytes: "20000",
-            published: "18446744073709551615", collisions: "3", wait_ns: "1500000000",
-            longest_wait_ns: "1100000000", current_wait_ns: "1000000000" }],
+        name: "camera/frame",
+        type: "UserExampleFrame",
+        schema: "18446744073709551615",
+        known_type: true,
+        hz: 30.5,
+        status: state,
+        reason: "Writer waiting for reader copy",
+        subscribers: 1,
+        lost: "2",
+        overwrites: "1",
+        oversized: "0",
+        publishers: [
+            {
+                id: "18446744073709551615",
+                mid: "12",
+                name: "camera",
+                hz: 30.5,
+                slots: 4,
+                requested_slots: 4,
+                message_bytes: "4096",
+                shared_bytes: "20000",
+                published: "18446744073709551615",
+                collisions: "3",
+                wait_ns: "1500000000",
+                longest_wait_ns: "1100000000",
+                current_wait_ns: "1000000000",
+            },
+        ],
     });
     await page.route("**/api/topics", async (route) => {
         if (!available) {
@@ -197,17 +218,25 @@ test("Topic Monitor renders diagnostics, safe previews, pause and stale states",
             return;
         }
         if (stale) {
-            await route.fulfill({ json: { apiVersion: 1, available: false, topics: [], error: "Diagnostic samples are stale" } });
+            await route.fulfill({
+                json: { apiVersion: 1, available: false, topics: [], error: "Diagnostic samples are stale" },
+            });
             return;
         }
         await route.fulfill({ json: { apiVersion: 1, available: true, topics: [topic()] } });
     });
     await page.route("**/api/topics/preview?*", async (route) => {
         previewReads += 1;
-        await route.fulfill({ json: {
-            apiVersion: 1, state: "ready", publisher: "camera", utc: "2026-10-25T00:00:00.000000000Z", count: "7",
-            text: '{sequence: 42, note: "<img src=x onerror=alert(1)>"}',
-        } });
+        await route.fulfill({
+            json: {
+                apiVersion: 1,
+                state: "ready",
+                publisher: "camera",
+                utc: "2026-10-25T00:00:00.000000000Z",
+                count: "7",
+                text: '{sequence: 42, note: "<img src=x onerror=alert(1)>"}',
+            },
+        });
     });
     await page.goto(url);
     await page.locator(".open-panel").filter({ hasText: "Topic Monitor" }).click();
@@ -253,12 +282,26 @@ test("Module Graph refreshes only on request and preserves manual arrangement", 
     page.on("pageerror", (error) => failures.push(error.message));
     let requests = 0;
     let fail = false;
+    const notificationFixture = () => {
+        const health = () => ({
+            degraded: false,
+            targetMid: "0",
+            failures: "0",
+            reopenAttempts: "0",
+            recoveries: "0",
+            firstFailure: "0",
+            lastError: "",
+        });
+        return { observed: true, receiver: health(), localSender: health(), publisherRoutes: health() };
+    };
     const snapshot: any = {
-        apiVersion: 1, atomicSnapshot: false, capturedAt: 1793088000000,
+        apiVersion: 2,
+        atomicSnapshot: false,
+        capturedAt: 1793088000000,
         modules: [
-            { mid: "1", name: "cameraFront", type: "camera", state: 2 },
-            { mid: "2", name: "detector", type: "vision", state: 2 },
-            { mid: "3", name: "idleModule", type: "worker", state: 5 },
+            { mid: "1", name: "cameraFront", type: "camera", state: 2, notifications: notificationFixture() },
+            { mid: "2", name: "detector", type: "vision", state: 2, notifications: notificationFixture() },
+            { mid: "3", name: "idleModule", type: "worker", state: 5, notifications: notificationFixture() },
         ],
         connections: [
             { mid: "1", topic: "camera/frames", role: "publish", id: "1", schema: "10" },
@@ -270,8 +313,9 @@ test("Module Graph refreshes only on request and preserves manual arrangement", 
     };
     await page.route("**/api/graph", (route) => {
         requests++;
-        return fail ? route.fulfill({ status: 503, body: "Query unavailable" }) :
-            route.fulfill({ json: snapshot });
+        return fail
+            ? route.fulfill({ status: 503, body: "Query unavailable" })
+            : route.fulfill({ json: snapshot });
     });
     await page.goto(url);
     await page.locator(".open-panel").filter({ hasText: "Module Graph" }).click();
@@ -292,7 +336,13 @@ test("Module Graph refreshes only on request and preserves manual arrangement", 
     const position = await camera.getAttribute("style");
     expect(position).not.toBe(initialPosition);
     const viewport = await page.locator(".vue-flow__transformationpane").getAttribute("style");
-    snapshot.modules.push({ mid: "4", name: "newModule", type: "worker", state: 2 });
+    snapshot.modules.push({
+        mid: "4",
+        name: "newModule",
+        type: "worker",
+        state: 2,
+        notifications: notificationFixture(),
+    });
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.locator(".vue-flow__node")).toHaveCount(7);
     expect(await camera.getAttribute("style")).toBe(position);
@@ -310,6 +360,30 @@ test("Module Graph refreshes only on request and preserves manual arrangement", 
     await page.getByPlaceholder("Module, MID or Topic").fill("");
     await page.getByRole("button", { name: "Auto-layout", exact: true }).click();
     await page.getByRole("button", { name: "Fit view", exact: true }).click();
+    await camera.click();
+    await expect(camera).toHaveClass(/notification-green/);
+    snapshot.modules[0].notifications.publisherRoutes = {
+        degraded: true,
+        targetMid: "2",
+        failures: "3",
+        reopenAttempts: "2",
+        recoveries: "0",
+        firstFailure: "1793088000000000000",
+        lastError: "MessageBus Notify: OSAL SystemError <script>",
+    };
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(camera).toHaveClass(/notification-yellow/);
+    await expect(page.locator(".graph-details")).toContainText("Last affected destination MID: 2");
+    await expect(page.locator(".graph-details")).toContainText("OSAL SystemError <script>");
+    snapshot.modules[0].state = 6;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(camera).toHaveClass(/notification-red/);
+    snapshot.modules[0].state = 2;
+    snapshot.modules[0].notifications.publisherRoutes.degraded = false;
+    snapshot.modules[0].notifications.publisherRoutes.recoveries = "1";
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(camera).toHaveClass(/notification-green/);
+    await expect(page.locator(".graph-details")).toContainText("Failures 3");
     await page.screenshot({ path: path.join(build, "ui-graph-desktop.png"), fullPage: true });
     fail = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();

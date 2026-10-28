@@ -415,12 +415,12 @@ That validation did not run cross-platform/multi-browser/high-topic-count/slow-H
 Start `webUi`, then open **Module Graph → Module Graph**. The official `vinc.graph`
 plugin draws `Module → Topic` for publication and `Topic → Module` for subscription.
 It fetches once when opened and only on **Refresh** afterward. It adds no polling,
-heartbeat thread, subscriptions, payload reads, Hz sampling, or health classification.
+heartbeat thread, subscriptions, payload reads, or Hz sampling. Module borders show the sampled notification status described below.
 The existing Topic Monitor retains its own sampling policy.
 
 啟動 `webUi` 後開啟 **Module Graph → Module Graph**。發布為 `Module → Topic`，
 訂閱為 `Topic → Module`；開啟時讀取一次，之後只在按 **Refresh** 時讀取。
-不新增輪詢、heartbeat 執行緒、訂閱或訊息讀取，也不計算 Hz／健康燈號。
+不新增輪詢、heartbeat 執行緒、訂閱或訊息讀取，也不計算 Hz；Module 邊框呈現下述通知診斷。
 既有 Topic Monitor 的取樣政策不變。
 
 - MID identifies a Module; full topic name identifies a Topic. Ownership comes from
@@ -431,7 +431,7 @@ The existing Topic Monitor retains its own sampling policy.
 - Drag, pan, zoom, search, selection/neighbour highlighting, Auto-layout and Fit view
   are browser-only. Refresh preserves surviving node positions and viewport; new nodes
   are placed to the right. Auto-layout reruns only when requested. Closing the panel
-  discards its layout; no persistence is promised. Colours distinguish kinds, not health.
+  discards its layout; no persistence is promised. Fill colours distinguish kinds; Module borders show sampled notification health as described below.
 - Module pages and connection pages are sampled separately. The result is **not an
   atomic global snapshot**. A connection whose MID is absent becomes an unresolved node.
   Removed connections disappear after refresh; there is no historical dependency inference.
@@ -471,13 +471,13 @@ other unavailable/capacity/shutdown failures return 503. Neither response grants
 | `ui_graph_connections` | 16384 | Raw registrations, before edge merging / 合併前登記上限 |
 | `ui_graph_response_bytes` | 8 MiB | Complete JSON response / 完整 JSON 上限 |
 
-The browser adds a 12 s fetch deadline, validates API v1 and the same record ceilings,
+The browser adds a 12 s fetch deadline, validates graph API v2 and the same record ceilings,
 and retains 64-bit identities as decimal strings. Increasing server ceilings requires
 updating the browser's protocol validation as well. These are safety ceilings, not a
 performance claim for maximum-size layouts. Page-size constants remain in their owning
 protocol codecs; the Control Channel payload ceiling is unchanged (16 KiB).
 
-瀏覽器另有 12 秒 fetch 期限，驗證 API v1 及相同筆數上限；64-bit ID／schema 保持十進位字串。
+瀏覽器另有 12 秒 fetch 期限，驗證 graph API v2 及相同筆數上限；64-bit ID／schema 保持十進位字串。
 調高 server 上限須同步調整 browser 驗證；最大布局效能尚未量測，不以容量上限宣稱流暢。
 分頁筆數屬於各元件協定，Control Channel 的 16 KiB 上限不變。
 
@@ -525,3 +525,9 @@ unresolved node until a subsequent refresh.
 
 待驗證：大型圖排版效能、持續惡意刷新負載、Linux／macOS 實機。
 分頁刻意不提供全域一致性 token；登記／重啟中的暫態 unresolved 可能到下次刷新才消失。
+
+### Notification health on Module Graph / 關係圖通知健康狀態
+
+Graph API v2 includes authenticated Module notification summaries. Existing manual refresh remains: no polling is added. Running/observed/no active fault is green, notification degradation yellow, lifecycle failure/restart waiting red, and inactive/unobserved/unresolved gray. Selection shows receiver/local sender/Publisher-route counters, first failure Unix ns, last affected MID and cause-aware error text. These are sampled reports, not heartbeat indicators or callback acknowledgements; historical errors remain after recovery. The complete contract is [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+Graph v2 加入 Module 通知診斷，仍由使用者手動刷新。綠／黃／紅／灰分別表示已觀察且運行無通知故障、通知降級、生命週期失敗／等待重啟、未活動／未觀察／未解析。選取後可看接收等待、本機送出與 Publisher 路由的計數及原因；歷史錯誤在恢復後保留，不宣稱為即時 heartbeat 或 callback 完成確認。

@@ -48,6 +48,12 @@ inline constexpr std::size_t module_lock_pending_limit = 32;
 inline constexpr auto concurrency_retry_interval = std::chrono::milliseconds(5);
 // Idle data polling and Host supervision of a locally completed/failed main.
 inline constexpr std::chrono::milliseconds module_pump_idle_interval{10};
+// Failed notification handles are reopened by existing runtime progress, in milliseconds.
+inline constexpr std::chrono::milliseconds notification_retry_interval{1000};
+// One initial failed send and one ordinary retry precede low-frequency backoff.
+inline constexpr std::uint32_t notification_send_failures_before_backoff = 2;
+// Repeated diagnostics are coalesced; state transitions may report immediately.
+inline constexpr std::chrono::milliseconds notification_report_interval{1000};
 inline constexpr std::chrono::milliseconds module_runtime_poll_interval{20};
 inline constexpr std::size_t module_callback_limit = 256;
 

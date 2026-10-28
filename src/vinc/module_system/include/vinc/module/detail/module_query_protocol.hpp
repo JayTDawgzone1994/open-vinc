@@ -1,11 +1,12 @@
 #pragma once
 #include <vinc/module/module_info.hpp>
+#include <vinc/module/detail/notification_protocol.hpp>
 #include <vinc/module/error.hpp>
 #include <vinc/control/protocol.hpp>
 #include <vinc/owner_id.hpp>
 
 namespace vinc::detail {
-inline constexpr std::uint32_t module_query_version = 1;
+inline constexpr std::uint32_t module_query_version = 2;
 inline constexpr std::uint32_t modules_per_page = 8;
 inline constexpr std::size_t query_name_bytes = 256;
 
@@ -28,6 +29,7 @@ inline Result<control::Bytes> encode_modules(const ModulePage& page) {
         }
 
         control::put_u32(bytes, static_cast<std::uint32_t>(module.state));
+        encode_notifications(bytes, module.notifications);
     }
     control::put_u64(bytes, page.next);
     return bytes;
@@ -61,6 +63,11 @@ inline Result<ModulePage> decode_modules(std::span<const std::byte> bytes, MID a
         }
 
         module.state = static_cast<ModuleState>(state);
+        auto notifications = decode_notifications(reader);
+        if (!notifications) {
+            return std::unexpected(notifications.error());
+        }
+        module.notifications = *notifications;
         previous = module.mid;
         page.modules.push_back(std::move(module));
     }

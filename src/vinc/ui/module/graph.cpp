@@ -23,6 +23,14 @@ Result<std::string> collect_graph(Context& context, Deadline deadline) {
     using nlohmann::json;
     json modules = json::array();
     json connections = json::array();
+    const auto health_json = [](const NotificationHealth& health) {
+        return json{{"degraded", health.degraded}, {"targetMid", std::to_string(health.target_mid)},
+            {"failures", std::to_string(health.failures)},
+            {"reopenAttempts", std::to_string(health.reopen_attempts)},
+            {"recoveries", std::to_string(health.recoveries)},
+            {"firstFailure", std::to_string(health.first_failure)},
+            {"lastError", health.last_error ? error_to_string(*health.last_error) : std::string{}}};
+    };
     std::set<std::string> topics;
     MID after = 0;
     do {
@@ -42,7 +50,11 @@ Result<std::string> collect_graph(Context& context, Deadline deadline) {
             }
             // Numeric identities travel as strings: browser numbers cannot represent 63-bit MIDs.
             modules.push_back({{"mid", std::to_string(module.mid)}, {"name", module.name},
-                {"type", module.module_type}, {"state", static_cast<std::uint32_t>(module.state)}});
+                {"type", module.module_type}, {"state", static_cast<std::uint32_t>(module.state)},
+                {"notifications", {{"observed", module.notifications.observed},
+                    {"receiver", health_json(module.notifications.receiver)},
+                    {"localSender", health_json(module.notifications.local_sender)},
+                    {"publisherRoutes", health_json(module.notifications.publisher_routes)}}}});
         }
         after = page->next;
     } while (after);
@@ -78,7 +90,7 @@ Result<std::string> collect_graph(Context& context, Deadline deadline) {
 
     const auto captured = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    auto text = json{{"apiVersion", 1}, {"capturedAt", captured}, {"atomicSnapshot", false},
+    auto text = json{{"apiVersion", 2}, {"capturedAt", captured}, {"atomicSnapshot", false},
         {"modules", std::move(modules)}, {"connections", std::move(connections)}}.dump();
     if (text.size() > config::ui_graph_response_bytes) {
         return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::Graph});

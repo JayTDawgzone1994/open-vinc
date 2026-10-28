@@ -6,7 +6,9 @@
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/module/detail/contract_report.hpp>
 #include <vinc/module/detail/host_path.hpp>
+#include <vinc/module/detail/error_protocol.hpp>
 #include <vinc/osal/path.hpp>
+#include <vinc/osal/notification.hpp>
 #include <algorithm>
 #include <array>
 #include <fstream>
@@ -101,7 +103,17 @@ void test_parent_loss(const std::filesystem::path& helper) {
     const std::string endpoint_text(reinterpret_cast<const char*>(endpoint_u8.data()), endpoint_u8.size());
     auto listener = make_raw_listener(endpoint_text);
 
-    for (bool disconnect : {false, true}) {
+    for (int scenario = 0; scenario < 3; ++scenario) {
+        const bool disconnect = scenario == 1;
+        const bool missing_notification = scenario == 2;
+        const auto notification_name = "orphan_n" + std::to_string(std::random_device{}());
+        auto notification = take(osal::NotificationReceiver::create(notification_name));
+        struct NotificationCleanup {
+            std::string name;
+            ~NotificationCleanup() {
+                (void)osal::NotificationReceiver::unlink_name(name);
+            }
+        } notification_cleanup{notification_name};
         auto report = take(detail::ContractReportStorage::create(
             "orphan_" + std::to_string(std::random_device{}()), 1234));
         osal::SpawnOptions spawn;
@@ -115,7 +127,13 @@ void test_parent_loss(const std::filesystem::path& helper) {
                            "2000",
                            "200",
                            "helper",
-                           report->name(), take(osal::path_to_utf8(helper)), "0", "--name", "orphan"};
+                           report->name(), take(osal::path_to_utf8(helper)), "0",
+                           notification_name, "--name", "orphan"};
+        if (missing_notification) {
+            spawn.arguments[detail::bootstrap::notification] = "absent_" + std::to_string(std::random_device{}());
+            // If initialization ordering regresses, this nonexistent Plugin changes the error.
+            spawn.arguments[detail::bootstrap::plugin_path] = "missing-plugin";
+        }
         auto child = process_service->spawn(spawn);
         check(bool(child), "spawn orphan test");
 
@@ -151,13 +169,34 @@ void test_parent_loss(const std::filesystem::path& helper) {
         // Wait for Ready so the test distinguishes watchdog exit from failed startup.
         control::Decoder decoder;
         bool ready = false;
+        bool rejected = false;
         std::array<std::byte, raw_receive_buffer_bytes> buffer;
-        while (!ready) {
+        while (!ready && !rejected) {
             auto received = socket->receive_until(buffer, control::Clock::now() + raw_frame_timeout);
             check(received && !received->eof, "receive module ready");
             auto frames = decoder.feed(std::span<const std::byte>(buffer).first(received->bytes));
             check(bool(frames), "decode ready");
             for (const auto& frame : *frames) {
+                if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
+                    frame.operation == detail::report_failure) {
+                    auto error = take(detail::decode_error(std::span<const std::byte>(frame.payload).subspan(sizeof(std::uint32_t))));
+                    check(missing_notification && error.is(module_system::ErrorCode::NotificationFailed),
+                          "Host must reject missing notification before Plugin load");
+                    check(!error.causes().empty() && error.causes().back().domain == ErrorDomain::Osal &&
+                              error.causes().back().code == static_cast<std::int32_t>(osal::ErrorCode::NotFound),
+                          "Host notification failure lost NotFound cause");
+                    control::Frame acknowledged{control::Kind::Response, detail::lifecycle,
+                                                detail::report_failure, frame.request};
+                    const auto encoded = take(control::encode(acknowledged));
+                    std::size_t sent = 0;
+                    while (sent < encoded.size()) {
+                        const auto count = take(socket->send_until(std::span<const std::byte>(encoded).subspan(sent),
+                                                                  control::Clock::now() + raw_frame_timeout));
+                        check(count != 0, "acknowledge notification failure");
+                        sent += count;
+                    }
+                    rejected = true;
+                }
                 if (frame.kind == control::Kind::Request && frame.domain == 1 && frame.operation == 3) {
                     control::Frame approved{control::Kind::Response, 1, 3, frame.request};
                     control::put_u32(approved.payload, 0);
@@ -176,6 +215,12 @@ void test_parent_loss(const std::filesystem::path& helper) {
                     ready = true;
                 }
             }
+        }
+        if (missing_notification) {
+            check(rejected && !ready, "failed notification reached Ready");
+            auto exited = take(child->wait_until(control::Clock::now() + raw_exit_timeout));
+            check(exited.value == 70, "notification setup failure exit status");
+            continue;
         }
         if (disconnect) {
             check(bool(socket->close()), "close central socket");

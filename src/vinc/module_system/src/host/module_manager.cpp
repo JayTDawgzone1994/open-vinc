@@ -28,6 +28,7 @@
 #include <map>
 #include <mutex>
 #include <vinc/osal/random.hpp>
+#include <vinc/osal/notification.hpp>
 #include <vinc/module/detail/error_protocol.hpp>
 #include <set>
 #include <stdexcept>
@@ -142,6 +143,9 @@ struct Record {
     // Resources owned by the current process generation.
     std::optional<osal::Process> process;
     std::unique_ptr<detail::ContractReportStorage> contract_report;
+    std::string notification_name;
+    osal::NotificationReceiver notification_creator;
+    bool notification_created = false;
     bool termination_requested = false;
     std::uint64_t output_capture = 0;
     std::optional<osal::Socket> listener;
@@ -510,6 +514,7 @@ struct ModuleManager::Impl {
         record.name_request.reset();
         record.module_query.reset();
         record.snapshot.pid = 0;
+        record.snapshot.notifications = {};
         record.termination_requested = false;
         record.fault = false;
         record.finishing = false;
@@ -589,7 +594,8 @@ struct ModuleManager::Impl {
                              record.module_type.name,
                              record.contract_report->name(),
                              utf8(record.module_type.python ? record.module_type.python->script : record.module_type.library),
-                             record.snapshot.debug ? "1" : "0"};
+                             record.snapshot.debug ? "1" : "0",
+                             record.notification_name};
         options.arguments.insert(options.arguments.end(), record.arguments.begin(), record.arguments.end());
 
         if (record.module_type.python) {
@@ -625,6 +631,59 @@ struct ModuleManager::Impl {
         record.changed.notify_all();
     }
 
+    Result<void> prepare_notification(Record& record) {
+        auto name = instance->reserve_notification();
+        if (!name) {
+            return std::unexpected(wrap_error(ErrorCode::NotificationFailed,
+                                             ErrorOperation::PrepareNotification, name.error()));
+        }
+
+        record.notification_name = std::move(*name);
+#ifdef VINC_MODULE_TESTING
+        module_system::test::checkpoint(module_system::test::Point::NotificationReserved,
+                                        nullptr, record.notification_name);
+#endif
+        auto receiver = osal::NotificationReceiver::create(record.notification_name);
+        if (!receiver) {
+            return std::unexpected(wrap_error(ErrorCode::NotificationFailed,
+                                             ErrorOperation::PrepareNotification, receiver.error()));
+        }
+
+        record.notification_creator = std::move(*receiver);
+        record.notification_created = true;
+        return {};
+    }
+
+    // Only called after confirmed exit, or when launch never created a child.
+    // A failed cleanup leaves its journal entry for the next admitted central.
+    void release_notification(Record& record) {
+        if (record.notification_name.empty()) {
+            return;
+        }
+
+        auto released = record.notification_creator.close();
+#ifndef _WIN32
+        if (released && record.notification_created) {
+            released = osal::NotificationReceiver::unlink_name(record.notification_name);
+            if (!released && released.error().is(osal::ErrorCode::NotFound)) {
+                released = {};
+            }
+        }
+#endif
+        if (released) {
+            released = instance->retire(record.notification_name);
+        }
+
+        if (!released) {
+            save_cleanup(record, wrap_error(ErrorCode::CleanupFailed,
+                                             ErrorOperation::CloseNotification, released.error()));
+        }
+
+        record.notification_creator = {};
+        record.notification_name.clear();
+        record.notification_created = false;
+    }
+
     // Each generation gets a fresh MID, token and endpoint before resource acquisition.
     void launch(Record& record) {
         auto reset = reset_generation(record);
@@ -633,6 +692,12 @@ struct ModuleManager::Impl {
             return;
         }
         if (!prepare_listener(record)) {
+            return;
+        }
+
+        auto notification = prepare_notification(record);
+        if (!notification) {
+            record_failure(record, notification.error());
             return;
         }
 
@@ -699,6 +764,7 @@ struct ModuleManager::Impl {
             }
             record.contract_report.reset();
         }
+        release_notification(record);
         retire_command(record);
 
         record.snapshot.debug_waiting = false;
@@ -925,6 +991,15 @@ struct ModuleManager::Impl {
                     continue;
                 }
                 if (frame.kind == control::Kind::Event && frame.domain == detail::lifecycle &&
+                    frame.operation == detail::notification_health) {
+                    control::Reader reader(frame.payload);
+                    auto status = detail::decode_notifications(reader);
+                    if (frame.request || !status || !reader.done() || !status->observed) {
+                        record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::Receive));
+                        break;
+                    }
+                    record.snapshot.notifications = *status;
+                } else if (frame.kind == control::Kind::Event && frame.domain == detail::lifecycle &&
                     frame.operation == detail::debug_waiting) {
                     if (!record.snapshot.debug || record.debug_gate_seen || !frame.payload.empty() ||
                         record.snapshot.state != ModuleState::Starting || record.name_confirmed) {
@@ -1001,7 +1076,7 @@ struct ModuleManager::Impl {
                     const auto operation = frame.operation;
                     const auto request = frame.request;
                     auto submitted = bus_manager->submit(record.snapshot.generation, record.snapshot.name,
-                                                         record.session, std::move(frame));
+                                                         record.session, std::move(frame), record.notification_name);
                     if (!submitted && operation == message_bus::detail::ListTopicConnections &&
                         submitted.error().is(message_bus::ErrorCode::CapacityExceeded)) {
                         control::Frame response{control::Kind::Response, message_bus::detail::message_bus_domain,
@@ -1034,7 +1109,19 @@ struct ModuleManager::Impl {
                         break;
                     }
 
+                    // Ready proves the Host opened its own endpoints before user code.
+                    // Central never waits on this receiver; it only bridges handoff lifetime.
+                    auto closed = record.notification_creator.close();
+                    if (!closed) {
+                        save_cleanup(record, wrap_error(ErrorCode::CleanupFailed,
+                                                        ErrorOperation::CloseNotification, closed.error()));
+                    }
+
                     record.snapshot.state = ModuleState::Running;
+#ifdef VINC_MODULE_TESTING
+                    module_system::test::checkpoint(module_system::test::Point::NotificationReady,
+                                                    &*record.process, record.notification_name);
+#endif
                     record.changed.notify_all();
                 } else if (frame.kind == control::Kind::Response && frame.domain == detail::commands) {
                     if (record.pending_request == frame.request &&
@@ -1183,7 +1270,7 @@ struct ModuleManager::Impl {
             }
 
             page.modules.insert(position, ModuleInfo{snapshot.mid, snapshot.name,
-                snapshot.module_type, snapshot.state});
+                snapshot.module_type, snapshot.state, snapshot.notifications});
             if (page.modules.size() > detail::modules_per_page + 1) {
                 page.modules.pop_back();
             }

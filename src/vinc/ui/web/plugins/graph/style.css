@@ -184,3 +184,18 @@ label {
         flex: 1;
     }
 }
+
+.vue-flow__node-default.notification-green {
+    border-color: #5bc48b;
+}
+.vue-flow__node-default.notification-yellow {
+    border-color: #f0bd55;
+    border-width: 3px;
+}
+.vue-flow__node-default.notification-red {
+    border-color: #ef7070;
+    border-width: 3px;
+}
+.vue-flow__node-default.notification-gray {
+    border-color: #8b949e;
+}

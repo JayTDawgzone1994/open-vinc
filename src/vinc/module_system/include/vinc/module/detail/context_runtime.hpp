@@ -12,6 +12,7 @@ public:
     virtual Result<ModulePage> list_modules(MID after, Deadline deadline) = 0;
     virtual Result<std::uint64_t> commands() = 0;
     virtual void wait() = 0;
+    virtual void wake() = 0;
     virtual void fail(const Error&) = 0;
     virtual Result<std::unique_ptr<ContextLock>> lock(std::uint64_t id, Deadline deadline) = 0;
 };

@@ -579,3 +579,9 @@ vinc::sdk 與 vinc/vinc.hpp 提供 RPC 的型別、錯誤及 Context 模板 API�
 vinc::rpc 是 Plugin facade／映像讀寫 target；vinc::rpc_host 與 vinc::rpc_manager 僅供框架接線。
 ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件。
 完整契約見 [RPC](../rpc/README.md)，範例見 [examples/rpc](../../../examples/rpc/README.md)。
+
+### Notification integration rebuild / 通知整合重建
+
+Host/Plugin entry 10 and bootstrap v16 require rebuilding connected SDK consumers, Plugins and Python native adapters with the central/Host. Public pumpOnce syntax/semantics stay unchanged; pumpLoop uses the Host-owned notification receiver plus the existing fallback. ModuleInfo now carries notification diagnostics. See [Pump wakeup](../module_system/PUMP_WAKEUP.md) for ownership, protocol versions, recovery and validation.
+
+本輪 entry 10／bootstrap v16 要求所有相連產物一起重建。pumpOnce 不變，pumpLoop 使用 Host 的通知與備援等待；ModuleInfo 加入通知診斷。完整契約見上述連結。

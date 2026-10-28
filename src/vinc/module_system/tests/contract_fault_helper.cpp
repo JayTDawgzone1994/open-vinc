@@ -83,7 +83,7 @@ private:
 
 #ifdef VINC_FAULT_HOST
 namespace vinc::module_system::test {
-void checkpoint(Point point, osal::Process*) {
+void checkpoint(Point point, osal::Process*, std::string_view) {
     if (point == Point::ContractWriting) {
         if (mode == FaultMode::Writing) {
             stall();

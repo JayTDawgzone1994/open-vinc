@@ -44,6 +44,99 @@
 
 ## Host 與 Plugin 的邊界
 
+### Notification ownership (2026-10-28) / 通知資源所有權
+
+The central journals and creates one notification per Module generation **before
+spawn**. The journal uses `r<epoch><sequence>` for existing shared-memory records
+and `n<epoch><sequence>` for notifications; both remain 24 characters and consume
+the same `instance_resource_limit` budget. `ResourceNames::reserve()` keeps its
+shared-memory meaning; only Instance's internal `reserve_notification()` uses
+the new kind. Admission validates the entire epoch, rejects unknown kinds, and
+dispatches POSIX unlink to the matching OSAL API. Old `r` records remain readable.
+Older central builds do not understand `n` records and may reject admission after
+a crash; this does not provide journal downgrade compatibility.
+
+中央在 spawn 前，先為每個 Module 世代登記並建立一個通知資源。既有共享記憶體記錄
+使用 `r` 前綴，通知使用 `n`；都維持 24 字元並共用 `instance_resource_limit`。
+新增通知每個世代多占一筆記錄。舊 `r` 記錄仍可讀，未知類型拒絕；POSIX 依類型 unlink。
+舊中央不認識 `n` 記錄，降版後可能拒絕帶有崩潰遺留記錄的 admission；不承諾 journal 降版相容。
+
+Bootstrap **v15** carries the reserved notification name. After control-channel
+authentication, native and Python Hosts open a receiver and a local sender before
+the debug gate, Plugin/Python source preparation, or user hooks. Host never creates
+or unlinks the endpoint. Existing Ready confirms handoff; central closes its
+temporary creator receiver and never waits on it. Plugin entry remains **9**:
+no Context vtable or RuntimeServices table change is involved. Rebuild central,
+ModuleHost and Python native adapters together; old bootstrap markers reject.
+
+bootstrap v15 攜帶通知名稱；Host 在控制連線驗證後、debug gate 與使用者程式載入前，
+開啟接收端及本機發送端。Host 不建立、不 unlink。中央收到既有 Ready 後關閉交接用
+handle，中央不等待此通知。Plugin entry 仍為 9；Context 與 RuntimeServices 介面不變。
+
+Preparation failures use `ModuleSystem / NotificationFailed / PrepareNotification`
+with the original cause chain. Only that Module fails startup; central and peers
+continue, and existing restart policy applies. A failed exclusive create does not
+unlink the pre-existing endpoint. Shutdown closes Host endpoints after hooks return;
+exceptional teardown uses RAII and OS process cleanup. Central retires the name only
+after OS-confirmed exit, or when no child was spawned. Cleanup failures remain
+separate from primary failures and retain the journal record for later admission.
+
+準備失敗只讓該 Module 啟動失敗，保留原因鏈並沿用既有重啟政策。獨占建立失敗不刪除
+既有資源。中央只有確認程序退出，或本來就沒有 spawn 子程序，才清理名稱；回收失敗
+保留記錄與獨立 cleanup error，不蓋掉主要故障。heartbeat timeout 不等於退出證據。
+
+Each restart reserves a new name. A replacement central unlinks recorded POSIX
+names without modifying retained endpoints; a delayed old Host's open cannot
+recreate them. Windows retirement follows handle lifetime. Old handles can still
+refer to old objects, but never to a new generation. Instance admission and epoch
+reservations continue to isolate different central names.
+
+本輪只完成資源交接與回收，**沒有 Bus route，也沒有通知等待者或新增 thread**。
+Host 的端點保持到 hooks 結束；後續 pump 接線必須先取消／等待本機使用者離開，再 close。
+目前 pumpOnce／pumpLoop 行為不變，完整計畫見 [PUMP_WAKEUP.md](PUMP_WAKEUP.md)。
+
+#### Phase-2 validation / 第二步驗證
+
+Validated on 2026-10-28, working tree based on `91d26bc` plus the notification
+phases (not yet committed):
+
+| Environment / 環境 | Checks / 檢查 | Result / 結果 |
+| --- | --- | --- |
+| Windows x64, MSVC 19.51.36257, toolset 14.51.36231, CMake 4.3.2, CPython 3.13 | Debug `^(module\.|osal\.)`, including C++/Python Shell startup | 40/40 passed, 81.27 s |
+| Same Windows toolchain / 同上 | Release, same selection / 相同範圍 | 40/40 passed, 80.19 s |
+| WSL Ubuntu 24.04, GCC/libstdc++ 13.3, glibc 2.39, CMake 3.28.3, CPython 3.12.3 | Debug `^module\.`, native Host and Python; apps/UI/examples disabled in this build | 18/18 passed, 50.38 s |
+| macOS | New notification ownership integration / 新通知接線 | Not run in this phase; earlier unrelated platform reports remain valid / 本輪未執行，不否定先前其他功能驗證 |
+
+- `module.instance`: real central crash with both shared-memory and notification
+  records, reserved-but-not-created names, retained old handles, generation/name
+  isolation, different central names, unknown-kind rejection and full validation
+  before cleanup. POSIX additionally verifies that delayed open cannot recreate
+  an unlinked old endpoint.
+- `module.manager_faults`: deterministic native exclusive-create failure, preserved
+  OSAL cause, healthy peer commands, no deletion of a conflicting endpoint, actual
+  child kill/restart with new MID/name, and native/journal cleanup on shutdown.
+- `module.process`: a real Host receives a missing notification name and an invalid
+  Plugin path; it reports NotificationFailed/NotFound before loading that Plugin,
+  never reaches Ready, and exits. Existing heartbeat/stop/restart tests also pass.
+- `module.runtime_faults`: queued hint survives Host open/creator close, local
+  sender works, close releases both endpoints, missing open cannot create resources,
+  and bootstrap v14 is rejected.
+- Existing Context, Plugin/debug, fatal supervision, shared locks, Python services
+  and Python message suites passed. No new worker or changed pump waiting was tested
+  or claimed. Native close/unlink failure injection is not part of this evidence.
+
+初次 Windows 全 Module 回歸只重建 Module System，`module.shell` 使用舊中央而因
+bootstrap 不相容逾時；重新連結中央後，上表 Debug／Release 全數通過。此紀錄保留
+版本一致性限制，沒有為了測試放寬驗證。Linux 首次完整設定補裝 zlib／Python 開發套件；
+Git safe.directory 僅以該命令的明確 submodule 清單設定，未修改全域 Git 設定。
+
+This validates resource lifetime, not lower Bus latency. Bus routing, local stop/
+work wakeups, cancellation/join of an actual pump waiter, and end-to-end latency
+measurements remain for later phases.
+
+本次證據是資源生命週期，不是 Bus 延遲改善；通知路由、停止／工作喚醒、實際 pump
+等待者的取消與 join，以及端到端延遲量測仍屬後續步驟。
+
 ```text
 ModuleManager
   ├─ Instance：同名排他、名稱與清理紀錄
@@ -124,3 +217,7 @@ Debug CTest **61/61**（182.98 秒）；Release 58 套首輪通過，3 套建置
   到上限先拒絕啟動，不能為了容量自行刪除仍可能有舊映射的前綴。
   後續可另行設計在全部同帳號中央及 Host 都退出後的離線維護流程。
 - **既有 OSAL 疑慮仍在：** FileLock 原生 unlock 失敗契約及 POSIX fd 競爭待辦不在本輪修復範圍。
+
+Phase 3 now connects Bus routes and pump waits. The v15 bootstrap above records the phase-2 validation; current versions and recovery/diagnostic contracts are in [Pump wakeup](PUMP_WAKEUP.md).
+
+第三步已接通；上文 v15 是第二步驗證的歷史版本，目前協定與恢復／診斷契約見上述連結。
