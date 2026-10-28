@@ -165,6 +165,13 @@ public:
             return std::unexpected(subscriber.error());
         }
 
+        auto notifications = message_bus::detail::enable_notifications(
+            message_bus::detail::DispatchAccess::core(*subscriber));
+        if (!notifications) {
+            return std::unexpected(wrap_error(module_system::ErrorCode::BusFailed,
+                module_system::ErrorOperation::AccessMessageBus, notifications.error()));
+        }
+
         auto subscription = std::make_shared<Subscription>();
         subscription->core = message_bus::detail::DispatchAccess::core(*subscriber);
         subscription->schema = &T::schema();

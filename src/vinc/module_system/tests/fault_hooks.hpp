@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vinc/osal/process.hpp>
+#include <string_view>
 
 namespace vinc::osal {
 class Process;
@@ -14,9 +15,11 @@ enum class Point {
     ReportFailure,
     Ready,
     ContractWriting,
-    ContractCommitted
+    ContractCommitted,
+    NotificationReserved,
+    NotificationReady
 };
 // Defined only by fault-test executables; production has no hook or registry.
-void checkpoint(Point, osal::Process* = nullptr);
+void checkpoint(Point, osal::Process* = nullptr, std::string_view resource = {});
 Result<osal::TerminateResult> terminate_process(osal::Process&);
 }

@@ -19,7 +19,7 @@ From repository root in an MSVC x64 developer environment:
 ```powershell
 cmake -S src -B build/windows-msvc-release -DVINC_BUILD_BUS_BENCHMARK=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build/windows-msvc-release --target bus_benchmark
-python src/vinc/message_bus/benchmarks/run.py --exe build/windows-msvc-release/vinc/message_bus/benchmarks/bus_benchmark.exe --plugin build/windows-msvc-release/vinc/message_bus/benchmarks/bus_benchmark_plugin.dll --output build/bus-benchmark-results
+python src/vinc/message_bus/benchmarks/run.py --exe build/windows-msvc-release/framework/message_bus/benchmarks/bus_benchmark.exe --plugin build/windows-msvc-release/framework/message_bus/benchmarks/bus_benchmark_plugin.dll --output build/bus-benchmark-results
 ```
 
 Python uses only the standard library, no psutil. Output directories must not exist. Narrow runs with `--sizes 1 128`, `--modes push`, or `--samples 1000`; `--sizes 1 --samples 16` is only smoke coverage, not reliable P99. Windows wmain/OSAL explicitly convert Module/report paths as UTF-8.
@@ -183,3 +183,13 @@ Final Release build was warning-free; analyzer **5/5**, Context/Bus/Ring regress
 Context／跨程序 Message Bus／RingBuffer 回歸 3／3 通過（12.51 秒）。
 中文目錄的 push／loan 冒煙測試亦通過；冒煙數字不混入正式效能結果。
 Linux／macOS 未實機驗證；本輪未重跑全專案測試，也不構成即時性保證。
+
+## Notification fan-out mode / 通知扇出量測
+
+The native driver accepts an optional final subscriber count (default 1, range 0 through the configured per-topic subscriber limit). Zero measures publication without receivers; counts above one start distinct Module instances, writing each receiver under `subscriber-N/`. Each run still uses one Publisher and the existing 4 GiB shared budget. The standard run.py calibration remains a single-receiver benchmark; fan-out analysis must verify every receiver independently. No production thread or framework setting is changed.
+
+原生 driver 最後可加訂閱 Module 數量，預設 1；0 量測無接收者的發布成本，多個接收者各輸出到 subscriber-N/。run.py 仍為單接收者校準，多接收者需逐一核對遺失與完整性。每組沿用 4 GiB 共享預算。
+
+The [2026-10-28 notification measurements](NOTIFICATION_RESULTS_2026-10-28.md) cover 64 B through 128 MiB, both paths, calibrated large-payload capacity/rate, and 0/1/8/32 subscriber fan-out.
+
+[通知喚醒量測報告](NOTIFICATION_RESULTS_2026-10-28.md)包含大小資料、雙路徑、容量／頻率校準及多 Module 通知成本。

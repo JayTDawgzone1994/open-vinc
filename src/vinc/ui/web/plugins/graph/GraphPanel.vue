@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { VueFlow, useVueFlow, type Node, type Edge } from "@vue-flow/core";
 import dagre from "@dagrejs/dagre";
-import { buildGraph, states, validate, type NodeData } from "./model";
+import { buildGraph, states, validate, notificationState, type NodeData } from "./model";
 
 // Slightly longer than the native 10 s refresh budget to receive its error response.
 const fetchTimeoutMs = 12000;
@@ -229,6 +229,42 @@ onBeforeUnmount(() => controller?.abort());
                             Type: {{ details.module.type }}<br />State: {{ states[details.module.state] }}
                         </p>
                         <p v-else>Identity unavailable in this sample. Refresh to check again.</p>
+                        <template v-if="details.module">
+                            <h3>Notification health: {{ notificationState(details.module) }}</h3>
+                            <p v-if="!details.module.notifications.observed">No Host report received yet.</p>
+                            <div
+                                v-for="(health, label) in {
+                                    'Receiver wait': details.module.notifications.receiver,
+                                    'Local wake': details.module.notifications.localSender,
+                                    'Publisher routes': details.module.notifications.publisherRoutes,
+                                }"
+                                :key="label"
+                            >
+                                <strong
+                                    >{{ label }}:
+                                    {{
+                                        health.degraded
+                                            ? "degraded — fallback active"
+                                            : "no active fault reported"
+                                    }}</strong
+                                >
+                                <p>
+                                    Failures {{ health.failures }} · Open attempts
+                                    {{ health.reopenAttempts }} · Recoveries {{ health.recoveries }}
+                                </p>
+                                <p v-if="health.targetMid !== '0'">
+                                    Last affected destination MID: {{ health.targetMid }}
+                                </p>
+                                <p v-if="health.firstFailure !== '0'">
+                                    First failure (Unix ns): {{ health.firstFailure }}
+                                </p>
+                                <p v-if="health.lastError">Last error: {{ health.lastError }}</p>
+                            </div>
+                            <p>
+                                Captured at refresh. Notification health does not prove callback or
+                                application health.
+                            </p>
+                        </template>
                     </template>
                     <h3>Registrations ({{ details.connections.length }})</h3>
                     <ul>
@@ -250,8 +286,9 @@ onBeforeUnmount(() => controller?.abort());
         </div>
         <p class="graph-note">
             Pages are sampled separately; this is not an atomic snapshot. Stopped Modules may remain listed.
-            Layout is kept in this panel only. Shape identifies Module / Topic; colours do not indicate
-            health.
+            Layout is kept in this panel only. Module borders: green = no reported notification fault, yellow
+            = notification degradation, red = lifecycle failure, gray = inactive or unobserved. Refresh to
+            obtain a new sample; these are not live heartbeat indicators.
         </p>
     </section>
 </template>

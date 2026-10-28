@@ -90,6 +90,7 @@ struct ModuleSnapshot {
     std::filesystem::path python_script;
     bool debug = false;
     bool debug_waiting = false;
+    ModuleNotifications notifications;
     MID mid = 0;
     ModuleState state = ModuleState::Queued;
     // The module runtime uses mid as its channel/Message Bus generation; retain both fields.

@@ -743,3 +743,7 @@ existing configuration to Param. Control wire page sizes remain protocol constan
 
 Module Graph 的 `ui_graph_*` 暫存設定由 UI 契約維護；本輪未搬移既有 config 到 Param。
 控制封包分頁大小仍是各元件的協定常數。
+
+Notification retry/report settings remain compile-time system policy in config.hpp; defaults, meanings and validation belong to [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+通知重試／回報間隔暫留 config.hpp；預設值、用途及驗證由上述跨元件契約維護。

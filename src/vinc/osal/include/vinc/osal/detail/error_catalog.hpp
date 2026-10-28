@@ -82,6 +82,12 @@ inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::OpenLibrary, "OpenLibrary"},
     ErrorOperationEntry{ErrorOperation::FindSymbol, "FindSymbol"},
     ErrorOperationEntry{ErrorOperation::CloseLibrary, "CloseLibrary"},
+    ErrorOperationEntry{ErrorOperation::CreateNotification, "CreateNotification"},
+    ErrorOperationEntry{ErrorOperation::OpenNotification, "OpenNotification"},
+    ErrorOperationEntry{ErrorOperation::Notify, "Notify"},
+    ErrorOperationEntry{ErrorOperation::WaitNotification, "WaitNotification"},
+    ErrorOperationEntry{ErrorOperation::CloseNotification, "CloseNotification"},
+    ErrorOperationEntry{ErrorOperation::UnlinkNotification, "UnlinkNotification"},
 };
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::Osal, "OSAL", error_entries, operation_entries,
                                             native_error_text};

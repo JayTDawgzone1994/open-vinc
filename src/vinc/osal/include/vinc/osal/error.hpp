@@ -80,7 +80,13 @@ enum class ErrorOperation : std::int32_t {
     PathToUtf8 = 45,
     OpenLibrary = 46,
     FindSymbol = 47,
-    CloseLibrary = 48
+    CloseLibrary = 48,
+    CreateNotification = 49,
+    OpenNotification = 50,
+    Notify = 51,
+    WaitNotification = 52,
+    CloseNotification = 53,
+    UnlinkNotification = 54
 };
 }
 

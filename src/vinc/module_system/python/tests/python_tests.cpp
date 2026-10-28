@@ -4,6 +4,7 @@
 #include <vinc/module/detail/module_protocol.hpp>
 #include <vinc/module/detail/contract_report.hpp>
 #include <vinc/osal/path.hpp>
+#include <vinc/osal/notification.hpp>
 #include <fstream>
 #include <array>
 #include <random>
@@ -96,6 +97,14 @@ void test_parent_loss(const std::filesystem::path& python, const std::filesystem
     auto listener = make_raw_listener(endpoint_text);
 
     for (bool disconnect : {false, true}) {
+        const auto notification_name = "py_orphan_n" + std::to_string(std::random_device{}());
+        auto notification = take(osal::NotificationReceiver::create(notification_name));
+        struct NotificationCleanup {
+            std::string name;
+            ~NotificationCleanup() {
+                (void)osal::NotificationReceiver::unlink_name(name);
+            }
+        } notification_cleanup{notification_name};
         auto report = take(detail::ContractReportStorage::create(
             "orphan_" + std::to_string(std::random_device{}()), 1234));
         osal::SpawnOptions spawn;
@@ -109,7 +118,8 @@ void test_parent_loss(const std::filesystem::path& python, const std::filesystem
                            std::to_string(std::chrono::milliseconds(orphan_startup_timeout).count()),
                            std::to_string(orphan_stop_timeout.count()),
                            "helper",
-                           report->name(), take(osal::path_to_utf8(helper)), "0", "--name", "orphan"};
+                           report->name(), take(osal::path_to_utf8(helper)), "0",
+                           notification_name, "--name", "orphan"};
         take(detail::prepare_python_spawn(spawn, PythonLaunch{helper, bootstrap, python}));
         auto child = process_service->spawn(spawn);
         check(bool(child), "spawn orphan test");

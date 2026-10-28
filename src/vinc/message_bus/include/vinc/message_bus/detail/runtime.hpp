@@ -8,6 +8,7 @@
 #include <vinc/time.hpp>
 namespace vinc::control { class Session; }
 #include <functional>
+#include <vinc/message_bus/detail/notifications.hpp>
 
 namespace vinc::message_bus::detail {
 struct Attachment;
@@ -27,6 +28,9 @@ public:
     // Called only by the module's existing receive dispatcher; does not map/copy payload.
     static vinc::Result<void> receive(Client&, control::Frame);
     static void shutdown(Client&) noexcept;
+    // Existing Host receive worker retries failed routes; it never invokes user code.
+    static void progress_notifications(Client&);
+    static NotificationDiagnostics notification_diagnostics(Client&);
     // Framework diagnostic snapshot. No mappings, payload or user callbacks.
     static std::vector<Attachment> inspect_attachments(Client&);
 };

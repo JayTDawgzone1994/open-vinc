@@ -37,6 +37,7 @@
 #include <vinc/osal/path.hpp>
 #include <vinc/osal/dynamic_library.hpp>
 #include <vinc/osal/file_lock.hpp>
+#include <vinc/osal/notification.hpp>
 #include <vinc/osal/pipe.hpp>
 #include <vinc/osal/process.hpp>
 #include <vinc/osal/process_pipe.hpp>

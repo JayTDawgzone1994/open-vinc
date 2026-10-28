@@ -29,6 +29,10 @@ Shared Memory 提供原始 bytes 的映射與資源生命週期；訊息布局�
 
 ## Headers and implementation / 標頭與實作位置
 
+The generic cross-process [Notification](NOTIFICATION.md) API is available through `<vinc/osal/notification.hpp>`. Windows and POSIX backends are implemented; validation and platform limits are recorded below. Bus/Context integration is implemented outside OSAL; its separate contracts and validation are in [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+通用跨程序[通知原語](NOTIFICATION.md)已實作 Windows 與 POSIX 後端，平台驗證與限制見下方紀錄；Bus／Context 接線已於 OSAL 之外實作，契約及驗證另見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
+
 Public headers remain `<vinc/osal/...>`. Native/state/platform headers are under `include/vinc/osal/detail/`; shared and platform `.cpp` files stay in `src/`. Detail is for this component and designated tests. Directory cleanup does not change platform behavior; the error contract follows.
 
 公開標頭維持 `<vinc/osal/...>`。native、state 與平台內部標頭統一放在 `include/vinc/osal/detail/`；
@@ -49,13 +53,13 @@ OSAL 使用 `vinc::Result<T>`／`vinc::Error`，不提供獨立 Result 或 Error
 舊的錯誤轉接標頭已由本元件 enum 定義取代。Deadline 是本地等待的截止時間，不是日期時間，
 也不直接序列化為跨程序協定欄位；原有等待、取消與逾時行為保持不變。
 
-`Error` stores `domain`, `code`, `operation`, and native source/value. Use domain-aware comparisons such as `error.is(osal::ErrorCode::Timeout)`; OSAL owns its text tables. `vinc::error_to_string(error)` formats diagnostics and does not print misleading native success text when no native value exists. Unknown codes/operations remain numeric. There are 23 error codes and 48 nonzero operations with stable explicit assignments; domain is part of identity. These are incompatible with old implicit enum ordinals, and C++ Error layout is not a cross-version wire format. Existing timeout, cancellation, lifecycle, classification, and exception boundaries remain.
+`Error` stores `domain`, `code`, `operation`, and native source/value. Use domain-aware comparisons such as `error.is(osal::ErrorCode::Timeout)`; OSAL owns its text tables. `vinc::error_to_string(error)` formats diagnostics and does not print misleading native success text when no native value exists. Unknown codes/operations remain numeric. There are 23 error codes and 54 nonzero operations with stable explicit assignments; domain is part of identity. These are incompatible with old implicit enum ordinals, and C++ Error layout is not a cross-version wire format. Existing timeout, cancellation, lifecycle, classification, and exception boundaries remain.
 
 `Error` 的 `domain`、`code`、`operation`、`native` 保存分類、失敗操作與原生來源／數值。
 使用 `error.is(osal::ErrorCode::Timeout)` 等具 domain 的比較，文字表由 OSAL 自行維護。
 `vinc::error_to_string(error)` 統一產生診斷文字；原生錯誤沒有值時，不輸出「成功」之類
 容易誤導的 OS 訊息。未知錯誤／操作保留數值，程式判斷仍使用具型別的錯誤碼。
-目前有 23 個錯誤碼與 48 個非零操作碼；既有明確指定的編號保持不變，domain 為完整身分的一部分。
+目前有 23 個錯誤碼與 54 個非零操作碼；既有明確指定的編號保持不變，domain 為完整身分的一部分。
 它們不相容於更早期 enum 的隱含序號；C++ Error 布局仍不是跨版本傳輸協定。
 現有逾時、取消、生命週期、平台錯誤分類與例外邊界保持原樣。
 
@@ -696,3 +700,65 @@ Recorded Windows coverage comes from Module System module.plugin: full Debug/Rel
 本輪 Windows DynamicLibrary 行為由 Module System 的 `module.plugin` 測試涵蓋，
 Debug／Release 全套各 55/55 通過；包含實際載入／符號、move／close、中文／空白路徑。
 後續平台結果見[目前平台驗證](#current-platform-validation)，載入範圍與限制見 [Module System](../module_system/README.md)。
+
+<a id="notification-validation"></a>
+
+## Notification validation (2026-10-28) / 通知功能驗證
+
+The [Notification contract](NOTIFICATION.md) owns the API, native mechanisms,
+lifetime, cancellation, and remaining limitations. This round implements only
+the OSAL primitive and tests. Bus publication and `Context::pumpLoop()` do not
+use it yet; no claim is made that the earlier approximately 16 ms tail latency
+has been fixed.
+
+[通知契約](NOTIFICATION.md)維護 API、後端、生命週期、取消與限制。
+本輪只完成 OSAL 原語與測試，Bus／Context 尚未接線，不能宣稱已改善約 16 ms 尾延遲。
+
+| Environment / 環境 | Results / 結果 |
+| --- | --- |
+| Windows x64, MSVC 19.51.36257, Debug | OSAL **19/19**, plus SDK consumer **1/1** passed. |
+| Windows x64, MSVC 19.51.36257, Release | OSAL **19/19** passed; notification test also passed **20 consecutive runs**. |
+| WSL2 Ubuntu 24.04.5 x86_64, GCC/libstdc++ 13.3.0, Debug | Standalone OSAL **24/24** passed; both notification tests also passed **20 consecutive runs each**. |
+| macOS | Backend and tests added; native execution of this new functionality is pending. Prior macOS results for other OSAL facilities remain valid. |
+
+**Receiver-open follow-up (2026-10-28):** Added `NotificationReceiver::open()`
+without creating/resetting resources or changing error numbers. Windows
+Debug/Release OSAL **19/19 each** and WSL Ubuntu 24.04 Debug **24/24** passed
+again with receiver-open tests. These cover actual cross-process handoff,
+pre-open hints, cancellation after creator close, and failed opens preserving
+resources/data. The SDK consumer and 20-run records above belong to the earlier
+primitive pass; they were not rerun for this addition. New macOS behavior remains
+pending native validation. That OSAL-only pass did not change central/Host/Bus/pump
+wiring; the subsequent central/Host phase is recorded in [Module ownership](../module_system/INSTANCE.md).
+
+**接收端 open 補充驗證（2026-10-28）：** 新增只開啟、不建立或清空資源的 API，錯誤編號不變。
+Windows Debug／Release OSAL 再次各 **19/19**、WSL Ubuntu 24.04 Debug **24/24** 通過，
+包含真正跨程序交接、保留先到提示、建立者關閉後取消，以及開啟失敗時保留資源與資料。
+上表 SDK consumer 與連跑 20 次是前一輪原語的紀錄，本次未重跑；新增功能的 macOS
+原生驗證仍待補。該輪未改中央、Host、Bus 與 pump；後續中央／Host 接線見
+[Module 資源所有權](../module_system/INSTANCE.md)。
+
+The full notification test includes real child processes, concurrent senders,
+indefinite-wait cancellation, full-buffer coalescing, killed-receiver behavior,
+native resource failures and cleanup. On Windows the lifecycle handle-count
+probe runs before ProcessService starts asynchronous reaping, avoiding unrelated
+handle-count changes. POSIX native fault cases run in isolated children and
+preserve inherited descriptors; no fd-3-is-free assumption is introduced.
+
+驗證含真正的子程序、並行發送、無限等待取消、滿載合併、接收程序死亡與原生失敗回收。
+Windows 的 handle 計數先於 ProcessService 啟動，避免非同步回收干擾基準；
+POSIX 故障案例在隔離子程序執行，保留繼承 FD，不假設 fd 3 必須空閒。
+新增通知功能的 macOS 驗證待執行，沒有撤銷其他元件已有的 macOS 驗證結果。
+
+Reproduce after building the matching targets / 建置後執行：
+
+```powershell
+ctest --test-dir build/windows-msvc-debug -R "^osal\." --output-on-failure
+ctest --test-dir build/windows-msvc-release -R "^osal\." --output-on-failure
+ctest --test-dir build/windows-msvc-release -R "^osal\.notification$" --repeat until-fail:20 --output-on-failure
+```
+
+```sh
+ctest --test-dir /home/vinc-test/build/osal-debug -R '^osal\.' --output-on-failure
+ctest --test-dir /home/vinc-test/build/osal-debug -R '^osal\.notification' --repeat until-fail:20 --output-on-failure
+```

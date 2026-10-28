@@ -13,6 +13,7 @@ Result<ReadBatch> capture(const std::shared_ptr<SubscriberCore>&);
 Result<std::unique_ptr<BaseMessage>> read_batch(const std::shared_ptr<SubscriberCore>&,
     const ReadBatch&, const message::detail::Schema&, Factory);
 bool closed(const std::shared_ptr<SubscriberCore>&) noexcept;
+Result<void> enable_notifications(const std::shared_ptr<SubscriberCore>&);
 
 struct Attachment;
 std::vector<Attachment> inspect_sources(const std::shared_ptr<SubscriberCore>&);

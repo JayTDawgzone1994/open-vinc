@@ -93,7 +93,7 @@ void graph(vinc::ModuleManager& manager, httplib::Client& client, const char* so
     const auto response = client.Get("/api/graph", headers);
     check(response && response->status == 200, "complete real Module graph request");
     const auto snapshot = Json::parse(response->body);
-    check(snapshot["apiVersion"] == 1 && snapshot["atomicSnapshot"] == false, "graph consistency contract");
+    check(snapshot["apiVersion"] == 2 && snapshot["atomicSnapshot"] == false, "graph consistency contract");
     check(snapshot["modules"].size() >= isolated_modules + 2, "isolated Modules and multiple Module pages retained");
     unsigned publishers = 0;
     unsigned subscribers = 0;

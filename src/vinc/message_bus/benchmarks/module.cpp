@@ -228,10 +228,18 @@ public:
     }
 
     Result<std::string> on_name(std::vector<std::string>& args) override {
+        std::string requested_name;
+        if (args.size() == 10 && args[8] == "--name") {
+            requested_name = args[9];
+            args.resize(8);
+        }
         if (!parse(args, options_)) {
             return std::unexpected(failure());
         }
 
+        if (!requested_name.empty()) {
+            return requested_name;
+        }
         return "benchmark_" + options_.role;
     }
 

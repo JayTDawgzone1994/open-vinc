@@ -63,6 +63,7 @@ Result<void> Context::register_callback(std::shared_ptr<Subscription> subscripti
     }
 
     subscriptions_.push_back(std::move(subscription));
+    runtime_->wake();
     return {};
 }
 

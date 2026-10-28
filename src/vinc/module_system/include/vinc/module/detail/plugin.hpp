@@ -6,7 +6,7 @@
 namespace vinc {
 namespace detail {
 class ModuleObject;
-inline constexpr std::uint32_t plugin_entry_version = 9;
+inline constexpr std::uint32_t plugin_entry_version = 10;
 inline constexpr char plugin_entry_symbol[] = "vinc_module_plugin";
 
 // Same-toolchain C++ ABI. The C export only fixes symbol lookup; it does not
