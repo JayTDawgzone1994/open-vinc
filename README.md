@@ -92,6 +92,22 @@ See [Tcl integration](library/tcl/README.md), [Python SDK](src/vinc/module_syste
 
 詳細需求與部署限制見上述文件。
 
+### Prepare dependencies / 準備相依環境
+
+Run `tools\setup.bat` on Windows, or `bash tools/setup.sh` on Ubuntu/macOS.
+These scripts install/check tools, restore pinned submodules and install UI npm
+dependencies. They **do not configure or build your project**. UI and optional
+Python SDK prerequisites are included by default; use `--no-ui` or `--no-python`
+to omit them, or `--check` to inspect without installing. Standalone temporary
+compiler probes check toolchain capabilities. See [setup instructions](tools/README.md)
+for platform requirements, environment selection and validation limits.
+
+Windows 執行 `tools\setup.bat`，Ubuntu／macOS 執行 `bash tools/setup.sh`。
+腳本安裝／檢查工具、還原固定 submodule 並安裝 UI npm 套件，**不配置或編譯使用者專案**。
+預設包含 UI 與選用 Python SDK 的相依，可用 `--no-ui`／`--no-python` 略過；
+`--check` 僅檢查、不安裝。工具鏈能力由獨立暫存小程式驗證。
+平台需求、環境選擇與驗證限制見 [setup 說明](tools/README.md)。
+
 ### Configure, build, test / 配置、建置、測試
 
 Run from the repository root in a configured compiler environment. Restore pinned submodules first; CMake does not install npm packages automatically.
