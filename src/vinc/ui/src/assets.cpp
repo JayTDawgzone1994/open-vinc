@@ -322,7 +322,8 @@ Result<Assets> load_assets(const std::filesystem::path& supplied_root) {
         const auto prefix = "/plugins/" + id + '/' + hash + '/';
         package.info["entry"] = prefix + package.info["entry"].get<std::string>();
         package.info["official"] = (id == "vinc.example" && hash == official_package_hash) ||
-            (id == "vinc.topics" && hash == official_topics_hash);
+            (id == "vinc.topics" && hash == official_topics_hash) ||
+            (id == "vinc.graph" && hash == official_graph_hash);
         for (auto& [path, bytes] : package.files) {
             assets.routes.emplace(prefix + path, Asset{std::move(bytes), mime(path)});
         }

@@ -2,6 +2,16 @@
 
 # Module System / 模組系統
 
+Host notification ownership, Bus routes, notification-driven pumpLoop, bounded recovery and
+Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
+preparation failure rejects only the affected Module; later notification failures retain the
+10 ms fallback. See the [pump wakeup contract](PUMP_WAKEUP.md) for policies and validation.
+Current bootstrap is **v16**, Plugin entry **10**, and Module query **v2**; rebuild connected artifacts.
+
+已接通通知資源、Bus 路由、pumpLoop 喚醒、故障恢復與診斷；pumpOnce 行為不變。
+準備失敗只拒絕該 Module 啟動，運行中的通知故障保留 10 ms 補查。契約及驗證見上述連結。
+目前 bootstrap v16、Plugin entry 10、Module query v2，所有接線產物須一起重建。
+
 Each Module instance runs in an independent OS process. The central process manages its lifecycle through OSAL Process; both sides use the same vinc::control component over an OSAL local stream Socket. Authors inherit BaseModule without implementing sockets, packets, or heartbeat.
 
 每個模組實例在獨立 OS 程序執行。中央以 OSAL Process 管理生命週期，
@@ -236,8 +246,12 @@ Host 綁定既有認證 Session 的 Client 與本地 Runtime。C++ Context 物�
 
 ### pump and callback contracts / pump 與 callback 契約
 
+The approved notification-wakeup direction, policies, and implementation steps are recorded in [Pump wakeup design](PUMP_WAKEUP.md). OSAL, central/Host ownership, Bus routes and Context notification waits are implemented; existing batch and callback contracts below remain unchanged.
+
+已同意的通知喚醒方向、政策與實作步驟見 [pump 喚醒設計](PUMP_WAKEUP.md)。OSAL、中央／Host 資源所有權、Bus 路由與 Context 通知等待已接線，下列 batch 與 callback 契約維持不變。
+
 - `Result<PumpStats>` pumpOnce() fixes the subscription set and each source publication ceiling, then handles retained data. Sources/subscriptions/publications added during callbacks wait until the next batch. Per-source boundaries are captured sequentially, not as a global atomic snapshot. Stop/errors can end the batch early; an empty batch succeeds.
-- `Result<void>` pumpLoop() repeats batches, waits when idle, and wakes/returns on stop. Bus data currently has no additional Socket notification; config::module_pump_idle_interval defaults to 10 ms polling, not a delivery deadline.
+- `Result<void>` pumpLoop() repeats batches, waits when idle, and wakes/returns on stop. Bus publication uses direct OSAL notifications; config::module_pump_idle_interval keeps a 10 ms fallback scan, not a delivery deadline. See [wakeup](PUMP_WAKEUP.md).
 - bool living() reports local Runtime permission to continue. Stop/detected faults make it false; it does not instantly observe remote central state.
 - Only one pump may be active per Context, including the whole pumpLoop. Concurrent/recursive use returns Busy. Manual may create a pump thread; FrameworkLoop creates none.
 - `subscribe<T>(topic, callback, options)` gives a void callback ownership of a writable local `std::unique_ptr<T>`, which it may modify or retain by move. The callback-free overload supports get_last only. Keep the Subscriber handle; close/destruction ends future dispatch and may occur inside its callback.
@@ -249,7 +263,7 @@ Host 綁定既有認證 Session 的 Client 與本地 Runtime。C++ Context 物�
   處理仍保留的資料；callback 期間新增的來源／訂閱／發布留到下一輪。各來源界線依序擷取，
   不是全域同時快照。停止／錯誤可提前結束；空批次是成功。
 - `Result<void> pumpLoop()`：重複批次；沒有資料／命令時等待，停止要求會喚醒並返回。
-  本版資料發布沒有額外 Socket 通知，使用 `config::module_pump_idle_interval`（預設 10ms）輪詢，
+  資料發布透過 OSAL 通知喚醒，使用 `config::module_pump_idle_interval`（預設 10 ms）補查，
   這是閒置等待值，不是 callback 送達時限。
 - `bool living()`：本地 Runtime 是否仍允許繼續；停止或已偵測故障後為 false，
   不承諾即時得知遠端中央狀態。
@@ -299,10 +313,10 @@ Finishing 啟動中央收尾期限；on_stop／Module 解構完成後才送 Comp
 本地 watchdog 以 `config::module_runtime_poll_interval`（預設 20ms）檢查本地主入口停止／故障，
 會增加少量閒置喚醒；不新增執行緒，也不保證 OS 排程的硬期限。
 
-Host operates both BaseModule modes through internal non-template detail::ModuleObject, preserving paired Plugin create/destroy. Current Plugin entry version is 8; bootstrap is --vinc-module-v13. Old Plugins/Hosts reject explicitly; rebuild central, Host, Plugin, and SDK consumers together under matching toolchain/CRT. RuntimeServices remains fatal-only.
+Host operates both BaseModule modes through internal non-template detail::ModuleObject, preserving paired Plugin create/destroy. Current Plugin entry version is 10; bootstrap is --vinc-module-v16. Old Plugins/Hosts reject explicitly; rebuild central, Host, Plugin, and SDK consumers together under matching toolchain/CRT. RuntimeServices remains fatal-only.
 
 Host 經內部非模板 `detail::ModuleObject` 操作兩種公開 BaseModule，維持 Plugin 成對 create/destroy。
-Plugin entry version 為 8，bootstrap 標記為 `--vinc-module-v13`；舊 Plugin／Host 明確拒絕，
+Plugin entry version 為 10，bootstrap 標記為 `--vinc-module-v16`；舊 Plugin／Host 明確拒絕，
 中央、Host、Plugin 與 SDK 消費端須一同重建。同工具鏈／CRT 的 ABI 限制維持。
 RuntimeServices bridge 仍僅供 fatal，未加入一般 Context 服務。
 
@@ -415,9 +429,9 @@ Central proxies module_interface(args)/module_autoComplete(args) through Socket.
 
 ### Lifecycle, command, and error protocol / 生命週期、命令與錯誤協定
 
-Current bootstrap is --vinc-module-v13, with debug flag 0/1 after Plugin path. Rebuild central/Host together; no old-bootstrap adapter exists. Socket numeric Error envelopes use version 1 below. Outer Control Channel frame remains v1; these are separate protocol version boundaries.
+Current bootstrap is --vinc-module-v16, with debug flag 0/1 and notification name after Plugin path. Rebuild central/Host together; no old-bootstrap adapter exists. Socket numeric Error envelopes use version 1 below. Outer Control Channel frame remains v1; these are separate protocol version boundaries.
 
-目前程序啟動標記為 --vinc-module-v13，在 Plugin 路徑之後帶本次啟動的 debug 旗標（0／1）。中央與 Host 須一同重建，不提供舊 bootstrap 轉接。下述 Socket 數字 Error envelope 為 version 1；外層 Control Channel frame 仍是 v1。這些是各自獨立的版本邊界。
+目前程序啟動標記為 --vinc-module-v16，在 Plugin 路徑之後帶本次啟動的 debug 旗標（0／1）及通知名稱。中央與 Host 須一同重建，不提供舊 bootstrap 轉接。下述 Socket 數字 Error envelope 為 version 1；外層 Control Channel frame 仍是 v1。這些是各自獨立的版本邊界。
 
 - Lifecycle Domain = 1: Ready Event = 1 (name string), Stop Event = 2 (empty), RegisterName Request/Response = 3 (request ID = 1, proposed name).
 - RegisterName/Execute/Complete responses begin with u32 tag 0 for success or 1 for failure. Successful bodies are name string, i32 result encoded as u32 bits, or argument string list. Failure contains numeric Error: current domain must be ModuleSystem, with causes from other domains allowed.
@@ -468,7 +482,7 @@ Root CTest runs control.channel/module.process/module.shell. Process cases cover
 以及重啟等待期間保留名稱、新 MID 與舊 MID 隔離。OutputHub 名稱交接另有事件與文字輸出測試。
 命名遷移另驗證 ModuleType 啟動入口與 Module 命令／補全入口沒有混用、
 種類登記與已啟動模組的查詢，以及 Snapshot 的 `module_type`／`mid`／generation 對應。
-Linux／macOS 尚待原生建置與行為驗證；未進行效能量測。
+後續各平台建置與行為驗證見[平台報告](../../../README.md#validation-and-limits)；本段沒有進行效能量測。
 
 2026-10-03 readability pass: Windows x64/MSVC full Debug/Release builds and 25/25 suites each passed (79.83/40.44 seconds), covering lifecycle, Control, Bus, Shell/Socket/Tcl. Scenarios/wait values were unchanged. Linux/macOS were not run.
 
@@ -695,7 +709,7 @@ Debug 上述整組已重跑；Release 另重建並重跑該測試 1/1 通過（0
 
 No native Linux/macOS build/run was performed in that pass. Injection does not establish coverage of every OS failure or scheduling condition.
 
-Linux／macOS 尚未原生建置或執行；注入結果不代表所有 OS 故障與排程均已驗證。
+後續平台證據見[平台報告](../../../README.md#validation-and-limits)；注入結果不代表所有 OS 故障與排程均已驗證。
 
 <a id="測試路徑轉換收尾2026-10-05"></a>
 
@@ -706,7 +720,7 @@ tests/module_helper.cpp startup/stop markers use [OSAL path helpers](../osal/REA
 `tests/module_helper.cpp` 的啟動／停止 marker 路徑改用
 [OSAL 路徑 helper](../osal/README.md#utf-8-與原生路徑)，不再透過 char8_t 指標讀取 char 儲存區。
 失敗由 StartHook 的 Result 保留 OSAL 原因。Windows Debug／Release 的 module.process 均通過，
-包含在本輪各 20/20 相關測試內。Linux／macOS 尚未驗證。
+包含在本輪各 20/20 相關測試內。後續平台與測試範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="契約故障共享紀錄"></a>
 
@@ -723,7 +737,7 @@ OS 強殺當成可攔截的 C++ 契約失敗；可恢復失敗仍走 Result。
 ### Responsibilities and lifetime / 責任與生命週期
 
 - Before each spawn, Manager exclusively creates uniquely named SharedMemory per MID. Existing supervision only observes its atomic state while the child lives. Internal vinc_module_contract shares codec/OSAL ownership between central/Runtime; Common depends on neither it nor OSAL.
-- Child validates bootstrap v13, maps the record, binds RuntimeServices, then creates controls/application objects/hooks. Binding survives service shutdown; unbinding waits for active readers before unmapping. Earlier faults lack this guarantee.
+- Child validates bootstrap v16, maps the record, binds RuntimeServices, then creates controls/application objects/hooks. Binding survives service shutdown; unbinding waits for active readers before unmapping. Earlier faults lack this guarantee.
 - Fatal writes preallocated bytes, publishes committed, and _Exit(76), without RuntimeInbox/Socket/stdio locks, strings, packets, on_stop, or destructors. First writer owns diagnostics; others yield waiting for commit, without a 500 ms early kill. Watchdog/central/OS termination can interrupt this fatal-only wait.
 - Central mapping survives child exit. It reads payload only after real OSAL ExitStatus, then saves/unmaps/removes POSIX name. Restart gets a new MID/name/empty record. Partial pre-spawn failures roll back; only the successful central creator may unlink.
 - Explicit close stores cleanup failures separately. POSIX unlink-name allocation exhaustion becomes ResourceExhausted while local unmap/close continues; destructor failure must not terminate central. A name may remain, so cleanup success is not claimed. Destructor fallback is best effort without a retry thread.
@@ -731,7 +745,7 @@ OS 強殺當成可攔截的 C++ 契約失敗；可恢復失敗仍走 Result。
 - ModuleManager 在每次 spawn 前建立排他、唯一命名的 SharedMemory。每個 MID 一份，
   中央既有監督迴圈只讀原子狀態，存活時不讀 payload。`vinc_module_contract` 是元件內部共用 target，讓中央／Runtime
   使用同一份紀錄 codec 與 OSAL owner；Common 不依賴它，也不依賴 OSAL。
-- 子程序先驗證 bootstrap v13、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
+- 子程序先驗證 bootstrap v16、開啟／映射紀錄，再綁定 Common 的 RuntimeServices，最後
   建立控制服務與呼叫使用者工廠／hooks。綁定活到 Runtime 服務停止後；解除綁定等待正在
   使用 context 的讀者離開，才解除映射。bootstrap 以前或綁定以前的故障仍沒有這份保證。
 - 故障呼叫端直接寫入預先配置的 bytes，發布 committed 狀態後 `_Exit(76)`。
@@ -1002,20 +1016,20 @@ Linux／macOS 未原生建置或執行；ELF symbol visibility 設定尚待該�
 
 **English**
 
-1. Validate bootstrap v13, map fatal storage, bind Host RuntimeServices.
-2. Create Control Service, Session, Bus Client, and existing watchdog.
+1. Validate bootstrap v16, map fatal storage, bind Host RuntimeServices.
+2. Create Control Service, Session, Bus Client, and existing watchdog; open the central-created notification receiver/local sender before user code.
 3. Load library through OSAL DynamicLibrary, validate entry/type, initialize Plugin bridge.
 4. Plugin create constructs Module; use MID/name approval/on_start/commands/on_stop lifecycle.
-5. Plugin destroy disposes Module; Host closes Bus/Session, joins watchdog, releases Client/services.
+5. Plugin destroy disposes Module; Host closes notification endpoints, closes Bus/Session, joins watchdog, releases Client/services.
 6. Clear Plugin bridge/release loader reference, then clear Host bridge/fatal storage.
 
 **繁體中文**
 
-1. Host 驗證 bootstrap v13，映射 fatal storage，綁定自己的 RuntimeServices。
-2. 建立 Control Service、Session、Bus Client 與既有 watchdog。
+1. Host 驗證 bootstrap v16，映射 fatal storage，綁定自己的 RuntimeServices。
+2. 建立 Control Service、Session、Bus Client 與既有 watchdog；在使用者程式之前開啟中央建立的通知接收端／本機發送端。
 3. 透過 OSAL DynamicLibrary 載入指定庫、驗證入口與種類，再初始化 Plugin bridge。
 4. Plugin create 建立 Module；沿用 MID、名稱核准、on_start、命令及 on_stop 流程。
-5. Plugin destroy 銷毀 Module；Host 關閉 Bus／Session、join watchdog，釋放 Client 與服務。
+5. Plugin destroy 銷毀 Module；Host 關閉通知端點、Bus／Session，join watchdog，釋放 Client 與服務。
 6. 清除 Plugin bridge、釋放 loader reference；最後清除 Host bridge 與 fatal storage。
 
 LoadedPlugin is declared before service owners and outlives their destruction. Module exists only inside run_hooks. User work must stop/join in on_stop/destruction; no Plugin callback/deleter/vtable/thread may survive unload. DllMain/loader hooks do not bind the bridge; REGISTER_MODULE performs no static-constructor registration. Normal completion releases the library once; no in-process reload or bridge rebind.
@@ -1051,19 +1065,19 @@ Windows x64／MSVC 19.51（toolset 14.51.36231，compiler 19.51.36257）、Windo
 既有 Module 啟停／重啟、雙向 heartbeat、fatal report 與有界監督、Bus 發布／訂閱／
 退出回收、Shell／Tcl／Socket Shell、獨立 SDK consumer 皆經正式 Host／Plugin 路徑驗證。
 
-Initial Debug 54/55 exposed a shell.console fixture hardcoding .exe; changing it to .dll yielded full success. Fault writer stays in a dedicated test Host while Module is a Plugin; production Host has no fault checkpoint. Historical bootstrap v4 was rejected in favor of library-path v5 at this stage; current versions are entry 8/bootstrap v13.
+Initial Debug 54/55 exposed a shell.console fixture hardcoding .exe; changing it to .dll yielded full success. Fault writer stays in a dedicated test Host while Module is a Plugin; production Host has no fault checkpoint. Historical bootstrap v4 was rejected in favor of library-path v5 at this stage; current versions are entry 10/bootstrap v16.
 
 Debug 首輪為 54/55，shell.console 的既有 fixture 寫死 .exe 路徑，改為 .dll 後全套通過。
 故障注入 fixture 將 report writer 留在專用 Host，Module 本體另編為 Plugin；未把故障
 checkpoint 加入正式 Host。Bootstrap v4 不提供相容模式，正式接線使用新增庫路徑的 v5。
-這是該輪歷史版本；目前為 entry 8／bootstrap v13。
+這是該輪歷史版本；目前為 entry 10／bootstrap v16。
 
-Ninja link closures confirm Module/SDK Plugins exclude vinc_control, Module Runtime, Manager, and Shell, while retaining control_protocol, Bus client, and utilities. dumpbin confirms Bus example exports only vinc_module_plugin. Linux/macOS loading/PIC/visibility branches still need native validation.
+Ninja link closures confirm Module/SDK Plugins exclude vinc_control, Module Runtime, Manager, and Shell, while retaining control_protocol, Bus client, and utilities. dumpbin confirms Bus example exports only vinc_module_plugin. Later native build and Module execution evidence is recorded in the [platform reports](../../../README.md#validation-and-limits), with revision-specific coverage.
 
 檢查 Ninja 實際 link closure：Module 與 SDK Plugin 不含 vinc_control、Module Runtime、
 Manager 或 Shell；仍有 vinc_control_protocol、Bus client 及必要工具。
 `dumpbin /exports` 確認 Message Bus 範例 DLL 只有 `vinc_module_plugin` 匯出。
-Linux／macOS 的載入分支與 PIC／visibility 設定尚未實機建置或驗證。
+後續原生建置與 Module 執行證據見[平台驗證報告](../../../README.md#validation-and-limits)，各項覆蓋以報告的原始碼版本為準。
 
 <a id="module-除錯支援2026-10-06"></a>
 
@@ -1132,11 +1146,11 @@ Initial native tests closed debug event process/thread handles too early, breaki
 
 首輪原生測試提早關閉 debug event 的 process/thread handles，造成 detach 失敗；已改由 debug session 管理，兩種組態通過。首輪外部 Debug SDK 沿用舊 object，清理後重建成功；後續 [MSVC／Ninja 增量建置修復](../sdk/README.md#msvcninja-增量建置修復2026-10-06) 已修正相依前綴追蹤。既有受影響產物需重新配置並 clean rebuild 一次，不再列為未解疑慮。
 
-Local logs: build/debug-support-final-build.log, build/debug-support-release-final-build.log, build/debug-support-debug-final-tests.log, build/debug-support-release-tests.log. Linux/macOS debugger cases and manual Visual Studio GUI/PDB source breakpoints were not validated.
+Local logs: build/debug-support-final-build.log, build/debug-support-release-final-build.log, build/debug-support-debug-final-tests.log, build/debug-support-release-tests.log. Later native build/test evidence is in the [platform reports](../../../README.md#validation-and-limits). Manual GDB/LLDB attachment and Visual Studio GUI/PDB source breakpoints are outside those reports.
 
 紀錄：`build/debug-support-final-build.log`、`build/debug-support-release-final-build.log`、
 `build/debug-support-debug-final-tests.log`、`build/debug-support-release-tests.log`。
-Linux／macOS 尚未建置或執行 debugger 測試；Visual Studio GUI／PDB source breakpoint 未人工實測。
+後續原生建置與測試證據見[平台報告](../../../README.md#validation-and-limits)；GDB／LLDB 實際附加與 Visual Studio GUI／PDB 原始碼斷點的人工操作不在該報告範圍內。
 
 <a id="contextpump-實作驗證2026-10-06"></a>
 
@@ -1208,13 +1222,13 @@ lock_protocol、原有故障／退出測試及外部 SDK；詳細紀錄見 [INST
 
 ## Context Log and central persistence (2026-10-08) / Context Log 與中央保存（2026-10-08）
 
-context.log uses Host-owned adapter/separate Log Session; Plugin links API/fmt only. Central Manager owns collector/writer; framework entry sets the storage path. Normal shutdown drains OutputHub, then stops Log, then releases Control Service. Log setup failure is diagnostic, not a Module startup/stop failure; fatal remains separate. This historical Context change used entry 5/bootstrap v10; current is entry 8/v13, requiring complete connected rebuilds. [Log](../log/README.md) owns API/backpressure/fence/capacity.
+context.log uses Host-owned adapter/separate Log Session; Plugin links API/fmt only. Central Manager owns collector/writer; framework entry sets the storage path. Normal shutdown drains OutputHub, then stops Log, then releases Control Service. Log setup failure is diagnostic, not a Module startup/stop failure; fatal remains separate. This historical Context change used entry 5/bootstrap v10; current is entry 10/v16, requiring complete connected rebuilds. [Log](../log/README.md) owns API/backpressure/fence/capacity.
 
 Context 增加 context.log；Host 持有 adapter 與獨立 Log Session，Plugin 僅連入 API／fmt。
 中央 Manager 擁有 collector／writer；Framework entry 自動設定保存路徑。
 正常停止先排空 OutputHub，再停止 Log，最後釋放 Control Service。
 Log 建立失敗可診斷，不當作 Module 啟停失敗；fatal report 仍獨立。
-該次 Context 布局更新為 Plugin entry version 5／bootstrap v10（目前為 entry 8／v13），需完整重新建置相連程式。
+該次 Context 布局更新為 Plugin entry version 5／bootstrap v10（目前為 entry 10／v16），需完整重新建置相連程式。
 API、backpressure、fence 與容量見 [Log](../log/README.md)。
 
 <a id="recorder-接線2026-10-12"></a>
@@ -1238,7 +1252,7 @@ STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設�
 - Before approval get_module_name is a possibly empty source proposal; only after on_name/central approval is it official. MID allocation and Context availability are unchanged.
 - Python source receives no central default name. Default on_name requires --name; custom hooks may return source-defined names. Central does not execute Python to discover names beforehand.
 - Restart reruns identical source/arguments and compares the approved old name. Renaming fails; reserved-command/name conflicts are checked on submission without advance knowledge of source defaults.
-- That migration used entry 6/bootstrap v11; current is entry 8/v13. Historical version numbers below describe their own stage. Connected C++ programs/Python extensions must rebuild together.
+- That migration used entry 6/bootstrap v11; current is entry 10/v16. Historical version numbers below describe their own stage. Connected C++ programs/Python extensions must rebuild together.
 - [SDK functions](../sdk/README.md#公開-cmake-functions) document configuration/generation order and usage.
 
 - `add_module()` 取代 `vinc_add_process_module()`，不接受 MODULE_BASE_NAME。
@@ -1252,7 +1266,7 @@ STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設�
   自訂 hook 仍可直接回傳 source 定義的名稱。中央不執行 Python 來預先取得名稱。
 - 重啟重新執行相同 source／啟動參數，由中央比對上次核准名稱；改名仍拒絕。
   保留命令與名稱的衝突在 Module 提交名稱時拒絕，無需預先知道 source 的預設名稱。
-- 該次 Plugin entry **6**、bootstrap **v11**（目前 entry 8／v13） 移除原有名稱傳遞，舊 Plugin／Host 明確拒絕。
+- 該次 Plugin entry **6**、bootstrap **v11**（目前 entry 10／v16） 移除原有名稱傳遞，舊 Plugin／Host 明確拒絕。
   下方或前文歷史驗證中的版本號是當時版本；所有相連 C++ 程式與 Python 擴充須重新建置。
 - 完整 functions 使用方式與配置／生成時序見 [SDK README](../sdk/README.md#公開-cmake-functions)。
 
@@ -1260,9 +1274,9 @@ STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設�
 
 ## Dual-time metadata ABI (2026-10-13) / 雙時間 metadata ABI（2026-10-13）
 
-BaseMessage gained monotonic publication time while timestamp became Unix time. That migration used entry 7/bootstrap v12; current is entry 8/v13. Rebuild central/Host/Plugin/Python together; old entries reject. General control/lifecycle remained unchanged. See [Bus metadata](../message_bus/README.md#雙時間發布-metadata2026-10-13) for fields/failures.
+BaseMessage gained monotonic publication time while timestamp became Unix time. That migration used entry 7/bootstrap v12; current is entry 10/v16. Rebuild central/Host/Plugin/Python together; old entries reject. General control/lifecycle remained unchanged. See [Bus metadata](../message_bus/README.md#雙時間發布-metadata2026-10-13) for fields/failures.
 
-BaseMessage 新增單調發布時間，原 timestamp 改為 Unix 時間；當時 Plugin entry 更新至 **7**、bootstrap marker 至 **v12**（目前 entry 8／v13）。中央、Host、Plugin 與 Python 擴充須一起重建；舊入口拒絕。
+BaseMessage 新增單調發布時間，原 timestamp 改為 Unix 時間；當時 Plugin entry 更新至 **7**、bootstrap marker 至 **v12**（目前 entry 10／v16）。中央、Host、Plugin 與 Python 擴充須一起重建；舊入口拒絕。
 一般控制協定與生命周期不變，欄位及失敗契約見 [Message Bus](../message_bus/README.md#雙時間發布-metadata2026-10-13)。
 
 <a id="rpc-接線2026-10-14"></a>
@@ -1275,12 +1289,12 @@ Context 新增 register_rpc、call_rpc、rpc_stats；完整 typed API、容量�
 契約見 [RPC README](../rpc/README.md)。RPC 控制事件在 pump 固定批次派送，新增 callback
 不在同一輪無限追送；heartbeat 仍由獨立 watchdog 維護。逃出 callback 的例外鎖定 Module 故障。
 
-Central owns one RpcManager worker; Host owns unique RPC integration; Plugin keeps only Context facade/application closures. Normal stop seals new work; confirmed OS exit precedes dead-party slot recovery. A full central inbox retains the current control frame for retry rather than dropping transfer completion/release. This layout uses current entry 8/bootstrap v13; rebuild Host/Plugin/SDK together.
+Central owns one RpcManager worker; Host owns unique RPC integration; Plugin keeps only Context facade/application closures. Normal stop seals new work; confirmed OS exit precedes dead-party slot recovery. A full central inbox retains the current control frame for retry rather than dropping transfer completion/release. This layout uses current entry 10/bootstrap v16; rebuild Host/Plugin/SDK together.
 
 中央持有一個 RpcManager worker，ModuleHost 持有唯一 RPC Host 接線；Plugin 只保留 Context
 facade 與應用 closures。正常停止封住新工作，確認 OS 退出才回收死亡方共享槽位。
 中央 inbox 滿時保留當前控制 frame 延後重試，不丟棄 transfer 的完成／釋放通知。
-本次 Context 布局更新為 Plugin entry 8／bootstrap v13，需完整重建 Host、Plugin 與 SDK。
+RPC 接入當時的 Context 布局為 Plugin entry 8／bootstrap v13；當前版本見本頁開頭，需完整重建 Host、Plugin 與 SDK。
 
 <a id="context-唯讀-topic-診斷2026-10-25"></a>
 
@@ -1293,3 +1307,39 @@ context.inspect_topics(after) uses the existing Host Client/authenticated Sessio
 Bus 的失敗以 ModuleSystem BusFailed／AccessMessageBus 包裝，保留下層原因。
 沒有新增 Context 欄位、worker、RPC singleton 或獨立控制服務；詳見 [Bus 契約](../message_bus/README.md#唯讀診斷與-reader-計數2026-10-25)。
 UI HTTP worker 不呼叫此 API，由 UI Manual main 更新本機快取。現有 pump／heartbeat／停止契約不變。
+
+## Read-only Module queries / 唯讀 Module 查詢（2026-10-27）
+
+`Context::list_modules(MID after, Deadline)` returns `Result<ModulePage>`. `after=0`
+starts a scan; `next=0` ends it. A page contains at most eight `ModuleInfo` entries
+(MID, name, ModuleType, ModuleState), sorted by strictly increasing MID. Retained
+stopped/failed records and Modules without Bus registrations appear; launch arguments,
+paths, credentials and unstarted ModuleTypes never appear. Names can be empty until
+registration. Each authenticated Context can read these diagnostics; this is not
+administrative authority. The new C++ diagnostic API is not a Python binding yet.
+
+`Context::list_modules` 回傳最多 8 筆精簡身分資料，以 MID 遞增分頁；0 為初始／結束游標。
+保留停止／失敗及沒有連線的 Module；名稱登記前可為空，不暴露路徑、參數、憑證或未啟動的
+ModuleType。所有已驗證的 Context 均可唯讀查詢，不增加管理權。本輪新增 C++ 診斷 API，
+尚未提供對應 Python 綁定。
+
+The Host-owned `ModuleQueries` admits one request, uses the existing watchdog receiver,
+and reports Busy/Timeout/Cancelled without killing a healthy Module. Late replies are
+retired. The supervisor defers collection until releasing the requester Record mutex;
+it copies registry owners under the registry mutex and locks only one Record at a time.
+Pages are independently sampled, with no global atomicity or restart-history promise.
+The caller supplies one deadline across pages. `Context::list_topic_connections` wraps
+Bus errors into ModuleSystem; its pagination/timeout contract belongs to the
+[Message Bus README](../message_bus/README.md#read-only-connections).
+
+Host 只允許一筆查詢，沿用 watchdog 接收；Busy、Timeout、Cancelled 不讓健康 Module 死掉，
+晚到回覆丟棄。中央先離開 requester Record 鎖才收集，任何時刻最多持有一個 Record 鎖。
+各頁獨立取樣，不保證全域原子性；呼叫端跨頁共用期限。Context 的 Bus 查詢會包回 ModuleSystem 錯誤。
+
+ContextRuntime's virtual interface changed: rebuild all connected C++ components,
+SDK consumers and Python native extensions. Plugin entry version is 10 and bootstrap
+version is v16, explicitly rejecting old combinations. No ABI compatibility promise
+has been added.
+
+ContextRuntime 虛擬介面改變，中央、Host、Plugin、SDK consumer 與 Python 原生擴充均須重建。
+Plugin entry 10／bootstrap v16 明確拒絕舊組合，未新增 ABI 相容保證。

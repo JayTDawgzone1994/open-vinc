@@ -262,7 +262,7 @@ void test_processes(const std::filesystem::path& helper) {
 }
 
 namespace vinc::module_system::test {
-void checkpoint(Point, osal::Process*) {}
+void checkpoint(Point, osal::Process*, std::string_view) {}
 
 Result<osal::TerminateResult> terminate_process(osal::Process& child) {
     if (deny_termination.exchange(false)) {

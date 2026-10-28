@@ -16,7 +16,24 @@ set(ui_license_inputs
     "${VINC_REPOSITORY_ROOT}/NOTICE"
     "${VINC_REPOSITORY_ROOT}/THIRD_PARTY_NOTICES.txt"
     "${web_root}/node_modules/vite/LICENSE.md")
-foreach(package IN ITEMS vue @vue/runtime-core @vue/runtime-dom @vue/shared @vue/reactivity)
+foreach(package IN ITEMS vue @vue/runtime-core @vue/runtime-dom @vue/shared @vue/reactivity
+    @vue-flow/core
+    @dagrejs/dagre
+    @dagrejs/graphlib
+    @vueuse/core
+    @vueuse/shared
+    @vueuse/metadata
+    @vueuse/core/node_modules/vue-demi
+    @vueuse/shared/node_modules/vue-demi
+    d3-color
+    d3-dispatch
+    d3-drag
+    d3-ease
+    d3-interpolate
+    d3-selection
+    d3-timer
+    d3-transition
+    d3-zoom)
     list(APPEND ui_license_inputs "${web_root}/node_modules/${package}/LICENSE")
 endforeach()
 add_custom_command(OUTPUT "${ui_dist}/ready.stamp" "${ui_generated}/vinc_ui_official.hpp"
@@ -25,7 +42,7 @@ add_custom_command(OUTPUT "${ui_dist}/ready.stamp" "${ui_generated}/vinc_ui_offi
         "${web_root}/package.json" "${web_root}/package-lock.json" "${web_root}/vite.config.ts"
     WORKING_DIRECTORY "${web_root}" VERBATIM)
 add_custom_target(vinc_ui_web DEPENDS "${ui_dist}/ready.stamp" "${ui_generated}/vinc_ui_official.hpp")
-add_library(vinc_ui STATIC src/assets.cpp src/server.cpp)
+add_library(vinc_ui STATIC src/assets.cpp src/server.cpp src/graph_requests.cpp)
 add_library(vinc::ui ALIAS vinc_ui)
 add_dependencies(vinc_ui vinc_ui_web)
 target_include_directories(vinc_ui PUBLIC include PRIVATE "${ui_generated}")
@@ -42,6 +59,10 @@ else()
 endif()
 set_property(GLOBAL PROPERTY VINC_UI_DIST "${ui_dist}")
 if(BUILD_TESTING)
+    add_executable(vinc_ui_graph_tests tests/graph_tests.cpp)
+    target_link_libraries(vinc_ui_graph_tests PRIVATE vinc::ui vinc::module vinc::message_bus vinc::errors)
+    add_test(NAME ui.graph COMMAND vinc_ui_graph_tests)
+    set_tests_properties(ui.graph PROPERTIES TIMEOUT 25)
     add_executable(vinc_ui_topic_tests tests/topic_tests.cpp)
     target_link_libraries(vinc_ui_topic_tests PRIVATE vinc::ui vinc::message_bus_client vinc_messages vinc::errors)
     add_test(NAME ui.topics COMMAND vinc_ui_topic_tests)

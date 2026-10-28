@@ -1,5 +1,6 @@
 #include <vinc/log/detail/transport.hpp>
 #include <vinc/module/detail/module_locks.hpp>
+#include <vinc/module/detail/module_queries.hpp>
 #include <vinc/module/detail/module_params.hpp>
 #include <vinc/param/detail/client_access.hpp>
 #include <vinc/param/detail/protocol.hpp>
@@ -9,10 +10,12 @@
 
 #include <vinc/time.hpp>
 #include <vinc/osal/path.hpp>
+#include <vinc/osal/notification.hpp>
 #include <vinc/module/detail/contract_report.hpp>
 #include <vinc/module/detail/runtime_services.hpp>
 #include <vinc/config.hpp>
 #include <vinc/module/detail/error_protocol.hpp>
+#include <vinc/module/detail/notification_protocol.hpp>
 #include <vinc/module/base_module.hpp>
 #include <vinc/module/detail/module_runtime.hpp>
 #include <vinc/control/channel.hpp>
@@ -102,12 +105,210 @@ struct Bootstrap {
     bool debug;
 };
 
+// Host-only endpoints. Central owns name retirement; opening never creates or
+// unlinks resources. No Plugin can wait on this receiver through the SDK.
+struct HostNotification {
+    osal::NotificationReceiver receiver;
+    osal::NotificationSender sender;
+    std::mutex sender_mutex;
+    std::mutex diagnostics_mutex;
+    std::string name;
+    bool active = false;
+    std::stop_source stop_source;
+    std::condition_variable_any fallback;
+    std::mutex fallback_mutex;
+    message_bus::detail::NotificationDiagnostics wait_diagnostics;
+    message_bus::detail::NotificationDiagnostics send_diagnostics;
+    Deadline receiver_retry{};
+    Deadline sender_retry{};
+    std::uint32_t consecutive_send_failures = 0;
+
+    static void failed(message_bus::detail::NotificationDiagnostics& diagnostics, const Error& error) {
+        if (!diagnostics.first_failure) {
+            const auto timestamp = unix_nanoseconds();
+            diagnostics.first_failure = timestamp ? *timestamp : 0;
+        }
+        diagnostics.degraded = true;
+        ++diagnostics.failures;
+        diagnostics.last_error = error;
+    }
+
+    static void recovered(message_bus::detail::NotificationDiagnostics& diagnostics) {
+        if (diagnostics.degraded) {
+            ++diagnostics.recoveries;
+        }
+        diagnostics.degraded = false;
+    }
+
+    Result<void> open(std::string_view resource) {
+        auto receiving = osal::NotificationReceiver::open(resource);
+        if (!receiving) {
+            return std::unexpected(wrap_error(ErrorCode::NotificationFailed,
+                                             ErrorOperation::PrepareNotification, receiving.error()));
+        }
+
+        auto sending = osal::NotificationSender::open(resource);
+        if (!sending) {
+            return std::unexpected(wrap_error(ErrorCode::NotificationFailed,
+                                             ErrorOperation::PrepareNotification, sending.error()));
+        }
+
+        std::lock_guard lock(sender_mutex);
+        name = resource;
+        receiver = std::move(*receiving);
+        sender = std::move(*sending);
+        active = true;
+        return {};
+    }
+
+    void wake() {
+        std::lock_guard lock(sender_mutex);
+        if (!active) {
+            return;
+        }
+        const auto now = control::Clock::now();
+        const bool backing_off = consecutive_send_failures >= config::notification_send_failures_before_backoff &&
+                                 now < sender_retry;
+        if (backing_off) {
+            return;
+        }
+        auto sent = sender.notify();
+        std::lock_guard diagnostic_lock(diagnostics_mutex);
+        if (!sent) {
+            failed(send_diagnostics, wrap_error(ErrorCode::NotificationFailed,
+                ErrorOperation::NotifyPump, sent.error()));
+            sender_retry = now + config::notification_retry_interval;
+            ++consecutive_send_failures;
+            return;
+        }
+        consecutive_send_failures = 0;
+        sender_retry = {};
+        recovered(send_diagnostics);
+    }
+
+    void cancel() {
+        // Cancellation callbacks never acquire the inbox/sender mutex. A wait
+        // owns its receiver until the callback has finished and been unregistered.
+        stop_source.request_stop();
+    }
+
+    ModuleNotifications snapshot(message_bus::Client& client) {
+        const auto convert = [](const message_bus::detail::NotificationDiagnostics& value) {
+            return NotificationHealth{value.degraded, value.target, value.failures, value.retries,
+                value.recoveries, value.first_failure, value.last_error};
+        };
+        ModuleNotifications result;
+        {
+            std::lock_guard lock(sender_mutex);
+            result.observed = active;
+        }
+        {
+            std::lock_guard lock(diagnostics_mutex);
+            result.receiver = convert(wait_diagnostics);
+            result.local_sender = convert(send_diagnostics);
+        }
+        result.publisher_routes = convert(message_bus::detail::RuntimeAccess::notification_diagnostics(client));
+        return result;
+    }
+
+    void progress() {
+        std::string resource;
+        {
+            std::lock_guard lock(sender_mutex);
+            if (!active || sender_retry == Deadline{} || control::Clock::now() < sender_retry) {
+                return;
+            }
+            resource = name;
+            sender_retry = control::Clock::now() + config::notification_retry_interval;
+        }
+        auto opened = osal::NotificationSender::open(resource);
+        {
+            std::lock_guard lock(sender_mutex);
+            if (!active) {
+                return;
+            }
+            std::lock_guard diagnostic_lock(diagnostics_mutex);
+            ++send_diagnostics.retries;
+            if (!opened) {
+                failed(send_diagnostics, wrap_error(ErrorCode::NotificationFailed,
+                    ErrorOperation::PrepareNotification, opened.error()));
+                return;
+            }
+            sender = std::move(*opened);
+            sender_retry = {};
+        }
+        wake();
+    }
+
+    void wait() {
+        const auto now = control::Clock::now();
+        const auto deadline = now + config::module_pump_idle_interval;
+        bool degraded;
+        {
+            std::lock_guard lock(diagnostics_mutex);
+            degraded = wait_diagnostics.degraded;
+        }
+        if (degraded && now >= receiver_retry && !stop_source.stop_requested()) {
+            // Only the pump thread replaces the receiver, between completed waits.
+            // Reopening never creates/unlinks or changes the generation's name.
+            auto opened = osal::NotificationReceiver::open(name);
+            std::lock_guard lock(diagnostics_mutex);
+            ++wait_diagnostics.retries;
+            receiver_retry = now + config::notification_retry_interval;
+            if (opened) {
+                receiver = std::move(*opened);
+                degraded = false;
+            } else {
+                failed(wait_diagnostics, wrap_error(ErrorCode::NotificationFailed,
+                    ErrorOperation::PrepareNotification, opened.error()));
+            }
+        }
+        if (!degraded) {
+            auto waited = receiver.wait_until(deadline, stop_source.get_token());
+            std::lock_guard lock(diagnostics_mutex);
+            if (waited || waited.error().is(osal::ErrorCode::Timeout)) {
+                recovered(wait_diagnostics);
+                return;
+            }
+            if (waited.error().is(osal::ErrorCode::Cancelled)) {
+                return;
+            }
+            failed(wait_diagnostics, wrap_error(ErrorCode::NotificationFailed,
+                ErrorOperation::WaitNotification, waited.error()));
+            receiver_retry = now + config::notification_retry_interval;
+        }
+        // An invalid native handle must not turn pumpLoop into a busy loop.
+        std::unique_lock lock(fallback_mutex);
+        fallback.wait_until(lock, stop_source.get_token(), deadline, [] { return false; });
+    }
+
+    Result<void> close() {
+        // run_hooks has joined/quiesced pump callers. Seal watchdog senders under
+        // their own lock; the watchdog itself remains alive for cleanup reports.
+        std::lock_guard lock(sender_mutex);
+        active = false;
+        auto sent = sender.close();
+        auto received = receiver.close();
+        if (!sent) {
+            return std::unexpected(wrap_error(ErrorCode::CleanupFailed,
+                                             ErrorOperation::CloseNotification, sent.error()));
+        }
+        if (!received) {
+            return std::unexpected(wrap_error(ErrorCode::CleanupFailed,
+                                             ErrorOperation::CloseNotification, received.error()));
+        }
+        return {};
+    }
+};
+
 // Shared only by the watchdog and main dispatcher. The mutex protects every
 // non-atomic field; finished keeps its existing sequentially consistent ordering.
 struct RuntimeInbox {
+    HostNotification* notification = nullptr;
     log::detail::Host* logs = nullptr;
     detail::ModuleParams* params = nullptr;
     rpc::detail::Host* rpc = nullptr;
+    detail::ModuleQueries* queries = nullptr;
     detail::ModuleLocks* locks = nullptr; // Host owner outlives inbox/watchdog/hooks.
     std::mutex mutex;
     std::condition_variable changed;
@@ -125,6 +326,17 @@ struct RuntimeInbox {
     std::uint64_t pending_fault_request = 0;
     bool fault_acknowledged = false;
     std::atomic<bool> finished{false};
+
+    void notify() {
+        changed.notify_all();
+        if (notification) {
+            if (stopping.load()) {
+                notification->cancel();
+            } else {
+                notification->wake();
+            }
+        }
+    }
 };
 
 Result<Bootstrap> parse_bootstrap(const std::vector<std::string>& args) {
@@ -207,6 +419,9 @@ Result<std::shared_ptr<control::Session>> connect_to_central(control::Service& s
                                    const Error& error, int exit_code, Deadline stop_deadline,
                                    std::uint32_t role = detail::primary_failure) noexcept {
     if (inbox.locks) {
+        if (inbox.queries) {
+            inbox.queries->stop();
+        }
         inbox.locks->stop();
         inbox.params->stop();
         if (inbox.rpc) {
@@ -249,6 +464,9 @@ Result<std::shared_ptr<control::Session>> connect_to_central(control::Service& s
 void watch_central(const std::shared_ptr<control::Session>& session, message_bus::Client& message_bus_client,
                    RuntimeInbox& inbox, std::chrono::milliseconds stop_grace, std::stop_token token) {
     auto stop_deadline = (vinc::Deadline::max)();
+    auto notification_progress_at = control::Clock::now();
+    auto notification_report_at = control::Clock::now();
+    control::Bytes last_notification_report;
     try {
         while (!token.stop_requested()) {
             std::optional<Error> terminal;
@@ -266,6 +484,35 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                     watchdog_failure(session, inbox,
                         wrap_error(ErrorCode::RpcFailed, ErrorOperation::Send, progress.error()),
                         child_exit::central_lost, stop_deadline);
+                }
+            }
+            if (inbox.notification) {
+                if (inbox.stopping.load()) {
+                    inbox.notification->cancel();
+                } else if (inbox.rpc && inbox.rpc->ready()) {
+                    inbox.notification->wake();
+                }
+                if (control::Clock::now() >= notification_progress_at) {
+                    notification_progress_at = control::Clock::now() + config::notification_retry_interval;
+                    inbox.notification->progress();
+                    message_bus::detail::RuntimeAccess::progress_notifications(message_bus_client);
+                }
+            }
+            if (inbox.notification && control::Clock::now() >= notification_report_at) {
+                notification_report_at = control::Clock::now() + config::notification_report_interval;
+                const auto status = inbox.notification->snapshot(message_bus_client);
+                if (status.observed) {
+                    control::Bytes payload;
+                    detail::encode_notifications(payload, status);
+                    if (payload != last_notification_report) {
+                        control::Frame report{control::Kind::Event, detail::lifecycle, detail::notification_health};
+                        report.payload = payload;
+                        // Diagnostics must not close a healthy Module on backpressure.
+                        // Keep the previous fingerprint so the next interval retries.
+                        if (session->send(std::move(report))) {
+                            last_notification_report = std::move(payload);
+                        }
+                    }
                 }
             }
             if (inbox.logs) {
@@ -293,6 +540,14 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                                  child_exit::central_lost, stop_deadline);
             }
             if (frame->kind == control::Kind::Response && frame->domain == detail::lifecycle &&
+                frame->operation == detail::list_modules) {
+                auto received = inbox.queries->receive(std::move(*frame));
+                if (!received) {
+                    watchdog_failure(session, inbox, received.error(), child_exit::central_lost, stop_deadline);
+                }
+                continue;
+            }
+            if (frame->kind == control::Kind::Response && frame->domain == detail::lifecycle &&
                 frame->operation == detail::attach_lock) {
                 auto received = inbox.locks->receive(std::move(*frame));
                 if (!received) {
@@ -311,7 +566,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                                      child_exit::central_lost, stop_deadline);
                 }
                 inbox.completion_acknowledged = true;
-                inbox.changed.notify_all();
+                inbox.notify();
             } else if (frame->kind == control::Kind::Response && frame->domain == detail::lifecycle &&
                 frame->operation == detail::register_name &&
                 frame->request == detail::name_registration_request) {
@@ -323,7 +578,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                 }
 
                 inbox.registration = std::move(*frame);
-                inbox.changed.notify_all();
+                inbox.notify();
             } else if (frame->kind == control::Kind::Response && frame->domain == detail::lifecycle &&
                        frame->operation == detail::report_failure) {
                 std::unique_lock lock(inbox.mutex);
@@ -341,7 +596,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                                      child_exit::central_lost, stop_deadline);
                 }
                 inbox.fault_acknowledged = true;
-                inbox.changed.notify_all();
+                inbox.notify();
             } else if (frame->kind == control::Kind::Event && frame->domain == detail::lifecycle &&
                        frame->operation == detail::debug_continue) {
                 std::unique_lock lock(inbox.mutex);
@@ -351,7 +606,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                                      child_exit::central_lost, stop_deadline);
                 }
                 inbox.debug_released = true;
-                inbox.changed.notify_all();
+                inbox.notify();
             } else if (frame->domain == rpc::detail::domain) {
                 auto received = inbox.rpc->receive(std::move(*frame));
                 if (!received) {
@@ -359,7 +614,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                         wrap_error(ErrorCode::RpcFailed, ErrorOperation::Receive, received.error()),
                         child_exit::central_lost, stop_deadline);
                 }
-                inbox.changed.notify_all();
+                inbox.notify();
             } else if (frame->domain == param::detail::domain) {
                 auto received = inbox.params->receive(std::move(*frame));
                 if (!received) {
@@ -367,7 +622,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                         wrap_error(ErrorCode::ParamFailed, ErrorOperation::Receive, received.error()),
                         child_exit::central_lost, stop_deadline);
                 }
-                inbox.changed.notify_all();
+                inbox.notify();
             } else if (frame->domain == message_bus::detail::message_bus_domain) {
                 auto received =
                     message_bus::detail::RuntimeAccess::receive(message_bus_client, std::move(*frame));
@@ -377,11 +632,15 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                         wrap_error(ErrorCode::BusFailed, ErrorOperation::Receive, received.error()),
                         child_exit::central_lost, stop_deadline);
                 }
+                inbox.notify();
             } else if (frame->kind == control::Kind::Event && frame->domain == detail::lifecycle &&
                        frame->operation == detail::stop) {
                 if (!frame->payload.empty()) {
                     watchdog_failure(session, inbox, Error{ErrorCode::Protocol, ErrorOperation::Stop},
                                      child_exit::invalid_stop_message, stop_deadline);
+                }
+                if (inbox.queries) {
+                    inbox.queries->stop();
                 }
                 inbox.locks->stop();
                 inbox.params->stop();
@@ -393,7 +652,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                     inbox.stopping = true;
                     stop_deadline = control::Clock::now() + stop_grace;
                 }
-                inbox.changed.notify_all();
+                inbox.notify();
             } else if (frame->kind == control::Kind::Request) {
                 std::unique_lock lock(inbox.mutex);
                 if (inbox.requests.size() >= pending_request_limit) {
@@ -404,7 +663,7 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
                 }
 
                 inbox.requests.push_back(std::move(*frame));
-                inbox.changed.notify_all();
+                inbox.notify();
             } else {
                 watchdog_failure(session, inbox, Error{ErrorCode::Protocol, ErrorOperation::Receive},
                                  child_exit::central_lost, stop_deadline);
@@ -591,6 +850,9 @@ public:
                 RuntimeInbox& inbox, bool fatal_errors = false)
         : module_(module), session_(std::move(session)), inbox_(inbox), fatal_command_errors_(fatal_errors) {
     }
+    Result<ModulePage> list_modules(MID after, Deadline deadline) override {
+        return inbox_.queries->list_modules(after, deadline);
+    }
     bool living() const noexcept override {
         return !inbox_.stopping.load();
     }
@@ -619,7 +881,18 @@ public:
     Result<std::unique_ptr<detail::ContextLock>> lock(std::uint64_t id, Deadline deadline) override {
         return inbox_.locks->lock(id, deadline);
     }
+    void wake() override {
+        if (inbox_.notification) {
+            inbox_.notification->wake();
+        }
+    }
     void wait() override {
+        if (inbox_.notification) {
+            if (!inbox_.stopping.load()) {
+                inbox_.notification->wait();
+            }
+            return;
+        }
         std::unique_lock lock(inbox_.mutex);
         inbox_.changed.wait_for(lock, config::module_pump_idle_interval, [&] {
             return inbox_.stopping.load() || !inbox_.requests.empty() ||
@@ -627,6 +900,9 @@ public:
         });
     }
     void fail(const Error& error) override {
+        if (inbox_.queries) {
+            inbox_.queries->stop();
+        }
         inbox_.locks->stop();
         inbox_.params->stop();
         if (inbox_.rpc) {
@@ -639,7 +915,7 @@ public:
         inbox_.stopping.store(true);
         inbox_.local_stop_deadline = (std::min)(inbox_.local_stop_deadline,
             control::Clock::now() + inbox_.stop_grace);
-        inbox_.changed.notify_all();
+        inbox_.notify();
     }
 };
 
@@ -668,6 +944,9 @@ struct RuntimeGuard {
     std::jthread watchdog;
 
     ~RuntimeGuard() {
+        if (inbox.queries) {
+            inbox.queries->stop();
+        }
         inbox.locks->stop();
         inbox.params->stop();
         if (inbox.rpc) {
@@ -740,7 +1019,10 @@ Result<void> run_started_hooks(detail::ModuleObject& module, std::vector<std::st
         if (inbox.terminal_failure) {
             running = std::unexpected(*inbox.terminal_failure);
         }
-        inbox.changed.notify_all();
+        inbox.notify();
+    }
+    if (inbox.queries) {
+        inbox.queries->stop();
     }
     inbox.locks->stop();
     inbox.params->stop();
@@ -886,13 +1168,17 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
 
         auto logs = log::detail::Host::connect(**service, args[detail::bootstrap::endpoint], options);
         detail::ModuleLocks locks(session, bootstrap->generation);
+        detail::ModuleQueries queries(session);
         detail::ModuleParams params(session, locks);
         rpc::detail::Host rpc(session);
+        HostNotification notification;
         RuntimeInbox inbox;
+        inbox.notification = &notification;
         inbox.logs = logs.get();
         inbox.params = &params;
         inbox.rpc = &rpc;
         inbox.locks = &locks;
+        inbox.queries = &queries;
         inbox.stop_grace = std::chrono::milliseconds(bootstrap->grace);
         RuntimeGuard guard{inbox, session, **client, {}};
         try {
@@ -900,6 +1186,11 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
                 watch_central(session, **client, inbox, std::chrono::milliseconds(bootstrap->grace), token);
             });
             auto result = [&]() -> Result<void> {
+                auto receiving = notification.open(args[detail::bootstrap::notification]);
+                if (!receiving) {
+                    return std::unexpected(receiving.error());
+                }
+
                 if (bootstrap->debug) {
                     auto released = wait_debug_gate(session, inbox);
                     if (!released) {
@@ -915,6 +1206,7 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
                 }
                 return run_hooks(args, *bootstrap, session, *client, inbox, source);
             }();
+            auto closed = notification.close();
             if (!result) {
                 // Already reported failures are not duplicated; early factory/name failures use this path.
                 bool needs_report = false;
@@ -925,7 +1217,13 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
                 if (needs_report) {
                     (void)report_module_failure(session, inbox, result.error(), detail::primary_failure);
                 }
+                if (!closed) {
+                    (void)report_module_failure(session, inbox, closed.error(), detail::cleanup_failure);
+                }
                 return child_exit::application_exception;
+            }
+            if (!closed) {
+                (void)report_module_failure(session, inbox, closed.error(), detail::cleanup_failure);
             }
             return 0;
         } catch (const std::system_error& error) {

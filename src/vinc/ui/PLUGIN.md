@@ -90,3 +90,20 @@ HTTP 401/403 表示存取未通過，400 為非法 query，503 為快取／預�
 回覆 apiVersion 1；preview state 包含 pending、empty、unknown、too_large、error、ready。
 ready 的 text 是有界診斷文字，不是可執行 HTML，也不是可重新發布的完整訊息編碼。
 政策、信任與限制以 [Topic Monitor 契約](README.md#topic-monitor-契約2026-10-25) 為準。
+
+## Read-only graph API / 唯讀關係圖 API
+
+`GET /api/graph` uses the same capability as `/api/topics`, accepts no query parameters,
+and returns `{apiVersion: 1, capturedAt: <Unix milliseconds>, atomicSnapshot: false,
+modules: [...], connections: [...]}`. Module records contain decimal-string `mid`,
+`name`, `type` and numeric `state` (Queued 0, Starting 1, Running 2, Stopping 3,
+RestartWaiting 4, Stopped 5, Failed 6). Connection records contain decimal-string
+`mid`, `id`, `schema`, full `topic`, and `role` (`publish` or `subscribe`). A Module
+awaiting name registration can have an empty name. Schema identity does not require a
+compiled message decoder. `HEAD` validates access without starting collection.
+
+`GET /api/graph` 使用相同 capability，不接受 query 參數；欄位如上。
+MID、登記 ID、schema 都是十進位字串；`capturedAt` 是 Unix 毫秒。
+名稱登記前 `name` 可以為空；顯示 schema 不需要已編譯的訊息解碼器。
+HEAD 只檢查存取，不觸發收集。失敗、容量、429／504 及一致性契約見
+[Module Graph](README.md#module-graph-2026-10-27--module-關係圖)。不要把失敗當成空圖。

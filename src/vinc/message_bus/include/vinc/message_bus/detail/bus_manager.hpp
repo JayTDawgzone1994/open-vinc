@@ -17,7 +17,7 @@ public:
     ~BusManager();
     // Enqueue only; allocation/mapping runs on the BusManager worker, never supervisor.
     vinc::Result<void> submit(std::uint64_t owner, std::string name, std::shared_ptr<control::Session>,
-                              control::Frame);
+                              control::Frame, std::string notification_name = {});
     void exited(std::uint64_t owner);               // ONLY after Process::try_wait confirms exit
     vinc::Result<void> drain_until(vinc::Deadline); // call after all producer processes have exited
 };

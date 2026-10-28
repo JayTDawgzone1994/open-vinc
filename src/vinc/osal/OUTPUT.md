@@ -77,6 +77,10 @@ OSAL 不暗中丟資料或增加無界暫存；日誌排隊、慢消費者與轉
 - 關閉 reader 或 PipeService 會取消未完成讀取，且不保證排空資料。
   OSAL 不因此要求 OS 終止子程序，但子程序後續寫入可能失敗；POSIX 的預設
   `SIGPIPE` 動作可能終止寫入者。因此「停止顯示」應在上層停止轉送，並繼續讀取。
+- PipeService 的斷管保護只涵蓋其管理的 I/O；Capture 的子程序 writer 不提交給
+  PipeService。父端設定 reader 不會將子程序的原生 stdout／stderr 寫入變成
+  `IoCompletion`，也不承諾三平台的原生寫入者採相同退出方式。OSAL Pipe 的共同
+  完成結果與 signal 隔離契約見 [PIPE.md](PIPE.md)。
 - 先停止新的啟動工作，再關閉服務。與 shutdown 競爭時，已接受的啟動仍可能成功，
   但回傳 reader 可能已受關閉要求影響。服務、options、bindings 及端點物件的
   移動／解構不得與啟動並行；一般 close／shutdown 沿用內部同步。
@@ -107,4 +111,5 @@ ctest --test-dir build/osal-standalone -C Release --output-on-failure
 新增的 `osal.process_output` 涵蓋一般程式的 C／C++ 輸出、雙路大型二進位資料、
 獨立模式組合、容量拒絕、啟動失敗回收、移動、逾時／取消／關閉、提前 EOF、
 強制終止、崩潰前已 flush 資料，以及與通用 Pipe 交付的組合。
-Windows 已執行驗證；Linux／macOS 後端已實作，但仍待各平台實機建置及行為驗證。
+Windows 有既有驗證紀錄。macOS 本次輸出擷取與斷管契約測試，以及尚待執行的
+Windows／Linux 驗證，統一記錄於 [Pipe 契約測試](PIPE.md#斷管與提交失敗契約測試2026-10-27)。

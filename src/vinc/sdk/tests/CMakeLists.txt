@@ -31,6 +31,7 @@ set(public_headers
     vinc/module/context.hpp
     vinc/module/error.hpp
     vinc/module/mid.hpp
+    vinc/module/module_info.hpp
     vinc/module/contract_report.hpp
     vinc/module/host/module_manager.hpp
     vinc/message/base_message.hpp

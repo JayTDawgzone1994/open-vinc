@@ -229,12 +229,12 @@ recovery 亦注入控制 payload 配置失敗，確認 Submit／Complete 未成�
 
 ## Outstanding issues / 待處理事項
 
-- Native Linux/macOS validation remains.
+- Current native platform scope is recorded in the [platform reports](../../../README.md#validation-and-limits). The Linux WSL four-suite OSAL run excludes RPC, and the macOS run disabled optional Python bindings.
 - Browser bridge/authorization/typed UI APIs remain unwired.
 - No latency/throughput measurement; mapping-cache value needs evidence.
 - Registration timeout can leave a central service without a locally obtained handler identity. No automatic retry/rollback; treat it as initialization failure and recover through Module exit, not assume same-name retries succeed.
 
-- Linux／macOS 尚未執行本輪 RPC 建置與實機測試。
+- 目前原生平台範圍見[平台驗證報告](../../../README.md#validation-and-limits)。Linux WSL 四套 OSAL 回歸不含 RPC，macOS 該輪停用選用 Python 綁定。
 - 瀏覽器 UI bridge、權限與 typed UI API 尚未接線。
 - 未量測 RPC 延遲／吞吐量；mapping cache 是否值得增加，待量測。
 - 登記逾時可能已在中央建立服務，本地未取得 handler 身分；不自動重試／回滾。

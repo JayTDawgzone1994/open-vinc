@@ -8,10 +8,11 @@ The official webUi Module provides a browser workspace, tab lifecycle, and plugi
 預設建置並登記 ModuleType，**不會隨中央自動啟動**；預設監聽 `127.0.0.1:8080`。
 瀏覽器不需要 Node.js。中央、ModuleHost 與一般 Module SDK 不連入 HTTP／JSON 實作。
 
-Official vinc.topics provides read-only topic lists, publication Hz, collision/loss diagnostics, and latest-message previews. Param/Log/Module management, dependency graphs,3D panels, and central administration RPC remain unwired. Topic Monitor uses ordinary read-only Context Bus services, without parameter-write or Module-control authority.
+Official vinc.topics provides read-only topic lists, publication Hz, collision/loss diagnostics, and latest-message previews. Official vinc.graph adds a manually refreshed Module/Topic relationship view. Param/Log/Module management, 3D panels, and central administration RPC remain unwired. Topic Monitor uses ordinary read-only Context Bus services, without parameter-write or Module-control authority.
 
 已有官方 `vinc.topics` Topic Monitor：唯讀 Topic 清單、發布 Hz、碰撞／漏資料及最新訊息預覽。
-仍沒有 Param、Log、Module 管理、流量依賴圖或 3D 面板，也沒有中央修改／管理 RPC。
+官方 `vinc.graph` 提供手動刷新的 Module／Topic 關係圖。
+仍沒有 Param、Log、Module 管理或 3D 面板，也沒有中央修改／管理 RPC。
 Topic Monitor 使用一般 Context 的唯讀 Bus 能力，不取得修改參數或啟停其他 Module 的權限。
 
 <a id="建置與啟動"></a>
@@ -22,6 +23,12 @@ Frontend builds need Node/npm (locally verified 24.19.0). package-lock pins vers
 
 前端需 Node.js（本機驗證 24.19.0）與 npm。相依版本及 integrity 固定於
 `web/package-lock.json`；CMake 不自行執行 npm install 或下載套件。
+
+The optional [dependency setup scripts](../../../tools/README.md) prepare Node/npm
+and run `npm ci` for you, without configuring or building a project.
+
+可使用 [相依環境準備腳本](../../../tools/README.md) 安裝／檢查 Node／npm 並執行 `npm ci`；
+腳本不配置或編譯專案。
 
 ```sh
 git submodule update --init --recursive
@@ -73,6 +80,7 @@ Default instance ui follows duplicate-name rejection. Stop with debug stop <MID>
 ├── app/                    # Vite 生成的工作區與 third-party.txt
 └── plugins/
     ├── vinc.example/       # 官方範例，建置管理
+    ├── vinc.graph/         # 官方 Module Graph，建置管理
     ├── vinc.topics/        # 官方 Topic Monitor，建置管理
     └── your.plugin/        # 使用者安裝的套件
         ├── plugin.json
@@ -86,9 +94,9 @@ Default root is the build-fixed **absolute** path above, independent of cwd. Rel
 `webUi --root /absolute/path/to/ui` 指定完整的 app＋plugins 目錄。
 這版沒有完整可重定位 install/package 規則；中央自己的 Module catalog 路徑契約仍適用。
 
-vinc_ui_deploy replaces build-owned app/plugins/vinc.example/plugins/vinc.topics including stale generated files, never other plugin directories. Do not save custom work there. Carry the complete app directory when deploying: app/third-party.txt combines Open-VINC's terms/attribution, the shared dependency inventory, and installed frontend licenses. The three shared files are also downloadable under app/licenses/open-vinc/. Native Module binaries follow [SDK license delivery](../sdk/README.md#license-delivery).
+vinc_ui_deploy replaces build-owned app/plugins/vinc.example/plugins/vinc.topics/plugins/vinc.graph including stale generated files, never other plugin directories. Do not save custom work there. Carry the complete app directory when deploying: app/third-party.txt combines Open-VINC's terms/attribution, the shared dependency inventory, and installed frontend licenses. The three shared files are also downloadable under app/licenses/open-vinc/. Native Module binaries follow [SDK license delivery](../sdk/README.md#license-delivery).
 
-`vinc_ui_deploy` 更新建置擁有的 `app`、`plugins/vinc.example`、`plugins/vinc.topics`，移除其中舊生成檔；
+`vinc_ui_deploy` 更新建置擁有的 `app`、`plugins/vinc.example`、`plugins/vinc.topics`、`plugins/vinc.graph`，移除其中舊生成檔；
 不碰其他 plugin 目錄。不要直接修改這些生成目錄保存自己的作品。
 部署時攜帶完整 `app`：`app/third-party.txt` 包含 Open-VINC 條款／署名、共用第三方盤點及實際前端相依授權；
 `app/licenses/open-vinc/` 亦提供三個共用聲明檔供下載。原生 Module binary 依
@@ -220,14 +228,14 @@ npx playwright install chromium
 npm test
 ```
 
-Recorded 2026-10-14: Windows x64/MSVC 19.51/Node 24.19.0, ui.server/module/shell passed Debug/Release. Four Chromium scenarios/typecheck and desktop/mobile screenshots passed; Debug Module/Bus/Bag Shell regressions passed. APPS/EXAMPLES/PYTHON/TESTING-off SDK composition had no UI/Node/HTTP dependency. No native Linux/macOS verification.
+Recorded 2026-10-14: Windows x64/MSVC 19.51/Node 24.19.0, ui.server/module/shell passed Debug/Release. Four Chromium scenarios/typecheck and desktop/mobile screenshots passed; Debug Module/Bus/Bag Shell regressions passed. APPS/EXAMPLES/PYTHON/TESTING-off SDK composition had no UI/Node/HTTP dependency. Later macOS UI build, type checking and manual HTTP results are in the [macOS report](../../../README.md#macos-validation); that report does not include browser automation, and the four-suite Linux WSL run does not cover UI.
 
 本機 2026-10-14：Windows x64、MSVC 19.51、Node 24.19.0。
 Debug／Release 的 `ui.server`、`ui.module`、`ui.shell` 均通過。
 Chromium 四組瀏覽器案例與 Vue／TypeScript 型別檢查通過，檢視桌面與手機寬度截圖。
 Debug 既有 `module.shell`、`message_bus.shell`、`bag.shell` 亦通過。
 另以 APPS／EXAMPLES／PYTHON／TESTING 關閉的純 SDK 配置確認沒有 UI／Node／HTTP 相依。
-Linux／macOS 尚未實機驗證，不宣稱已通過。
+後續 macOS 已完成 UI 建置、型別檢查與 HTTP 人工驗證，見[macOS 報告](../../../README.md#macos-validation)；該報告未含瀏覽器自動化，Linux WSL 四套回歸亦未涵蓋 UI。
 
 <a id="待處理事項"></a>
 
@@ -339,7 +347,7 @@ Existing visit_types/ribosome_visit_fields and designated Storage preview.hpp in
 暫停預覽保留目前文字；切到其他分頁／關閉分頁取消輪詢，Reader 於 idle timeout 後回收。
 不承諾總 RSS 上限：接收副本、Storage metadata、JSON、HTTP 回覆與 allocator 另有成本。
 
-GET /api/session requires X-Vinc-UI:1 and Host/Origin/Sec-Fetch-Site checks. OS randomness creates a service-lifetime token, held only in browser memory, never URL/cookie/storage. Topic/preview GETs require one Bearer Authorization. Restart invalidates it; clients may bootstrap again. No CORS/POST/cross-site preflight. API v1 serializes 64-bit IDs/hashes/counts/times as decimal strings.
+GET /api/session requires X-Vinc-UI:1 and Host/Origin/Sec-Fetch-Site checks. OS randomness creates a service-lifetime token, held only in browser memory, never URL/cookie/storage. Topic/preview GETs require one Bearer Authorization. Restart invalidates it; clients may bootstrap again. No CORS/POST/cross-site preflight. The Topic API v1 serializes 64-bit IDs/hashes/counts/times as decimal strings. Graph capture time uses Unix milliseconds; graph IDs/hashes remain decimal strings.
 
 `GET /api/session` 必須帶 `X-Vinc-UI: 1`，並通過 Host／Origin／Sec-Fetch-Site 檢查。
 OS CSPRNG 產生本次 UI service 專用 token，存在 browser 記憶體，不放 URL、cookie 或持久儲存。
@@ -405,3 +413,127 @@ Scope: UI topics/server/module/shell, six Bus suites, Module context/process. No
 That validation did not run cross-platform/multi-browser/high-topic-count/slow-HTTP stress. It added no forced restarts or changed collision/failure policy; the verification record is not a claim about current Git publication state.
 
 上述驗證尚未涵蓋跨平台、多瀏覽器、大量 Topic／慢 HTTP 客戶端壓力。該次工作沒有新增強制重啟或改變碰撞等待／故障政策；這是歷史驗證紀錄，不描述目前 Git 提交／推送狀態。
+
+<a id="module-graph"></a>
+
+## Module Graph (2026-10-27) / Module 關係圖
+
+Start `webUi`, then open **Module Graph → Module Graph**. The official `vinc.graph`
+plugin draws `Module → Topic` for publication and `Topic → Module` for subscription.
+It fetches once when opened and only on **Refresh** afterward. It adds no polling,
+heartbeat thread, subscriptions, payload reads, or Hz sampling. Module borders show the sampled notification status described below.
+The existing Topic Monitor retains its own sampling policy.
+
+啟動 `webUi` 後開啟 **Module Graph → Module Graph**。發布為 `Module → Topic`，
+訂閱為 `Topic → Module`；開啟時讀取一次，之後只在按 **Refresh** 時讀取。
+不新增輪詢、heartbeat 執行緒、訂閱或訊息讀取，也不計算 Hz；Module 邊框呈現下述通知診斷。
+既有 Topic Monitor 的取樣政策不變。
+
+- MID identifies a Module; full topic name identifies a Topic. Ownership comes from
+  authenticated Bus registrations, never a topic-name prefix. ModuleType is detail
+  text, not an unstarted graph node. Isolated Modules and retained stopped records appear.
+- Repeated registrations of one MID/topic/role share an edge with a count; both roles
+  remain separate directed edges. Selection shows individual registration IDs/schema hashes.
+- Drag, pan, zoom, search, selection/neighbour highlighting, Auto-layout and Fit view
+  are browser-only. Refresh preserves surviving node positions and viewport; new nodes
+  are placed to the right. Auto-layout reruns only when requested. Closing the panel
+  discards its layout; no persistence is promised. Fill colours distinguish kinds; Module borders show sampled notification health as described below.
+- Module pages and connection pages are sampled separately. The result is **not an
+  atomic global snapshot**. A connection whose MID is absent becomes an unresolved node.
+  Removed connections disappear after refresh; there is no historical dependency inference.
+- A failed, timed-out, malformed or oversized refresh retains the previous graph with
+  an error. A successful empty result clears it. No partial success is displayed.
+
+- Module 以 MID、Topic 以完整名稱識別；所有權取自已驗證的 Bus 登記，不猜名稱前綴。
+  顯示沒有 pub/sub 的 Module 及中央保留的停止紀錄，不顯示尚未啟動的 ModuleType。
+- 同 MID／Topic／角色的重複登記合併成帶數量的邊，發布與訂閱方向分開。
+  選取節點可查原始登記 ID、schema、MID、名稱、ModuleType 與文字狀態。
+- 拖曳、縮放、平移、搜尋、鄰接標示、自動排版均只改瀏覽器畫面。刷新保留既有位置及視角，
+  新節點放右側；重排需按 Auto-layout。關閉面板後不保留排版。
+- 分頁之間不是全域原子快照；找不到 MID 時標示 unresolved，不推測名稱。
+  失敗保留舊圖並顯示錯誤；成功空結果會清空；不顯示半份成功結果。
+
+### Data path and limits / 資料路徑與上限
+
+`GET /api/graph` uses the same origin/Host/Bearer capability checks as Topic Monitor.
+HTTP workers submit to one `GraphRequests` mailbox. The existing UI Module main
+executes `Context::list_modules` and `Context::list_topic_connections` using one shared
+deadline. The existing Host watchdog is the sole reply receiver. Stop wakes waiting
+HTTP workers before Server destruction; browser cancellation does not promise remote
+cancellation of a request already admitted, which remains bounded by its deadline.
+One refresh may run at a time; additional requests return 429. Timeout returns 504;
+other unavailable/capacity/shutdown failures return 503. Neither response grants mutation rights.
+
+`GET /api/graph` 沿用 Host／Origin／Bearer 檢查。HTTP worker 只投遞有界工作並等待，
+既有 UI main 透過 Context 分頁取得資料，共用一個期限；Host watchdog 仍是唯一接收者。
+停止時先喚醒 HTTP 等待者再回收 Server。瀏覽器取消不保證已接收的中央查詢立即取消，
+仍受期限限制。同時只處理一筆刷新，其餘回 429；逾時 504；不可用／容量不足／停止中 503。
+
+| Setting in `vinc::config` | Default / 預設 | Meaning / 用途 |
+| --- | --- | --- |
+| `ui_graph_timeout` | 10 s | Whole refresh deadline, including mailbox wait / 含等待佇列的整次期限 |
+| `ui_graph_modules` | 256 | Maximum collected Module records / Module 紀錄上限 |
+| `ui_graph_topics` | 1024 | Distinct topics / 不同 Topic 上限 |
+| `ui_graph_connections` | 16384 | Raw registrations, before edge merging / 合併前登記上限 |
+| `ui_graph_response_bytes` | 8 MiB | Complete JSON response / 完整 JSON 上限 |
+
+The browser adds a 12 s fetch deadline, validates graph API v2 and the same record ceilings,
+and retains 64-bit identities as decimal strings. Increasing server ceilings requires
+updating the browser's protocol validation as well. These are safety ceilings, not a
+performance claim for maximum-size layouts. Page-size constants remain in their owning
+protocol codecs; the Control Channel payload ceiling is unchanged (16 KiB).
+
+瀏覽器另有 12 秒 fetch 期限，驗證 graph API v2 及相同筆數上限；64-bit ID／schema 保持十進位字串。
+調高 server 上限須同步調整 browser 驗證；最大布局效能尚未量測，不以容量上限宣稱流暢。
+分頁筆數屬於各元件協定，Control Channel 的 16 KiB 上限不變。
+
+Vue Flow 1.48.2 and Dagre 2.0.4 are bundled only into `vinc.graph`, with pinned npm
+integrities and transitive licenses in `app/third-party.txt`. No CDN, browser Node runtime,
+framework-wide frontend state or native dependency is introduced. Official trust hashes
+the **built package bytes**, not the Vue/TypeScript sources.
+
+Vue Flow／Dagre 只打包進 `vinc.graph`，不引入 CDN、瀏覽器 Node 或中央原生相依。
+版本與 integrity 固定，第三方授權完整交付；官方信任雜湊以實際部署產物計算。
+
+### Module Graph validation / 關係圖驗證
+
+Windows x64 / MSVC 19.51 (toolset 14.51.36231): full Debug and Release builds
+passed. The 42 selected Common error, Control Channel, Message Bus, Module System,
+SDK and UI CTests passed in each configuration. They include real ModuleHost
+pagination across nine isolated Modules and 43 registrations, subscriber-only topics,
+authenticated MIDs, stopped-record retention and connection cleanup; codec truncation,
+version/cursor rejection and 16 KiB limits; query timeout/late replies, pending-slot
+recovery, Busy admission and shutdown wakeup. The SDK external-consumer test builds
+with the matching MSVC developer environment.
+
+TypeScript checking and all six Chromium workspace tests passed. The graph test
+uses bounded HTTP fixtures to check initial fit after stylesheet/node measurement,
+dragging, viewport/position preservation, manual-only fetches, selection/search,
+layout controls, stale-graph retention after HTTP or malformed-timestamp failure,
+empty results, close cleanup and mobile width. These browser fixtures complement
+the real-process CTests; they are not a load benchmark. Screenshots/logs stay under
+the local build directory.
+
+Windows x64／MSVC 19.51：Debug、Release 完整建置通過，各 **42/42** 項相關 CTest 通過。
+包含真實 ModuleHost 的跨頁清單（9 個孤立 Module、43 筆連線）、只有訂閱者的 Topic、
+MID 所有權、停止後紀錄／連線回收，以及截斷／版本／游標／封包上限、逾時晚到回覆、
+pending 額度回收、Busy 與停止喚醒。外部 SDK consumer 使用相符的 MSVC 開發環境建置。
+
+TypeScript 檢查與 Chromium **6/6** 通過；圖形測試涵蓋首次量測縮放、拖曳、刷新保留位置／
+視角、無自動查詢、選取搜尋、排版控制、HTTP／畸形時間戳失敗保留舊圖、空結果、關閉及手機寬度。
+瀏覽器使用有界 HTTP fixture，真實跨程序路徑由 CTest 驗證；不宣稱是壓力測試。
+截圖與 log 保留於本機 build，不提交生成檔。
+
+Outstanding validation: very large graph layout responsiveness, sustained adversarial
+refresh load, and native Linux/macOS remain unverified. Graph pages intentionally have
+no global consistency token; refresh during registration/restart may show a transient
+unresolved node until a subsequent refresh.
+
+待驗證：大型圖排版效能、持續惡意刷新負載、Linux／macOS 實機。
+分頁刻意不提供全域一致性 token；登記／重啟中的暫態 unresolved 可能到下次刷新才消失。
+
+### Notification health on Module Graph / 關係圖通知健康狀態
+
+Graph API v2 includes authenticated Module notification summaries. Existing manual refresh remains: no polling is added. Running/observed/no active fault is green, notification degradation yellow, lifecycle failure/restart waiting red, and inactive/unobserved/unresolved gray. Selection shows receiver/local sender/Publisher-route counters, first failure Unix ns, last affected MID and cause-aware error text. These are sampled reports, not heartbeat indicators or callback acknowledgements; historical errors remain after recovery. The complete contract is [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+Graph v2 加入 Module 通知診斷，仍由使用者手動刷新。綠／黃／紅／灰分別表示已觀察且運行無通知故障、通知降級、生命週期失敗／等待重啟、未活動／未觀察／未解析。選取後可看接收等待、本機送出與 Publisher 路由的計數及原因；歷史錯誤在恢復後保留，不宣稱為即時 heartbeat 或 callback 完成確認。

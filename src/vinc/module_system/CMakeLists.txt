@@ -20,7 +20,7 @@ add_library(vinc::module ALIAS vinc_module)
 target_include_directories(vinc_module PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(vinc_module PUBLIC vinc::message_bus_client vinc::param vinc::log vinc::rpc)
 
-add_library(vinc_module_runtime STATIC src/runtime/module_runtime.cpp src/runtime/native_source.cpp src/runtime/plugin_loader.cpp src/runtime/module_locks.cpp src/runtime/module_params.cpp)
+add_library(vinc_module_runtime STATIC src/runtime/module_runtime.cpp src/runtime/native_source.cpp src/runtime/plugin_loader.cpp src/runtime/module_locks.cpp src/runtime/module_queries.cpp src/runtime/module_params.cpp)
 add_library(vinc::module_runtime ALIAS vinc_module_runtime)
 target_link_libraries(vinc_module_runtime PUBLIC vinc::module vinc::message_bus vinc::control vinc_module_contract vinc::concurrency vinc::param_host vinc::log_host vinc::rpc_host)
 

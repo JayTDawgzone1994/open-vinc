@@ -108,4 +108,8 @@ if (!memory) {
 2026-10-01：Windows x64、MSVC 19.51.36257、SDK 10.0.26100.0、CMake 4.3.2、Ninja 1.13.2，
 完整專案 Debug／Release 建置成功，各八套 CTest 全數通過，包含新增的 `osal.shared_memory`。
 此次完整執行紀錄位於本機 `build/shared-memory-verification.log`（建置產物，不納入版控）。
-Linux／macOS 尚待原生建置與行為驗證；沒有進行效能量測或承諾跨程序 atomic 支援。
+目前三平台原生結果見 [OSAL 平台驗證](README.md#current-platform-validation)：
+Windows Debug／Release、macOS Debug 與 Ubuntu 24.04／WSL 2 Debug 的已記錄套件
+均包含 `osal.shared_memory`。Linux 另追蹤到真實 `EMFILE` 後的名稱回滾，
+並以隔離副本驗證漏清理／誤刪既有名稱會被測試攔下。
+這些結果不屬於效能量測，也不增加跨程序 atomic 的契約。

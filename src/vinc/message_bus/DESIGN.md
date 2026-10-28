@@ -61,25 +61,40 @@ reader index 屬於訂閱而非執行緒或 OS PID；同一 Subscriber 的 read 
 Heartbeat timeout 自己不足以安全清 token；仍活著但掛住的讀者可能讓 Writer 持續等待，
 需由 Module 故障政策終止並確認退出才能回收。中央控制面、heartbeat 與 reader copy 不執行應用 callback。
 
-## Message Bus Domain=3 的 v2 控制協定
+## Message Bus Domain=3 的 v3 控制協定
 
 沿用共用 Socket v1 framing、big-endian 整數與 u32 長度字串。
-Operation 的高 byte 為 Bus 版本 2，低 byte 為操作編號；v1 的 1–6 已退休。
+Operation 的高 byte 為 Bus 版本 3，低 byte 為操作編號；v1 的 1–6 已退休。
 中央 `submit()` 在工作入列前驗證，Client dispatcher 在處理回覆／拓樸前驗證，
 舊／未知版本拒絕並由接線關閉會話，不做 capability negotiation 或舊格式 fallback。
-新 Client 的 v2 request 對舊 BusManager 是未知操作，舊錯誤回覆亦無法通過新 envelope 驗證。
+新 Client 的 v3 request 對舊 BusManager 是未知操作，舊錯誤回覆亦無法通過新 envelope 驗證。
 此變更不修改共用 Socket framing、當時的 Module bootstrap（目前版本見 Module System）、Lifecycle／Command 欄位。
 
 | Operation | Kind | Payload |
 | --- | --- | --- |
-| `0x0201` Advertise | Request | topic string、schema u64、requested slots u32、byte budget u64 |
-| `0x0202` Subscribe | Request | topic string、schema u64、start u32（0 oldest、1 new-only） |
-| `0x0203` ClosePublisher | Event | Publisher ID u64 |
-| `0x0204` Unsubscribe | Event | Subscription ID u64 |
-| `0x0205` Attach | Event | Subscription ID u64、Attachment |
-| `0x0206` Detach | Event | Subscription ID u64、Publisher ID u64 |
-| `0x0207` ListTopics | Request | 字典序游標 string；回覆活動 Publisher 的 Topic 清單 |
-| `0x0208` InspectTopics | Request | 字典序游標 string；回覆單一 Topic 的有界診斷 |
+| `0x0301` Advertise | Request | topic string、schema u64、requested slots u32、byte budget u64 |
+| `0x0302` Subscribe | Request | topic string、schema u64、start u32（0 oldest、1 new-only） |
+| `0x0303` ClosePublisher | Event | Publisher ID u64 |
+| `0x0304` Unsubscribe | Event | Subscription ID u64 |
+| `0x0305` Attach | Event | Subscription ID u64、Attachment |
+| `0x0306` Detach | Event | Subscription ID u64、Publisher ID u64 |
+| `0x0307` ListTopics | Request | 字典序游標 string；回覆活動 Publisher 的 Topic 清單 |
+| `0x0308` InspectTopics | Request | 字典序游標 string；回覆單一 Topic 的有界診斷 |
+
+| `0x0309` ListTopicConnections | Request | 有界連線分頁游標；回覆發布／訂閱登記 |
+| `0x030a` EnableNotifications | Request | Subscription ID u64；成功後空 body，只啟用該 owner 的訂閱 |
+| `0x030b` NotificationRoutesChanged | Event | Publisher ID u64、route count u32、各 route 的 MID u64／name string |
+
+Advertise 成功 body 現為 Descriptor 加上完整 route list。route 依非零 MID 嚴格遞增，
+名稱僅允許 1..24 ASCII 字母、數字、底線、連字號；來源為中央可信的啟動紀錄，非 Module payload。
+v2 與 v3 不相容。控制 framing 與錯誤 envelope 未改版，RingBuffer／訊息布局不變。
+
+路由依 Publisher／目標 Module 世代合併，只有 Context callback 訂閱啟用；純 get_last 不啟用。
+route count 受 reader 上限約束，也受 16 KiB 控制封包 byte 上限約束。啟用時預留最大 Descriptor
+及回覆 tag 的空間；超限回 CapacityExceeded，保留既有路由，不以斷線代替容量錯誤。
+發布後的通知失敗只更新診斷，不反轉提交成功。退訂／確認退出時先回收 reader，再更新路由；
+拓樸編碼／傳送的配置例外沿用 Detach 邊界，關閉無法同步的接收會話，不中斷其他 owner 的清理。
+跨元件等待、重試、生命週期與診斷契約見 [Pump wakeup](../module_system/PUMP_WAKEUP.md)。
 
 Response 沿用 request／operation，先放 u32 tag：0 成功、1 失敗，其他值拒絕。
 失敗 body 為 Error envelope：u32 version=1、u32 record count（1..16）、u32 flags

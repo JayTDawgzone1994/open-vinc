@@ -9,5 +9,5 @@
         "skipLibCheck": true,
         "noEmit": true
     },
-    "include": ["sdk/**/*.ts", "workspace/**/*.ts", "workspace/**/*.vue", "tests/**/*.ts", "*.ts"]
+    "include": ["sdk/**/*.ts", "plugins/**/*.ts", "plugins/**/*.vue", "workspace/**/*.ts", "workspace/**/*.vue", "tests/**/*.ts", "*.ts"]
 }

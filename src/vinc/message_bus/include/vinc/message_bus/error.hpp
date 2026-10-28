@@ -58,7 +58,11 @@ enum class ErrorOperation : std::int32_t {
     OpenCounter = 35,
     NextCount = 36,
     ListTopics = 37,
-    InspectTopics = 38
+    InspectTopics = 38,
+    ListTopicConnections = 39,
+    OpenNotification = 40,
+    Notify = 41,
+    EnableNotifications = 42
 };
 }
 

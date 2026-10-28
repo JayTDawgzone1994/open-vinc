@@ -5,6 +5,7 @@
 
 namespace vinc::module_system::detail {
 inline constexpr auto error_entries = std::array{
+    ErrorCodeEntry{ErrorCode::NotificationFailed, "Module notification operation failed"},
     ErrorCodeEntry{ErrorCode::PythonUnavailable, "Python executable unavailable"},
     ErrorCodeEntry{ErrorCode::PythonDiscoveryFailed, "Python module discovery failed"},
     ErrorCodeEntry{ErrorCode::RpcFailed, "RPC failed"},
@@ -71,6 +72,10 @@ inline constexpr auto error_entries = std::array{
 inline constexpr auto operation_entries =
     std::array{ErrorOperationEntry{ErrorOperation::DiscoverPython, "DiscoverPython"},
                ErrorOperationEntry{ErrorOperation::LoadPython, "LoadPython"},
+               ErrorOperationEntry{ErrorOperation::PrepareNotification, "PrepareNotification"},
+               ErrorOperationEntry{ErrorOperation::CloseNotification, "CloseNotification"},
+    ErrorOperationEntry{ErrorOperation::NotifyPump, "NotifyPump"},
+    ErrorOperationEntry{ErrorOperation::WaitNotification, "WaitNotification"},
                ErrorOperationEntry{ErrorOperation::Create, "Create"},
                ErrorOperationEntry{ErrorOperation::RegisterType, "RegisterType"},
                ErrorOperationEntry{ErrorOperation::UnregisterType, "UnregisterType"},
@@ -133,7 +138,8 @@ inline constexpr auto operation_entries =
                ErrorOperationEntry{ErrorOperation::AccessLog, "AccessLog"},
                ErrorOperationEntry{ErrorOperation::AccessParam, "AccessParam"},
                ErrorOperationEntry{ErrorOperation::ParamCallback, "ParamCallback"},
-               ErrorOperationEntry{ErrorOperation::RecoverLock, "RecoverLock"}};
+               ErrorOperationEntry{ErrorOperation::RecoverLock, "RecoverLock"},
+               ErrorOperationEntry{ErrorOperation::ListModules, "ListModules"}};
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::ModuleSystem, "ModuleSystem", error_entries,
                                             operation_entries};
 static_assert(valid_catalog(error_catalog));

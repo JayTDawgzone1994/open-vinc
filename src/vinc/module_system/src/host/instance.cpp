@@ -3,6 +3,7 @@
 #include <vinc/config.hpp>
 #include <vinc/osal/random.hpp>
 #include <vinc/osal/shared_memory.hpp>
+#include <vinc/osal/notification.hpp>
 #include <array>
 #include <fstream>
 #include <vector>
@@ -96,7 +97,8 @@ Result<void> clean_epoch(const fs::path& path, const std::string& epoch) {
             continue;
         }
         if (records.size() >= config::instance_resource_limit || filename.size() != resource_name_bytes ||
-            filename.substr(0, 1 + epoch_digits) != "r" + epoch ||
+            (filename.front() != 'r' && filename.front() != 'n') ||
+            filename.substr(1, epoch_digits) != epoch ||
             !hex_string(std::string_view(filename).substr(1 + epoch_digits)) ||
             entry.symlink_status().type() != fs::file_type::directory || !fs::is_empty(entry.path())) {
             return std::unexpected(Error{ErrorCode::InvalidInstanceJournal, ErrorOperation::CleanInstance});
@@ -105,7 +107,9 @@ Result<void> clean_epoch(const fs::path& path, const std::string& epoch) {
     }
     for (const auto& record : records) {
 #ifndef _WIN32
-        auto unlinked = osal::SharedMemory::unlink_name(record.filename().string());
+        const auto name = record.filename().string();
+        auto unlinked = name.front() == 'n' ? osal::NotificationReceiver::unlink_name(name)
+                                           : osal::SharedMemory::unlink_name(name);
         if (!unlinked && !unlinked.error().is(osal::ErrorCode::NotFound)) {
             return std::unexpected(wrap_error(ErrorCode::CleanupFailed, ErrorOperation::CleanInstance,
                                                unlinked.error()));
@@ -292,12 +296,21 @@ Result<std::shared_ptr<Instance>> Instance::create(std::string name) {
 Instance::~Instance() = default; // Retain unretired records for the next admitted central.
 
 Result<std::string> Instance::reserve() {
+    return reserve_kind('r');
+}
+
+Result<std::string> Instance::reserve_notification() {
+    return reserve_kind('n');
+}
+
+Result<std::string> Instance::reserve_kind(char kind) {
     std::lock_guard lock(mutex_);
     constexpr auto maximum_sequence = (std::uint64_t{1} << (sequence_digits * 4)) - 1;
     if (recorded_ >= config::instance_resource_limit || next_ > maximum_sequence) {
         return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::RecordResource});
     }
-    std::string name = "r" + epoch_;
+    std::string name(1, kind);
+    name += epoch_;
     auto sequence = std::uint64_t(next_++);
     std::array<char, sequence_digits> suffix{};
     for (std::size_t digit = suffix.size(); digit > 0; --digit) {
@@ -314,7 +327,8 @@ Result<std::string> Instance::reserve() {
 }
 
 Result<void> Instance::retire(std::string_view name) {
-    if (name.size() != resource_name_bytes || name.substr(0, 1 + epoch_digits) != "r" + epoch_ ||
+    if (name.size() != resource_name_bytes || (name.front() != 'r' && name.front() != 'n') ||
+        name.substr(1, epoch_digits) != epoch_ ||
         !hex_string(name.substr(1 + epoch_digits))) {
         return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::CleanInstance});
     }

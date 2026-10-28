@@ -5,6 +5,7 @@
 
 #include <vinc/message/generated.hpp>
 #include <vinc/config.hpp>
+#include <vinc/time.hpp>
 #include <vinc/message_bus/error.hpp>
 #include <chrono>
 #include <expected>
@@ -104,6 +105,31 @@ struct TopicDiagnosticsPage {
     std::string next;
 };
 
+enum class ConnectionRole : std::uint32_t {
+    Publisher = 1,
+    Subscriber = 2
+};
+
+// Exclusive lexicographic cursor: topic, role, registration ID. An empty topic
+// starts a scan. Pages observe a changing registry, not an atomic global snapshot.
+struct ConnectionCursor {
+    std::string topic;
+    ConnectionRole role = ConnectionRole::Publisher;
+    std::uint64_t id = 0;
+    bool operator==(const ConnectionCursor&) const = default;
+};
+
+struct TopicConnection {
+    ConnectionCursor key;
+    std::uint64_t schema = 0;
+    std::uint64_t mid = 0;
+};
+
+struct TopicConnectionsPage {
+    std::vector<TopicConnection> connections;
+    ConnectionCursor next;
+};
+
 namespace detail {
 struct PublisherCore;
 struct SubscriberCore;
@@ -199,6 +225,9 @@ public:
     ~Client();
     vinc::Result<TopicPage> list_topics(std::string after = {});
     vinc::Result<TopicDiagnosticsPage> inspect_topics(std::string after = {});
+    // A timed-out read does not close the shared control session. Late replies
+    // are retired without retaining pending slots; no automatic retry or payload mapping occurs.
+    vinc::Result<TopicConnectionsPage> list_topic_connections(ConnectionCursor after, vinc::Deadline deadline);
 
     template <Message T> vinc::Result<Publisher<T>> advertise(std::string topic, PublisherOptions options = {}) {
         auto publisher = advertise_raw(std::move(topic), T::schema().hash, options);

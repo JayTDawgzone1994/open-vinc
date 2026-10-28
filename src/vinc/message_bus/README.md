@@ -13,6 +13,10 @@ Sequential delivery runs through Context pump callbacks; get_last reads the late
 
 依序接收透過 Context pump 派送 callback；`get_last()` 提供最新值。沒有額外資料 Socket 通知。
 
+Successful publications now signal callback destinations directly through OSAL notifications. Host pumpLoop waits on them with a 10 ms fallback; get_last-only readers create no route. Failure/retry/UI contracts and validation are maintained in [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+發布成功後直接透過 OSAL 通知 callback 所屬 Module；pumpLoop 等待通知並保留 10 ms 補查，純 get_last 不建路由。故障／重試／UI 契約及驗證見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
+
 The opt-in [benchmark](benchmarks/README.md) measures 1–128 MiB push/loan paths with a4 GiB shared budget per case, without changing defaults/pump settings.
 
 跨程序延遲量測工具見 [Benchmark](benchmarks/README.md)：1～128 MiB、push／loan 兩條路徑，
@@ -378,14 +382,14 @@ Shared accounting includes active ring controls/aligned payload and 8-byte/topic
 `PublisherStats::shared_bytes` 是該 RingBuffer 的配置，未含共用 topic counter。
 因此它們不是整個系統的 RSS／commit 上限，也不是所有物件都已析構的證明。
 
-OSAL owns atomics/time; rings do not belong in SharedMemory. Windows uses Interlocked64, POSIX compile-time 64-bit always-lock-free atomics. Whole APIs include allocation/synchronization and **are not claimed lock-free**. Scope is same-host/version 64-bit, not cross-compiler ABI/security/hard real-time. Production Instance records names before creation and cleans recorded old epochs at startup; standalone random-name tests/unrecorded legacy orphans have no such guarantee. Windows has measured evidence; native Linux/macOS/fault validation remains revision-specific. [Paced benchmarks](benchmarks/README.md) are not saturation throughput.
+OSAL owns atomics/time; rings do not belong in SharedMemory. Windows uses Interlocked64, POSIX compile-time 64-bit always-lock-free atomics. Whole APIs include allocation/synchronization and **are not claimed lock-free**. Scope is same-host/version 64-bit, not cross-compiler ABI/security/hard real-time. Production Instance records names before creation and cleans recorded old epochs at startup; standalone random-name tests/unrecorded legacy orphans have no such guarantee. Platform evidence is recorded with source revisions and suite scope in the [platform reports](../../../README.md#validation-and-limits). [Paced benchmarks](benchmarks/README.md) are not saturation throughput.
 
 共享原子與時間封裝在 OSAL；Message Bus 不把 RingBuffer 塞進 SharedMemory API。
 Windows 使用 Interlocked64；Linux／macOS 使用編譯器原子操作並靜態要求 64-bit always-lock-free。
 發布可見性與 slot 協定使用原子 word，整個 `commit`／Message Bus API 含配置與同步，**不宣稱整體 lock-free**。
 目前支援設計範圍為同主機、同版本 framework、64-bit 程序；沒有跨編譯器 ABI／安全沙箱／硬即時保證。
 正式 Instance 接線已有建立前名稱記錄及下次啟動清理；未注入服務的獨立測試與未留下紀錄的舊 orphan 不在保證內，見下方名稱服務章節。
-Windows x64 為實測平台；Linux／macOS 尚待原生建置與故障驗證。
+各平台的實測版本與套件範圍見[平台驗證報告](../../../README.md#validation-and-limits)；原生故障注入仍依各項案例紀錄。
 有節奏的延遲／資料率量測見 [Benchmark](benchmarks/README.md)；尚未測量飽和吞吐量。
 
 Synchronization reasoning/protocol/tests: [DESIGN](DESIGN.md).
@@ -465,9 +469,9 @@ Result alias 與 `to_error()`；呼叫端以 `error.is(message_bus::ErrorCode::.
   錯誤遷移輪次沒有全面攔截 STL 例外或宣告所有操作不拋例外。
 - 通知送出與析構路徑維持既有關閉會話政策，未新增背景故障查詢介面。
 
-Current control protocol is Bus v2: high operation byte 2, original operations 1–6 in the low byte, plus later list/inspect operations below. Old/unknown versions reject before queue/topology, without adapters. Frame stays v1; current bootstrap is v13, ring layout v3, Storage image v2. Historical migration preserved its then-current bootstrap/ring versions, not those values forever. Rebuild all connected participants.
+Current control protocol is Bus v3: high operation byte 3, original operations 1–6 in the low byte, plus list/inspect/connection and callback-notification operations. Old/unknown versions reject before queue/topology, without adapters. Frame stays v1; current bootstrap is v16, ring layout v3, Storage image v2. Historical migration preserved its then-current bootstrap/ring versions, not those values forever. Rebuild all connected participants.
 
-目前 Bus 控制協定為 v2，高 byte 為 2，低 byte 保留原 1–6，並擴充下方清單／診斷操作。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v13、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
+目前 Bus 控制協定為 v3，高 byte 為 3，低 byte 保留原 1–6，另含清單／診斷／連線及 callback 通知操作。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v16、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
 
 Failure responses explicitly encode current error/causes/count/truncation/native fields; same-layer remote Bus errors pass through. Unknown codes stay numeric; malformed packets close Sessions. Text resolves in local catalogs, never object-layout transport. [DESIGN](DESIGN.md) owns bytes. detail/error_protocol is only Bus codec/runtime/test integration, independent of Module-private protocol; Module wraps Bus failures at its boundary.
 
@@ -722,12 +726,12 @@ push／commit 取樣與失敗回滾、跨程序 metadata、舊布局／Bag 版�
 並重跑 `common.time`、`message_bus.cleanup`、`message_bus.ring_buffer`，3/3 通過；
 其餘三組 27 項回歸包含該斷言。
 
-Only 27 of 76 CTests were run. Debug retains iterator-debug allocation skips; Release scans them. 19.44 retained existing Shell C4127 warnings. No native Linux/macOS for that change.
+Only 27 of 76 CTests were run. Debug retains iterator-debug allocation skips; Release scans them. 19.44 retained existing Shell C4127 warnings. Later platform evidence is recorded in the [platform reports](../../../README.md#validation-and-limits).
 
 本輪執行的是 76 項 CTest 中的 27 項相關測試，未宣稱全套重跑。
 MSVC Debug 的 `message.access` 仍依既有 iterator-debug 條件略過配置失敗掃描，Release 執行該路徑。
 19.44 建置仍有 Shell `tcl_runtime.cpp` 的既有 C4127 警告，本輪未修改該部分。
-Linux／macOS 尚未驗證本輪變更。
+後續平台結果與測試範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="唯讀診斷與-reader-計數2026-10-25"></a>
 
@@ -767,3 +771,38 @@ Related Debug/Release Bus/Context/Module/UI suites passed; exact scope/logs/plat
 
 本輪 Debug／Release 的 Bus、Context、Module 與 UI 相關回歸均通過；完整測試範圍、
 紀錄與未驗證平台統一見 [UI 驗證](../ui/README.md#topic-monitor-實際驗證)。
+
+<a id="read-only-connections"></a>
+
+## Read-only connections / 唯讀連線查詢（2026-10-27）
+
+`Client::list_topic_connections(ConnectionCursor after, Deadline)` returns
+`Result<TopicConnectionsPage>`. The exclusive cursor sorts by (topic name, role,
+registration ID); empty topic starts/ends the scan. Up to 32 raw registrations per
+page keep the existing 16 KiB control envelope bounded, including pagination within
+one large topic. Roles are Publisher=1 and Subscriber=2. Each record includes the
+schema hash and authenticated owner MID. Subscriber-only topics are included.
+There is no shared-memory mapping, statistics sampling, payload read, new subscriber,
+or background topology timer. Existing `list_topics` / `inspect_topics` behavior is unchanged.
+
+新增查詢以（Topic 完整名稱、角色、登記 ID）遞增排除式游標分頁，每頁最多 32 筆，
+單一 Topic 也可跨頁；空 Topic 為起點／終點。包含 Subscriber-only Topic、schema 與
+已驗證 owner MID。不 mapping 資料、不取樣統計、不讀訊息、不新增訂閱或背景計時器。
+既有 `list_topics`／`inspect_topics` 行為不變。
+
+Operation 0x0209 uses query payload version 1 and validates cursors, row count, roles,
+MIDs, ordering, trailing data and version. Registry changes between pages may omit
+newly inserted earlier keys; this is a best-effort current scan, not a global snapshot.
+A timed-out read keeps the Session usable. A retired-query watermark discards old unclaimed read-only replies (including duplicates)
+after validating their response envelope. Timeout releases pending capacity immediately;
+lost responses cannot accumulate pending slots. Mutation reply handling stays strict.
+No automatic retry is performed. Query send backpressure and central queue saturation
+return failures instead of applying the mutation-timeout shutdown policy. A congested
+central response may be dropped, leaving the caller to time out. Malformed control
+frames and genuinely lost Sessions retain existing protocol/lifecycle handling.
+
+新操作 0x0209／payload v1 驗證游標、筆數、角色、MID、順序、尾端資料與版本。
+分頁間登記可能變動，早於游標的新登記可能等下次才看到。唯讀逾時保留 Session；
+單一退休查詢水位在驗證 envelope 後丟棄舊的無等待者唯讀回覆（含重複回覆）。
+逾時立即釋放 pending 額度，不因遺失回覆持續累積；mutation 回覆仍嚴格配對。不自動重試。傳送壅塞／中央佇列滿不套用 mutation
+逾時的關閉政策；中央回覆壅塞可丟棄，由呼叫端逾時。畸形控制封包及真正斷線仍照既有契約處理。

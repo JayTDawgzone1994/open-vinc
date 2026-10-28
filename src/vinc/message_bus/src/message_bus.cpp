@@ -4,6 +4,7 @@
 
 #include <vinc/message_bus/detail/protocol.hpp>
 #include <vinc/message_bus/detail/diagnostics_protocol.hpp>
+#include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/message/detail/framework_access.hpp>
 #include <vinc/time.hpp>
 #include <condition_variable>
@@ -38,6 +39,62 @@ template <class F> auto guarded(ErrorOperation operation, F&& f) -> decltype(f()
 
 // Share the existing module control session. The module receive dispatcher fills
 // responses/topology while caller threads wait; no second reader competes for Socket frames.
+// Decode before opening anything. Native names come only from the authenticated
+// central, but malformed fields still must not reach the OS namespace.
+Result<std::vector<NotificationTarget>> decode_notification_targets(control::Reader& reader) {
+    const auto count = reader.u32();
+    if (count > maximum_ring_buffer_readers) {
+        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Receive});
+    }
+    std::vector<NotificationTarget> result;
+    std::uint64_t previous = 0;
+    for (std::uint32_t index = 0; index < count; ++index) {
+        NotificationTarget target{reader.u64(), reader.string()};
+        const auto valid_character = [](unsigned char character) {
+            return (character >= 'a' && character <= 'z') ||
+                   (character >= 'A' && character <= 'Z') ||
+                   (character >= '0' && character <= '9') || character == '_' || character == '-';
+        };
+        if (target.owner <= previous || target.name.empty() || target.name.size() > 24 ||
+            !std::all_of(target.name.begin(), target.name.end(), valid_character)) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Receive});
+        }
+        previous = target.owner;
+        result.push_back(std::move(target));
+    }
+    if (!reader.done()) {
+        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Receive});
+    }
+    return result;
+}
+
+void install_notification_targets(NotificationRoutes& routes, const std::vector<NotificationTarget>& targets,
+                                  const std::shared_ptr<NotificationTotals>& totals) {
+    auto previous = routes.destinations.load();
+    auto next = std::make_shared<NotificationDestinations>();
+    next->reserve(targets.size());
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& target : targets) {
+        std::shared_ptr<NotificationDestination> destination;
+        if (previous) {
+            for (const auto& existing : *previous) {
+                if (existing->target().owner == target.owner && existing->target().name == target.name) {
+                    destination = existing;
+                    break;
+                }
+            }
+        }
+        if (!destination) {
+            destination = std::make_shared<NotificationDestination>(target, totals);
+            destination->reopen(now);
+        }
+        next->push_back(std::move(destination));
+    }
+    routes.destinations.store(std::move(next));
+    // Cover a publication racing route installation, including reused targets.
+    routes.notify();
+}
+
 struct Transport {
     struct Pending {
         std::uint16_t operation;
@@ -45,12 +102,16 @@ struct Transport {
     };
 
     ControlTransport connection;
+    std::shared_ptr<NotificationTotals> notification_totals = std::make_shared<NotificationTotals>();
     std::mutex mutex;
     std::condition_variable changed;
     std::uint64_t next_request = 1;
+    std::uint64_t retired_query = 0;
     bool closed = false;
+    std::optional<Error> receive_failure;
     std::map<std::uint64_t, Pending> pending;
     std::map<std::uint64_t, std::map<std::uint64_t, Attachment>> topology;
+    std::map<std::uint64_t, std::shared_ptr<NotificationRoutes>> notification_routes;
 
     explicit Transport(ControlTransport transport)
         : connection(std::move(transport)) {
@@ -64,8 +125,14 @@ struct Transport {
         changed.notify_all();
     }
 
-    vinc::Result<control::Bytes> request(std::uint16_t operation, control::Bytes bytes) {
+    vinc::Result<control::Bytes> request(std::uint16_t operation, control::Bytes bytes,
+                                       Deadline deadline = (Deadline::max)()) {
         std::unique_lock lock(mutex);
+        const bool read_only = operation == ListTopicConnections;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return std::unexpected(Error{ErrorCode::Timeout, ErrorOperation::Request});
+        }
+
         if (closed) {
             return std::unexpected(vinc::make_error(ErrorCode::Closed, ErrorOperation::Request));
         }
@@ -77,37 +144,56 @@ struct Transport {
         const auto id = next_request++;
         pending.emplace(id, Pending{operation, {}});
         // This guard is destroyed before lock. An exception after admission may
-        // leave the remote outcome unknown, so close rather than permit replay.
+        // leave a mutation outcome unknown. Only read-only queries can retire
+        // their caller without closing the session.
         struct PendingCleanup {
             Transport& transport;
             std::uint64_t id;
+            bool read_only;
             bool settled = false;
 
             ~PendingCleanup() {
+                if (read_only) {
+                    // Read replies have no mutation outcome to recover. One watermark
+                    // retires old replies without leaking pending capacity after timeout.
+                    transport.retired_query = (std::max)(transport.retired_query, id);
+                }
                 transport.pending.erase(id);
-                if (!settled) {
+                if (!settled && !read_only) {
                     transport.fail_locked();
                 }
 #ifdef VINC_MESSAGE_BUS_TESTING
                 testing::pending_remaining(transport.pending.size());
 #endif
             }
-        } cleanup{*this, id};
+        } cleanup{*this, id, read_only};
 #ifdef VINC_MESSAGE_BUS_TESTING
         testing::checkpoint(testing::FaultPoint::RequestSend);
 #endif
         auto sent = connection.send({control::Kind::Request, message_bus_domain, operation, id, std::move(bytes)});
         if (!sent) {
+            if (read_only && !sent.error().is(control::ErrorCode::Closed)) {
+                // Nothing was admitted to the transport, so no late reply is possible.
+                cleanup.settled = true;
+                return std::unexpected(wrap_error(ErrorCode::Io, ErrorOperation::Request, sent.error()));
+            }
+
             fail_locked();
             return std::unexpected(vinc::wrap_error(ErrorCode::Closed, ErrorOperation::Request, sent.error()));
         }
 
         const bool response_received =
-            changed.wait_until(lock, std::chrono::steady_clock::now() + config::message_bus_request_timeout, [&] {
+            changed.wait_until(lock, (std::min)(deadline,
+                std::chrono::steady_clock::now() + config::message_bus_request_timeout), [&] {
                 return closed || pending.at(id).response.has_value();
             });
         if (!response_received || closed) {
-            fail_locked();
+            if (receive_failure) {
+                return std::unexpected(*receive_failure);
+            }
+            if (!read_only || closed) {
+                fail_locked();
+            }
             return std::unexpected(vinc::make_error(
                 response_received ? ErrorCode::Closed : ErrorCode::Timeout, ErrorOperation::Request));
         }
@@ -137,6 +223,8 @@ struct Transport {
             std::lock_guard lock(mutex);
             if (operation == Unsubscribe) {
                 topology.erase(id);
+            } else if (operation == ClosePublisher) {
+                notification_routes.erase(id);
             }
 
             if (closed) {
@@ -154,7 +242,7 @@ struct Transport {
     }
 
     bool receive(control::Frame frame) {
-        std::lock_guard lock(mutex);
+        std::unique_lock lock(mutex);
         if (closed || frame.domain != message_bus_domain || !supported_operation(frame.operation)) {
             return false;
         }
@@ -162,6 +250,16 @@ struct Transport {
         control::Reader reader(frame.payload);
         if (frame.kind == control::Kind::Response) {
             auto found = pending.find(frame.request);
+            if (found == pending.end() && frame.operation == ListTopicConnections &&
+                frame.request != 0 && frame.request <= retired_query) {
+                // Ignore an unclaimed old read-only reply, including duplicates. Its
+                // envelope must still be valid; no topology or mutation state is applied.
+                if (!decode_response(frame.payload)) {
+                    fail_locked();
+                    return false;
+                }
+                return true;
+            }
             if (found == pending.end() || found->second.operation != frame.operation ||
                 found->second.response) {
                 fail_locked();
@@ -172,6 +270,25 @@ struct Transport {
             if (!response) {
                 fail_locked();
                 return false;
+            }
+
+            if (!response->failure && frame.operation == Advertise) {
+                control::Reader publication_reader(response->body);
+                auto descriptor = decode_descriptor(publication_reader);
+                auto targets = decode_notification_targets(publication_reader);
+                if (!descriptor.id || !targets || notification_routes.contains(descriptor.id)) {
+                    receive_failure = Error{ErrorCode::Protocol, ErrorOperation::Receive};
+                    fail_locked();
+                    return false;
+                }
+                auto routes = std::make_shared<NotificationRoutes>();
+                notification_routes.emplace(descriptor.id, routes);
+                lock.unlock();
+                install_notification_targets(*routes, *targets, notification_totals);
+                lock.lock();
+                if (closed) {
+                    return false;
+                }
             }
 
             if (!response->failure && frame.operation == Subscribe) {
@@ -212,6 +329,22 @@ struct Transport {
         }
 
         const auto id = reader.u64();
+        if (frame.operation == NotificationRoutesChanged) {
+            auto targets = decode_notification_targets(reader);
+            if (!id || !targets) {
+                fail_locked();
+                return false;
+            }
+            auto found = notification_routes.find(id);
+            if (found == notification_routes.end()) {
+                // A local close can retire the Publisher before an ordered event arrives.
+                return true;
+            }
+            auto routes = found->second;
+            lock.unlock();
+            install_notification_targets(*routes, *targets, notification_totals);
+            return true;
+        }
         auto target = topology.find(id);
         if (frame.operation == Attach) {
             auto attachment = decode_attachment(reader);
@@ -283,6 +416,7 @@ struct PublisherCore {
     std::shared_ptr<Transport> transport;
     std::shared_ptr<RingBuffer> ring_buffer;
     std::shared_ptr<NamedCounter> counter;
+    std::shared_ptr<NotificationRoutes> notifications;
     std::uint32_t requested = 0;
     std::mutex operation;
     std::atomic<bool> closed{false};
@@ -413,7 +547,7 @@ void construction_failed(const std::shared_ptr<PublisherCore>& publisher,
 // access, then timestamp/count are assigned immediately before ring buffer publication.
 vinc::Result<void> commit(const std::shared_ptr<PublisherCore>& publisher, const std::shared_ptr<LoanCore>& loan,
                     message::detail::Binding binding) {
-    return guarded(ErrorOperation::Commit, [&]() -> vinc::Result<void> {
+    auto result = guarded(ErrorOperation::Commit, [&]() -> vinc::Result<void> {
         if (!publisher) {
             return std::unexpected(vinc::make_error(ErrorCode::Closed, ErrorOperation::Commit));
         }
@@ -461,12 +595,16 @@ vinc::Result<void> commit(const std::shared_ptr<PublisherCore>& publisher, const
 
         return published;
     });
+    if (result) {
+        publisher->notifications->notify();
+    }
+    return result;
 }
 
 // Copied publication has no user-visible loan: reserve, render into shared storage,
 // then publish. Rollback abandons an unpublished reservation when an intermediate step fails.
 vinc::Result<void> push(const std::shared_ptr<PublisherCore>& publisher, message::detail::Binding binding) {
-    return guarded(ErrorOperation::Push, [&]() -> vinc::Result<void> {
+    auto result = guarded(ErrorOperation::Push, [&]() -> vinc::Result<void> {
         if (!publisher) {
             return std::unexpected(vinc::make_error(ErrorCode::Closed, ErrorOperation::Push));
         }
@@ -531,6 +669,10 @@ vinc::Result<void> push(const std::shared_ptr<PublisherCore>& publisher, message
         rollback.done = bool(published);
         return published;
     });
+    if (result) {
+        publisher->notifications->notify();
+    }
+    return result;
 }
 
 void close(const std::shared_ptr<PublisherCore>& publisher) noexcept {
@@ -833,10 +975,15 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
         detail::testing::checkpoint(detail::testing::FaultPoint::DescriptorDecode);
 #endif
         auto descriptor = detail::decode_descriptor(reader);
-        if (!reader.done() || !descriptor.id || descriptor.schema != schema) {
+        auto targets = detail::decode_notification_targets(reader);
+        if (!targets || !reader.done() || !descriptor.id || descriptor.schema != schema) {
             return std::unexpected(vinc::make_error(ErrorCode::Protocol, ErrorOperation::Advertise));
         }
         cleanup.id = descriptor.id;
+        {
+            std::lock_guard lock(impl_->transport->mutex);
+            core->notifications = impl_->transport->notification_routes.at(descriptor.id);
+        }
 #ifdef VINC_MESSAGE_BUS_TESTING
         detail::testing::checkpoint(detail::testing::FaultPoint::PublisherAttach);
 #endif
@@ -853,6 +1000,28 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
 
         cleanup.done = true;
         return core;
+    });
+}
+
+Result<TopicConnectionsPage> Client::list_topic_connections(ConnectionCursor after, Deadline deadline) {
+    return detail::guarded(ErrorOperation::ListTopicConnections, [&]() -> Result<TopicConnectionsPage> {
+        if (!detail::valid_cursor(after)) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::ListTopicConnections});
+        }
+
+        control::Bytes payload;
+        control::put_u32(payload, detail::connections_version);
+        auto encoded = detail::encode_cursor(payload, after);
+        if (!encoded) {
+            return std::unexpected(encoded.error());
+        }
+
+        auto response = impl_->transport->request(detail::ListTopicConnections, std::move(payload), deadline);
+        if (!response) {
+            return std::unexpected(wrap_error(ErrorCode::Io, ErrorOperation::ListTopicConnections, response.error()));
+        }
+
+        return detail::decode_connections(*response, after);
     });
 }
 
@@ -968,6 +1137,22 @@ vinc::Result<std::shared_ptr<detail::SubscriberCore>> Client::subscribe_raw(std:
     });
 }
 
+Result<void> detail::enable_notifications(const std::shared_ptr<SubscriberCore>& subscriber) {
+    if (!subscriber || subscriber->closed.load()) {
+        return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::EnableNotifications});
+    }
+    control::Bytes payload;
+    control::put_u64(payload, subscriber->id);
+    auto response = subscriber->transport->request(EnableNotifications, std::move(payload));
+    if (!response) {
+        return std::unexpected(response.error());
+    }
+    if (!response->empty()) {
+        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::EnableNotifications});
+    }
+    return {};
+}
+
 vinc::Result<std::shared_ptr<Client>>
 detail::RuntimeAccess::create(ControlTransport connection) {
     if (!connection.send || !connection.close) {
@@ -996,6 +1181,35 @@ vinc::Result<void> detail::RuntimeAccess::receive(Client& client, control::Frame
         shutdown(client);
         return std::unexpected(vinc::Error{ErrorCode::Io, ErrorOperation::Receive});
     }
+}
+
+namespace {
+std::vector<std::shared_ptr<const detail::NotificationDestinations>> notification_snapshots(detail::Transport& transport) {
+    std::vector<std::shared_ptr<const detail::NotificationDestinations>> snapshots;
+    std::lock_guard lock(transport.mutex);
+    for (const auto& [_, routes] : transport.notification_routes) {
+        auto current = routes->destinations.load();
+        if (current) {
+            snapshots.push_back(std::move(current));
+        }
+    }
+    return snapshots;
+}
+}
+
+void detail::RuntimeAccess::progress_notifications(Client& client) {
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& snapshot : notification_snapshots(*client.impl_->transport)) {
+        for (const auto& destination : *snapshot) {
+            destination->reopen(now);
+        }
+    }
+}
+
+detail::NotificationDiagnostics detail::RuntimeAccess::notification_diagnostics(Client& client) {
+    auto& totals = *client.impl_->transport->notification_totals;
+    std::lock_guard lock(totals.mutex);
+    return totals.value;
 }
 
 void detail::RuntimeAccess::shutdown(Client& client) noexcept {

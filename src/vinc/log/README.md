@@ -222,7 +222,7 @@ Recorded 2026-10-09 on Windows x64/MSVC: Debug/Release builds and full **67/67**
 
 2026-10-09 在 Windows x64／MSVC 完成 Debug 與 Release 建置，兩種組態的完整 CTest
 皆為 67／67 通過。另以暫停接收的傳輸測試確認 Backpressure，以及恢復接收後在沒有新
-應用 Log 的情況下仍能補送拒絕統計。本輪 Linux／macOS 尚未實機驗證。
+應用 Log 的情況下仍能補送拒絕統計。後續 Windows／macOS 結果與 Linux 報告範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="待處理事項"></a>
 

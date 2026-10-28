@@ -24,19 +24,22 @@ inline bool valid_topic_separators(std::string_view topic) noexcept {
 
 enum Operation : std::uint16_t {
     // High byte is the Bus protocol version. v1 used 1..6; disjoint identities
-    // make old peers reject v2 before interpreting a registration or mutation.
-    Advertise = 0x0201,
-    Subscribe = 0x0202,
-    ClosePublisher = 0x0203,
-    Unsubscribe = 0x0204,
-    Attach = 0x0205,
-    Detach = 0x0206,
-    ListTopics = 0x0207,
-    InspectTopics = 0x0208
+    // make old peers reject v3 before interpreting a registration or mutation.
+    Advertise = 0x0301,
+    Subscribe = 0x0302,
+    ClosePublisher = 0x0303,
+    Unsubscribe = 0x0304,
+    Attach = 0x0305,
+    Detach = 0x0306,
+    ListTopics = 0x0307,
+    InspectTopics = 0x0308,
+    ListTopicConnections = 0x0309,
+    EnableNotifications = 0x030a,
+    NotificationRoutesChanged = 0x030b
 };
 
 inline bool supported_operation(std::uint16_t operation) noexcept {
-    return operation >= Advertise && operation <= InspectTopics;
+    return operation >= Advertise && operation <= NotificationRoutesChanged;
 }
 
 inline vinc::Result<void> encode_descriptor(control::Bytes& bytes, const Descriptor& descriptor) {

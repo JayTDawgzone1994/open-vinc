@@ -342,9 +342,9 @@ Historical layout validation 2026-10-03, Windows x64/MSVC:
 - 首輪 Debug 的跨程序鎖測試曾逾時，單獨重跑及最後兩組完整測試均通過。
   原因尚未確認，紀錄見 [Concurrency README](../components/concurrency/README.md)。
 
-Native Linux/macOS verification remains separate. Tcl requires single-config generators; configuration-separated paths do not establish overall multi-config support.
+Current native platform results and their SDK coverage are recorded in the [platform reports](../../../README.md#validation-and-limits). Tcl requires single-config generators; configuration-separated paths do not establish overall multi-config support.
 
-Linux／macOS 尚待原生驗證；
+目前原生平台結果及 SDK 覆蓋範圍見[平台報告](../../../README.md#validation-and-limits)；
 Tcl 整合目前仍要求單組態 generator，不能由生成路徑具組態區隔推論整體已支援多組態建置。
 
 <a id="2026-10-04-測試可讀性收尾"></a>
@@ -579,3 +579,9 @@ vinc::sdk 與 vinc/vinc.hpp 提供 RPC 的型別、錯誤及 Context 模板 API�
 vinc::rpc 是 Plugin facade／映像讀寫 target；vinc::rpc_host 與 vinc::rpc_manager 僅供框架接線。
 ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件。
 完整契約見 [RPC](../rpc/README.md)，範例見 [examples/rpc](../../../examples/rpc/README.md)。
+
+### Notification integration rebuild / 通知整合重建
+
+Host/Plugin entry 10 and bootstrap v16 require rebuilding connected SDK consumers, Plugins and Python native adapters with the central/Host. Public pumpOnce syntax/semantics stay unchanged; pumpLoop uses the Host-owned notification receiver plus the existing fallback. ModuleInfo now carries notification diagnostics. See [Pump wakeup](../module_system/PUMP_WAKEUP.md) for ownership, protocol versions, recovery and validation.
+
+本輪 entry 10／bootstrap v16 要求所有相連產物一起重建。pumpOnce 不變，pumpLoop 使用 Host 的通知與備援等待；ModuleInfo 加入通知診斷。完整契約見上述連結。

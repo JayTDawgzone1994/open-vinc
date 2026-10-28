@@ -27,17 +27,19 @@ vinc_register_error_catalog(TARGET vinc_osal_errors
     HEADER vinc/osal/detail/error_catalog.hpp SYMBOL vinc::osal::detail::error_catalog)
 add_library(vinc_osal STATIC src/process.cpp src/pipe.cpp src/process_pipe.cpp src/process_pipe_native.cpp
     src/socket_address.cpp src/socket.cpp src/socket_poller.cpp src/shared_memory.cpp src/shared_atomic.cpp src/terminal.cpp src/random.cpp
-    src/file_lock.cpp src/path.cpp src/dynamic_library.cpp)
+    src/file_lock.cpp src/path.cpp src/dynamic_library.cpp src/notification.cpp)
 add_library(vinc::osal ALIAS vinc_osal)
 target_compile_features(vinc_osal PUBLIC cxx_std_23)
 target_include_directories(vinc_osal PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(vinc_osal PUBLIC vinc::common vinc::errors PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
 if(WIN32)
+    target_sources(vinc_osal PRIVATE src/windows/notification.cpp)
     target_sources(vinc_osal PRIVATE src/windows/process.cpp src/windows/pipe.cpp src/windows/socket_poller.cpp src/windows/shared_memory.cpp src/windows/file_lock.cpp)
     target_link_libraries(vinc_osal PRIVATE bcrypt advapi32 ws2_32)
     target_compile_definitions(vinc_osal PRIVATE _WIN32_WINNT=0x0601)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_sources(vinc_osal PRIVATE src/posix/notification.cpp)
     include(CheckCXXSymbolExists)
     include(CMakePushCheckState)
     cmake_push_check_state(RESET)

@@ -40,7 +40,7 @@ English and Traditional Chinese are paired below. Commands and code blocks are s
 | Shell and scripts | Console, Raw TCP Socket Shell, Tcl scripts, cancellation, and embedded startup scripts. / 互動終端、Raw TCP Socket Shell、Tcl 腳本、中斷與啟動腳本打包。 |
 | Logging | Central capture of stdout/stderr and structured Error/Warn/Info/Debug records with time and Module identity. / 中央擷取 stdout／stderr，保存含時間與 Module 身分的 Error／Warn／Info／Debug 結構化紀錄。 |
 | Bag Recorder | SQLite recording of selected or all discovered topics, bounded queues, and loss statistics. Payload recording requires compiled-in types. Player is not implemented. / 以 SQLite 錄製指定或探索到的全部 topic，具備有界佇列與損失統計；payload 限建置時已知型別，Player 尚未實作。 |
-| Web UI | Optional-to-start Module, plugin workspace, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 預設不啟動的官方 Module、plugin 工作區，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
+| Web UI | Optional-to-start Module, plugin workspace, manual-refresh Module Graph, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 預設不啟動的官方 Module、plugin 工作區、手動刷新 Module Graph，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
 
 <a id="architecture"></a>
 
@@ -91,6 +91,22 @@ See [Module System](src/vinc/module_system/README.md), [Message Bus](src/vinc/me
 See [Tcl integration](library/tcl/README.md), [Python SDK](src/vinc/module_system/python/README.md), and [third-party dependencies](library/README.md) for detailed requirements.
 
 詳細需求與部署限制見上述文件。
+
+### Prepare dependencies / 準備相依環境
+
+Run `tools\setup.bat` on Windows, or `bash tools/setup.sh` on Ubuntu/macOS.
+These scripts install/check tools, restore pinned submodules and install UI npm
+dependencies. They **do not configure or build your project**. UI and optional
+Python SDK prerequisites are included by default; use `--no-ui` or `--no-python`
+to omit them, or `--check` to inspect without installing. Standalone temporary
+compiler probes check toolchain capabilities. See [setup instructions](tools/README.md)
+for platform requirements, environment selection and validation limits.
+
+Windows 執行 `tools\setup.bat`，Ubuntu／macOS 執行 `bash tools/setup.sh`。
+腳本安裝／檢查工具、還原固定 submodule 並安裝 UI npm 套件，**不配置或編譯使用者專案**。
+預設包含 UI 與選用 Python SDK 的相依，可用 `--no-ui`／`--no-python` 略過；
+`--check` 僅檢查、不安裝。工具鏈能力由獨立暫存小程式驗證。
+平台需求、環境選擇與驗證限制見 [setup 說明](tools/README.md)。
 
 ### Configure, build, test / 配置、建置、測試
 
@@ -150,9 +166,9 @@ webUi
 ui status
 ```
 
-Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor**. `webUi` is built by default but starts only when requested. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
+Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. `webUi` is built by default but starts only when requested. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
 
-開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor**。`webUi` 預設建置，需明確啟動才會執行。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
+開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。`webUi` 預設建置，需明確啟動才會執行。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
 
 <a id="develop-a-module"></a>
 
@@ -274,8 +290,80 @@ For example, the [Topic Monitor validation recorded on 2026-10-25](src/vinc/ui/R
 
 例如上述 2026-10-25 的 Topic Monitor 驗證包含 Windows Debug／Release 各 12 項相關 CTest、前端型別檢查與 5 項 Chromium 測試，不是全專案或跨平台認證。
 
+<a id="windows-validation"></a>
+
+**Validated Windows environment (2026-10-27) / Windows 已驗證環境（2026-10-27）**
+
+| Item / 項目 | Validated version / 已驗證版本 |
+| --- | --- |
+| OS / 作業系統 | Windows, build **26200**, x64 |
+| Compiler and standard library / 編譯器與標準函式庫 | MSVC **19.51.36257.0**, toolset / 工具集 **14.51.36231** |
+| Windows SDK | **10.0.26100.0** |
+| Build tools / 建置工具 | CMake **4.3.2**, Ninja **1.13.2** |
+| Configuration / 組態 | Debug and Release; apps, examples, Python and Web UI enabled / 啟用 apps、examples、Python 與 Web UI |
+| Source / 原始碼 | Commit **`ab236857480bdf85e81129361f517fc72fcd6935`** |
+
+Full Debug and Release project builds succeeded. The selected OSAL, OutputHub and Log suites passed **23/23 in each configuration** (11.76 s / 8.72 s). Coverage includes Process, Pipe, submission-error wrapping, four Pipe contract cases, Socket, SharedMemory, FileLock, OutputHub integration/faults, and Log unit/process/transport. The deterministic `osal.pipe_attach_failure` test also passed separately in both configurations; it does not establish actual Windows IOCP failure injection. These were selected regression suites, not full-project CTest runs. Local logs: `build/windows-macos-followup-debug-ctest.log` and `build/windows-macos-followup-release-ctest.log`.
+
+Debug／Release 全專案建置成功；選定的 OSAL、OutputHub 與 Log 測試兩種組態各 **23/23 通過**（11.76／8.72 秒）。範圍包含 Process、Pipe、提交錯誤包裝、四個 Pipe 契約案例、Socket、SharedMemory、FileLock、OutputHub 整合／故障，以及 Log 單元／程序／傳輸。確定性 `osal.pipe_attach_failure` 亦於兩種組態分別重跑通過，但不代表已注入 Windows IOCP 的真實失敗。這是選定套件的回歸，並非全專案 CTest。上述本機 log 保存完整結果。
+
+<a id="linux-validation"></a>
+
+**Validated Linux environment (2026-10-27) / Linux 已驗證環境（2026-10-27）**
+
+| Item / 項目 | Validated version / 已驗證版本 |
+| --- | --- |
+| Distribution / 發行版 | Ubuntu **24.04.5 LTS**, WSL 2, x86_64 |
+| Kernel / 核心 | **6.18.54.1-microsoft-standard-WSL2** |
+| Compiler / 編譯器 | GCC / G++ **13.3.0** (`13.3.0-6ubuntu2~24.04.1`) |
+| C library / C 函式庫 | glibc **2.39** |
+| C++ standard library / C++ 標準函式庫 | libstdc++ headers / 標頭 **13.3.0**; runtime package / 執行時套件 **14.2.0-4ubuntu2~24.04.1** |
+| Build tools / 建置工具 | CMake **3.28.3**, Ninja **1.11.1** |
+| Configuration / 組態 | Standalone OSAL Debug, non-root user, build directory on the WSL Linux filesystem / 獨立 OSAL Debug、非 root 帳號，建置目錄位於 WSL Linux 檔案系統 |
+| Source / 原始碼 | Commit **`ab236857480bdf85e81129361f517fc72fcd6935`** plus the descriptor test fix / 加上 descriptor 測試修正 |
+
+The OSAL library and four selected test targets built successfully; **`osal.descriptor`, `osal.process`, `osal.shared_memory` and `osal.file_lock` passed 4/4**. Direct descriptor execution, an inherited-fd-3 launcher, and 20 consecutive descriptor CTest runs passed. `strace` verified real low-fd acquisition, `EMFILE` during relocation, cleanup of new names, and preservation of existing names after failed open. Five deliberately broken variants in isolated source copies were detected, and the restored copy passed. See the [descriptor findings](src/vinc/osal/README.md#待處理事項) for the original CTest fixture defect and negative controls. Logs and traces are under `build/wsl-ubuntu2404-descriptor-review/`.
+
+OSAL library 與四個選定測試目標建置成功；**`osal.descriptor`、`osal.process`、`osal.shared_memory`、`osal.file_lock` 共 4/4 通過**。descriptor 直接執行、繼承 fd 3 的啟動方式，以及連續 20 次 CTest 均通過。`strace` 確認真正的低 fd 建立、搬移時 `EMFILE`、新建名稱回收與 open 失敗保留既有名稱；隔離副本中五個刻意破壞的版本均被攔下，還原後通過。原始 CTest fixture 問題與負向對照詳見 [descriptor 紀錄](src/vinc/osal/README.md#待處理事項)，本機 log 與 trace 保存於上述目錄。
+
+This Linux report covers the stated OSAL paths. It does not establish a full-project Linux build, Release results, Ubuntu 22.04 deployment compatibility, or resolution of the separately deferred fd creation/spawn race. Earlier Ubuntu 22.04 / GCC 12.3 execution evidence was reported separately; it is not counted as part of this four-suite WSL run.
+
+此 Linux 報告涵蓋上述 OSAL 路徑；全專案 Linux 建置、Release、Ubuntu 22.04 部署相容性與另列的 fd 建立／spawn 競爭問題，不在這四套 WSL 結果的範圍內。先前另有 Ubuntu 22.04／GCC 12.3 的執行驗證回報，不併入本輪測試數。
+
+<a id="macos-validation"></a>
+
+**Validated macOS environment (2026-10-27) / macOS 已驗證環境（2026-10-27）**
+
+| Item / 項目 | Validated version / 已驗證版本 |
+| --- | --- |
+| macOS | **26.3.1(a)**, OS build `25D771280a` |
+| Architecture / 架構 | Apple Silicon / `arm64` |
+| Compiler / 編譯器 | Apple Clang **21.0.0** (`clang-2100.1.1.101`) |
+| Standard library / 標準函式庫 | libc++ **21.1.6** (`_LIBCPP_VERSION=210106`) |
+| macOS SDK | **26.5** |
+| Build tools / 建置工具 | CMake **4.4.4**, Ninja **1.13.2** (`1.13.2.git.kitware.jobserver-pipe-1`) |
+| Web UI build tools / Web UI 建置工具 | Node.js **24.22.0**, npm **11.19.1** |
+| Configuration / 組態 | Debug; apps, examples and Web UI enabled; Python disabled / 啟用 apps、examples、Web UI；停用 Python |
+| Source / 原始碼 | Base commit `13204c20a361` plus local macOS fixes and Pipe contract tests / 基礎 commit 加上本機 macOS 修正與 Pipe 契約測試 |
+
+This records a tested configuration, not a minimum macOS deployment version or a released version of Open-VINC. Minimum macOS compatibility and Intel/x86_64 support have not been established by this run.
+
+此表記錄實際通過驗證的組合；macOS 最低部署版本仍未確立，也不代表已發布的 Open-VINC 版本。本次未驗證 Intel／x86_64 Mac。
+
+The initial clean default Debug build including the Web UI succeeded. All 82 CTests passed across the full run (79 passed) and the corrected Socket/Log test rerun (3 passed). Frontend type checking also passed. Manual Vinc execution verified example Module commands, Web UI HTML/JS/CSS HTTP 200 responses, enabled file logging, and complete shutdown. Logs are under `build/macos-debug-fixed-*.log`.
+
+初次乾淨的預設 Debug 建置（含 Web UI）成功；完整 CTest 首輪通過 79 項，修正 Socket／Log 測試情境後重跑其餘 3 項通過，合計 82 項均通過。前端型別檢查亦通過。另實際啟動 Vinc，確認範例 Module 命令、Web UI HTML／JS／CSS 的 HTTP 200 回應、檔案 Log 啟用及完整關閉。紀錄位於 `build/macos-debug-fixed-*.log`。
+
+After the Pipe submission-error wrapping and contract-test additions, the full Debug project rebuilt successfully and **24/24 OSAL and OutputHub CTests passed**, including 9 new tests. This follow-up did not rerun the full project suite; do not add the two runs' counts together. [Pipe validation details](src/vinc/osal/PIPE.md#斷管與提交失敗契約測試2026-10-27) record the scope and negative controls. Local logs: `build/macos-pipe-contract-final-build.log` and `build/macos-pipe-contract-final-ctest.log`.
+
+補齊 Pipe 提交錯誤包裝與契約測試後，完整 Debug 專案再次建置成功，**OSAL 與 OutputHub 的 24/24 項 CTest 通過**，包含新增 9 項測試。此後續回歸沒有重跑全專案套件，兩輪測試數不可直接相加；範圍與反向驗證詳見 [Pipe 驗證紀錄](src/vinc/osal/PIPE.md#斷管與提交失敗契約測試2026-10-27)。本機紀錄為 `build/macos-pipe-contract-final-build.log` 與 `build/macos-pipe-contract-final-ctest.log`。
+
+Release, optional Python bindings, browser automation, and other operating systems were not tested in these macOS runs. Use a fresh build directory when upgrading from the original `vinc/` binary-tree layout, which collided with `Vinc` on case-insensitive filesystems; intermediate framework artifacts now live under `framework/`.
+
+上述 macOS 驗證未涵蓋 Release、選用 Python 綁定、瀏覽器自動化或其他 OS。原本 `vinc/` 中間產物目錄與 `Vinc` 在不區分大小寫的檔案系統衝突，現改放 `framework/`；從舊布局升級時請使用新的建置目錄。
+
 - **ABI and deployment:** native Plugins require matching toolchain, standard library, configuration, layout, and Windows CRT. There is no installed `find_package(VINC)` SDK or complete relocatable Plugin/UI package yet. / **ABI 與部署：**原生 Plugin 須符合工具鏈、標準庫、組態、布局及 Windows CRT 契約；尚無安裝式 `find_package(VINC)` SDK 或完整可重定位的 Plugin／UI 部署包。
-- **UI scope:** Topic Monitor is read-only. Module control, Param editing, Log panels, dependency graphs, 3D panels, and browser management RPC are not wired. Trusted plugins share page privileges, not a sandbox. / **UI 範圍：**Topic Monitor 為唯讀；Module 控制、Param 編輯、Log 面板、依賴圖、3D 面板與瀏覽器管理 RPC 尚未接線。受信任 plugin 共用頁面權限，不是隔離沙箱。
+- **UI scope:** Read-only Topic Monitor and a manually refreshed Module Graph are available. Module control, Param editing, Log panels, 3D panels, and browser management RPC are not wired. Trusted plugins share page privileges, not a sandbox. / **UI 範圍：**已提供唯讀 Topic Monitor 與手動刷新的唯讀 Module Graph；Module 控制、Param 編輯、Log 面板、3D 面板與瀏覽器管理 RPC 尚未接線。受信任 plugin 共用頁面權限，不是隔離沙箱。
 - **Future capabilities:** native Plugin hot discovery/loading, dynamic message schemas, Bag Player, and framework-to-framework multi-machine transport are not implemented. / **未來能力：**尚未實作原生 Plugin 熱探索／載入、動態訊息 schema、Bag Player 與框架對框架的多機傳輸。
 - **Failure isolation:** process boundaries limit crash propagation, but do not promise security sandboxing or hard real-time behavior. Heartbeat detects only limited liveness; resource bounds and shared-memory recovery remain explicit contracts. / **故障隔離：**程序邊界可限制 crash 連帶影響，不等於安全沙箱或硬即時保證；heartbeat 只能有限度偵測存活，資源上限與共享記憶體回收仍依明定契約。
 

@@ -1,3 +1,4 @@
+#include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/control/channel.hpp>
 // Exercise actual Bus code and Socket sessions at allocation failure boundaries.
 // Fault checkpoints throw only in this test executable; data-path tests use real mappings.
@@ -31,6 +32,8 @@ thread_local std::optional<Result<std::uint64_t>> clock_override;
 std::atomic<FaultPoint> armed{FaultPoint::None};
 std::atomic<bool> fault_hit{false};
 std::atomic<std::size_t> remaining_pending{SIZE_MAX};
+std::atomic<std::uint64_t> failed_notification_owner{0};
+std::atomic<std::uint64_t> notification_calls{0};
 
 void check(bool condition, const char* reason) {
     if (!condition) {
@@ -96,12 +99,17 @@ struct Connection {
         detail::RuntimeAccess::shutdown(*client);
     }
 
-    void reply(const control::Frame& request, control::Bytes body) {
+    void reply(const control::Frame& request, control::Bytes body, bool malformed = false) {
         control::Frame response{control::Kind::Response, request.domain, request.operation, request.request};
         control::put_u32(response.payload, detail::result_success);
         response.payload.insert(response.payload.end(), body.begin(), body.end());
         ok(central->send(std::move(response)));
-        ok(detail::RuntimeAccess::receive(*client, take(module->receive_until(deadline()))));
+        auto received = detail::RuntimeAccess::receive(*client, take(module->receive_until(deadline())));
+        if (malformed) {
+            check(!received && received.error().is(bus::ErrorCode::Protocol), "dispatcher rejects malformed routes");
+        } else {
+            ok(std::move(received));
+        }
     }
 
     void expect_closed() {
@@ -139,6 +147,7 @@ detail::Descriptor descriptor() {
 control::Bytes advertisement(const detail::Descriptor& value) {
     control::Bytes body;
     ok(detail::encode_descriptor(body, value));
+    control::put_u32(body, 0); // No callback destinations in this synthetic reply.
     return body;
 }
 
@@ -151,6 +160,73 @@ control::Bytes subscription(std::uint64_t id, const detail::Descriptor* source =
     }
 
     return body;
+}
+
+void test_publication_notification_failure() {
+    Connection connection;
+    const auto source = descriptor();
+    auto ring = take(detail::RingBuffer::create(source));
+    auto counter = take(detail::NamedCounter::create(source.counter));
+    const auto first_name = detail::shared_name('n');
+    const auto second_name = detail::shared_name('n');
+    auto first = take(osal::NotificationReceiver::create(first_name));
+    auto second = take(osal::NotificationReceiver::create(second_name));
+    struct Cleanup {
+        std::string first;
+        std::string second;
+        ~Cleanup() {
+            (void)osal::NotificationReceiver::unlink_name(first);
+            (void)osal::NotificationReceiver::unlink_name(second);
+        }
+    } cleanup{first_name, second_name};
+    auto pending = std::async(std::launch::async, [&] {
+        return connection.client->advertise<Frame>("notification-test");
+    });
+    control::Bytes body;
+    ok(detail::encode_descriptor(body, source));
+    control::put_u32(body, 2);
+    control::put_u64(body, 2);
+    ok(control::put_string(body, first_name));
+    control::put_u64(body, 3);
+    ok(control::put_string(body, second_name));
+    connection.reply(take(connection.central->receive_until(deadline())), std::move(body));
+    auto publisher = take(pending.get());
+    ok(first.wait_until(deadline()));
+    ok(second.wait_until(deadline()));
+    auto local = make_message<Frame>();
+    local->data().sequence = 42;
+    failed_notification_owner.store(2);
+    notification_calls.store(0);
+    ok(publisher.push(*local));
+    ok(second.wait_until(deadline()));
+    check(detail::shared_load(ring->header().head) == 1, "signal follows committed head");
+    auto status = detail::RuntimeAccess::notification_diagnostics(*connection.client);
+    check(status.degraded && status.target == 2 && status.failures == 1,
+        "first notify failure preserves publication and target diagnostics");
+    auto loan = take(publisher.get_next());
+    loan->data().sequence = 43;
+    ok(publisher.commit(loan));
+    ok(second.wait_until(deadline()));
+    check(detail::shared_load(ring->header().head) == 2, "loan publication remains successful");
+    check(notification_calls.load() == 4, "first failure permits the next normal publication retry");
+    ok(publisher.push(*local));
+    ok(second.wait_until(deadline()));
+    check(notification_calls.load() == 5, "repeated sender failure is rate limited, other routes progress");
+    failed_notification_owner.store(0);
+    std::this_thread::sleep_for(config::notification_retry_interval);
+    detail::RuntimeAccess::progress_notifications(*connection.client);
+    ok(first.wait_until(deadline()));
+    status = detail::RuntimeAccess::notification_diagnostics(*connection.client);
+    check(!status.degraded && status.recoveries == 1 && status.last_error.has_value(),
+        "low-frequency reopen catches up and retains failure history");
+    ok(publisher.push(*local));
+    ok(first.wait_until(deadline()));
+    publisher.close();
+    control::Frame invalid{control::Kind::Event, detail::message_bus_domain, detail::NotificationRoutesChanged};
+    control::put_u64(invalid.payload, 0);
+    control::put_u32(invalid.payload, 0);
+    auto rejected = detail::RuntimeAccess::receive(*connection.client, std::move(invalid));
+    check(!rejected && rejected.error().is(bus::ErrorCode::Protocol), "zero Publisher route identity is malformed");
 }
 
 void test_publication_times() {
@@ -319,7 +395,8 @@ void test_malformed_advertise(MalformedReply kind) {
         return connection.client->advertise<Frame>("malformed-success");
     });
     const auto request = take(connection.central->receive_until(deadline()));
-    connection.reply(request, std::move(body));
+    connection.reply(request, std::move(body),
+        kind == MalformedReply::Truncated || kind == MalformedReply::ZeroId);
     auto result = pending.get();
     check(!result && result.error().is(bus::ErrorCode::Protocol), "malformed success must report Protocol");
     connection.expect_closed();
@@ -328,12 +405,12 @@ void test_malformed_advertise(MalformedReply kind) {
 // Drive the real manager via real control frames, without a module dispatcher.
 // These tests own every simulated owner and guarantee no payload access during exited().
 Result<control::Bytes> manager_request(detail::BusManager& manager, Connection& connection, std::uint64_t owner,
-                               std::uint16_t operation, control::Bytes payload) {
+                               std::uint16_t operation, control::Bytes payload, std::string notification = {}) {
     control::Frame frame{control::Kind::Request, detail::message_bus_domain, operation,
                          connection.next_request++, std::move(payload)};
     ok(connection.module->send(std::move(frame)));
     auto request = take(connection.central->receive_until(deadline()));
-    ok(manager.submit(owner, "cleanup-owner", connection.central, std::move(request)));
+    ok(manager.submit(owner, "cleanup-owner", connection.central, std::move(request), std::move(notification)));
     auto response = take(connection.module->receive_until(deadline()));
     check(response.kind == control::Kind::Response, "expected manager response");
     auto decoded = take(detail::decode_response(response.payload));
@@ -345,7 +422,7 @@ Result<control::Bytes> manager_request(detail::BusManager& manager, Connection& 
 }
 
 detail::Descriptor register_publisher(detail::BusManager& manager, Connection& connection,
-                                      std::uint64_t owner, const std::string& topic) {
+                                      std::uint64_t owner, const std::string& topic, std::uint32_t expected_routes = 0) {
     control::Bytes payload;
     ok(control::put_string(payload, topic));
     control::put_u64(payload, Frame::schema().hash);
@@ -354,7 +431,12 @@ detail::Descriptor register_publisher(detail::BusManager& manager, Connection& c
     auto body = take(manager_request(manager, connection, owner, detail::Advertise, std::move(payload)));
     control::Reader reader(body);
     auto value = detail::decode_descriptor(reader);
-    check(reader.done(), "manager descriptor must be complete");
+    const auto routes = reader.u32();
+    check(routes == expected_routes, "Advertise route count");
+    for (std::uint32_t index = 0; index < routes; ++index) {
+        check(reader.u64() != 0 && !reader.string().empty(), "authenticated destination identity");
+    }
+    check(reader.done(), "manager descriptor and routes must be complete");
     return value;
 }
 
@@ -508,6 +590,114 @@ void test_manager_topic_separators() {
     ok(manager->drain_until(deadline()));
 }
 
+void test_notification_topology() {
+    Connection writer;
+    Connection reader;
+    auto manager = take(detail::BusManager::create());
+    const auto name = detail::shared_name('n');
+    const auto subscribe = [&](const std::string& topic) {
+        control::Bytes payload;
+        ok(control::put_string(payload, topic));
+        control::put_u64(payload, Frame::schema().hash);
+        control::put_u32(payload, 0);
+        auto response = take(manager_request(*manager, reader, 2, detail::Subscribe, std::move(payload), name));
+        control::Reader decoded(response);
+        const auto id = decoded.u64();
+        const auto count = decoded.u32();
+        for (std::uint32_t index = 0; index < count; ++index) {
+            (void)detail::decode_attachment(decoded);
+        }
+        check(decoded.done(), "subscription response consumed");
+        return id;
+    };
+    const auto mutate = [&](std::uint16_t operation, std::uint64_t id) {
+        control::Bytes payload;
+        control::put_u64(payload, id);
+        take(manager_request(*manager, reader, 2, operation, std::move(payload), name));
+    };
+    const auto route_event = [&](std::uint64_t publisher, std::uint32_t count) {
+        const auto event = take(writer.module->receive_until(deadline()));
+        check(event.operation == detail::NotificationRoutesChanged, "dedicated route event");
+        control::Reader decoded(event.payload);
+        check(decoded.u64() == publisher && decoded.u32() == count, "route belongs to the current Publisher");
+        if (count) {
+            check(decoded.u64() == 2 && decoded.string() == name, "route uses central-approved generation/name");
+        }
+        check(decoded.done(), "one destination per Module, not per subscription");
+    };
+    const auto publication = register_publisher(*manager, writer, 1, "routes");
+    const auto first = subscribe("routes");
+    mutate(detail::EnableNotifications, first);
+    route_event(publication.id, 1);
+    const auto second = subscribe("routes");
+    mutate(detail::EnableNotifications, second);
+    route_event(publication.id, 1);
+    const auto get_last_only = subscribe("routes");
+    mutate(detail::Unsubscribe, first);
+    route_event(publication.id, 1);
+    mutate(detail::Unsubscribe, second);
+    route_event(publication.id, 0);
+    mutate(detail::Unsubscribe, get_last_only);
+    const auto early = subscribe("sub-first");
+    mutate(detail::EnableNotifications, early);
+    const auto early_publication = register_publisher(*manager, writer, 1, "sub-first", 1);
+    auto early_ring = take(detail::RingBuffer::open(early_publication, false));
+    detail::shared_store(early_ring->reader(0).token, 1);
+    check(take(reader.module->receive_until(deadline())).operation == detail::Attach,
+        "subscriber-first route accompanies ordinary source attachment");
+    arm(FaultPoint::NotificationRoutesEncode);
+    manager->exited(2);
+    ok(manager->drain_until(deadline()));
+    check(fault_hit.load(), "route encoding failure injected during owner cleanup");
+    check(detail::shared_load(early_ring->reader(0).token) == 0,
+          "notification failure cannot prevent confirmed-exit reader cleanup");
+    manager->exited(1);
+    ok(manager->drain_until(deadline()));
+}
+
+void test_notification_capacity() {
+    Connection connection;
+    bus::Limits limits;
+    limits.subscribers_per_topic = detail::maximum_ring_buffer_readers;
+    auto manager = take(detail::BusManager::create(limits));
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> registrations;
+    bool rejected = false;
+    const auto request_id = [&](std::uint64_t owner, std::uint16_t operation, std::uint64_t id) {
+        control::Bytes body;
+        control::put_u64(body, id);
+        return manager_request(*manager, connection, owner, operation, std::move(body), std::string(24, 'n'));
+    };
+    // Reuse the test transport for many authenticated owner identities. No native
+    // endpoints or child processes are needed to test central wire admission.
+    for (std::uint64_t owner = 1; owner <= limits.subscribers_per_topic; ++owner) {
+        control::Bytes body;
+        ok(control::put_string(body, "bounded-routes"));
+        control::put_u64(body, Frame::schema().hash);
+        control::put_u32(body, 0);
+        auto response = take(manager_request(*manager, connection, owner, detail::Subscribe,
+            std::move(body), std::string(24, 'n')));
+        control::Reader decoded(response);
+        const auto id = decoded.u64();
+        check(decoded.u32() == 0 && decoded.done(), "empty topic subscriber");
+        auto enabled = request_id(owner, detail::EnableNotifications, id);
+        if (!enabled) {
+            check(enabled.error().is(bus::ErrorCode::CapacityExceeded), "oversized route list is rejected before mutation");
+            const auto [first_owner, first_id] = registrations.front();
+            take(request_id(first_owner, detail::Unsubscribe, first_id));
+            take(request_id(owner, detail::EnableNotifications, id));
+            rejected = true;
+            registrations.emplace_back(owner, id);
+            break;
+        }
+        registrations.emplace_back(owner, id);
+    }
+    check(rejected, "route wire ceiling reached before reader ceiling");
+    for (const auto& [owner, id] : registrations) {
+        manager->exited(owner);
+    }
+    ok(manager->drain_until(deadline()));
+}
+
 void test_registration_capacity_reuse() {
     Connection publisher_connection;
     Connection subscriber_connection;
@@ -547,6 +737,37 @@ void test_registration_capacity_reuse() {
     manager->exited(publisher_owner);
     manager->exited(subscriber_owner);
     ok(manager->drain_until(deadline()));
+}
+
+void test_readonly_timeout() {
+    Connection connection;
+    constexpr auto query_budget = std::chrono::milliseconds{50};
+    auto call = std::async(std::launch::async, [&] {
+        return connection.client->list_topic_connections({}, control::Clock::now() + query_budget);
+    });
+    auto request = take(connection.central->receive_until(deadline()));
+    auto expired = call.get();
+    check(!expired, "read-only query times out");
+    check(connection.module->state() == control::State::Open, "query timeout retains control session");
+    connection.reply(request, take(detail::encode_connections({})));
+    auto retry = std::async(std::launch::async, [&] {
+        return connection.client->list_topic_connections({}, deadline());
+    });
+    auto next = take(connection.central->receive_until(deadline()));
+    connection.reply(next, take(detail::encode_connections({})));
+    check(take(retry.get()).connections.empty(), "late reply retired; subsequent query succeeds");
+    constexpr auto retirement_budget = std::chrono::milliseconds{30};
+    for (std::size_t index = 0; index <= config::message_bus_pending_requests; ++index) {
+        auto dropped = connection.client->list_topic_connections({}, control::Clock::now() + retirement_budget);
+        check(!dropped, "lost reply times out");
+        take(connection.central->receive_until(deadline()));
+    }
+    auto recovered = std::async(std::launch::async, [&] {
+        return connection.client->list_topic_connections({}, deadline());
+    });
+    auto recovered_frame = take(connection.central->receive_until(deadline()));
+    connection.reply(recovered_frame, take(detail::encode_connections({})));
+    check(take(recovered.get()).connections.empty(), "lost replies never exhaust pending capacity");
 }
 
 void test_exit_cleanup(FaultPoint point) {
@@ -624,6 +845,14 @@ Result<std::uint64_t> publication_timestamp() noexcept {
     return clock_override ? *clock_override : vinc::unix_nanoseconds();
 }
 
+Result<void> notification_notify(osal::NotificationSender& sender, std::uint64_t owner) {
+    ++notification_calls;
+    if (failed_notification_owner.load() == owner) {
+        return std::unexpected(Error{osal::ErrorCode::SystemError, osal::ErrorOperation::Notify});
+    }
+    return sender.notify();
+}
+
 void checkpoint(FaultPoint point) {
     auto expected = point;
     if (armed.compare_exchange_strong(expected, FaultPoint::None)) {
@@ -638,30 +867,58 @@ void pending_remaining(std::size_t count) noexcept {
 }
 
 int main() {
+    const char* phase = "startup";
     try {
+        phase = "test_publication_notification_failure()";
+        test_publication_notification_failure();
+        phase = "test_publication_times()";
         test_publication_times();
+        phase = "test_topic_discovery()";
         test_topic_discovery();
+        phase = "test_malformed_discovery()";
         test_malformed_discovery();
+        phase = "test_client_topic_separators()";
         test_client_topic_separators();
+        phase = "test_manager_topic_separators()";
         test_manager_topic_separators();
+        phase = "test_readonly_timeout()";
+        test_readonly_timeout();
+        phase = "test_send_failure()";
         test_send_failure();
+        phase = "test_advertise_failure(FaultPoint::ResponseCopy)";
         test_advertise_failure(FaultPoint::ResponseCopy);
+        phase = "test_advertise_failure(FaultPoint::DescriptorDecode)";
         test_advertise_failure(FaultPoint::DescriptorDecode);
+        phase = "test_advertise_failure(FaultPoint::PublisherAttach)";
         test_advertise_failure(FaultPoint::PublisherAttach);
+        phase = "test_subscribe_failure(FaultPoint::ResponseCopy)";
         test_subscribe_failure(FaultPoint::ResponseCopy);
+        phase = "test_subscribe_failure(FaultPoint::AttachmentDecode)";
         test_subscribe_failure(FaultPoint::AttachmentDecode);
+        phase = "test_malformed_advertise(MalformedReply::Truncated)";
         test_malformed_advertise(MalformedReply::Truncated);
+        phase = "test_malformed_advertise(MalformedReply::Schema)";
         test_malformed_advertise(MalformedReply::Schema);
+        phase = "test_malformed_advertise(MalformedReply::ZeroId)";
         test_malformed_advertise(MalformedReply::ZeroId);
+        phase = "test_malformed_advertise(MalformedReply::Dimensions)";
         test_malformed_advertise(MalformedReply::Dimensions);
+        phase = "test_notification_capacity()";
+        test_notification_capacity();
+        phase = "test_notification_topology()";
+        test_notification_topology();
+        phase = "test_registration_capacity_reuse()";
         test_registration_capacity_reuse();
+        phase = "test_exit_cleanup(FaultPoint::DetachEncode)";
         test_exit_cleanup(FaultPoint::DetachEncode);
+        phase = "test_exit_cleanup(FaultPoint::DetachSend)";
         test_exit_cleanup(FaultPoint::DetachSend);
+        phase = "test_exit_cleanup(FaultPoint::None)";
         test_exit_cleanup(FaultPoint::None);
         std::cout << "PASS: Bus transaction rollback and failure-safe exit cleanup\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
+        std::cerr << phase << ": " << error.what() << '\n';
         return 1;
     }
 }

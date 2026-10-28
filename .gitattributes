@@ -1,2 +1,6 @@
 # Preserve the exact upstream bytes checked by library/sqlite/CMakeLists.txt.
 library/sqlite/upstream/* -text
+
+# Dependency setup must remain runnable after Windows checkouts or WSL copies.
+tools/** text eol=lf
+tools/*.bat text eol=crlf

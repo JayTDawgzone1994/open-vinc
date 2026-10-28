@@ -15,12 +15,14 @@ public:
     static Result<std::shared_ptr<Instance>> create(std::string name);
     ~Instance();
     Result<std::string> reserve() override;
+    Result<std::string> reserve_notification();
     Result<void> retire(std::string_view name) override;
     const std::string& name() const noexcept;
     const std::filesystem::path& journal() const noexcept;
 
 private:
     Instance() = default;
+    Result<std::string> reserve_kind(char kind);
     Result<void> prepare_directory();
     Result<void> acquire_instance();
     Result<void> clean_previous();

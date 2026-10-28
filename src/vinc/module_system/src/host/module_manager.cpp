@@ -1,3 +1,5 @@
+#include <vinc/message_bus/detail/protocol.hpp>
+#include <vinc/module/detail/module_query_protocol.hpp>
 #include <vinc/module/detail/python_launch.hpp>
 #include <vinc/log/detail/manager.hpp>
 #include <iostream>
@@ -26,6 +28,7 @@
 #include <map>
 #include <mutex>
 #include <vinc/osal/random.hpp>
+#include <vinc/osal/notification.hpp>
 #include <vinc/module/detail/error_protocol.hpp>
 #include <set>
 #include <stdexcept>
@@ -140,6 +143,9 @@ struct Record {
     // Resources owned by the current process generation.
     std::optional<osal::Process> process;
     std::unique_ptr<detail::ContractReportStorage> contract_report;
+    std::string notification_name;
+    osal::NotificationReceiver notification_creator;
+    bool notification_created = false;
     bool termination_requested = false;
     std::uint64_t output_capture = 0;
     std::optional<osal::Socket> listener;
@@ -167,6 +173,7 @@ struct Record {
     bool startup_rejected = false;
     std::uint64_t last_fault_request = detail::name_registration_request;
     std::optional<control::Frame> name_request;
+    std::optional<control::Frame> module_query;
 
     // At most one command or completion request may be in flight.
     bool pending_waiter = false;
@@ -505,7 +512,9 @@ struct ModuleManager::Impl {
             record.snapshot.mid; // Existing wire/Message Bus generation uses this same identity.
         record.name_confirmed = false;
         record.name_request.reset();
+        record.module_query.reset();
         record.snapshot.pid = 0;
+        record.snapshot.notifications = {};
         record.termination_requested = false;
         record.fault = false;
         record.finishing = false;
@@ -585,7 +594,8 @@ struct ModuleManager::Impl {
                              record.module_type.name,
                              record.contract_report->name(),
                              utf8(record.module_type.python ? record.module_type.python->script : record.module_type.library),
-                             record.snapshot.debug ? "1" : "0"};
+                             record.snapshot.debug ? "1" : "0",
+                             record.notification_name};
         options.arguments.insert(options.arguments.end(), record.arguments.begin(), record.arguments.end());
 
         if (record.module_type.python) {
@@ -621,6 +631,59 @@ struct ModuleManager::Impl {
         record.changed.notify_all();
     }
 
+    Result<void> prepare_notification(Record& record) {
+        auto name = instance->reserve_notification();
+        if (!name) {
+            return std::unexpected(wrap_error(ErrorCode::NotificationFailed,
+                                             ErrorOperation::PrepareNotification, name.error()));
+        }
+
+        record.notification_name = std::move(*name);
+#ifdef VINC_MODULE_TESTING
+        module_system::test::checkpoint(module_system::test::Point::NotificationReserved,
+                                        nullptr, record.notification_name);
+#endif
+        auto receiver = osal::NotificationReceiver::create(record.notification_name);
+        if (!receiver) {
+            return std::unexpected(wrap_error(ErrorCode::NotificationFailed,
+                                             ErrorOperation::PrepareNotification, receiver.error()));
+        }
+
+        record.notification_creator = std::move(*receiver);
+        record.notification_created = true;
+        return {};
+    }
+
+    // Only called after confirmed exit, or when launch never created a child.
+    // A failed cleanup leaves its journal entry for the next admitted central.
+    void release_notification(Record& record) {
+        if (record.notification_name.empty()) {
+            return;
+        }
+
+        auto released = record.notification_creator.close();
+#ifndef _WIN32
+        if (released && record.notification_created) {
+            released = osal::NotificationReceiver::unlink_name(record.notification_name);
+            if (!released && released.error().is(osal::ErrorCode::NotFound)) {
+                released = {};
+            }
+        }
+#endif
+        if (released) {
+            released = instance->retire(record.notification_name);
+        }
+
+        if (!released) {
+            save_cleanup(record, wrap_error(ErrorCode::CleanupFailed,
+                                             ErrorOperation::CloseNotification, released.error()));
+        }
+
+        record.notification_creator = {};
+        record.notification_name.clear();
+        record.notification_created = false;
+    }
+
     // Each generation gets a fresh MID, token and endpoint before resource acquisition.
     void launch(Record& record) {
         auto reset = reset_generation(record);
@@ -629,6 +692,12 @@ struct ModuleManager::Impl {
             return;
         }
         if (!prepare_listener(record)) {
+            return;
+        }
+
+        auto notification = prepare_notification(record);
+        if (!notification) {
+            record_failure(record, notification.error());
             return;
         }
 
@@ -695,6 +764,7 @@ struct ModuleManager::Impl {
             }
             record.contract_report.reset();
         }
+        release_notification(record);
         retire_command(record);
 
         record.snapshot.debug_waiting = false;
@@ -921,6 +991,15 @@ struct ModuleManager::Impl {
                     continue;
                 }
                 if (frame.kind == control::Kind::Event && frame.domain == detail::lifecycle &&
+                    frame.operation == detail::notification_health) {
+                    control::Reader reader(frame.payload);
+                    auto status = detail::decode_notifications(reader);
+                    if (frame.request || !status || !reader.done() || !status->observed) {
+                        record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::Receive));
+                        break;
+                    }
+                    record.snapshot.notifications = *status;
+                } else if (frame.kind == control::Kind::Event && frame.domain == detail::lifecycle &&
                     frame.operation == detail::debug_waiting) {
                     if (!record.snapshot.debug || record.debug_gate_seen || !frame.payload.empty() ||
                         record.snapshot.state != ModuleState::Starting || record.name_confirmed) {
@@ -939,6 +1018,21 @@ struct ModuleManager::Impl {
                 } else if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
                            frame.operation == detail::attach_lock) {
                     receive_lock_request(record, frame);
+                } else if (frame.kind == control::Kind::Request && frame.domain == detail::lifecycle &&
+                           frame.operation == detail::list_modules) {
+                    if (!record.name_confirmed || !frame.request) {
+                        record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::ListModules));
+                        break;
+                    }
+                    if (record.module_query) {
+                        control::Frame response{control::Kind::Response, detail::lifecycle,
+                            detail::list_modules, frame.request};
+                        response.payload = detail::encode_failure(Error{ErrorCode::Busy, ErrorOperation::ListModules});
+                        (void)record.session->send(std::move(response));
+                    } else {
+                        // Collection needs other Record locks; defer until tick releases this lock.
+                        record.module_query = std::move(frame);
+                    }
                 } else if (frame.domain == rpc::detail::domain) {
                     if (!record.name_confirmed) {
                         record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::Receive));
@@ -979,9 +1073,17 @@ struct ModuleManager::Impl {
                         break;
                     }
 
+                    const auto operation = frame.operation;
+                    const auto request = frame.request;
                     auto submitted = bus_manager->submit(record.snapshot.generation, record.snapshot.name,
-                                                         record.session, std::move(frame));
-                    if (!submitted) {
+                                                         record.session, std::move(frame), record.notification_name);
+                    if (!submitted && operation == message_bus::detail::ListTopicConnections &&
+                        submitted.error().is(message_bus::ErrorCode::CapacityExceeded)) {
+                        control::Frame response{control::Kind::Response, message_bus::detail::message_bus_domain,
+                            operation, request};
+                        response.payload = message_bus::detail::encode_failure(submitted.error());
+                        (void)record.session->send(std::move(response));
+                    } else if (!submitted) {
                         record_failure(record, wrap_error(ErrorCode::BusFailed, ErrorOperation::Receive,
                                                           submitted.error()));
                         break;
@@ -1007,7 +1109,19 @@ struct ModuleManager::Impl {
                         break;
                     }
 
+                    // Ready proves the Host opened its own endpoints before user code.
+                    // Central never waits on this receiver; it only bridges handoff lifetime.
+                    auto closed = record.notification_creator.close();
+                    if (!closed) {
+                        save_cleanup(record, wrap_error(ErrorCode::CleanupFailed,
+                                                        ErrorOperation::CloseNotification, closed.error()));
+                    }
+
                     record.snapshot.state = ModuleState::Running;
+#ifdef VINC_MODULE_TESTING
+                    module_system::test::checkpoint(module_system::test::Point::NotificationReady,
+                                                    &*record.process, record.notification_name);
+#endif
                     record.changed.notify_all();
                 } else if (frame.kind == control::Kind::Response && frame.domain == detail::commands) {
                     if (record.pending_request == frame.request &&
@@ -1132,6 +1246,72 @@ struct ModuleManager::Impl {
         record.changed.notify_all();
     }
 
+    Result<control::Bytes> collect_modules(const control::Frame& request) {
+        control::Reader reader(request.payload);
+        const auto version = reader.u32();
+        const auto after = reader.u64();
+        if (!reader.done() || version != detail::module_query_version || after >= central_owner) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::ListModules});
+        }
+
+        ModulePage page;
+        page.modules.reserve(detail::modules_per_page + 1);
+        for (const auto& candidate : snapshot_records()) {
+            std::lock_guard record_lock(candidate->mutex);
+            const auto& snapshot = candidate->snapshot;
+            if (snapshot.mid <= after) {
+                continue;
+            }
+
+            const auto position = std::lower_bound(page.modules.begin(), page.modules.end(), snapshot.mid,
+                [](const ModuleInfo& module, MID mid) { return module.mid < mid; });
+            if (position == page.modules.end() && page.modules.size() > detail::modules_per_page) {
+                continue;
+            }
+
+            page.modules.insert(position, ModuleInfo{snapshot.mid, snapshot.name,
+                snapshot.module_type, snapshot.state, snapshot.notifications});
+            if (page.modules.size() > detail::modules_per_page + 1) {
+                page.modules.pop_back();
+            }
+        }
+        if (page.modules.size() > detail::modules_per_page) {
+            page.modules.pop_back();
+            page.next = page.modules.back().mid;
+        }
+        return detail::encode_modules(page);
+    }
+
+    void process_module_query(const std::shared_ptr<Record>& record) {
+        std::optional<control::Frame> request;
+        std::shared_ptr<control::Session> session;
+        {
+            std::lock_guard record_lock(record->mutex);
+            request.swap(record->module_query);
+            session = record->session;
+        }
+        if (!request || !session) {
+            return;
+        }
+
+        // Only one Record mutex is held at a time. A query allocation failure is
+        // a recoverable diagnostic failure, not a failure of the Module supervisor.
+        Result<control::Bytes> body;
+        try {
+            body = collect_modules(*request);
+        } catch (const std::bad_alloc&) {
+            body = std::unexpected(Error{ErrorCode::ResourceExhausted, ErrorOperation::ListModules});
+        }
+        control::Frame response{control::Kind::Response, detail::lifecycle, detail::list_modules, request->request};
+        if (body) {
+            control::put_u32(response.payload, detail::result_success);
+            response.payload.insert(response.payload.end(), body->begin(), body->end());
+        } else {
+            response.payload = detail::encode_failure(body.error());
+        }
+        (void)session->send(std::move(response));
+    }
+
     void register_name(const std::shared_ptr<Record>& record) {
         std::lock_guard registry_lock(mutex);
         std::lock_guard record_lock(record->mutex);
@@ -1236,6 +1416,7 @@ struct ModuleManager::Impl {
                     }
                     // Release the record before taking registry -> record locks.
                     register_name(record);
+                    process_module_query(record);
                 } catch (const std::system_error& error) {
                     std::lock_guard record_lock(record->mutex);
                     record_failure(*record, Error{ErrorCode::SupervisorFailed, ErrorOperation::Supervise,

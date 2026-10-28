@@ -4,6 +4,7 @@
 #include <vinc/time.hpp>
 #include <vinc/message_bus/detail/protocol.hpp>
 #include <vinc/message_bus/detail/diagnostics_protocol.hpp>
+#include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <vinc/control/channel.hpp>
 #include <condition_variable>
@@ -26,12 +27,14 @@ struct BusManager::Impl {
     struct Peer {
         std::shared_ptr<control::Session> session;
         std::uint64_t last_request = 0;
+        std::string notification_name;
     };
 
     struct Sub {
         std::uint64_t id;
         std::uint64_t owner;
         std::uint32_t index;
+        bool notifications = false;
     };
 
     // A topic shares its schema and count, but each Publisher owns a separate ring buffer.
@@ -54,6 +57,7 @@ struct BusManager::Impl {
         std::shared_ptr<control::Session> session;
         control::Frame frame;
         bool exit = false;
+        std::string notification_name;
     };
 
     std::shared_ptr<vinc::detail::ResourceNames> resources;
@@ -112,6 +116,13 @@ struct BusManager::Impl {
             frame.payload.insert(frame.payload.end(), body->begin(), body->end());
         } else {
             frame.payload = encode_failure(body.error());
+        }
+
+        if (item.frame.operation == ListTopicConnections) {
+            // A congested diagnostic reply may time out at its caller; it must
+            // not turn a read-only refresh into a forced Module disconnection.
+            (void)item.session->send(std::move(frame));
+            return;
         }
 
         send(item.owner, std::move(frame));
@@ -210,6 +221,78 @@ struct BusManager::Impl {
         }
     }
 
+    // Deduplicate callback destinations by their central-approved process generation.
+    control::Bytes notification_routes(const Topic& topic_state, std::uint64_t enabling = 0) const {
+        std::map<std::uint64_t, std::string> destinations;
+        for (const auto& [_, subscriber] : topic_state.subscribers) {
+            auto peer = peers.find(subscriber.owner);
+            if ((subscriber.notifications || subscriber.id == enabling) &&
+                peer != peers.end() && !peer->second.notification_name.empty()) {
+                destinations.emplace(subscriber.owner, peer->second.notification_name);
+            }
+        }
+        control::Bytes bytes;
+        control::put_u32(bytes, static_cast<std::uint32_t>(destinations.size()));
+        for (const auto& [owner, name] : destinations) {
+            control::put_u64(bytes, owner);
+            // Names originate in central resource admission and have a 24-byte bound.
+            (void)control::put_string(bytes, name);
+        }
+        return bytes;
+    }
+
+    void update_notification_routes(const Topic& topic_state) noexcept {
+        for (const auto& [id, publisher] : topic_state.publishers) {
+            try {
+#ifdef VINC_MESSAGE_BUS_TESTING
+                testing::checkpoint(testing::FaultPoint::NotificationRoutesEncode);
+#endif
+                const auto routes = notification_routes(topic_state);
+                control::Frame frame{control::Kind::Event, message_bus_domain, NotificationRoutesChanged};
+                control::put_u64(frame.payload, id);
+                frame.payload.insert(frame.payload.end(), routes.begin(), routes.end());
+                send(publisher->descriptor.owner, std::move(frame));
+            } catch (...) {
+                // Match Detach's existing topology-failure boundary: a recipient
+                // that cannot receive consistent routes is disconnected, while
+                // confirmed-exit reader reclamation continues for other owners.
+                auto peer = peers.find(publisher->descriptor.owner);
+                if (peer != peers.end()) {
+                    peer->second.session->close();
+                }
+            }
+        }
+    }
+
+    Result<control::Bytes> enable_notifications(const Work& item) {
+        control::Reader reader(item.frame.payload);
+        const auto id = reader.u64();
+        if (!reader.done()) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::EnableNotifications});
+        }
+        for (auto& [_, topic_state] : topics) {
+            auto found = topic_state.subscribers.find(id);
+            if (found != topic_state.subscribers.end() && found->second.owner == item.owner) {
+                const auto routes = notification_routes(topic_state, id);
+                // Reserve the largest encoded Descriptor, so subscriber-first
+                // registration also fits a later Advertise response. This is a
+                // wire ceiling, separate from the configured reader capacity.
+                constexpr auto descriptor_fixed_bytes = 5 * sizeof(std::uint64_t) + 2 * sizeof(std::uint32_t);
+                constexpr auto descriptor_text_bytes = 4 * (sizeof(std::uint32_t) + maximum_name_bytes);
+                constexpr auto route_budget = control::max_payload - response_status_bytes -
+                                              descriptor_fixed_bytes - descriptor_text_bytes;
+                if (routes.size() > route_budget) {
+                    return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::EnableNotifications});
+                }
+
+                found->second.notifications = true;
+                update_notification_routes(topic_state);
+                return control::Bytes{};
+            }
+        }
+        return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::EnableNotifications});
+    }
+
     // Called only after a quiescent unsubscribe or confirmed owner-process exit.
     // Clearing a live reader lease based only on a timeout would permit unsafe overwrite.
     void remove_subscriber(Topic& topic_state, std::map<std::uint64_t, Sub>::iterator it) {
@@ -219,7 +302,11 @@ struct BusManager::Impl {
         }
 
         topic_state.used[it->second.index] = false;
+        const bool notifications = it->second.notifications;
         topic_state.subscribers.erase(it);
+        if (notifications) {
+            update_notification_routes(topic_state);
+        }
     }
 
     void exited(std::uint64_t owner) {
@@ -326,6 +413,12 @@ struct BusManager::Impl {
         if (!encoded) {
             return std::unexpected(encoded.error());
         }
+        const auto routes = notification_routes(topic_state);
+        body.insert(body.end(), routes.begin(), routes.end());
+        if (body.size() + response_status_bytes > control::max_payload) {
+            return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::Advertise});
+        }
+
         (*ring_buffer)->requested_slots = requested;
         topic_state.publishers.emplace(descriptor.id, *ring_buffer);
         allocated += needed;
@@ -494,8 +587,56 @@ struct BusManager::Impl {
         return encode_diagnostics(page);
     }
 
+    vinc::Result<control::Bytes> list_connections(const Work& item) {
+        control::Reader reader(item.frame.payload);
+        const auto version = reader.u32();
+        const auto after = read_cursor(reader);
+        if (!reader.done() || version != connections_version || !valid_cursor(after)) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ListTopicConnections});
+        }
+
+        TopicConnectionsPage page;
+        // One worker owns the registry. Stop at the first extra row; a single
+        // topic with thousands of subscriptions still fits bounded wire pages.
+        auto append = [&](const std::string& topic, std::uint64_t schema, ConnectionRole role,
+                          std::uint64_t id, std::uint64_t owner) {
+            ConnectionCursor key{topic, role, id};
+            if (!cursor_before(after, key)) {
+                return true;
+            }
+            if (page.connections.size() == connections_per_page) {
+                page.next = page.connections.back().key;
+                return false;
+            }
+
+            page.connections.push_back({std::move(key), schema, owner});
+            return true;
+        };
+        for (auto it = topics.lower_bound(after.topic); it != topics.end(); ++it) {
+            const auto& [name, topic] = *it;
+            for (const auto& [id, ring] : topic.publishers) {
+                if (!append(name, topic.schema, ConnectionRole::Publisher, id, ring->descriptor.owner)) {
+                    return encode_connections(page);
+                }
+            }
+            for (const auto& [id, subscriber] : topic.subscribers) {
+                if (!append(name, topic.schema, ConnectionRole::Subscriber, id, subscriber.owner)) {
+                    return encode_connections(page);
+                }
+            }
+        }
+
+        return encode_connections(page);
+    }
+
     vinc::Result<control::Bytes> execute(const Work& item) {
         switch (item.frame.operation) {
+        case ListTopicConnections:
+            try {
+                return list_connections(item);
+            } catch (const std::bad_alloc&) {
+                return std::unexpected(Error{ErrorCode::ResourceExhausted, ErrorOperation::ListTopicConnections});
+            }
         case InspectTopics:
             return inspect_topics(item);
         case ListTopics:
@@ -504,6 +645,8 @@ struct BusManager::Impl {
             return advertise(item);
         case Subscribe:
             return subscribe(item);
+        case EnableNotifications:
+            return enable_notifications(item);
         case ClosePublisher:
         case Unsubscribe:
             return close_registration(item);
@@ -545,7 +688,7 @@ struct BusManager::Impl {
                     continue;
                 }
 
-                auto [peer, added] = peers.try_emplace(item.owner, Peer{item.session});
+                auto [peer, added] = peers.try_emplace(item.owner, Peer{item.session, 0, item.notification_name});
                 if (peer->second.session != item.session || item.frame.domain != message_bus_domain) {
                     item.session->close();
                     continue;
@@ -608,7 +751,7 @@ vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings, st
 BusManager::~BusManager() = default;
 
 vinc::Result<void> BusManager::submit(std::uint64_t owner, std::string name,
-                                      std::shared_ptr<control::Session> session, control::Frame frame) {
+                                      std::shared_ptr<control::Session> session, control::Frame frame, std::string notification_name) {
     // Reject old/unknown versions before queueing any registration or release work.
     if (frame.domain != message_bus_domain || !supported_operation(frame.operation)) {
         return std::unexpected(vinc::Error{ErrorCode::Protocol, ErrorOperation::Submit});
@@ -622,7 +765,7 @@ vinc::Result<void> BusManager::submit(std::uint64_t owner, std::string name,
         return std::unexpected(vinc::Error{ErrorCode::CapacityExceeded, ErrorOperation::Submit});
     }
 
-    impl_->work.push_back({owner, std::move(name), std::move(session), std::move(frame), false});
+    impl_->work.push_back({owner, std::move(name), std::move(session), std::move(frame), false, std::move(notification_name)});
     ++impl_->pending_work;
     impl_->cv.notify_all();
     return {};

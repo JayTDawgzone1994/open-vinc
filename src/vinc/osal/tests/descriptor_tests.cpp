@@ -6,14 +6,18 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <new>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -27,6 +31,9 @@ constexpr auto reap_interval = 5ms;
 constexpr int inherited_input_timeout_ms = 5000;
 constexpr std::uint64_t memory_bytes = 4096;
 constexpr int stdio_count = 3;
+constexpr std::size_t failure_message_capacity = 512;
+constexpr int inherited_descriptor_count = 3;
+constexpr int sparse_descriptor_minimum = 32;
 
 void require(bool condition, const char* text) {
     if (!condition) {
@@ -59,6 +66,83 @@ void require_missing_stdio() {
         require(::fcntl(fd, F_GETFD) == -1 && errno == EBADF, "internal fd occupied stdio");
     }
 }
+
+// Anonymous shared memory keeps diagnostics independent of the fd table being
+// tested. The parent reads only after waitpid confirms that the child exited.
+struct ChildFailure {
+    char message[failure_message_capacity]{};
+};
+
+class ChildDiagnostics {
+public:
+    ChildDiagnostics() {
+        void* mapping = ::mmap(nullptr, sizeof(ChildFailure), PROT_READ | PROT_WRITE,
+                               MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        require(mapping != MAP_FAILED, "map child diagnostics");
+        // mmap supplies page-aligned storage; placement new starts the lifetime
+        // of this trivial record before fork gives both processes the mapping.
+        failure_ = ::new (mapping) ChildFailure{};
+    }
+
+    ChildDiagnostics(const ChildDiagnostics&) = delete;
+    ChildDiagnostics& operator=(const ChildDiagnostics&) = delete;
+
+    ~ChildDiagnostics() {
+        (void)::munmap(failure_, sizeof(ChildFailure));
+    }
+
+    void record(const char* message) noexcept {
+        const auto length = ::strnlen(message, failure_message_capacity - 1);
+        std::memcpy(failure_->message, message, length);
+        failure_->message[length] = '\0';
+    }
+
+    void check(int exit, const char* stage) const {
+        if (exit != 0) {
+            const char* reason = "child exited abnormally or exceeded its deadline";
+            if (failure_->message[0] != '\0') {
+                reason = failure_->message;
+            }
+            throw std::runtime_error(std::string(stage) + ": " + reason);
+        }
+    }
+
+private:
+    ChildFailure* failure_ = nullptr;
+};
+
+// Keep launcher-owned descriptors intact. These extra descriptors are inherited
+// across fork, including one above a gap, and are owned only by this fixture.
+struct InheritedDescriptors {
+    int descriptors[inherited_descriptor_count] = {-1, -1, -1};
+    int sparse = -1;
+
+    InheritedDescriptors() = default;
+    InheritedDescriptors(const InheritedDescriptors&) = delete;
+    InheritedDescriptors& operator=(const InheritedDescriptors&) = delete;
+
+    void occupy() {
+        for (int& fd : descriptors) {
+            fd = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+            require(fd >= stdio_count, "open inherited descriptor");
+        }
+
+        sparse = ::fcntl(descriptors[0], F_DUPFD_CLOEXEC, sparse_descriptor_minimum);
+        require(sparse >= sparse_descriptor_minimum, "open sparse inherited descriptor");
+    }
+
+    ~InheritedDescriptors() {
+        for (int fd : descriptors) {
+            if (fd >= 0) {
+                (void)::close(fd);
+            }
+        }
+
+        if (sparse >= 0) {
+            (void)::close(sparse);
+        }
+    }
+};
 
 struct Workspace {
     std::filesystem::path directory;
@@ -125,22 +209,54 @@ void isolated_resources(const std::filesystem::path& executable) {
 struct DescriptorLimit {
     rlimit original{};
     int filler = -1;
+    bool restricted = false;
+
+    DescriptorLimit(const DescriptorLimit&) = delete;
+    DescriptorLimit& operator=(const DescriptorLimit&) = delete;
 
     DescriptorLimit() {
         require(::getrlimit(RLIMIT_NOFILE, &original) == 0, "read descriptor limit");
-        // Leave 0..2 free but fill the sole permitted non-stdio descriptor.
+        // F_DUPFD_CLOEXEC selects the lowest free fd >= 3. All smaller
+        // non-stdio numbers are therefore already occupied, possibly by CTest.
         const int source = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
         require(source >= 0, "limit fixture source");
         filler = ::fcntl(source, F_DUPFD_CLOEXEC, stdio_count);
         (void)::close(source);
-        require(filler == stdio_count, "limit fixture requires clean child fd table");
-        const rlimit restricted{static_cast<rlim_t>(stdio_count + 1), original.rlim_max};
-        require(::setrlimit(RLIMIT_NOFILE, &restricted) == 0, "set descriptor limit");
+        require(filler >= stdio_count, "duplicate limit fixture source");
+        const rlimit limit{static_cast<rlim_t>(filler) + 1, original.rlim_max};
+        if (::setrlimit(RLIMIT_NOFILE, &limit) != 0) {
+            (void)::close(filler);
+            filler = -1;
+            throw std::runtime_error("set descriptor limit");
+        }
+
+        restricted = true;
     }
 
     ~DescriptorLimit() {
-        (void)::setrlimit(RLIMIT_NOFILE, &original);
-        (void)::close(filler);
+        if (restricted) {
+            (void)::setrlimit(RLIMIT_NOFILE, &original);
+        }
+
+        if (filler >= 0) {
+            (void)::close(filler);
+        }
+    }
+
+    void restore() {
+        require(::setrlimit(RLIMIT_NOFILE, &original) == 0, "restore descriptor limit");
+        restricted = false;
+    }
+
+    void verify_exhausted() const {
+        require_missing_stdio();
+        const int probe = ::fcntl(filler, F_DUPFD_CLOEXEC, stdio_count);
+        const int failure = errno;
+        if (probe >= 0) {
+            (void)::close(probe);
+        }
+
+        require(probe == -1 && failure == EMFILE, "fixture did not exhaust non-stdio descriptors");
     }
 };
 
@@ -149,6 +265,7 @@ void relocation_failure() {
     close_stdio();
     {
         DescriptorLimit limit;
+        limit.verify_exhausted();
         auto lock = FileLock::create(workspace.lock);
         require(!lock && lock.error().is(ErrorCode::ResourceExhausted), "lock relocation failure");
         require(lock.error().is_operation(ErrorOperation::CreateFileLock), "lock operation");
@@ -165,6 +282,7 @@ void relocation_failure() {
         auto service = ProcessService::create();
         require(!service && service.error().is(ErrorCode::ResourceExhausted), "monitor relocation failure");
         require_missing_stdio();
+        limit.restore();
     }
 
     // Retry with the same names: failed creation must have rolled them back.
@@ -174,11 +292,17 @@ void relocation_failure() {
     take(memory.close());
     {
         DescriptorLimit limit;
+        limit.verify_exhausted();
         auto opened_lock = FileLock::open(workspace.lock);
         require(!opened_lock && opened_lock.error().is(ErrorCode::ResourceExhausted), "lock open failure");
+        require(opened_lock.error().is_operation(ErrorOperation::OpenFileLock), "lock open operation");
+        require(opened_lock.error().native.value() == EMFILE, "lock open native error");
         auto opened_memory = SharedMemory::open(workspace.memory_name, SharedMemoryAccess::ReadOnly);
         require(!opened_memory && opened_memory.error().is(ErrorCode::ResourceExhausted), "memory open failure");
+        require(opened_memory.error().is_operation(ErrorOperation::OpenSharedMemory), "memory open operation");
+        require(opened_memory.error().native.value() == EMFILE, "memory open native error");
         require_missing_stdio();
+        limit.restore();
     }
     // Open failures must not unlink someone else's existing resource.
     auto opened_lock = take(FileLock::open(workspace.lock));
@@ -208,6 +332,7 @@ int reap(pid_t child) {
 
 void owner_exit(const std::filesystem::path& executable) {
     Workspace workspace;
+    ChildDiagnostics diagnostics;
     int control[2];
     require(::pipe(control) == 0, "owner control pipe");
     const auto owner = ::fork();
@@ -230,7 +355,8 @@ void owner_exit(const std::filesystem::path& executable) {
             // Deliberately skip destructors: only OS cleanup may release the lock.
             // The supervisor's pipe keeps the grandchild alive until after the probe.
             ::_exit(0);
-        } catch (const std::exception&) {
+        } catch (const std::exception& error) {
+            diagnostics.record(error.what());
             result = 1;
         }
         ::_exit(result);
@@ -247,7 +373,36 @@ void owner_exit(const std::filesystem::path& executable) {
     // EOF releases the grandchild even if the lock assertion fails. Its native
     // poll timeout is an additional bound if the supervisor itself is terminated.
     (void)::close(control[1]);
+    diagnostics.check(exit, "owner death");
     require(exit == 0 && released, "dead owner's lock retained by a child");
+}
+
+void run_isolated_case(const std::filesystem::path& executable, bool failure_case, bool inherit_fds) {
+    InheritedDescriptors inherited;
+    if (inherit_fds) {
+        inherited.occupy();
+    }
+    ChildDiagnostics diagnostics;
+    const auto child = ::fork();
+    require(child >= 0, "fork isolated test");
+    if (child == 0) {
+        try {
+            if (failure_case) {
+                relocation_failure();
+            } else {
+                isolated_resources(executable);
+            }
+            ::_exit(0);
+        } catch (const std::exception& error) {
+            diagnostics.record(error.what());
+            ::_exit(1);
+        }
+    }
+    const char* stage = failure_case ? "relocation rollback" : "stdio isolation";
+    if (inherit_fds) {
+        stage = failure_case ? "relocation rollback with inherited fds" : "stdio isolation with inherited fds";
+    }
+    diagnostics.check(reap(child), stage);
 }
 }
 
@@ -273,22 +428,10 @@ int main(int argc, char** argv) {
 
     try {
         const auto executable = std::filesystem::absolute(argv[0]);
-        for (bool failure_case : {false, true}) {
-            const auto child = ::fork();
-            require(child >= 0, "fork isolated test");
-            if (child == 0) {
-                try {
-                    if (failure_case) {
-                        relocation_failure();
-                    } else {
-                        isolated_resources(executable);
-                    }
-                    ::_exit(0);
-                } catch (const std::exception&) {
-                    ::_exit(1);
-                }
+        for (bool inherit_fds : {false, true}) {
+            for (bool failure_case : {false, true}) {
+                run_isolated_case(executable, failure_case, inherit_fds);
             }
-            require(reap(child) == 0, failure_case ? "relocation rollback" : "stdio isolation");
         }
         owner_exit(executable);
         std::cout << "PASS: descriptor isolation, relocation rollback and owner death\n";

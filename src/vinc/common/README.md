@@ -413,7 +413,7 @@ Debug／Release 完整專案建置通過，包含 SDK 個別公開標頭編譯�
 provider symbol 後的增量查詢；容量 fixture 重新建置深度 2／5，並拒絕深度 1。
 已核對 Ninja 對生成來源具有真正的 copy 指令，不再是空命令。
 以上是 catalog／table 修改完成時的驗證；後續致命回報接線的驗證另列於本頁末段。
-Linux／macOS 尚未原生驗證。
+目前各平台的建置與測試範圍見[平台驗證報告](../../../README.md#validation-and-limits)。
 
 <a id="shared-time-type"></a>
 
@@ -736,3 +736,14 @@ Message publication contracts and version changes belong to [Message Bus](../mes
 新增 ErrorDomain::Rpc = 14；元件自行維護錯誤／操作 catalog，common 不反向依賴 RPC runtime。
 config.hpp 的 rpc_* 設定集中控制共享／本地容量、待處理數與等待，預設值及限制見
 [RPC 資源與執行緒](../rpc/README.md#資源與執行緒)。未將既有設定遷入 Param。
+
+Module Graph's `ui_graph_*` limits are defined here but owned and documented by the
+[UI contract](../ui/README.md#module-graph-2026-10-27--module-關係圖). They do not move
+existing configuration to Param. Control wire page sizes remain protocol constants.
+
+Module Graph 的 `ui_graph_*` 暫存設定由 UI 契約維護；本輪未搬移既有 config 到 Param。
+控制封包分頁大小仍是各元件的協定常數。
+
+Notification retry/report settings remain compile-time system policy in config.hpp; defaults, meanings and validation belong to [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+通知重試／回報間隔暫留 config.hpp；預設值、用途及驗證由上述跨元件契約維護。
