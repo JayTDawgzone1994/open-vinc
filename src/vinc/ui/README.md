@@ -24,6 +24,12 @@ Frontend builds need Node/npm (locally verified 24.19.0). package-lock pins vers
 前端需 Node.js（本機驗證 24.19.0）與 npm。相依版本及 integrity 固定於
 `web/package-lock.json`；CMake 不自行執行 npm install 或下載套件。
 
+The optional [dependency setup scripts](../../../tools/README.md) prepare Node/npm
+and run `npm ci` for you, without configuring or building a project.
+
+可使用 [相依環境準備腳本](../../../tools/README.md) 安裝／檢查 Node／npm 並執行 `npm ci`；
+腳本不配置或編譯專案。
+
 ```sh
 git submodule update --init --recursive
 npm ci --prefix src/vinc/ui/web
