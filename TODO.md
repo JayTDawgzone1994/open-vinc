@@ -1,5 +1,7 @@
 # TODO
 
+本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
+
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 
 - [ ] 定義原生 unlock 失敗後的鎖狀態、資料存取限制及清理／重試／故障政策。
@@ -17,6 +19,8 @@
 
 **狀態（2026-10-05）：使用者決定暫緩處理。** 已確認程式交錯路徑，尚未以受控排程
 重現或修復；既有 fd 搬移及 Windows 測試不能證明此窗口已排除。
+2026-10-27 已修正 `osal.descriptor` 對繼承 fd 編號的測試假設，並完成 Ubuntu 24.04／WSL 2
+驗證；該修正未改動正式 OSAL 實作，不代表本項並行競爭已解決。
 共用 mutex＋標準串流快照仍為未核准提案，鎖成本及宿主／第三方責任邊界尚待決策。
 後續須在 Linux、macOS 分別建置並執行受控競爭與回收測試；Windows 僅作回歸驗證。
 詳細問題、提案、待決策與驗證需求統一維護於
@@ -36,7 +40,7 @@
 
 - 使用 PuTTY Raw TCP，開啟 Local echo／Local line editing 時，尚未按 Enter 的文字只存在客戶端，伺服器尚未收到。
 - 模組 stdout／stderr 經 OutputHub 傳到該連線時，可能插入正在顯示的輸入列；這是顯示交錯，不代表命令內容遭修改。
-- 此問題與 Tab 自動完成不同，也不依賴未來的 Vinc Log；目前的 OutputHub 模組輸出即可觸發。
+- 此問題與 Tab 自動完成不同，也不依賴 Vinc Log；目前的 OutputHub 模組輸出即可觸發。
 - 第一版先保留整行輸入及模組輸出開關，不加入遠端逐鍵編輯或輸入列重繪。
 
 ### 後續候選方向（尚未選定實作）
@@ -51,28 +55,3 @@
 - [ ] 背景輸出抵達時，尚未送出的命令內容與游標位置能正確保留及重繪。
 - [ ] 連續輸出、中文與跨區塊 UTF-8 不會破壞輸入；按 Enter 後只執行一次完整命令。
 - [ ] 明確記錄支援的 PuTTY 設定與相容模式，完成實際連線驗證。
-
-<a id="ribosome-訊息模板補齊反序列化介面"></a>
-
-## Ribosome deserialization API (resolved) / Ribosome 反序列化介面（已解決）
-
-- [x] Generated messages provide both `deserialize(buffer)` and `deserialize(buffer, offset)` through `message::GeneratedMessage<Derived>`, returning `Result<void>`.
-- [x] 生成訊息透過 `message::GeneratedMessage<Derived>` 提供單參數及帶 `offset` 的 `deserialize()`，皆回傳 `Result<void>`。
-
-**Status checked on 2026-10-26:** the old missing-override/abstract-class description is obsolete.
-Ribosome generates classes inheriting GeneratedMessage, which implements both BaseMessage overrides.
-The old raw-helper/integer-return guidance no longer applies. Detailed contracts and historical validation
-are maintained in [Message Storage: deserialization closeout](src/vinc/components/message_storage/README.md#解碼介面收尾2026-10-05).
-
-**狀態核對於 2026-10-26：** 原有「缺少 override、生成類別仍為抽象類別」的描述已過時。
-Ribosome 生成的 class 繼承 GeneratedMessage，由該基礎類別實作 BaseMessage 的兩個入口；
-舊 raw helper 與整數回傳值的處理建議亦不再適用。完整契約與歷史驗證統一維護於上述 Message Storage 章節。
-
-Existing regression cases cover BaseMessage virtual dispatch, concatenated images/nonzero offsets,
-malformed input, and preservation of destination payload/binding/capacity and offset on failure.
-This update checks source and test coverage only; it does not rerun builds/tests.
-The separate [isolated-generation-script TODO](src/vinc/ribosome/README.md#待處理事項) remains open.
-
-既有回歸案例涵蓋 BaseMessage 虛擬派送、連續映像／非零 offset、非法輸入，以及失敗時保留
-目的 payload、binding、容量與 offset。本次僅核對實作及測試內容，未重新建置或執行測試。
-獨立生成測試腳本的過時假設仍列於上述 Ribosome 待辦，本項關閉不代表該問題已修復。
