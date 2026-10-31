@@ -1,12 +1,13 @@
 # Module 除錯指南
 
-Module DLL 由中央啟動的獨立 ModuleHost 載入。除錯器附加到該 Host 的 **OS PID**，
+Module DLL 由中央啟動的獨立 Host 程序載入；中央與原生 Host 使用**同一份 App 執行檔**，
+不再部署獨立 `ModuleHost.exe`／`ModuleHost`。除錯器附加到該 Module 的 **OS PID**，
 Shell 命令則以 **MID** 選擇 Module；兩者不能互換。
 
 ## 使用流程
 
-先使用同一組態建置框架、ModuleHost 與 Plugin。Windows 建議使用 MSVC Debug，
-現有建置會產出 Host 與 Plugin 的 PDB；保留匹配的 DLL／EXE、PDB 與原始碼。
+先使用同一組態建置 App 與 Plugin。Windows 建議使用 MSVC Debug，
+保留 App 及 Plugin 匹配的 DLL／EXE、PDB 與原始碼；Host 程序使用 App 的符號。
 Release 的最佳化及符號可用性依其建置設定，不保證能逐行對應原始碼。
 
 在 Vinc Shell：
@@ -17,7 +18,8 @@ debug start exampleModule --name camera
 
 回覆包含 `MID=... PID=... Plugin=...`。此時尚未載入 DLL，也尚未執行 Module 建構／命名 hook。
 
-1. 將 debugger 附加到回覆的 PID，而不是中央 Vinc.exe。
+1. 將 debugger 附加到回覆的 Module PID。中央與 Module 在程序清單中可能同名，
+   不可只依 `Vinc.exe`／自訂 App 名稱選擇，也不要附加到中央的 PID。
 2. 載入匹配的符號，設定 Module 建構子、`on_start()` 或其他位置的斷點。
 3. 在 debugger 中繼續執行，讓 Host 能接收控制訊息。
 4. 回到 Shell，使用回覆提供的 MID：
@@ -47,6 +49,8 @@ Ctrl+C／exit 仍完整關閉中央及其所有 Module；即使停在斷點，�
   附加權限依 OS 與開發工具設定。[LLDB 官方說明](https://lldb.llvm.org/use/tutorial.html)
 
 Windows 自動測試會透過原生 Debug API 附加真正 Host、停在 breakpoint、繼續並 detach。
+`app.debug` 將相同流程套在正式 App main 的 Host 分流；`module.debug` 保留隔離測試 Host。
+本次單一入口的環境與結果見[整合驗證計畫](../../../apps/vinc/SINGLE_EXECUTABLE.md)。
 一般原生建置與測試結果見[平台驗證報告](../../../README.md#validation-and-limits)。
 外部 debugger 的人工操作另計：Visual Studio GUI／PDB 原始碼斷點，以及 Linux GDB／macOS LLDB 的實際附加操作，仍無本次人工驗證紀錄。
 

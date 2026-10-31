@@ -8,8 +8,15 @@
 
 - CMake `VINC_NAME` 預設 `open-vinc`，建置時指定，例如 `-DVINC_NAME=camera-station`。
   限 1～48 個小寫 ASCII 字母、數字、`_`、`-`；非法值在 configure 時拒絕。
-- `ModuleManager::create()` 使用本次建置的名稱，先取得 OSAL FileLock，再建立其他服務。
+- 框架入口以 OS 查得的 App 路徑呼叫 `ModuleManager::create(limits, host_path)`，使用本次建置的
+  中央名稱，先取得 OSAL FileLock，再建立其他服務。這是框架內部接線，不是使用者入口。
   同名占用回 `ModuleSystem::InstanceRunning`；不同名稱可並存。Socket Shell port 仍須另行區分。
+- 來源／安裝式 SDK 的 `vinc_add_app(INSTANCE_NAME ...)` 由中央組裝入口經 `ManagerAccess::create`
+  傳入應用身分及 OS 查得的 App 自身路徑，不沿用 SDK 製作者的預設值。Host 分支在此之前分流，
+  不建立中央 Instance。Module 不取得選擇中央身分的權限。
+  建置／搬移契約見 [SDK 安裝指南](../sdk/INSTALL.md)。
+- 原生 Host 與中央雖共用 App 執行檔，仍是不同 OS 程序；Host 分流先於中央 admission、
+  Shell、Tcl 與啟動腳本。Python 仍由系統直譯器執行，沒有因此改成 App 內嵌 Python。
 - `detail::ManagerAccess::create(name, ...)` 只供框架組裝及測試，讓測試不爭用正式中央名稱。
   它不是讓 Module 選擇中央身分的公開服務。
 - 狀態根目錄：Windows 目前使用者的 temp 下 `open-vinc-state-v1`；POSIX 使用

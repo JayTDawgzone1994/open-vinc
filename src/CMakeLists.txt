@@ -1,6 +1,8 @@
 # Root composition: libraries first, then examples and the central application.
 cmake_minimum_required(VERSION 3.20)
-project(vinc_root LANGUAGES C CXX)
+project(vinc_root VERSION 0.1.4 LANGUAGES C CXX)
+option(VINC_INSTALL_SDK "Enable the native, matching-build C++ SDK installation" OFF)
+set(VINC_SDK_VERSION "${PROJECT_VERSION}")
 
 # Shared Plugin consumers require PIC and image-local implementation symbols.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -21,6 +23,19 @@ option(VINC_BUILD_UI "Build the optional-to-start official Web UI Module" ON)
 option(VINC_BUILD_EXAMPLES "Build and register example Modules" ON)
 get_filename_component(VINC_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(VINC_BUILD_ROOT "${CMAKE_CURRENT_BINARY_DIR}")
+if(VINC_BUILD_APPS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/vinc/sdk/cmake/VincConfiguration.cmake")
+    vinc_configure_application_features("${VINC_REPOSITORY_ROOT}/tools/configure"
+        UI_AVAILABLE "${VINC_BUILD_UI}" BAG_AVAILABLE TRUE)
+    # A normal variable preserves the legacy cache input without making the
+    # resolved Kconfig value a competing user choice on the next configure.
+    set(VINC_BUILD_PYTHON "${VINC_APP_PYTHON}")
+endif()
+if(VINC_INSTALL_SDK)
+    # Run before any component copies files, so incompatible reinstalls cannot
+    # partially overwrite an existing SDK. The script is configured below.
+    install(SCRIPT "${VINC_BUILD_ROOT}/sdk-package/CheckInstall.cmake" COMPONENT VincSDK)
+endif()
 set(VINC_MESSAGE_INPUT_DIR "${VINC_REPOSITORY_ROOT}/vinc_messages/messages")
 if(CMAKE_CONFIGURATION_TYPES)
     set(VINC_GENERATED_INCLUDE_DIR "${VINC_BUILD_ROOT}/$<CONFIG>/generated/include")
@@ -32,6 +47,7 @@ set(VINC_MESSAGE_OUTPUT_DIR "${VINC_GENERATED_INCLUDE_DIR}/vinc_messages")
 # Avoid a case-insensitive collision between the framework tree and Vinc.
 add_subdirectory(vinc framework)
 add_subdirectory("${VINC_REPOSITORY_ROOT}/vinc_messages" "vinc_messages")
+include("${CMAKE_CURRENT_SOURCE_DIR}/vinc/sdk/cmake/VincApplication.cmake")
 if(VINC_BUILD_EXAMPLES)
     add_subdirectory("${VINC_REPOSITORY_ROOT}/examples/module" "examples/module")
     add_subdirectory("${VINC_REPOSITORY_ROOT}/examples/message_bus" "examples/message_bus")
@@ -39,9 +55,15 @@ if(VINC_BUILD_EXAMPLES)
     add_subdirectory("${VINC_REPOSITORY_ROOT}/examples/rpc" "examples/rpc")
 endif()
 if(VINC_BUILD_APPS)
-    add_subdirectory(vinc/bag/module framework/bag/module)
-    if(VINC_BUILD_UI)
+    if(VINC_APP_BAG)
+        add_subdirectory(vinc/bag/module framework/bag/module)
+    endif()
+    if(VINC_APP_UI)
         add_subdirectory(vinc/ui/module framework/ui/module)
     endif()
     add_subdirectory("${VINC_REPOSITORY_ROOT}/apps/vinc" "apps/vinc")
+endif()
+
+if(VINC_INSTALL_SDK)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/vinc/sdk/cmake/InstallSdk.cmake")
 endif()

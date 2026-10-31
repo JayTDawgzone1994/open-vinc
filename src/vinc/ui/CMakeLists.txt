@@ -74,3 +74,12 @@ if(BUILD_TESTING)
     add_executable(vinc_ui_test_server tests/serve.cpp)
     target_link_libraries(vinc_ui_test_server PRIVATE vinc::ui vinc::errors vinc::osal)
 endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_ui vinc_ui_errors)
+    if(VINC_INSTALL_SDK)
+        install(DIRECTORY "${ui_dist}/" DESTINATION share/vinc/ui COMPONENT VincSDK)
+    endif()
+endif()

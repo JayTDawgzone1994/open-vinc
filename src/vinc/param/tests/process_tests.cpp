@@ -1,5 +1,6 @@
 #include "support.hpp"
 #include <vinc/module/detail/manager_access.hpp>
+#include "../../../../tests/support/manager.hpp"
 #include <vinc/param/detail/persistence.hpp>
 #include <vinc/shell/detail/command_router.hpp>
 #include <vinc/shell/detail/socket_shell.hpp>
@@ -26,7 +27,7 @@ std::int32_t command(ModuleManager& manager, MID mid, std::vector<std::string> a
 
 std::unique_ptr<ModuleManager> create(std::string name, const std::filesystem::path& plugin,
                                       const std::filesystem::path& root) {
-    auto manager = take(Access::create(std::move(name)));
+    auto manager = take(Access::create(std::move(name), {}, vinc::test::host_path()));
     take(Access::configure_params(*manager, root));
     ModuleType type{"paramTest", plugin};
     take(manager->register_module_type(std::move(type)));

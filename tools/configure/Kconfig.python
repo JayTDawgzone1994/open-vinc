@@ -1,0 +1,6 @@
+config VINC_APP_PYTHON
+    bool "Build and deploy Python Module bindings"
+    default n
+    help
+      Build bindings with the selected CPython development environment.
+      This is separate from the interpreter running this configurator.

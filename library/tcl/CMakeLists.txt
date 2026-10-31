@@ -99,3 +99,40 @@ function(vinc_deploy_tcl target)
     endif()
     add_dependencies(${target} vinc_tcl_resources_${key})
 endfunction()
+
+if(VINC_INSTALL_SDK)
+    # Only pinned static archives and Tcl's runtime scripts are installed.
+    # Consumers never invoke upstream configure/NMAKE or refer to its checkout.
+    get_filename_component(tcl_archive_name "${tcl_archive}" NAME)
+    install(FILES "${tcl_archive}" DESTINATION lib/vinc/tcl COMPONENT VincSDK)
+    set(tcl_package_content [=[
+add_library(vinc::detail_tcl STATIC IMPORTED)
+set_target_properties(vinc::detail_tcl PROPERTIES
+    IMPORTED_LOCATION "${_vinc_prefix}/lib/vinc/tcl/@tcl_archive_name@"
+    INTERFACE_LINK_LIBRARIES "@tcl_package_system_libs@")
+]=])
+    set(tcl_package_system_libs "${tcl_system_libs}")
+    if(WIN32)
+        get_filename_component(tcl_stub_name "${tcl_stub_archive}" NAME)
+        install(FILES "${tcl_stub_archive}" DESTINATION lib/vinc/tcl COMPONENT VincSDK)
+        list(TRANSFORM tcl_package_system_libs REPLACE "^vinc_tcl_stub$" "vinc::detail_tcl_stub")
+        string(APPEND tcl_package_content [=[
+add_library(vinc::detail_tcl_stub STATIC IMPORTED)
+set_target_properties(vinc::detail_tcl_stub PROPERTIES
+    IMPORTED_LOCATION "${_vinc_prefix}/lib/vinc/tcl/@tcl_stub_name@")
+]=])
+    endif()
+    file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/VincTclTargets.cmake"
+        CONTENT "${tcl_package_content}" @ONLY)
+    set_property(GLOBAL PROPERTY VINC_TCL_PACKAGE_TARGETS
+        "${CMAKE_CURRENT_BINARY_DIR}/VincTclTargets.cmake")
+    install(DIRECTORY "${tcl_source}/library/" DESTINATION share/vinc/tcl/library COMPONENT VincSDK)
+    install(FILES "${tcl_source}/license.terms" DESTINATION share/vinc/tcl COMPONENT VincSDK)
+    foreach(dependency utf8proc libtommath compat/zlib)
+        install(DIRECTORY "${tcl_source}/${dependency}/"
+            DESTINATION "share/vinc/tcl/${dependency}" COMPONENT VincSDK
+            FILES_MATCHING PATTERN "LICENSE" PATTERN "LICENSE.md")
+    endforeach()
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/deploy.cmake"
+        DESTINATION lib/cmake/vinc RENAME DeployTcl.cmake COMPONENT VincSDK)
+endif()

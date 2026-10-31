@@ -8,9 +8,38 @@ Python Module 由中央 Shell 啟停，每個實例使用一個系統 Python 程
 中央不連結或嵌入 Python，不附帶直譯器，也不自動安裝 Python／pip 套件。
 使用者程式透過 pybind11 原生擴充使用同一套 C++ Runtime；沒有另寫 Socket／共享記憶體協定。
 
+The [single-App entry](../../../../apps/vinc/SINGLE_EXECUTABLE.md) changes native
+Module launches only: C++ Hosts execute the App image, while Python Modules still
+execute the selected system interpreter and bootstrap. Central never imports the
+Python extension merely because Python support is packaged.
+
+單一 App 入口只改變原生 Module 啟動：C++ Host 執行 App 本身，Python Module 仍執行
+所選系統直譯器與 bootstrap。中央不因部署了 Python 支援就匯入原生擴充。
+
 <a id="建置與部署"></a>
 
 ## Build and deploy / 建置與部署
+
+For the new multi-App constructor, put `CONFIG_VINC_APP_PYTHON=y` in that App's
+`VINC_BUILD_CONFIG` file. Compatible enabled Apps share one `vinc_python_native`
+target and the common message list; disabled Apps have no build dependency on it.
+All enabled Apps use the same CPython ABI. The legacy source switches below still
+apply to the built-in shell, not per-App selection. Enabled Apps deploy their own resources in stage 3; current validation is recorded
+in the Multi-App plan, separately from the historical evidence below.
+
+新多 App 介面在各自 `VINC_BUILD_CONFIG` 檔啟用 Python；相容 App 共用同一個
+`vinc_python_native` target／訊息清單，未啟用 App 不依賴它。全建置使用同一 CPython ABI。
+下方舊來源開關仍用於內建 shell，不能取代各 App 設定。第三階段已接上各 App 資源部署；
+本次驗證見多 App 計畫，下方歷史紀錄不代替本輪驗證。
+
+Source application builds may select bindings with `CONFIG_VINC_APP_PYTHON=y`
+in `vinc.conf`. Legacy `VINC_BUILD_PYTHON` remains a compatibility input and must
+not contradict the file. Installed SDK applications use the same binding recipe.
+The Kconfig interpreter (`Python3_EXECUTABLE`) is independent of this extension's
+ABI interpreter (`Python_EXECUTABLE`); see [configuration](../../../../tools/configure/README.md).
+
+來源版應用可用 `vinc.conf` 選擇 Python；舊開關保留但不能與檔案衝突。
+安裝式應用共用同一份綁定建置流程。設定工具直譯器與此處原生綁定使用的 Python ABI 分開選擇。
 
 ```sh
 cmake -S src -B build/my-build -DVINC_BUILD_PYTHON=ON -DPython_EXECUTABLE=/absolute/path/to/python3
@@ -71,6 +100,104 @@ User code lives in data/module, distinct from vinc_data persistence. Editing exi
 `Vinc --python /absolute/path/to/python` 可指定 Python 或 venv，CLI 亦可接受相對路徑並在中央啟動時轉成絕對路徑。
 省略時，在啟動 Module 當下依 PATH 順序尋找 Windows `python.exe` 或 POSIX `python3`。
 不使用建置時選定的 Python 位置作為部署端的隱含預設，不在第一個 Python 不相容時偷偷換另一個環境。
+
+### Installed SDK applications / 安裝式 SDK 應用
+
+An installed SDK always carries `share/vinc/python`: adapter sources/internal
+headers, Python package, build helper and pinned pybind11 headers/CMake tools.
+The producer need not build bindings or have Python development files. These
+materials are not a public C++ API and contain no interpreter. Upstream sources
+remain unchanged; revision verification happens at SDK production, not in the
+consumer's Git-less installation.
+
+安裝式 SDK 預設交付 `share/vinc/python`：綁定來源／內部標頭、Python 套件、共用建置
+helper 與固定 pybind11 標頭／CMake 工具。製作者不必建置 Python 綁定或具備 Python
+開發檔；材料不是新的 C++ 公開 API，也不附帶直譯器。上游未修改，固定版本由 SDK
+製作時核對，使用端不要求 Git repository 存在。
+
+Set `CONFIG_VINC_APP_PYTHON=y` and use ordinary `add_message_dir()` /
+`vinc_add_app()`. The application builds one `_native` image against its merged
+built-in/custom message list and the installed Runtime archives. Source builds
+use the same `cmake/VincPython.cmake` recipe. Late message registration is supported;
+schema addition/edit/removal must rebuild the extension. Plain package lookup
+and Python-disabled applications do not look for Python development files or
+initialize pybind11. When enabled, Vinc initializes its pinned pybind11 first;
+an already-created `pybind11::module` target is rejected instead of silently mixing
+versions or Python environments. Other bindings can use those targets afterward.
+
+設 `CONFIG_VINC_APP_PYTHON=y`，沿用 `add_message_dir()`／`vinc_add_app()` 即可。
+每份應用建置一個 `_native`，使用合併的內建／自訂訊息與 SDK 預編譯 Runtime。
+來源版共用同一 helper。可在 app 宣告後登記訊息；增刪改 schema 會重建擴充。
+單純套件查找及關閉 Python 的應用不尋找 Python 開發檔、不初始化 pybind11。
+啟用時須由 Vinc 先建立固定 pybind11 targets；若已有 `pybind11::module` 則明確拒絕，
+不默默混用版本或 Python 環境。之後其他綁定可使用同一組 targets。
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/vinc-sdk -DPython_EXECUTABLE=/path/to/python3
+cmake --build build --target MyApp
+cmake --install build --prefix /path/to/deployed-app
+```
+
+Build/install deploy only declared package files, including the selected extension,
+ABI/CRT metadata and licenses, rather than sweeping the build directory for stale
+extensions from another ABI. Ownership records remove obsolete unchanged files
+when Python is disabled or the extension filename changes; untracked/modified
+files are preserved. User `.py` Modules and extra dependencies remain application-
+owned deployment inputs under `data/module`. Never overlay a running application.
+Use separate build directories when changing Python environments to avoid stale
+CMake discovery. Runtime still uses PATH or `--python`, never the producer's path.
+
+build／install 僅部署明確列出的擴充、ABI／CRT 資訊與授權，不掃描並複製另一 ABI
+遺留的擴充。功能關閉或檔名改變時清理未被修改的舊產物，保留未納管／修改過檔案。
+使用者 `.py` 與額外相依仍由應用自行部署到 `data/module`。不要覆蓋執行中的程式；
+切換 Python 環境建議使用不同 build 目錄，避免沿用 CMake 探測快取。
+執行時仍透過 PATH／`--python` 選擇直譯器，不使用製作者路徑。
+
+#### Installed SDK validation (2026-10-29) / 安裝式 SDK 驗證
+
+`sdk.installed_python` passed on Windows x64/MSVC 19.51/CMake 4.3.2/Ninja 1.13.2
+in Debug and Release with isolated CPython 3.13.12, and on WSL Ubuntu 24.04.5
+x86-64/GCC+libstdc++ 13.3/CMake 3.28.3/Ninja 1.11.1/CPython 3.12.3 in Release.
+The Windows copy uses the already-prepared compatible CRT; system Python was not
+modified. This supplies a positive import path beyond the earlier old-CRT rejection.
+
+Windows Debug／Release 與 WSL Ubuntu 24.04 Release 的 `sdk.installed_python` 均通過。
+Windows 使用既有隔離 CPython 3.13.12 及相容 CRT；Linux 使用系統 CPython 3.12.3。
+未修改正式 Python 安裝，這次補足先前舊 CRT 拒絕之外的正常匯入路徑。
+
+Regression checks also passed: Windows Release installed C++ consumer/application
+2/2 plus configuration/ownership/license tests 3/3; WSL Release the same five
+tests 5/5. These retain default Bag/UI composition and incomplete-SDK rejection.
+
+回歸亦通過：Windows Release 安裝式 C++ 使用端／應用 2/2，加設定／所有權／授權
+3/3；WSL Release 同五項 5/5。保留預設 Bag／UI 組裝及不完整 SDK 的拒絕行為。
+
+The producer had Python bindings disabled. The fixture moves the SDK and app,
+disables Git discovery in the consumer, hides SDK/build paths during execution,
+and tests custom C++/Python Bus round trips, typed RPC, Param callback/cache,
+Shell lifecycle and clean shutdown. Added/changed/deleted/invalid schemas exercise
+real extension rebuilds and recovery; an incompatible bootstrap Python version
+rejects that Module while the native peer/central remain responsive. Missing
+deployment files are repaired, and disabling Python cleans generated packages
+while retaining user Module sources/untracked files. Source-build Python
+enable/build/import/disable cleanup also passed on Windows Release.
+
+SDK 製作時關閉 Python 綁定。測試搬移 SDK／應用、禁止使用端 Git 探測、執行時隱藏
+SDK 與 build 原位置，驗證自訂 C++／Python 雙向 Bus、typed RPC、Param callback／快取、
+Shell 啟停及正常退出。訊息增刪改／非法 schema 驗證擴充重建與恢復；錯誤 Python ABI
+只拒絕該 Module，中央及原生 Module 仍可操作。遺失部署檔可補回，關閉 Python 清理
+生成套件並保留使用者腳本／未納管檔案。Windows Release 來源版亦通過開啟、建置、
+匯入、關閉清理循環。
+
+Enable this opt-in test with `-DVINC_TEST_SDK_PYTHON_EXECUTABLE=/path/to/python`
+on an SDK build with `BUILD_TESTING=ON`; it requires that interpreter's development
+environment and working runtime dependencies. No native macOS run, real switch
+between two Python minor versions in one build, PyPy/free-threaded support, or
+full Python service regression is claimed by this integration test.
+
+在 SDK 測試建置指定 `VINC_TEST_SDK_PYTHON_EXECUTABLE` 才啟用此測試，需要該直譯器
+開發檔與可用 Runtime。未執行 macOS 原生驗證、同 build 內切換兩種實際 Python minor，
+亦不以這項整合測試宣稱完整 Python 服務回歸或 PyPy／free-threaded 支援。
 
 <a id="windows-msvc-runtime-載入前檢查"></a>
 

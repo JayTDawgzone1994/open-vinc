@@ -34,3 +34,9 @@ if(BUILD_TESTING)
     add_test(NAME concurrency.interprocess_mutex COMMAND concurrency_interprocess_mutex_tests)
     set_tests_properties(concurrency.interprocess_mutex PROPERTIES TIMEOUT 90)
 endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_concurrency vinc_concurrency_errors)
+endif()

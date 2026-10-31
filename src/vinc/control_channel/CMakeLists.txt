@@ -27,3 +27,9 @@ target_include_directories(vinc_control_channel_errors INTERFACE "${CMAKE_CURREN
 target_link_libraries(vinc_control_channel_errors INTERFACE vinc::common)
 vinc_register_error_catalog(TARGET vinc_control_channel_errors
     HEADER vinc/control/detail/error_catalog.hpp SYMBOL vinc::control::detail::error_catalog)
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_control vinc_control_protocol vinc_control_channel_errors)
+endif()

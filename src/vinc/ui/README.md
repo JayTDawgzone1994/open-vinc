@@ -2,10 +2,10 @@
 
 # Web UI / 瀏覽器工作區
 
-The official webUi Module provides a browser workspace, tab lifecycle, and plugin SDK. It is built/registered by default but **never automatically started**. Default listener is 127.0.0.1:8080. Browsers need no Node; central/Host/general Module SDK do not link HTTP/JSON implementations.
+The official webUi Module provides a browser workspace, tab lifecycle, and plugin SDK. It is built/registered by default and **automatically started before startup Tcl**. Default listener is 127.0.0.1:8080. Browsers need no Node; central/Host/general Module SDK do not link HTTP/JSON implementations.
 
 第一版提供官方 `webUi` Module、瀏覽器工作區、分頁生命週期及 UI plugin SDK。
-預設建置並登記 ModuleType，**不會隨中央自動啟動**；預設監聽 `127.0.0.1:8080`。
+預設建置並登記 ModuleType，**隨中央自動啟動，先於啟動 Tcl**；預設監聽 `127.0.0.1:8080`。
 瀏覽器不需要 Node.js。中央、ModuleHost 與一般 Module SDK 不連入 HTTP／JSON 實作。
 
 Official vinc.topics provides read-only topic lists, publication Hz, collision/loss diagnostics, and latest-message previews. Official vinc.graph adds a manually refreshed Module/Topic relationship view. Param/Log/Module management, 3D panels, and central administration RPC remain unwired. Topic Monitor uses ordinary read-only Context Bus services, without parameter-write or Module-control authority.
@@ -18,6 +18,30 @@ Topic Monitor 使用一般 Context 的唯讀 Bus 能力，不取得修改參數�
 <a id="建置與啟動"></a>
 
 ## Build and start / 建置與啟動
+
+The source-build instructions below build the frontend. An [installed SDK](../sdk/INSTALL.md)
+produced with UI enabled instead ships those built assets and the UI server archive.
+`vinc_add_app()` recompiles a thin typed adapter per App against the common message
+list, while sharing the server library. Its default root is
+`vinc_data/<INSTANCE_NAME>/ui`, resolved from the Host executable, not cwd.
+`--root` keeps its explicit-path behavior. The new multi-App API always includes
+UI and rejects `NO_UI`; stage 3 implements asset staging and automatic startup.
+See the [multi-App plan](../../../apps/vinc/MULTI_APP.md) for current validation.
+
+以下為原始碼版前端建置方式。啟用 UI 的安裝式 SDK 會交付已建置前端與 UI server 靜態庫；
+`vinc_add_app()` 按 App 重編薄 C++ Module 接線，共用訊息全集及 server 函式庫。
+預設根目錄為 `vinc_data/<INSTANCE_NAME>/ui`，依 Host 位置解析，不依賴 cwd；
+`--root` 保留原有語意。新多 App API 必定包含 UI、不接受 `NO_UI`；資源部署與自動啟動
+已於上述計畫第三階段接上，驗證範圍見該計畫。
+
+Installed-package evidence (2026-10-29): Windows Debug/Release and WSL Ubuntu 24.04
+validate a moved application serving assets, custom-message previews and graph HTTP
+requests. UI graph/topics/server suites pass in those configurations. This is not
+browser interaction or a macOS packaging test; see [SDK validation](../sdk/INSTALL.md).
+
+安裝套件驗證（2026-10-29）：Windows Debug／Release 與 WSL Ubuntu 24.04 已驗證搬移後的
+資源提供、自訂訊息預覽、graph HTTP 請求，以及 UI graph／topics／server 測試。
+這不是瀏覽器互動或 macOS 套件測試，詳見 SDK 驗證紀錄。
 
 Frontend builds need Node/npm (locally verified 24.19.0). package-lock pins versions/integrity. CMake never runs npm install or downloads packages.
 
@@ -37,23 +61,24 @@ cmake -S src -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/debug
 ```
 
-Use VINC_BUILD_UI=OFF to omit it. SDK-only VINC_BUILD_APPS=OFF consumers need neither Node/npm nor the three UI native dependencies. C++23/Tcl/Plugin ABI contracts still apply.
+Use VINC_BUILD_UI=OFF to omit the capability for library-only builds; the new App composer requires UI. With UI enabled, source builds prepare its assets/libraries even when VINC_BUILD_APPS=OFF so external Apps can use them. With UI disabled, Node/npm and the UI native dependencies are not required. C++23/Tcl/Plugin ABI contracts still apply.
 
-不建置 UI 可指定 `-DVINC_BUILD_UI=OFF`。`VINC_BUILD_APPS=OFF` 的純 SDK 使用端也不需要
-Node、npm 或 UI 的三個原生相依。建置仍需符合主專案 C++23、Tcl 與 Plugin ABI 契約。
+純函式庫建置可指定 `-DVINC_BUILD_UI=OFF`，不需 Node／npm 或 UI 原生相依；新 App 建構器則要求 UI 能力。
+UI=ON 時即使 `VINC_BUILD_APPS=OFF` 仍會準備 UI 資源與函式庫，讓外部 App 組裝使用。仍需符合主專案 C++23、Tcl 與 Plugin ABI 契約。
 
-In Vinc Shell or Tcl:
+Central starts the official UI before the startup script. A bind/load failure is
+reported without terminating central. Query the default instance in Shell or Tcl:
 
-在 Vinc Shell 或 Tcl 執行：
+中央在啟動腳本前自動啟動官方 UI；綁定／載入失敗會回報但不終止中央。
+在 Vinc Shell 或 Tcl 查詢預設實例：
 
 ```tcl
-webUi
 ui status
 ```
 
-Open http://127.0.0.1:8080/. Override listener settings at Module launch:
+Open http://127.0.0.1:8080/. To change listener settings, stop the current UI MID first, then launch it again:
 
-用瀏覽器開啟 `http://127.0.0.1:8080/`。需要變更時，在啟動命令指定：
+用瀏覽器開啟 `http://127.0.0.1:8080/`。需要變更時，先用 `debug stop <MID>` 停止目前 UI，再重新啟動：
 
 ```tcl
 webUi --ip 127.0.0.1 --port 8090
@@ -248,7 +273,7 @@ Debug 既有 `module.shell`、`message_bus.shell`、`bag.shell` 亦通過。
 - **已確認的下一階段**：官方管理面板與中央管理 bridge。須由中央核准官方 UI 的 MID／session，
   不能以 `ui` 名稱或 plugin 自稱官方取得權限；一般 Module 的 Param 權限維持現況。
   本輪只有防跨站 browser capability；未來加入修改 endpoint 前，仍須設計使用者登入及中央命令授權，不沿用唯讀 capability 冒充管理權限。
-- **未實作**：修改管理資料串流、其餘官方 feature plugins、可重定位安裝包、Electron 包裝；不提供 placeholder RPC。
+- **未實作**：修改管理資料串流、其餘官方 feature plugins、Electron 包裝；不提供 placeholder RPC。
 - **驗證限制**：原生 Linux／macOS、多瀏覽器及大量慢連線負載測試待執行。
   目前 HTTP thread 故障由 status／瀏覽器顯示，尚無自動轉換為 Module 故障的監督接線。
 
@@ -258,7 +283,7 @@ Debug 既有 `module.shell`、`message_bus.shell`、`bag.shell` 亦通過。
 
 Start webUi, then open Topics→Topic Monitor. Lists registered topics, known type/hash, active Publisher/Subscriber counts, publication Hz, collisions, and Reader loss. Subscriber-only topics can appear; topics disappear under Bus rules when no registrations remain.
 
-啟動 `webUi` 後，在左側 **Topics → Topic Monitor** 開啟。清單列出登記中的 Topic、
+預設 `ui` 就緒後，在左側 **Topics → Topic Monitor** 開啟。清單列出登記中的 Topic、
 編譯時已知訊息型別／hash、活動 Publisher 與 Subscriber 數、發布 Hz、碰撞與讀者漏資料。
 只有 Subscriber、尚無 Publisher 的 Topic 也可列出；沒有任何登記後依 Bus 規則移除。
 
@@ -418,13 +443,13 @@ That validation did not run cross-platform/multi-browser/high-topic-count/slow-H
 
 ## Module Graph (2026-10-27) / Module 關係圖
 
-Start `webUi`, then open **Module Graph → Module Graph**. The official `vinc.graph`
+With the default UI ready, open **Module Graph → Module Graph**. The official `vinc.graph`
 plugin draws `Module → Topic` for publication and `Topic → Module` for subscription.
 It fetches once when opened and only on **Refresh** afterward. It adds no polling,
 heartbeat thread, subscriptions, payload reads, or Hz sampling. Module borders show the sampled notification status described below.
 The existing Topic Monitor retains its own sampling policy.
 
-啟動 `webUi` 後開啟 **Module Graph → Module Graph**。發布為 `Module → Topic`，
+預設 `ui` 就緒後開啟 **Module Graph → Module Graph**。發布為 `Module → Topic`，
 訂閱為 `Topic → Module`；開啟時讀取一次，之後只在按 **Refresh** 時讀取。
 不新增輪詢、heartbeat 執行緒、訂閱或訊息讀取，也不計算 Hz；Module 邊框呈現下述通知診斷。
 既有 Topic Monitor 的取樣政策不變。

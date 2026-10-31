@@ -108,8 +108,10 @@ struct ModuleSnapshot {
 // Requests are bounded, never automatically replayed, and timeout does not imply cancellation.
 class ModuleManager {
 public:
-    static Result<std::unique_ptr<ModuleManager>> create(message_bus::Limits limits = {},
-                                                          std::filesystem::path host_executable = {});
+    // Framework composition supplies an absolute executable with Host dispatch.
+    // No implicit build-tree Host or user-owned application entry is provided.
+    static Result<std::unique_ptr<ModuleManager>> create(message_bus::Limits limits,
+                                                       std::filesystem::path host_executable);
     ~ModuleManager();
     ModuleManager(const ModuleManager&) = delete;
     ModuleManager& operator=(const ModuleManager&) = delete;

@@ -117,6 +117,28 @@ CMake 4.3.2、Ninja 1.13.2。完整 Debug／Release 建置及公開標頭編譯�
 
 ## UTF-8 and native paths / UTF-8 與原生路徑
 
+`executable_path()` in the same header queries the running executable's absolute,
+canonical native path independently of argv/PATH/cwd. Windows uses GetModuleFileNameW,
+macOS uses _NSGetExecutablePath, and Linux requires `/proc/self/exe`. Missing/deleted
+executables or unavailable OS/filesystem data return Result errors under ExecutablePath=55.
+Unlike the conversion functions below, this query accesses OS/filesystem state; it
+does not change cwd or promise identity/security, deployment ABI, or availability after deletion.
+
+同一標頭的 `executable_path()` 查詢目前執行檔的絕對、解析符號連結後的原生路徑，不依賴
+argv／PATH／cwd。Windows 使用 GetModuleFileNameW，macOS 使用 _NSGetExecutablePath，
+Linux 需要 `/proc/self/exe`。檔案已刪除或 OS／檔案系統查詢失敗時回傳 Result 錯誤，
+operation 為 ExecutablePath=55。此查詢會存取 OS／檔案系統，與下方純編碼轉換不同；
+不修改 cwd，也不承諾身分安全驗證、部署 ABI 或檔案刪除後仍可取得有效路徑。
+
+Executable-path validation (2026-10-29): Windows MSVC Debug/Release and WSL Ubuntu
+24.04/GCC 13.3 path tests passed. Installed application/Host relocation tests also
+exercise this query from an unrelated cwd; see [SDK evidence](../sdk/INSTALL.md).
+The new macOS backend requires native validation; no prior OSAL platform evidence is withdrawn.
+
+執行檔路徑驗證（2026-10-29）：Windows MSVC Debug／Release 與 WSL Ubuntu 24.04／GCC 13.3
+的 path 測試通過，另由 SDK 搬移應用／Host 並從不同 cwd 啟動驗證。macOS 此新增查詢尚待原生驗證，
+不撤銷既有 OSAL 平台證據。
+
 `<vinc/osal/path.hpp>` provides `path_from_utf8(std::string_view)` and `path_to_utf8(const std::filesystem::path&)`, returning `Result<std::filesystem::path>` and `Result<std::string>`. Link `vinc::osal`; the SDK umbrella includes this header.
 
 `<vinc/osal/path.hpp>` 提供 `path_from_utf8(std::string_view)` 與

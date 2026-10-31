@@ -86,7 +86,8 @@ enum class ErrorOperation : std::int32_t {
     Notify = 51,
     WaitNotification = 52,
     CloseNotification = 53,
-    UnlinkNotification = 54
+    UnlinkNotification = 54,
+    ExecutablePath = 55
 };
 }
 

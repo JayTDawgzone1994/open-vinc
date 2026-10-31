@@ -1,0 +1,31 @@
+if {[catch {
+    if {[info exists ::env(VINC_TEST_UI_UNAVAILABLE)]} {
+        if {![catch {ui status}]} { error "Unavailable UI accepted a command" }
+    } else {
+        ui status
+    }
+    if {[info exists ::env(VINC_TEST_BAG_UNAVAILABLE)]} {
+        if {![catch {recorder status}]} { error "Unavailable Recorder accepted a command" }
+    } else {
+        recorder status
+    }
+    if {[info exists ::env(VINC_TEST_STOP_UI)]} {
+        # This fixture starts no user Modules before the first official MID.
+        set officialUiMid 1
+        set stoppedObservationMs 100
+        debug stop $officialUiMid
+        after $stoppedObservationMs
+        if {![catch {ui status}]} { error "Stopped UI restarted automatically" }
+    }
+    if {[@MODULE_TYPE@ [info nameofexecutable]] != 0} { error "Module startup failed" }
+    if {[file exists [file join $::vinc::app_dir python vinc bootstrap.py]]} {
+        if {[ScriptPeer --name python] != 0} { error "Python startup failed" }
+        if {[python status] != 0} { error "Python command failed" }
+    }
+    puts "@APP_NAME@_SCRIPT_OK"
+} diagnostic]} {
+    puts "APP_TEST_FAILED: $diagnostic"
+}
+if {![info exists ::env(VINC_TEST_KEEP_RUNNING)]} {
+    exit
+}

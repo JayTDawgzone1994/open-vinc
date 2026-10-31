@@ -16,7 +16,6 @@
 #include <vinc/config.hpp>
 #include <vinc/module/detail/contract_report.hpp>
 #include <vinc/module/host/module_manager.hpp>
-#include <vinc/module/detail/host_path.hpp>
 #include <vinc/module/detail/mid_allocator.hpp>
 #include <vinc/module/detail/module_protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
@@ -1549,12 +1548,10 @@ Result<std::unique_ptr<ModuleManager>> ModuleManager::create(message_bus::Limits
 
 Result<std::unique_ptr<ModuleManager>> detail::ManagerAccess::create(std::string name, message_bus::Limits limits, std::filesystem::path host_executable) {
     try {
-        if (host_executable.empty()) {
-            host_executable = std::filesystem::path(VINC_MODULE_HOST_PATH);
-        }
         if (!host_executable.is_absolute()) {
             return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::Create));
         }
+
         auto instance = detail::Instance::create(name);
         if (!instance) {
             return std::unexpected(instance.error());

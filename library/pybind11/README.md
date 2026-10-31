@@ -24,6 +24,11 @@
 Python 相依只由綁定 target 使用，不讓中央與一般 C++ Module 因此必須安裝 Python。
 不修改上游來源，不自行建立或安裝 Python 環境。部署同時複製上游 LICENSE。
 
+安裝式 SDK 即使未啟用 Python 綁定建置，也會交付固定版本的 include／tools／CMakeLists
+及 LICENSE／revision.txt。製作 SDK 時驗證 gitlink；使用端不依賴 Git，也不下載另一版
+pybind11。來源版及安裝版共用 Module System 的 Python 建置 helper。
+啟用 Python 時由 Vinc 先建立固定 pybind11 targets，避免混入先前建立的不同版本／ABI。
+
 ## 驗證
 
 2026-10-12：核對官方 v3.1.0 tag／commit，上游工作目錄保持乾淨。

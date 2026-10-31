@@ -1,8 +1,9 @@
 #include <vinc/module/host/python_modules.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc/module/detail/manager_access.hpp>
-// Central executable entry point: parse -S, locate Tcl resources, reserve command names,
-// register compiled module types, then enter the Shell/deployment loop.
+#include <vinc/module/detail/module_runtime.hpp>
+// Framework-owned process entry: dispatch Host launches before central services.
+// Central then parses -S, registers modules and enters the Shell/deployment loop.
 
 #include <vinc/shell/detail/shell.hpp>
 #include <vinc/shell/detail/tcl_runtime.hpp>
@@ -10,7 +11,11 @@
 #include <vinc/config.hpp>
 #include <iostream>
 #include <charconv>
+#include <chrono>
 #include <limits>
+#ifdef VINC_COMPOSED_APP
+#include <vinc_app_config.hpp>
+#endif
 #ifdef VINC_EMBEDDED_STARTUP
 #include <embedded_startup.hpp>
 #endif
@@ -132,20 +137,79 @@ ParseAction parse_arguments(int argc, char** argv, StartupOptions& options) {
     return ParseAction::Start;
 }
 
-vinc::Result<void> run_services(const char* executable, StartupOptions& options) {
-    auto initialized = vinc::shell::initialize_tcl(executable);
+// Each official Module is attempted once. Ready waits retain Manager's existing
+// startup deadline; failure remains local, and explicit stops are never undone.
+void start_official(vinc::ModuleManager& manager, const std::string& type,
+                    std::chrono::milliseconds stop_timeout) {
+    // Legacy library-only fixtures may omit official types. Composed Apps always
+    // include them; failures here remain local so later startup can continue.
+    if (!manager.has_module_type(type)) {
+        return;
+    }
+
+    auto started = manager.start_module(type);
+    if (!started) {
+        std::cerr << "Official Module " << type << " failed: "
+                  << vinc::error_to_string(started.error()) << '\n';
+        return;
+    }
+
+    auto ready = manager.wait_started(*started);
+    if (ready) {
+        const auto snapshot = manager.inspect(*started);
+        std::cout << "Official Module " << type << " ready: "
+                  << (snapshot ? snapshot->name : "<exited>") << " MID=" << *started << '\n';
+        return;
+    }
+
+    std::cerr << "Official Module " << type << " MID=" << *started << " failed: "
+              << vinc::error_to_string(ready.error()) << '\n';
+    const auto snapshot = manager.inspect(*started);
+    if (snapshot && snapshot->last_failure) {
+        std::cerr << "Module failure: " << vinc::error_to_string(snapshot->last_failure->error) << '\n';
+    }
+
+    // A wait timeout alone does not cancel startup. Request an explicit stop;
+    // supervision keeps owning any child whose OS exit is not yet confirmed.
+    auto stopped = manager.stop_module(*started, std::chrono::steady_clock::now() + stop_timeout);
+    if (!stopped) {
+        std::cerr << "Official Module cleanup " << type << " MID=" << *started << ": "
+                  << vinc::error_to_string(stopped.error()) << '\n';
+    }
+}
+
+vinc::Result<void> run_services(StartupOptions& options) {
+    // Both roles use this executable. Query the OS instead of trusting argv[0],
+    // cwd or a producer build path; only central creates Manager and Tcl.
+    auto native_executable = vinc::osal::executable_path();
+    if (!native_executable) {
+        return std::unexpected(native_executable.error());
+    }
+
+    auto executable_text = vinc::osal::path_to_utf8(*native_executable);
+    if (!executable_text) {
+        return std::unexpected(executable_text.error());
+    }
+
+    auto initialized = vinc::shell::initialize_tcl(executable_text->c_str());
     if (!initialized) {
         return initialized;
     }
-    auto owner = vinc::ModuleManager::create();
-    if (!owner) {
-        return std::unexpected(owner.error());
-    }
-    auto& manager = **owner;
     auto directory = vinc::shell::executable_directory();
     if (!directory) {
         return std::unexpected(directory.error());
     }
+#ifdef VINC_COMPOSED_APP
+    auto owner = vinc::detail::ManagerAccess::create(std::string(vinc::app::instance_name), {},
+        *native_executable);
+#else
+    auto owner = vinc::ModuleManager::create({}, *native_executable);
+#endif
+    if (!owner) {
+        return std::unexpected(owner.error());
+    }
+
+    auto& manager = **owner;
     auto logging = vinc::detail::ManagerAccess::configure_log(manager, *directory / "vinc_data");
     if (!logging) {
         std::cerr << "Log file: " << vinc::error_to_string(logging.error()) << '\n';
@@ -162,7 +226,11 @@ vinc::Result<void> run_services(const char* executable, StartupOptions& options)
         return std::unexpected(shell_owner.error());
     }
     auto& shell = **shell_owner;
+#ifdef VINC_COMPOSED_APP
+    auto registered = vinc::register_built_modules(manager, *directory);
+#else
     auto registered = vinc::register_built_modules(manager);
+#endif
     if (!registered) {
         return std::unexpected(registered.error());
     }
@@ -192,6 +260,9 @@ vinc::Result<void> run_services(const char* executable, StartupOptions& options)
               << ':' << endpoint->port << " (Raw TCP)\n"
               << std::flush;
 
+    start_official(manager, "webUi", vinc::config::ui_stop_timeout);
+    start_official(manager, "bagRecorder", vinc::config::bag_stop_timeout);
+
 #ifdef VINC_EMBEDDED_STARTUP
     return shell.run_source(vinc::shell::ScriptSource::embedded(std::string(vinc::app::startup_script)));
 #else
@@ -201,6 +272,12 @@ vinc::Result<void> run_services(const char* executable, StartupOptions& options)
 }
 
 int application(int argc, char** argv) {
+    // Reserved internal launches never fall back to central, including unknown
+    // bootstrap versions. Later tokens belong to central/script/module arguments.
+    if (argc > 1 && vinc::detail::is_module_launch(argv[1])) {
+        return vinc::run_module_process(std::vector<std::string>(argv + 1, argv + argc));
+    }
+
     try {
         StartupOptions options;
         const auto action = parse_arguments(argc, argv, options);
@@ -214,7 +291,7 @@ int application(int argc, char** argv) {
             return invalid_arguments_exit_code;
         }
 
-        auto result = run_services(argv[0], options);
+        auto result = run_services(options);
         if (!result) {
             std::cerr << "Shell startup failed: " << vinc::error_to_string(result.error()) << '\n';
             return startup_failure_exit_code;
