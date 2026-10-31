@@ -1,0 +1,21 @@
+mainmenu "Open-VINC application features"
+
+menu "Application services"
+
+config VINC_APP_UI
+    bool "Include official Web UI Module"
+    default y
+    help
+      Build and deploy webUi without starting it automatically.
+      Installed SDKs must provide the UI libraries and frontend assets.
+
+config VINC_APP_BAG
+    bool "Include Bag Recorder Module"
+    default y
+    help
+      Build and deploy bagRecorder without starting it automatically.
+      This does not remove Bag storage or SQLite from the SDK.
+
+rsource "Kconfig.python"
+
+endmenu

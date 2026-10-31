@@ -17,3 +17,9 @@ endif()
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_output_hub vinc_output_hub_errors)
+endif()

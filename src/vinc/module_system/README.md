@@ -28,6 +28,29 @@ stdout／stderr 由中央 [OutputHub](../output_hub/README.md) 自啟動起擷�
 
 ## Build boundaries / 建置邊界
 
+The [application entry contract](../../../apps/vinc/SINGLE_EXECUTABLE.md) confirms
+framework ownership of the sole production App main and all Manager/Host wiring.
+Module authors inherit BaseModule and use Context; its virtual main is not an OS
+entry point. App dispatches central/Host roles and supplies its own path to Manager.
+There is no production standalone Host target or entry-object target. Isolated
+test fixtures remain under tests and are not installed.
+Here and in historical validation records, ModuleHost denotes that runtime role;
+it does not imply a separate deployed `ModuleHost` executable in current builds.
+上述入口契約已確認：正式 App 唯一 main 及 Manager／Host 接線均由框架提供。
+Module 作者繼承 BaseModule 並使用 Context，其虛擬 main 不是 OS 程序入口。
+App 已分流中央／Host 並交付自身路徑給 Manager；正式獨立 Host 與 entry-object target
+均已移除。隔離測試 fixture 留在 tests，不安裝，也不形成使用者入口 API。
+本文及歷史驗證中的 ModuleHost 表示該 runtime 角色，不代表目前另有同名部署執行檔。
+
+For prebuilt C++ SDK consumption, [installed application composition](../sdk/INSTALL.md)
+provides `add_module()` and `vinc_add_app()` with one executable per App. Multi-App
+stage 3 uses per-App relative deployed Plugin paths.
+The Plugin ABI and process ownership below are unchanged; this does not add hot loading.
+
+預編譯 C++ SDK 可由上述安裝指南使用 `add_module()`／`vinc_add_app()`，每個 App 有一個執行檔。
+多 App 第三階段改用相對 App 執行檔的 Plugin 部署路徑。
+以下 Plugin ABI 及程序所有權維持不變，不增加熱載入。
+
 <a id="modulehostplugin-接線2026-10-06"></a>
 
 ### ModuleHost / Plugin integration (2026-10-06) / ModuleHost／Plugin 接線（2026-10-06）
@@ -62,14 +85,14 @@ Responsibilities and targets:
 
 - vinc::module: BaseModule and the Plugin-facing Bus client, without a process entry or control service.
 - vinc::module_runtime: Host bootstrap, Plugin loader, watchdog, control services, and Bus wiring.
-- vinc::module_entry: framework Host main/wmain; application Modules no longer link it.
-- vinc_module_host: shared ModuleHost executable owned by this component.
+- App owns main/wmain and dispatches to vinc::module_runtime for native Host launches.
+- vinc_test_host/vinc_test_manager: test-only Host and its Manager fixture requirements; never installed.
 - vinc::module_manager: central supervision; central and Host statically link Control Channel services.
 
 - `vinc::module`：BaseModule 與 Plugin 可用的 Message Bus client，無程序入口或控制服務。
 - `vinc::module_runtime`：Host bootstrap、Plugin loader、watchdog、控制服務與 Bus 接線。
-- `vinc::module_entry`：框架 Host main／wmain；不再由應用 Module 連結。
-- `vinc_module_host`：共用 `ModuleHost` 執行檔；仍由 Module System 元件維護。
+- App 維護 main／wmain，原生 Host 啟動分流至 `vinc::module_runtime`。
+- `vinc_test_host`／`vinc_test_manager`：測試專用 Host 及 Manager fixture 接線，不安裝。
 - `vinc::module_manager`：中央監督；Control Channel 服務仍靜態連入中央與 Host。
 
 Host explicitly owns the Bus Client/Transport. Plugin uses that same Client; Host injects send/close into ControlTransport and watchdog remains the sole receiver. Plugin statically links only Bus client, message storage, and necessary utilities, without control services or central BusManager. vinc::control_protocol supplies a codec without workers or Socket ownership. RuntimeServices remains fatal-only, with no Bus, Param, or Context placeholder.
@@ -85,9 +108,9 @@ src/vinc/module_system/ jointly owns BaseModule, subprocess Runtime, and central
 本元件位於 `src/vinc/module_system/`，共同維護 `BaseModule`、子程序 Runtime 與中央
 `ModuleManager`。標頭仍使用 `<vinc/module/...>`，各 target 依下述職責分開提供。
 
-cmake/VincModule.cmake provides the application Plugin helper; this component builds the Host entry. Protocol/Plugin integration headers live in include/vinc/module/detail. See [SDK and layout](../sdk/README.md).
+cmake/VincModule.cmake provides the application Plugin helper; App owns the production process entry. Protocol/Plugin integration headers live in include/vinc/module/detail. See [SDK and layout](../sdk/README.md).
 
-`cmake/VincModule.cmake` 提供應用 Plugin helper，框架 Host 入口由本元件建置。
+`cmake/VincModule.cmake` 提供應用 Plugin helper，正式程序入口由 App 建置。
 內部協定與 Plugin 接線放在 `include/vinc/module/detail`。
 詳見 [SDK 與目錄說明](../sdk/README.md)。
 
@@ -164,14 +187,28 @@ add_module(camera
 )
 ```
 
-Framework provides main/Windows wmain for ModuleHost. MODULE_TYPE_NAME must match REGISTER_MODULE; each Plugin declares one ModuleType, while multiple Hosts can instantiate the same library independently. CMake generates the central catalog; Shell no longer whole-archives Module implementations. Catalog paths are absolute build-tree Plugin paths. For relocation, register_module_type(ModuleType) supplies the library path and ModuleManager::create(limits, host_executable) supplies an absolute Host path. Omission uses the generated build path; this is not a relocatable installation manifest.
+During [multi-App stage 1](../../../apps/vinc/MULTI_APP.md), `add_module()` registers
+availability and creates an `EXCLUDE_FROM_ALL` target; it no longer appends a global
+C++ catalog string. App dependencies select what builds, and catalog rendering
+receives an explicit target list. Existing single-App composers still select all
+registered Modules until stage 2. Normal subsequent target customization remains
+supported. This does not skip user CMake dependency discovery for unselected Modules.
 
-框架為 ModuleHost 提供 `main`／Windows `wmain`。`MODULE_TYPE_NAME` 必須與 `REGISTER_MODULE` 一致，
+多 App 第一階段將登記與 catalog 生成分開；Module target 不再自行進入預設建置，
+由 App 相依決定建置集合。既有單 App 暫時仍選入全部登記 Module，第二階段才接公開選擇。
+保留 `target_link_libraries()` 等後續操作，不承諾跳過未選 Module 的 CMake 相依檢查。
+
+The framework App now dispatches central/Host roles itself; production has no standalone ModuleHost target; tests explicitly link their fixture requirements. MODULE_TYPE_NAME must match REGISTER_MODULE; each Plugin declares one ModuleType, while multiple Hosts can instantiate the same library independently. CMake generates the central catalog; Shell does not whole-archive Module implementations. Source catalog paths are absolute build-tree Plugin paths. Framework wiring uses register_module_type(ModuleType) for the library path and ModuleManager::create(limits, host_executable) for an explicit absolute Host path. Both factory arguments are required; empty/relative Host paths return InvalidArgument/Create before central admission. No generated-path fallback remains in Manager. Official App and the opt-in benchmark supply their own OS-reported paths; tests explicitly supply their fixture Host. This is internal composition, not a supported user-owned main API.
+
+框架 App 已自行分流中央／Host；正式建置不再有獨立 ModuleHost target，測試明確連結自己的 fixture 相依。
+`MODULE_TYPE_NAME` 必須與 `REGISTER_MODULE` 一致，
 每個 Plugin 只宣告一種 ModuleType；同一庫可由多個 Host 程序建立獨立實例。
 CMake 產生中央的模組目錄，Shell 不再把模組實作 whole-archive 連進自身。
-生成目錄內是本次建置的 Plugin 絕對路徑；搬移部署時以 `register_module_type(ModuleType)`
+生成目錄內是本次建置的 Plugin 絕對路徑；框架部署接線以 `register_module_type(ModuleType)`
 提供 library 路徑，並以 `ModuleManager::create(limits, host_executable)` 指定 Host 絕對路徑。
-省略 Host 路徑時使用本次建置生成的位置；目前不是可搬移的安裝 manifest。
+factory 的兩個參數均必填；空白／相對 Host 路徑在中央 admission 前回報 InvalidArgument／Create。
+Manager 不再回退到建置生成的路徑；正式 App 與選用 benchmark 提供 OS 查得的自身路徑，測試
+明確提供自己的 fixture Host。這是框架內部組裝，不代表支援使用者自行組裝 main。
 
 exampleModule demonstrates process lifecycle and command hooks; its default instance name is exampleNode.
 
@@ -324,9 +361,9 @@ RuntimeServices bridge 仍僅供 fatal，未加入一般 Context 服務。
 
 ## Central APIs and naming / 中央 API 與命名
 
-ModuleManager::create() returns `Result<std::unique_ptr<ModuleManager>>`; there is no implicit singleton/get compatibility entry. Shell explicitly owns/injects Manager. register_module_type registers ModuleType, absolute Plugin path, and policy; instance names belong to source. start_module returns `Result<MID>`, a nonzero central-assigned uint64_t identity; supervision performs startup asynchronously. Success does not mean spawn/Ready succeeded: use wait_started(mid), then inspect(mid)->name. ModuleSnapshot separates module_type, mid, and OS pid. Inspect/wait/command/stop/forget APIs accept MID or name; use MID before naming approval.
+Framework-owned ModuleManager::create(limits, host_executable) returns `Result<std::unique_ptr<ModuleManager>>`; there is no implicit singleton/get compatibility entry. Shell explicitly owns/injects Manager. register_module_type registers ModuleType, absolute Plugin path, and policy; instance names belong to source. start_module returns `Result<MID>`, a nonzero central-assigned uint64_t identity; supervision performs startup asynchronously. Success does not mean spawn/Ready succeeded: use wait_started(mid), then inspect(mid)->name. ModuleSnapshot separates module_type, mid, and OS pid. Inspect/wait/command/stop/forget APIs accept MID or name; use MID before naming approval.
 
-`ModuleManager` 透過 `create()` 明確建立，回傳 `Result<std::unique_ptr<ModuleManager>>`，
+`ModuleManager` 由框架透過 `create(limits, host_executable)` 明確建立，回傳 `Result<std::unique_ptr<ModuleManager>>`，
 不提供隱含 singleton 或 `get()` 相容入口。Shell 主程式明確持有並傳入 manager。
 `register_module_type` 登記 ModuleType、Plugin 絕對庫路徑與政策；實例名稱由 source 擁有。
 `start_module` 回傳 `Result<MID>`，成功值為中央配置的非零 `MID`（`uint64_t`），啟動工作由監督執行緒進行；
@@ -456,13 +493,14 @@ Current bootstrap is --vinc-module-v16, with debug flag 0/1 and notification nam
   截斷／多餘 bytes、未知格式版本／flags、非法筆數均拒絕；未知數字代碼原樣保留。
   接收端依本地容量保留近因與最深原因，必要時標記省略；wire 上限不隨本地設定改變。
 
-[Shared Memory Message Bus](../message_bus/README.md) is available through inherited context.`advertise<T>()`/`subscribe<T>()` from on_start, not construction/on_name. Watchdog routes Domain 3 controls; central BusManager owns registration/shared areas on another thread. Large payloads never traverse Socket; confirmed OS exit precedes reader/history reclamation. ModuleManager::create(message_bus::Limits) accepts Bus limits or defaults. messageBusExample demonstrates cross-process exchange. Context pump dispatches subscriptions. Framework-to-framework multi-host communication is not implemented.
+[Shared Memory Message Bus](../message_bus/README.md) is available through inherited context.`advertise<T>()`/`subscribe<T>()` from on_start, not construction/on_name. Watchdog routes Domain 3 controls; central BusManager owns registration/shared areas on another thread. Large payloads never traverse Socket; confirmed OS exit precedes reader/history reclamation. Framework wiring calls ModuleManager::create(limits, host_executable); pass message_bus::Limits{} for default Bus budgets and always supply the absolute Host path. messageBusExample demonstrates cross-process exchange. Context pump dispatches subscriptions. Framework-to-framework multi-host communication is not implemented.
 
 [Shared Memory Message Bus](../message_bus/README.md) 已接上：在 `on_start()`／後續工作
 使用繼承的 `context.advertise<T>()`／`subscribe<T>()`，建構與 on_name 尚未開放服務。
 Module watchdog 統一路由 Message Bus Domain=3 的控制訊息；中央另有 BusManager 執行緒管理註冊與共享區。
 大量資料不進 Socket，中央確認子程序退出後才清除其 reader 占用與發布歷史。
-`ModuleManager::create(message_bus::Limits)` 可配置 Message Bus 容量；省略 limits 使用預設限制。
+框架以 `ModuleManager::create(limits, host_executable)` 配置 Message Bus 容量；
+傳入 `message_bus::Limits{}` 使用預設容量，Host 絕對路徑仍須明確提供。
 `messageBusExample` 提供可操作的跨程序發布／接收範例。
 訂閱 callback 由 Context pump 派送；框架間多機通訊尚未實作。
 
@@ -524,7 +562,8 @@ Module／Message Bus 程序相關測試（22.66 秒），Release 的上述 33/33
 Linux／macOS 未建置或執行；未注入 OS 執行緒建立失敗及所有記憶體配置失敗點。
 
 ```cpp
-auto created = vinc::ModuleManager::create();
+// Framework-owned composition only; host_executable is the validated App path.
+auto created = vinc::ModuleManager::create(vinc::message_bus::Limits{}, host_executable);
 if (!created) {
     std::cerr << vinc::error_to_string(created.error()) << '\n';
     return;
@@ -574,12 +613,17 @@ ModuleSnapshot.last_failure and cleanup_failure each hold {mid, error}; the firs
 ### Limitations after Plugin migration / Plugin 遷移後的限制
 
 - Matching-build ABI, native discovery/hot loading, and central version checks retain the limitations above.
-- Build-tree catalog/default Host paths are absolute; a relocatable deployment manifest is not implemented.
+- Source-build Plugin catalogs still use absolute paths. App self-launch is implemented;
+  installed SDK relocation is documented in [INSTALL.md](../sdk/INSTALL.md).
+  Standalone Host build/export/copy wiring is removed; remaining deployment and
+  integration validation follows the [single-executable plan](../../../apps/vinc/SINGLE_EXECUTABLE.md).
 - Loader static constructors run before bridge injection and can only use fallback termination; static destructors after clearing also lack guaranteed fatal reports.
 - Native load/unload executes arbitrary Plugin code without portable timeouts. Central startup/stop supervision terminates stuck Hosts; this is not a malicious-code sandbox.
 
 - 相同建置 C++ ABI、自動掃描／熱載入與中央版本檢查的限制見上方建置邊界。
-- Build-tree catalog 與預設 Host 路徑仍是絕對路徑，正式可搬移部署 manifest 尚未實作。
+- Source-build Plugin catalog 仍使用絕對路徑；App 自我啟動已實作，安裝式 SDK 搬移驗證見
+  [INSTALL.md](../sdk/INSTALL.md)。獨立 Host 建置／匯出／複製接線已移除，剩餘部署及
+  整合驗證見[單一執行檔計畫](../../../apps/vinc/SINGLE_EXECUTABLE.md)。
 - 載入器執行的 static constructor 早於 bridge 注入，只有 fallback termination；
   清除 bridge 後的 static destructor 同樣不保證有 fatal report。
 - 原生載入／卸載可能執行任意 Plugin 程式碼，無 portable timeout；中央的啟動／停止

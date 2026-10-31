@@ -15,6 +15,11 @@ set(parent_build_type "${CMAKE_BUILD_TYPE}")
 set(parent_crt "${CMAKE_MSVC_RUNTIME_LIBRARY}")
 set(BUILD_SHARED_LIBS ON)
 add_subdirectory("${VINC_SOURCE_DIR}/src" open-vinc)
+foreach(forbidden vinc_module_host vinc_module_entry vinc_test_host vinc_test_manager)
+    if(TARGET ${forbidden})
+        message(FATAL_ERROR "Production source composition leaked Host/test target: ${forbidden}")
+    endif()
+endforeach()
 if(VINC_TEST_EMBEDDED_STARTUP)
     vinc_configure_app(NAME EmbeddedApp STARTUP_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/startup.tcl")
 endif()
@@ -78,8 +83,6 @@ vinc_deploy_tcl(shell "${CMAKE_CURRENT_BINARY_DIR}/explicit resources")
 add_dependencies(external_consumer external_module)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/executables.cmake" CONTENT
     "set(central [==[$<TARGET_FILE:shell>]==])\nset(consumer [==[$<TARGET_FILE:external_consumer>]==])\nset(module [==[$<TARGET_FILE:external_module>]==])\nset(incremental_probe [==[$<TARGET_FILE:sdk_incremental_probe>]==])\nset(message_probe [==[$<TARGET_FILE:external_message_probe>]==])\n")
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/host-license.cmake" CONTENT
-    "set(host [==[$<TARGET_FILE:vinc_module_host>]==])\n")
 
 # A child runtime must not acquire the central manager or output service through its target.
 get_target_property(runtime_links vinc_module LINK_LIBRARIES)

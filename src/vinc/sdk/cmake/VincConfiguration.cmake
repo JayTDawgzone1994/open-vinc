@@ -1,0 +1,216 @@
+include_guard(GLOBAL)
+
+# Internal composition entry: capture caller paths now, resolve after all Modules
+# have registered. Public App construction supplies its own official adapters.
+function(vinc_register_app_configuration target)
+    cmake_parse_arguments(PARSE_ARGV 1 APP ""
+        "CONFIG;TOOL_DIRECTORY;UI_AVAILABLE;BAG_AVAILABLE;PYTHON_AVAILABLE" "")
+    if(APP_UNPARSED_ARGUMENTS OR APP_KEYWORDS_MISSING_VALUES OR NOT APP_CONFIG OR NOT APP_TOOL_DIRECTORY)
+        message(FATAL_ERROR "App configuration requires CONFIG and TOOL_DIRECTORY")
+    endif()
+    if(NOT TARGET ${target} OR NOT target MATCHES "^[A-Za-z_][A-Za-z0-9_-]*$")
+        message(FATAL_ERROR "App configuration requires an existing named App target")
+    endif()
+    get_property(registered TARGET ${target} PROPERTY VINC_APP_CONFIG_REGISTERED)
+    if(registered)
+        message(FATAL_ERROR "Configuration already registered for ${target}")
+    endif()
+    # Generated directories must also be unambiguous on case-insensitive filesystems.
+    string(TOLOWER "${target}" key)
+    get_property(keys GLOBAL PROPERTY VINC_APP_CONFIG_KEYS)
+    if(key IN_LIST keys)
+        message(FATAL_ERROR "App configuration directory collision: ${target}")
+    endif()
+    foreach(feature UI BAG PYTHON)
+        if(NOT DEFINED APP_${feature}_AVAILABLE)
+            message(FATAL_ERROR "App configuration requires ${feature}_AVAILABLE")
+        endif()
+    endforeach()
+
+    find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+    get_filename_component(config "${APP_CONFIG}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    get_filename_component(tool "${APP_TOOL_DIRECTORY}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(output "${CMAKE_BINARY_DIR}/vinc-config/${target}")
+    set(arguments --config "${config}" --require-file --modules "${output}/modules.json")
+    foreach(feature UI BAG PYTHON)
+        string(TOLOWER "${feature}" name)
+        set(available n)
+        if(APP_${feature}_AVAILABLE)
+            set(available y)
+        endif()
+        list(APPEND arguments "--${name}-available" "${available}")
+    endforeach()
+    set_target_properties(${target} PROPERTIES
+        VINC_APP_CONFIG_REGISTERED TRUE
+        VINC_APP_CONFIG_FILE "${config}"
+        VINC_APP_CONFIG_TOOL "${tool}"
+        VINC_APP_CONFIG_OUTPUT "${output}"
+        VINC_APP_CONFIG_ARGUMENTS "${arguments}"
+        VINC_APP_CONFIG_INTERPRETER "${Python3_EXECUTABLE}")
+    set_property(GLOBAL APPEND PROPERTY VINC_APP_CONFIG_KEYS "${key}")
+    set_property(GLOBAL APPEND PROPERTY VINC_APP_CONFIG_TARGETS "${target}")
+
+    foreach(mode gui menu)
+        add_custom_target(${target}_vinc_${mode}config
+            COMMAND "${Python3_EXECUTABLE}" -B "${tool}/configure.py" ${arguments} "--${mode}"
+            USES_TERMINAL VERBATIM)
+    endforeach()
+    # Register in the outer directory so late sibling/subdirectory registrations
+    # are visible. Target properties retain data beyond this function's scope.
+    get_property(scheduled GLOBAL PROPERTY VINC_APP_CONFIG_SCHEDULED)
+    if(NOT scheduled)
+        set_property(GLOBAL PROPERTY VINC_APP_CONFIG_SCHEDULED TRUE)
+        cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL vinc_finalize_app_configurations)
+    endif()
+endfunction()
+
+function(vinc_finalize_app_configurations)
+    get_property(apps GLOBAL PROPERTY VINC_APP_CONFIG_TARGETS)
+    foreach(app IN LISTS apps)
+        vinc_resolve_app_configuration(${app})
+    endforeach()
+endfunction()
+
+# Resolve only build membership; no catalogs, deployment or runtime services here.
+function(vinc_resolve_app_configuration app)
+    get_property(resolved TARGET ${app} PROPERTY VINC_APP_CONFIG_RESOLVED)
+    if(resolved)
+        message(FATAL_ERROR "App configuration already resolved: ${app}")
+    endif()
+    foreach(name FILE TOOL OUTPUT ARGUMENTS INTERPRETER)
+        get_target_property(${name} ${app} VINC_APP_CONFIG_${name})
+    endforeach()
+    get_property(modules GLOBAL PROPERTY VINC_PROCESS_TARGETS)
+    get_property(app_official_set TARGET ${app} PROPERTY VINC_APP_OFFICIAL_MODULE_TARGETS SET)
+    set(types)
+    foreach(module IN LISTS modules)
+        get_target_property(official ${module} VINC_MODULE_OFFICIAL)
+        if(NOT official)
+            get_target_property(type ${module} VINC_MODULE_TYPE)
+            if(app_official_set AND type MATCHES "^(webUi|bagRecorder)$")
+                message(FATAL_ERROR "ModuleType ${type} is reserved for the official App Module")
+            endif()
+            list(APPEND types "${type}")
+        endif()
+    endforeach()
+    list(SORT types)
+    set(manifest "[")
+    set(separator "")
+    foreach(type IN LISTS types)
+        # add_module restricts types to ASCII identifiers; no JSON escaping needed.
+        string(APPEND manifest "${separator}\"${type}\"")
+        set(separator ",")
+    endforeach()
+    string(APPEND manifest "]\n")
+    file(MAKE_DIRECTORY "${OUTPUT}")
+    file(CONFIGURE OUTPUT "${OUTPUT}/modules.json" CONTENT "${manifest}" @ONLY)
+
+    # Keep reconfiguration local to each input. UI saves trigger CMake on the
+    # next build; editors do not launch a nested configure/build themselves.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${FILE}" "${TOOL}/configure.py" "${TOOL}/Kconfig.python")
+    execute_process(COMMAND "${INTERPRETER}" -B "${TOOL}/configure.py"
+        ${ARGUMENTS} --output "${OUTPUT}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors)
+    if(NOT result STREQUAL "0")
+        message(FATAL_ERROR "App ${app}: ${summary}${errors}\nEditor: ${INTERPRETER} ${TOOL}/configure.py ${ARGUMENTS} --gui")
+    endif()
+    include("${OUTPUT}/features.cmake")
+
+    set(selected)
+    foreach(module IN LISTS modules)
+        get_target_property(official ${module} VINC_MODULE_OFFICIAL)
+        get_target_property(symbol ${module} VINC_MODULE_CONFIG_SYMBOL)
+        if(official AND app_official_set)
+            continue()
+        endif()
+        if(official OR ${symbol})
+            list(APPEND selected "${module}")
+        endif()
+    endforeach()
+    if(app_official_set)
+        get_target_property(app_official ${app} VINC_APP_OFFICIAL_MODULE_TARGETS)
+        list(APPEND selected ${app_official})
+    endif()
+    if(selected)
+        add_dependencies(${app} ${selected})
+    endif()
+    set_target_properties(${app} PROPERTIES
+        VINC_APP_MODULE_TARGETS "${selected}"
+        VINC_APP_PYTHON "${VINC_APP_PYTHON}"
+        VINC_APP_CONFIG_RESOLVED TRUE)
+    message(STATUS "App ${app}: selected Modules [${selected}]")
+endfunction()
+
+# Only application composition needs Python. Plain SDK lookup/linking is inert.
+function(vinc_configure_application_features tool_directory)
+    cmake_parse_arguments(PARSE_ARGV 1 FEATURE "INSTALLED;NO_UI;NO_BAG" "UI_AVAILABLE;BAG_AVAILABLE;PYTHON_AVAILABLE" "")
+    find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+    set(config "${CMAKE_SOURCE_DIR}/vinc.conf")
+    set(arguments)
+    if(DEFINED VINC_CONFIG_FILE)
+        if(VINC_CONFIG_FILE STREQUAL "")
+            message(FATAL_ERROR "VINC_CONFIG_FILE must name a file")
+        endif()
+        get_filename_component(config "${VINC_CONFIG_FILE}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+        list(APPEND arguments --require-file)
+    endif()
+    set(output "${CMAKE_BINARY_DIR}/vinc-config")
+    if(FEATURE_INSTALLED)
+        if(FEATURE_PYTHON_AVAILABLE)
+            list(APPEND arguments --python-available y)
+        else()
+            list(APPEND arguments --python-available n)
+        endif()
+    endif()
+    foreach(name UI BAG)
+        string(TOLOWER "${name}" feature_name)
+        if(FEATURE_${name}_AVAILABLE)
+            list(APPEND arguments "--${feature_name}-available" y)
+        else()
+            list(APPEND arguments "--${feature_name}-available" n)
+        endif()
+    endforeach()
+    foreach(name UI BAG PYTHON)
+        if(DEFINED VINC_BUILD_${name})
+            if(VINC_BUILD_${name})
+                set(value y)
+            else()
+                set(value n)
+            endif()
+            # UI ON describes a source SDK capability, not a demand to deploy it.
+            if(NOT name STREQUAL "UI" OR NOT VINC_BUILD_UI)
+                list(APPEND arguments --legacy "VINC_APP_${name}=${value}")
+            endif()
+        endif()
+    endforeach()
+    foreach(name UI BAG)
+        if(FEATURE_NO_${name})
+            list(APPEND arguments --legacy "VINC_APP_${name}=n")
+        endif()
+    endforeach()
+    execute_process(COMMAND "${Python3_EXECUTABLE}" -B "${tool_directory}/configure.py"
+        --config "${config}" --output "${output}" ${arguments}
+        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors)
+    if(NOT result STREQUAL "0")
+        message(FATAL_ERROR "${summary}${errors}")
+    endif()
+    message(STATUS "${summary}")
+    include("${output}/features.cmake")
+    foreach(name UI BAG PYTHON)
+        set(VINC_APP_${name} "${VINC_APP_${name}}" PARENT_SCOPE)
+    endforeach()
+    # Glob tracks creation/deletion as well as edits to an optional default file.
+    file(GLOB config_presence CONFIGURE_DEPENDS "${config}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${config}" "${tool_directory}/Kconfig" "${tool_directory}/Kconfig.python"
+        "${tool_directory}/configure.py")
+    foreach(mode gui menu)
+        if(NOT TARGET vinc_${mode}config)
+            add_custom_target(vinc_${mode}config
+                COMMAND "${Python3_EXECUTABLE}" -B "${tool_directory}/configure.py"
+                    --config "${config}" ${arguments} "--${mode}"
+                USES_TERMINAL VERBATIM)
+        endif()
+    endforeach()
+endfunction()

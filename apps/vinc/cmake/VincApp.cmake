@@ -23,7 +23,14 @@ function(vinc_configure_app)
         message(FATAL_ERROR "Startup script is not a file: ${script}")
     endif()
 
-    set(generated_directory "${CMAKE_CURRENT_BINARY_DIR}/vinc_app_generated")
+    vinc_embed_startup(shell "${script}")
+    set_target_properties(shell PROPERTIES OUTPUT_NAME "${APP_NAME}" VINC_APP_CONFIGURED TRUE)
+endfunction()
+
+# Shared by source and installed application composition. The caller owns the
+# central target; embedding never creates another executable or runtime service.
+function(vinc_embed_startup target script)
+    set(generated_directory "${CMAKE_CURRENT_BINARY_DIR}/${target}_startup")
     set(header "${generated_directory}/embedded_startup.hpp")
     add_custom_command(OUTPUT "${header}"
         COMMAND "${CMAKE_COMMAND}" "-DINPUT=${script}" "-DOUTPUT=${header}"
@@ -33,10 +40,9 @@ function(vinc_configure_app)
         VERBATIM)
     # The command belongs to the consumer directory, while shell belongs to a
     # framework subdirectory. An explicit target orders their first compilation.
-    add_custom_target(vinc_app_startup DEPENDS "${header}")
-    add_dependencies(shell vinc_app_startup)
-    target_sources(shell PRIVATE "${header}")
-    target_include_directories(shell PRIVATE "${generated_directory}")
-    target_compile_definitions(shell PRIVATE VINC_EMBEDDED_STARTUP)
-    set_target_properties(shell PROPERTIES OUTPUT_NAME "${APP_NAME}" VINC_APP_CONFIGURED TRUE)
+    add_custom_target(${target}_vinc_startup DEPENDS "${header}")
+    add_dependencies(${target} ${target}_vinc_startup)
+    target_sources(${target} PRIVATE "${header}")
+    target_include_directories(${target} PRIVATE "${generated_directory}")
+    target_compile_definitions(${target} PRIVATE VINC_EMBEDDED_STARTUP)
 endfunction()

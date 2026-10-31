@@ -22,3 +22,6 @@
 [submodule "library/picosha2/upstream"]
 	path = library/picosha2/upstream
 	url = https://github.com/okdshin/PicoSHA2.git
+[submodule "library/kconfiglib/upstream"]
+	path = library/kconfiglib/upstream
+	url = https://github.com/zephyrproject-rtos/Kconfiglib.git

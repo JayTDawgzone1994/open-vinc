@@ -32,6 +32,17 @@ public:
         }
 
         options.root = std::move(*root);
+#ifdef VINC_COMPOSED_APP
+        // The deployed Host lives beside the central executable. Resolve the
+        // application's relative resource root without changing the user's cwd.
+        auto executable = vinc::osal::executable_path();
+        if (!executable) {
+            return std::unexpected(vinc::wrap_error(vinc::ui::ErrorCode::FileFailed,
+                vinc::ui::ErrorOperation::Start, executable.error()));
+        }
+
+        options.root = executable->parent_path() / options.root;
+#endif
         for (std::size_t index = 0; index < args.size(); index += 2) {
             if (index + 1 >= args.size()) {
                 return invalid_argument();

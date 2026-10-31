@@ -9,3 +9,11 @@ if(NOT actual_revision STREQUAL expected_revision)
 endif()
 add_library(vinc_ui_json INTERFACE)
 target_include_directories(vinc_ui_json SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/upstream/single_include")
+if(VINC_INSTALL_SDK)
+    set_target_properties(vinc_ui_json PROPERTIES EXPORT_NAME detail_ui_json
+        INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/single_include>;$<INSTALL_INTERFACE:include/vinc-third-party/json>"
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/single_include>;$<INSTALL_INTERFACE:include/vinc-third-party/json>")
+    install(TARGETS vinc_ui_json EXPORT VincTargets COMPONENT VincSDK)
+    install(DIRECTORY upstream/single_include/nlohmann DESTINATION include/vinc-third-party/json
+        COMPONENT VincSDK FILES_MATCHING PATTERN "*.hpp")
+endif()

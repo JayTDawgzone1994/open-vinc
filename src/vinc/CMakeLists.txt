@@ -19,6 +19,7 @@ endif()
 # =================================================================
 # Declare runtime libraries before application targets.
 # =================================================================
+include(sdk/cmake/VincInstall.cmake)
 include(sdk/cmake/VincLicenses.cmake)
 # Explicit target dependencies below govern message generation.
 add_subdirectory(common)         # Shared framework Result and error interface
@@ -46,7 +47,7 @@ if(BUILD_TESTING)
     add_subdirectory(rpc/tests)
 endif()
 
-if(VINC_BUILD_APPS AND VINC_BUILD_UI)
+if(VINC_BUILD_UI)
     add_subdirectory(ui)
 endif()
 

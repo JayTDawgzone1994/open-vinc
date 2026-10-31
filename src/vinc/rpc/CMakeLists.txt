@@ -25,3 +25,9 @@ target_include_directories(vinc_rpc_errors INTERFACE "${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(vinc_rpc_errors INTERFACE vinc::common)
 vinc_register_error_catalog(TARGET vinc_rpc_errors
     HEADER vinc/rpc/detail/error_catalog.hpp SYMBOL vinc::rpc::detail::error_catalog)
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_rpc vinc_rpc_host vinc_rpc_manager vinc_rpc_errors)
+endif()

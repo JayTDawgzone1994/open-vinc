@@ -11,7 +11,7 @@ function(require_text text source)
     endif()
 endfunction()
 
-foreach(package IN ITEMS tcl tomlplusplus fmt spdlog sqlite pybind11 cpp-httplib json picosha2)
+foreach(package IN ITEMS tcl tomlplusplus fmt spdlog sqlite pybind11 cpp-httplib json picosha2 kconfiglib)
     file(READ "${VINC_SOURCE_DIR}/library/${package}/revision.txt" revision)
     require_text("${revision}" "${package} revision")
 endforeach()
@@ -28,12 +28,13 @@ foreach(path IN ITEMS
         library/spdlog/upstream/LICENSE
         library/sqlite/upstream/sqlite3.c
         library/pybind11/upstream/LICENSE
+        library/kconfiglib/upstream/LICENSE.txt
         library/cpp-httplib/upstream/LICENSE
         library/json/upstream/LICENSE.MIT
         library/picosha2/upstream/LICENSE)
     if(NOT EXISTS "${VINC_SOURCE_DIR}/${path}")
         # Optional Python/UI sources need not be initialized for a native SDK.
-        if(path MATCHES "library/(pybind11|cpp-httplib|json|picosha2)/")
+        if(path MATCHES "library/(pybind11|cpp-httplib|json|picosha2|kconfiglib)/")
             continue()
         endif()
         message(FATAL_ERROR "Missing license source: ${path}")
@@ -45,6 +46,14 @@ foreach(path IN ITEMS
         string(SUBSTRING "${original}" 0 ${end} original)
     endif()
     require_text("${original}" "${path}")
+endforeach()
+
+foreach(script IN ITEMS menuconfig.py guiconfig.py)
+    set(path "${VINC_SOURCE_DIR}/library/kconfiglib/upstream/${script}")
+    if(EXISTS "${path}")
+        file(STRINGS "${path}" attribution REGEX "^# Copyright" ENCODING UTF-8)
+        require_text("${attribution}" "Kconfiglib ${script} attribution")
+    endif()
 endforeach()
 
 file(READ "${VINC_SOURCE_DIR}/library/fmt/upstream/include/fmt/format.h" fmt)

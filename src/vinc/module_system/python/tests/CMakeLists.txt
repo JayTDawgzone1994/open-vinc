@@ -1,6 +1,6 @@
 # Python lifecycle integration tests are private to Module System.
 add_executable(module_python_tests python_tests.cpp)
-target_link_libraries(module_python_tests PRIVATE vinc::module_manager)
+target_link_libraries(module_python_tests PRIVATE vinc_test_manager)
 add_dependencies(module_python_tests vinc_python_native)
 add_test(NAME module.python COMMAND module_python_tests "${Python_EXECUTABLE}"
     "${VINC_BUILD_ROOT}/python/$<CONFIG>/vinc/bootstrap.py" "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
@@ -37,7 +37,7 @@ endif()
 vinc_add_module_plugin(module_python_peer native_peer.cpp)
 target_link_libraries(module_python_peer PRIVATE vinc_messages)
 add_executable(module_python_services_tests services_tests.cpp)
-target_link_libraries(module_python_services_tests PRIVATE vinc::module_manager)
+target_link_libraries(module_python_services_tests PRIVATE vinc_test_manager)
 add_dependencies(module_python_services_tests module_python_peer vinc_python_native)
 add_test(NAME module.python_services COMMAND module_python_services_tests "${Python_EXECUTABLE}"
     "${VINC_BUILD_ROOT}/python/$<CONFIG>/vinc/bootstrap.py"

@@ -7,9 +7,57 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 namespace vinc::osal {
+Result<std::filesystem::path> executable_path() {
+    constexpr auto operation = ErrorOperation::ExecutablePath;
+    std::filesystem::path candidate;
+#ifdef _WIN32
+    // Win32 extended paths are bounded by 32767 UTF-16 units plus the terminator.
+    constexpr DWORD maximum_path_units = 32768;
+    std::wstring buffer(maximum_path_units, L'\0');
+    const auto size = GetModuleFileNameW(nullptr, buffer.data(), maximum_path_units);
+    if (size == 0) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation,
+            {NativeErrorSource::Win32, GetLastError()}});
+    }
+
+    if (size == maximum_path_units) {
+        return std::unexpected(Error{ErrorCode::MessageTooLarge, operation});
+    }
+
+    buffer.resize(size);
+    candidate = std::filesystem::path(std::move(buffer));
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (size == 0 || _NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation});
+    }
+
+    candidate = std::filesystem::path(buffer.c_str());
+#else
+    std::error_code error;
+    candidate = std::filesystem::read_symlink("/proc/self/exe", error);
+    if (error) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation, native_error(error)});
+    }
+#endif
+    // Resolve native symlinks once. Missing/deleted executables fail rather than
+    // returning a misleading deployment root (including Linux's " (deleted)").
+    std::error_code canonical_error;
+    auto resolved = std::filesystem::canonical(candidate, canonical_error);
+    if (canonical_error) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation, native_error(canonical_error)});
+    }
+
+    return resolved;
+}
+
 #ifdef _WIN32
 namespace {
 Error conversion_error(ErrorOperation operation) {

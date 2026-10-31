@@ -53,16 +53,16 @@ Central Vinc / 中央
        | Socket: identity, lifecycle, heartbeat, commands, control metadata
        | Socket：身分、生命週期、heartbeat、命令與控制資訊
        |
-       +---- ModuleHost process ---- C++ Plugin + Context
+       +---- same App (Host role) ---- C++ Plugin + Context
        +---- system Python process ---- Python Module + Context
 
   Module <====== shared memory / 共享記憶體 ======> Module
                  Message Bus / RPC payloads
 ```
 
-A C++ Module is a Plugin library, not a standalone executable. Vinc starts a separate ModuleHost for each instance; the Host loads the Plugin and owns its process-level control services. Python Modules run in separate system-Python processes. Authors use the Context inherited from BaseModule instead of implementing sockets or heartbeat.
+A C++ Module is a Plugin library, not a standalone executable. Vinc starts a separate ModuleHost process for each instance using the same App executable; the Host loads the Plugin and owns its process-level control services. Python Modules run in separate system-Python processes. Authors use the Context inherited from BaseModule instead of implementing sockets or heartbeat.
 
-C++ Module 是 Plugin 動態庫，不是獨立執行檔。Vinc 為每個實例啟動獨立 ModuleHost，由 Host 載入 Plugin 並持有程序級控制服務；Python Module 則在獨立的系統 Python 程序執行。開發者使用 BaseModule 繼承的 Context，不必自行實作 Socket 或 heartbeat。
+C++ Module 是 Plugin 動態庫，不是獨立執行檔。Vinc 使用同一份 App 執行檔，為每個實例啟動獨立的 ModuleHost 程序，由 Host 載入 Plugin 並持有程序級控制服務；Python Module 則在獨立的系統 Python 程序執行。開發者使用 BaseModule 繼承的 Context，不必自行實作 Socket 或 heartbeat。
 
 Sockets carry control information. Message Bus payloads use one shared RingBuffer per Publisher; RPC payloads use fixed shared slots. Subscription delivery copies a validated message into the receiving process before invoking user callbacks. A Publisher loan lets users fill shared storage directly, then commit it.
 
@@ -87,6 +87,7 @@ See [Module System](src/vinc/module_system/README.md), [Message Bus](src/vinc/me
 - **Linux/macOS:** a suitable C++ toolchain, make, and zlib development files for Tcl. Ubuntu 22.04 is the minimum Linux target; its default GCC 11 is not the C++23 baseline. / **Linux／macOS：**適用 C++ 工具鏈、make 與 Tcl 所需 zlib 開發檔。Linux 最低目標為 Ubuntu 22.04，不以預設 GCC 11 為 C++23 基準。
 - **Default Web UI build:** Node.js and npm; local validation records use Node.js 24.19.0. These are build-time tools, not browser/runtime requirements. / **預設 Web UI 建置：**需要 Node.js 與 npm，本機驗證紀錄使用 Node.js 24.19.0；部署後的瀏覽器與執行環境不需要 Node.js。
 - **Optional Python SDK:** compatible 64-bit, GIL-enabled CPython and Development.Module files. The deployment environment supplies Python. / **選用 Python SDK：**需要相容的 64 位元、含 GIL 的 CPython 與 Development.Module 開發檔，部署環境自行提供 Python。
+- **Application configuration:** Python 3.9+ runs the bundled Kconfig tool at configure time, even when Python Modules are disabled. Plain SDK lookup/linking does not need it. / **應用功能設定：**配置時需要 Python 3.9+ 執行內附 Kconfig 工具，與是否啟用 Python Module 無關；單純查找／連結 SDK 不需要。
 
 See [Tcl integration](library/tcl/README.md), [Python SDK](src/vinc/module_system/python/README.md), and [third-party dependencies](library/README.md) for detailed requirements.
 
@@ -109,6 +110,16 @@ Windows 執行 `tools\setup.bat`，Ubuntu／macOS 執行 `bash tools/setup.sh`�
 平台需求、環境選擇與驗證限制見 [setup 說明](tools/README.md)。
 
 ### Configure, build, test / 配置、建置、測試
+
+Application features are selected in `vinc.conf`: UI and Bag Recorder default to
+enabled, Python Modules to disabled. Text editing, CLI, GUI and terminal editors
+are available; see [application configuration](tools/configure/README.md).
+The legacy CMake options below remain accepted but must agree with explicit file
+settings. Inclusion does not auto-start UI or recording.
+
+應用功能由 `vinc.conf` 選擇：UI、Bag Recorder 預設包含，Python Module 預設關閉。
+支援文字、CLI、GUI 與終端編輯器，詳見[應用功能設定](tools/configure/README.md)。
+下列舊 CMake 選項仍可使用，但不得與檔案明確設定衝突；包含功能不代表自動啟動 UI 或錄製。
 
 Run from the repository root in a configured compiler environment. Restore pinned submodules first; CMake does not install npm packages automatically.
 
@@ -154,21 +165,21 @@ Start Vinc from the repository root:
 ./build/debug/Vinc
 ```
 
-Enter the following in the **Vinc Shell**, not the OS terminal. `exampleModule` requires examples enabled; `webUi` requires the UI build.
+Enter the following in the **Vinc Shell**, not the OS terminal. `exampleModule` requires examples enabled; `ui status` requires the included UI Module to have started successfully.
 
-在 **Vinc Shell** 輸入下列命令，不是在作業系統終端。`exampleModule` 需啟用範例建置，`webUi` 需啟用 UI 建置。
+在 **Vinc Shell** 輸入下列命令，不是在作業系統終端。`exampleModule` 需啟用範例建置，`ui status` 需 UI Module 已成功啟動。
 
 ```text
 help
 exampleModule
 exampleNode status
-webUi
+ui status
 ui status
 ```
 
-Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. `webUi` is built by default but starts only when requested. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
+Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. The included UI starts before startup Tcl; Bag also starts and stays idle until commanded. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
 
-開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。`webUi` 預設建置，需明確啟動才會執行。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
+開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。包含的 UI 會在啟動 Tcl 前自動啟動；Bag 同時啟動待命，收到命令才錄製。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
 
 <a id="develop-a-module"></a>
 
@@ -250,9 +261,9 @@ Vinc initializes Tcl and starts Socket Shell automatically at `127.0.0.1:5500` b
 
 Vinc 自動初始化 Tcl 並啟動 Socket Shell，預設為 `127.0.0.1:5500`，可用 PuTTY Raw 模式連入，目前沒有登入驗證或加密。以 `--shell-ip`／`--shell-port` 調整位址與埠；對 localhost 以外開放前，請閱讀 [Socket Shell 契約](src/vinc/shell/SOCKET.md)。
 
-Use `Vinc -S startup.tcl` for startup scripts, `srun file.tcl` within Shell, and Ctrl+D to cancel the foreground script. `vinc_configure_app(NAME MyApp STARTUP_SCRIPT startup.tcl)` embeds an application's default startup script; those applications reject `-S`. See [Shell](src/vinc/shell/README.md) and [application packaging](apps/vinc/README.md).
+Use `Vinc -S startup.tcl` for startup scripts, `srun file.tcl` within Shell, and Ctrl+D to cancel the foreground script. `vinc_add_app(MyApp INSTANCE_NAME my-app VINC_BUILD_CONFIG app.config STARTUP_SCRIPT startup.tcl)` embeds an application's default startup script; those applications reject `-S`. See [Shell](src/vinc/shell/README.md) and [application packaging](apps/vinc/README.md).
 
-使用 `Vinc -S startup.tcl` 執行啟動腳本，Shell 內用 `srun file.tcl` 執行其他腳本，Ctrl+D 中斷前景腳本。`vinc_configure_app(NAME MyApp STARTUP_SCRIPT startup.tcl)` 可內嵌應用預設啟動腳本，此類應用不接受 `-S`。詳見 [Shell](src/vinc/shell/README.md) 與[應用打包](apps/vinc/README.md)。
+使用 `Vinc -S startup.tcl` 執行啟動腳本，Shell 內用 `srun file.tcl` 執行其他腳本，Ctrl+D 中斷前景腳本。`vinc_add_app(MyApp INSTANCE_NAME my-app VINC_BUILD_CONFIG app.config STARTUP_SCRIPT startup.tcl)` 可內嵌應用預設啟動腳本，此類應用不接受 `-S`。詳見 [Shell](src/vinc/shell/README.md) 與[應用打包](apps/vinc/README.md)。
 
 ### Param and Log / 參數與紀錄
 
@@ -274,9 +285,9 @@ The [Topic Monitor](src/vinc/ui/README.md) shows publication Hz, Publisher/Subsc
 
 [Topic Monitor](src/vinc/ui/README.md) 顯示發布 Hz、Publisher／Subscriber 數、碰撞、漏資料與建置時已知型別的有界預覽；未知型別仍可看 schema 與統計。綠燈表示近期未觀察到問題，黃燈表示碰撞／漏資料或恢復觀察，紅燈表示 Writer 長時間等待或預覽錯誤，灰燈表示資料不可用／過期。燈號不代表所有應用功能健康；預覽會建立真正的 Subscriber，也可能增加競爭。
 
-Use `bagRecorder record session01 --all`, then `recorder status` and `recorder finish` in Shell. The default main SQLite database limit is 16 GiB; transaction temporary files take additional space. Capacity exhaustion or disk failure stops recording and reports the cause without shutting down Vinc. Recording can drop data when it cannot keep up. Player is not implemented. See [Bag Recorder](src/vinc/bag/README.md).
+Use `recorder record session01 --all`, then `recorder status` and `recorder finish` in Shell. The default main SQLite database limit is 16 GiB; transaction temporary files take additional space. Capacity exhaustion or disk failure stops recording and reports the cause without shutting down Vinc. Recording can drop data when it cannot keep up. Player is not implemented. See [Bag Recorder](src/vinc/bag/README.md).
 
-在 Shell 使用 `bagRecorder record session01 --all` 開始錄製，以 `recorder status` 與 `recorder finish` 查看及結束。主 SQLite 資料庫預設上限為 16 GiB，交易暫存檔另占空間。達上限或磁碟失敗會停止錄製並回報原因，不關閉中央。跟不上時可能丟資料；Player 尚未實作。詳見 [Bag Recorder](src/vinc/bag/README.md)。
+在 Shell 使用 `recorder record session01 --all` 開始錄製，以 `recorder status` 與 `recorder finish` 查看及結束。主 SQLite 資料庫預設上限為 16 GiB，交易暫存檔另占空間。達上限或磁碟失敗會停止錄製並回報原因，不關閉中央。跟不上時可能丟資料；Player 尚未實作。詳見 [Bag Recorder](src/vinc/bag/README.md)。
 
 <a id="validation-and-limits"></a>
 
@@ -362,7 +373,7 @@ Release, optional Python bindings, browser automation, and other operating syste
 
 上述 macOS 驗證未涵蓋 Release、選用 Python 綁定、瀏覽器自動化或其他 OS。原本 `vinc/` 中間產物目錄與 `Vinc` 在不區分大小寫的檔案系統衝突，現改放 `framework/`；從舊布局升級時請使用新的建置目錄。
 
-- **ABI and deployment:** native Plugins require matching toolchain, standard library, configuration, layout, and Windows CRT. There is no installed `find_package(VINC)` SDK or complete relocatable Plugin/UI package yet. / **ABI 與部署：**原生 Plugin 須符合工具鏈、標準庫、組態、布局及 Windows CRT 契約；尚無安裝式 `find_package(VINC)` SDK 或完整可重定位的 Plugin／UI 部署包。
+- **ABI and deployment:** native Plugins require matching toolchain, standard library, configuration, layout, and Windows CRT. The [installed C++ SDK](src/vinc/sdk/INSTALL.md) provides `find_package(vinc CONFIG REQUIRED)` and custom message/Module helpers. Multi-App stage 2 supports per-App composition with official UI/Bag and shared optional Python bindings; [stage 3](apps/vinc/MULTI_APP.md) adds independent deployment/install and automatic official startup. / **ABI 與部署：**原生 Plugin 須匹配工具鏈、標準庫、組態、布局及 Windows CRT。安裝式 SDK 提供套件查找與自訂訊息／Module helper；多 App 第二階段已接上各 App 組裝、官方 UI／Bag 與選用的共用 Python 綁定，第三階段已接上獨立部署／安裝及官方 Module 自動啟動。
 - **UI scope:** Read-only Topic Monitor and a manually refreshed Module Graph are available. Module control, Param editing, Log panels, 3D panels, and browser management RPC are not wired. Trusted plugins share page privileges, not a sandbox. / **UI 範圍：**已提供唯讀 Topic Monitor 與手動刷新的唯讀 Module Graph；Module 控制、Param 編輯、Log 面板、3D 面板與瀏覽器管理 RPC 尚未接線。受信任 plugin 共用頁面權限，不是隔離沙箱。
 - **Future capabilities:** native Plugin hot discovery/loading, dynamic message schemas, Bag Player, and framework-to-framework multi-machine transport are not implemented. / **未來能力：**尚未實作原生 Plugin 熱探索／載入、動態訊息 schema、Bag Player 與框架對框架的多機傳輸。
 - **Failure isolation:** process boundaries limit crash propagation, but do not promise security sandboxing or hard real-time behavior. Heartbeat detects only limited liveness; resource bounds and shared-memory recovery remain explicit contracts. / **故障隔離：**程序邊界可限制 crash 連帶影響，不等於安全沙箱或硬即時保證；heartbeat 只能有限度偵測存活，資源上限與共享記憶體回收仍依明定契約。

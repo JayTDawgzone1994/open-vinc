@@ -109,6 +109,9 @@ int main() {
         test_round_trip();
         test_invalid_encoding();
         test_file_access();
+        const auto executable = take(vinc::osal::executable_path());
+        check(executable.is_absolute(), "executable path must be absolute");
+        check(std::filesystem::is_regular_file(executable), "executable path must exist");
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

@@ -21,3 +21,16 @@ if(NOT actual_revision STREQUAL expected_revision)
 endif()
 add_subdirectory(upstream EXCLUDE_FROM_ALL)
 set_target_properties(fmt PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+
+if(VINC_INSTALL_SDK)
+    set_target_properties(fmt PROPERTIES EXPORT_NAME detail_fmt)
+    # Upstream records PUBLIC_HEADER relative to its own directory. Installation
+    # is owned by this wrapper, so preserve that base explicitly.
+    get_target_property(fmt_headers fmt PUBLIC_HEADER)
+    list(TRANSFORM fmt_headers PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/upstream/")
+    set_target_properties(fmt PROPERTIES PUBLIC_HEADER "${fmt_headers}")
+    install(TARGETS fmt EXPORT VincTargets ARCHIVE DESTINATION lib COMPONENT VincSDK
+        PUBLIC_HEADER DESTINATION include/fmt COMPONENT VincSDK)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/upstream/include/fmt"
+        DESTINATION include COMPONENT VincSDK FILES_MATCHING PATTERN "*.h")
+endif()

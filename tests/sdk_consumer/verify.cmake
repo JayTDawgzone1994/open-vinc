@@ -28,7 +28,7 @@ run_checked(configure "${CMAKE_COMMAND}"
 run_checked(build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
     --target external_consumer shell --parallel 4)
 include("${TEST_BINARY_DIR}/executables.cmake")
-run_checked(consumer "${consumer}" "${module}")
+run_checked(consumer "${consumer}" "${module}" "${central}")
 run_checked(messages_initial "${message_probe}" 1 0)
 
 # Cross-directory dependencies and the complete catalog must follow edits,
@@ -96,8 +96,6 @@ endfunction()
 check_licenses("${central}")
 check_licenses("${consumer}")
 check_licenses("${module}")
-include("${TEST_BINARY_DIR}/host-license.cmake")
-check_licenses("${host}")
 
 # No application calls initialize_tcl or activates SocketShell. The real Vinc
 # entry performs both before interpreting the user's startup script.
@@ -219,3 +217,23 @@ run_checked(embedded_recovery_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DI
     --target shell --parallel 4)
 run_checked(embedded_restore_configuration "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
     -B "${TEST_BINARY_DIR}" -DVINC_TEST_EMBEDDED_STARTUP=OFF)
+
+# Explicit configuration lives in this fixture's build tree, never the shared
+# repository source. Module removal and restoration must survive normal builds.
+set(features "${TEST_BINARY_DIR}/application.conf")
+file(WRITE "${features}" "# CONFIG_VINC_APP_UI is not set\n# CONFIG_VINC_APP_BAG is not set\n")
+run_checked(features_configure "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
+    -B "${TEST_BINARY_DIR}" "-DVINC_CONFIG_FILE=${features}")
+run_checked(features_off "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --target shell --parallel 4)
+file(READ "${TEST_BINARY_DIR}/.vinc-owned-files" owned)
+if(owned MATCHES "bag_recorder|module_ui|/ui/app/")
+    message(FATAL_ERROR "Disabled source application feature still owned/deployed")
+endif()
+file(WRITE "${features}" "CONFIG_VINC_APP_BAG=y\nCONFIG_VINC_APP_UI=y\n")
+run_checked(features_on "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --target shell --parallel 4)
+file(READ "${TEST_BINARY_DIR}/.vinc-owned-files" owned)
+if(NOT owned MATCHES "bag_recorder" OR NOT owned MATCHES "module_ui")
+    message(FATAL_ERROR "Source application feature restoration failed")
+endif()
+run_checked(features_restore_legacy "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
+    -B "${TEST_BINARY_DIR}" -U VINC_CONFIG_FILE)

@@ -6,6 +6,10 @@
 #include <optional>
 
 namespace vinc {
+bool detail::is_module_launch(std::string_view first_argument) noexcept {
+    return first_argument.starts_with("--vinc-module");
+}
+
 namespace {
 class NativeSource final : public detail::ModuleSource {
     std::optional<detail::LoadedPlugin> plugin_;

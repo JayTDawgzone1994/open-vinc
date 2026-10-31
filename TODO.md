@@ -2,6 +2,17 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## App／SDK：單一執行檔的 macOS 原生驗證
+
+- [ ] 在 macOS 使用同一份來源版本，驗證中央與原生 Module Host 共用 App 執行檔的完整流程。
+
+**狀態（2026-10-31）：實作與 Windows Debug／Release、WSL Ubuntu 24.04 驗證已完成；
+本次改動仍缺 macOS 原生證據。** 既有 Mac 驗證紀錄保留，但不能代替這次新入口的驗證。
+需涵蓋角色分流、錯誤啟動／token 拒絕、生命週期與故障隔離、debug gate、服務回歸，
+以及乾淨 SDK 安裝、搬移部署、產物清單與 Python／C++ 混合執行；記錄 OS、CPU 架構、
+工具鏈、組態及實際結果。詳細契約、測試指令與既有結果統一維護於
+[單一執行檔計畫：macOS 交接](apps/vinc/SINGLE_EXECUTABLE.md#remaining-native-macos-handoff--macos-原生待驗證)。
+
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 
 - [ ] 定義原生 unlock 失敗後的鎖狀態、資料存取限制及清理／重試／故障政策。

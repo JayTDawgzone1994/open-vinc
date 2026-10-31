@@ -31,3 +31,9 @@ target_include_directories(vinc_message_storage_errors INTERFACE "${CMAKE_CURREN
 target_link_libraries(vinc_message_storage_errors INTERFACE vinc::common)
 vinc_register_error_catalog(TARGET vinc_message_storage_errors
     HEADER vinc/message/detail/error_catalog.hpp SYMBOL vinc::message::detail::error_catalog)
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_message_storage vinc_message_storage_errors)
+endif()

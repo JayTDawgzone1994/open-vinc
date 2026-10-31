@@ -29,3 +29,9 @@ target_link_libraries(vinc_param_errors INTERFACE vinc::common)
 vinc_register_error_catalog(TARGET vinc_param_errors
     HEADER vinc/param/detail/error_catalog.hpp SYMBOL vinc::param::detail::error_catalog)
 
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_param vinc_param_host vinc_param_manager vinc_param_errors)
+endif()

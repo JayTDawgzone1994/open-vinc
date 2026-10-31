@@ -370,7 +370,8 @@ Overlapping data operations on one Pub/Sub return OperationInProgress; different
 
 Manager Bus limits default 128 topics,32 Publishers/topic,128 Subscribers, 1 GiB active shared bytes. Maximum 65536 slots,4096 Subscribers,32 Publishers due to bounded descriptors. Names/topics<=256 UTF-8 bytes. Each Client has 32 pending controls, manager 256 application requests; accepted exit recovery is not dropped by that cap.
 
-`ModuleManager::create(message_bus::Limits)` 可設定中央預算：預設 128 topics、每 topic 32 Publishers、
+框架內部 `ModuleManager::create(limits, host_executable)` 可設定中央預算，Host 路徑由框架提供：
+預設 128 topics、每 topic 32 Publishers、
 128 Subscribers、1 GiB 活躍共享配置。每 Publisher 最多 65,536 slots；Subscriber 上限可設到 4,096，
 Publisher 上限目前不可超過 32（控制封包有界）。Publisher 名稱及 topic 最多 256 UTF-8 bytes。
 每個 Client 最多 32 個控制請求等待，BusManager 應用請求佇列最多 256；退出回收事件不因該上限被丟棄。

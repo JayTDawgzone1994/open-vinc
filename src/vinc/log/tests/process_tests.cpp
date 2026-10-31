@@ -1,5 +1,6 @@
 #include "support.hpp"
 #include <vinc/module/detail/manager_access.hpp>
+#include "../../../../tests/support/manager.hpp"
 #include <vinc/log/detail/manager.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc/shell/detail/socket_shell.hpp>
@@ -63,7 +64,8 @@ int main(int argc, char** argv) {
         check(argc == 2, "plugin required");
         Directory directory;
         const std::string name = "log-test";
-        auto manager = take(detail::ManagerAccess::create(name));
+        auto manager = take(detail::ManagerAccess::create(name, {},
+            vinc::test::host_path()));
         const auto blocked = directory.path / name / "logs";
         std::filesystem::create_directories(blocked.parent_path());
         {

@@ -19,3 +19,10 @@ if(UNIX)
     find_package(Threads REQUIRED)
     target_link_libraries(vinc_sqlite PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
+
+if(VINC_INSTALL_SDK)
+    set_property(TARGET vinc_sqlite PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream>")
+    install(TARGETS vinc_sqlite EXPORT VincTargets ARCHIVE DESTINATION lib COMPONENT VincSDK)
+    set_target_properties(vinc_sqlite PROPERTIES EXPORT_NAME detail_sqlite)
+endif()

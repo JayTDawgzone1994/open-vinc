@@ -30,23 +30,9 @@ target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_SOURCE_DI
 target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(vinc_module_manager PUBLIC vinc::common vinc::log vinc::param vinc::message_bus vinc::control vinc::output_hub PRIVATE vinc_module_contract vinc::concurrency vinc::param_manager vinc::log_manager vinc::rpc_manager)
 
-# Linking this object target supplies main/wmain without consumers reaching into src/.
-add_library(vinc_module_entry OBJECT src/runtime/module_main.cpp)
-add_library(vinc::module_entry ALIAS vinc_module_entry)
-target_link_libraries(vinc_module_entry PUBLIC vinc::module_runtime)
-add_executable(vinc_module_host)
-set_target_properties(vinc_module_host PROPERTIES OUTPUT_NAME ModuleHost)
-target_link_libraries(vinc_module_host PRIVATE vinc::module_entry)
-vinc_deploy_licenses(vinc_module_host)
-
-# A source-build default. Deployment owners may override this in Manager::create.
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>/vinc/module/detail/host_path.hpp"
-    CONTENT "#pragma once\n#define VINC_MODULE_HOST_PATH u8\"$<TARGET_FILE:vinc_module_host>\"\n")
-target_include_directories(vinc_module_manager PUBLIC
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>>")
-add_dependencies(vinc_module_manager vinc_module_host)
-
-foreach(target IN ITEMS vinc_module vinc_module_manager vinc_module_entry vinc_module_contract vinc_module_runtime vinc_module_host)
+# Production entry ownership stays in App. Linking Manager must not build a
+# second executable or expose a generated Host path to its consumers.
+foreach(target IN ITEMS vinc_module vinc_module_manager vinc_module_contract vinc_module_runtime)
     target_compile_features(${target} PUBLIC cxx_std_23)
     set_target_properties(${target} PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
     if(MSVC)
@@ -71,4 +57,10 @@ vinc_register_error_catalog(TARGET vinc_module_system_errors
 option(VINC_BUILD_PYTHON "Build the optional Python Module SDK" OFF)
 if(VINC_BUILD_PYTHON)
     add_subdirectory(python)
+endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_module vinc_module_contract vinc_module_runtime vinc_module_manager vinc_module_system_errors)
 endif()

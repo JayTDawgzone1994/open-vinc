@@ -396,3 +396,14 @@ Reserve get_message_monotonic_timestamp and shared vinc format_utc/unix_nanoseco
 新增保留成員名 `get_message_monotonic_timestamp`，以及 vinc 命名空間的
 `format_utc`／`unix_nanoseconds`，避免生成名稱遮蔽正式 API。
 時間由 BaseMessage／Bus 維護，生成 payload 布局與 schema hash 不變。
+
+## Installed generator / 安裝版產生器
+
+With `VINC_INSTALL_SDK=ON`, a separate tool built from the same source is installed as
+`vinc::ribosome`. It requires explicit `--input`, `--output`, and `--template` paths
+before generation, with no producer-machine defaults. Source-build Ribosome retains
+its existing defaults and tests. See [installed SDK](../sdk/INSTALL.md).
+
+`VINC_INSTALL_SDK=ON` 時，由同份來源建立獨立安裝工具 `vinc::ribosome`；
+生成前必須明確指定 `--input`、`--output`、`--template`，不帶 SDK 製作者的預設路徑。
+原始碼建置的 Ribosome 預設行為與測試保持不變，詳見 [安裝式 SDK](../sdk/INSTALL.md)。

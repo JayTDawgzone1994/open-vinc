@@ -8,8 +8,14 @@ target_link_libraries(vinc_sdk INTERFACE
     "$<$<NOT:$<BOOL:$<TARGET_PROPERTY:VINC_MODULE_PLUGIN>>>:vinc::module_manager;vinc::message_bus;vinc::control;vinc::output_hub;vinc::shell>")
 # Obtain public header locations from their owning targets, without linking their services.
 target_include_directories(vinc_sdk INTERFACE
-    "$<TARGET_PROPERTY:vinc_output_hub,INTERFACE_INCLUDE_DIRECTORIES>"
-    "$<TARGET_PROPERTY:vinc_shell,INTERFACE_INCLUDE_DIRECTORIES>")
+    "$<TARGET_PROPERTY:vinc::output_hub,INTERFACE_INCLUDE_DIRECTORIES>"
+    "$<TARGET_PROPERTY:vinc::shell,INTERFACE_INCLUDE_DIRECTORIES>")
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_sdk)
 endif()

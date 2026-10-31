@@ -1,10 +1,18 @@
+# Check the inventory guard itself with accepted and deliberately rejected packages.
+add_test(NAME sdk.package_inventory COMMAND "${CMAKE_COMMAND}"
+    "-DTEST_BUILD=${CMAKE_CURRENT_BINARY_DIR}" "-DTOOL=$<TARGET_FILE:ribosome>"
+    "-DSUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/package_inventory_test.cmake")
+set_tests_properties(sdk.package_inventory PROPERTIES TIMEOUT 20)
+
 # The consumer manually supplies no component include directories.
 vinc_add_module_plugin(sdk_module_helper module_helper.cpp)
 target_link_libraries(sdk_module_helper PRIVATE vinc::sdk)
 add_executable(sdk_consumer_tests consumer.cpp)
 target_link_libraries(sdk_consumer_tests PRIVATE vinc::sdk)
-add_dependencies(sdk_consumer_tests sdk_module_helper)
-add_test(NAME sdk.consumer COMMAND sdk_consumer_tests "$<TARGET_FILE:sdk_module_helper>")
+add_dependencies(sdk_consumer_tests sdk_module_helper vinc_test_host)
+add_test(NAME sdk.consumer COMMAND sdk_consumer_tests "$<TARGET_FILE:sdk_module_helper>"
+    "$<TARGET_FILE:vinc_test_host>")
 # This public consumer uses the default central name, like the real Vinc app.
 # Do not overlap it with Shell integration tests that own that instance lock.
 set_tests_properties(sdk.consumer PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
@@ -92,6 +100,24 @@ add_test(NAME sdk.license_inventory COMMAND "${CMAKE_COMMAND}"
     "-DVINC_SOURCE_DIR=${VINC_REPOSITORY_ROOT}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/license_inventory.cmake")
 set_tests_properties(sdk.license_inventory PROPERTIES TIMEOUT 15)
+
+add_test(NAME sdk.owned_files COMMAND "${CMAKE_COMMAND}"
+    "-DHELPER=${VINC_REPOSITORY_ROOT}/src/vinc/sdk/cmake/VincOwnedFiles.cmake"
+    "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/owned-files-test"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/owned_files.cmake")
+set_tests_properties(sdk.owned_files PROPERTIES TIMEOUT 15)
+find_package(Python3 3.9 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME sdk.configuration COMMAND "${Python3_EXECUTABLE}" -B
+        "${VINC_REPOSITORY_ROOT}/tools/configure/tests/test_configuration.py")
+    set_tests_properties(sdk.configuration PROPERTIES TIMEOUT 60)
+    add_test(NAME sdk.app_selection COMMAND "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/app_selection.py"
+        --cmake "${CMAKE_COMMAND}" --compiler "${CMAKE_CXX_COMPILER}"
+        --generator "${CMAKE_GENERATOR}" --make-program "${CMAKE_MAKE_PROGRAM}"
+        --config "$<CONFIG>" --work "${CMAKE_CURRENT_BINARY_DIR}/app-selection-test")
+    set_tests_properties(sdk.app_selection PROPERTIES TIMEOUT 300)
+endif()
 add_test(NAME sdk.license_deployment COMMAND "${CMAKE_COMMAND}"
     "-DVINC_SOURCE_DIR=${VINC_REPOSITORY_ROOT}"
     "-DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/license-deployment"
