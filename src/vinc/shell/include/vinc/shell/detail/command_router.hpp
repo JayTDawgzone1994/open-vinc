@@ -6,6 +6,7 @@
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/shell/detail/command_line.hpp>
 #include <map>
+#include <optional>
 
 namespace vinc::shell {
 struct CommandReply {
@@ -21,7 +22,6 @@ struct CompletionResult {
 };
 
 // Rendering is a presentation boundary; dispatch retains numeric errors.
-std::string command_text(const Result<CommandReply>& result);
 std::string contract_diagnostic_text(std::string_view name, const ModuleContractDiagnostic& diagnostic);
 
 // Shell owns its builtins. No callback capturing the Shell is stored in ModuleManager.
@@ -30,6 +30,7 @@ class CommandRouter {
         Log,
         Param,
         Debug,
+        System,
         Help,
         Exit,
         Script,
@@ -37,8 +38,12 @@ class CommandRouter {
         Session
     };
     ModuleManager& manager_;
+    bool remote_session_ = false;
     const std::map<std::string, Builtin> builtins_{
+        {"ui", Builtin::System},
+        {"recorder", Builtin::System},
         {"param", Builtin::Param},
+        {"shell", Builtin::Session},
         {"log", Builtin::Log},
         {"debug", Builtin::Debug},
         {"exit", Builtin::Exit},      {"help", Builtin::Help},      {"srun", Builtin::Script},
@@ -47,7 +52,8 @@ class CommandRouter {
 
     Result<CommandReply> execute_builtin(Builtin builtin_kind, const std::vector<std::string>& arguments);
     Result<CommandReply> execute_debug(const std::vector<std::string>& arguments, std::stop_token stop);
-    Result<CommandReply> make_help();
+    Result<CommandReply> execute_system(const std::vector<std::string>& arguments, std::stop_token stop);
+    Result<CommandReply> make_help(bool verbose);
     Result<CommandReply> execute_legacy(const std::vector<std::string>& arguments);
     Result<CommandReply> execute_module(const std::vector<std::string>& arguments, std::stop_token stop);
     Result<CommandReply> start_module(const std::vector<std::string>& arguments, std::stop_token stop);
@@ -56,11 +62,14 @@ class CommandRouter {
                                           const std::vector<std::string>& arguments);
 
 public:
-    explicit CommandRouter(ModuleManager& manager) : manager_(manager) {
+    explicit CommandRouter(ModuleManager& manager, bool remote_session = false)
+        : manager_(manager), remote_session_(remote_session) {
     }
 
     Result<void> initialize();
     bool builtin(std::string_view name) const;
+    // Exact builtin help only; Module and script arguments remain their owner's input.
+    std::optional<std::string_view> command_help(const std::vector<std::string>& arguments) const;
     std::string contract_notifications(std::uint64_t& cursor);
     std::string param_notifications(std::uint64_t& cursor);
     Result<CommandReply> execute(const std::vector<std::string>& arguments, std::stop_token stop = {});

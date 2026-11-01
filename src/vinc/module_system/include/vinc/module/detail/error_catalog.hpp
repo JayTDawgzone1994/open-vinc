@@ -5,6 +5,7 @@
 
 namespace vinc::module_system::detail {
 inline constexpr auto error_entries = std::array{
+    ErrorCodeEntry{ErrorCode::SystemModuleProtected, "System Module lifecycle is managed by the framework"},
     ErrorCodeEntry{ErrorCode::NotificationFailed, "Module notification operation failed"},
     ErrorCodeEntry{ErrorCode::PythonUnavailable, "Python executable unavailable"},
     ErrorCodeEntry{ErrorCode::PythonDiscoveryFailed, "Python module discovery failed"},

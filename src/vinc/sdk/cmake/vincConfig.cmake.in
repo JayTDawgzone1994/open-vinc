@@ -1,5 +1,13 @@
 @PACKAGE_INIT@
 
+include("${CMAKE_CURRENT_LIST_DIR}/VincToolchain.cmake")
+vinc_check_toolchain(toolchain_error)
+if(toolchain_error)
+    set(vinc_FOUND FALSE)
+    set(vinc_NOT_FOUND_MESSAGE "${toolchain_error}")
+    return()
+endif()
+
 # Check before creating imported targets: a failed optional lookup must not
 # leave a partially usable package in the consumer's build graph.
 if(NOT CMAKE_CXX_COMPILER_LOADED)

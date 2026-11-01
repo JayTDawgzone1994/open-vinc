@@ -29,6 +29,9 @@ add_test(NAME module.python_messages COMMAND "${Python_EXECUTABLE}"
 set_tests_properties(module.python_messages PROPERTIES TIMEOUT 30)
 
 if(MSVC)
+    add_test(NAME module.python_runtime_metadata COMMAND "${Python_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/runtime_metadata_tests.py")
+    set_tests_properties(module.python_runtime_metadata PROPERTIES TIMEOUT 30)
     add_test(NAME module.python_runtime COMMAND "${Python_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/runtime_tests.py" "${VINC_BUILD_ROOT}/python/$<CONFIG>")
     set_tests_properties(module.python_runtime PROPERTIES TIMEOUT 120)

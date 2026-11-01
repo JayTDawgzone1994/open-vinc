@@ -92,6 +92,11 @@ if(result STREQUAL "0" OR NOT errors MATCHES "Install this SDK with --config")
     message(FATAL_ERROR "Wrong install configuration was not rejected: ${output}\n${errors}")
 endif()
 expect_rejected(version "version" -DTEST_WRONG_VERSION=ON)
+run_checked("${CMAKE_COMMAND}" -S "${WORK}/source" -B "${WORK}/old-msvc-optional"
+    -G "${GENERATOR}" "-DCMAKE_CXX_COMPILER=${COMPILER}"
+    "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}" "-DCMAKE_BUILD_TYPE=${CONFIG}"
+    "-Dvinc_DIR=${moved}/lib/cmake/vinc" -DTEST_POLICY_OLD_MSVC=ON)
+expect_rejected(compiler "SDK requires native" -DTEST_POLICY_DIFFERENT_COMPILER=ON)
 if(WIN32)
     expect_rejected(crt "ABI mismatch" -DTEST_STATIC_CRT=ON)
 else()

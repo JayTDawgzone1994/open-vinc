@@ -40,7 +40,7 @@ English and Traditional Chinese are paired below. Commands and code blocks are s
 | Shell and scripts | Console, Raw TCP Socket Shell, Tcl scripts, cancellation, and embedded startup scripts. / 互動終端、Raw TCP Socket Shell、Tcl 腳本、中斷與啟動腳本打包。 |
 | Logging | Central capture of stdout/stderr and structured Error/Warn/Info/Debug records with time and Module identity. / 中央擷取 stdout／stderr，保存含時間與 Module 身分的 Error／Warn／Info／Debug 結構化紀錄。 |
 | Bag Recorder | SQLite recording of selected or all discovered topics, bounded queues, and loss statistics. Payload recording requires compiled-in types. Player is not implemented. / 以 SQLite 錄製指定或探索到的全部 topic，具備有界佇列與損失統計；payload 限建置時已知型別，Player 尚未實作。 |
-| Web UI | Optional-to-start Module, plugin workspace, manual-refresh Module Graph, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 預設不啟動的官方 Module、plugin 工作區、手動刷新 Module Graph，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
+| Web UI | Automatically started official Module, plugin workspace, manual-refresh Module Graph, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 自動啟動的官方 Module、plugin 工作區、手動刷新 Module Graph，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
 
 <a id="architecture"></a>
 
@@ -82,12 +82,19 @@ See [Module System](src/vinc/module_system/README.md), [Message Bus](src/vinc/me
 
 ### Requirements / 工具需求
 
+Windows native MSVC builds require **19.44 or newer** (no patch pin). Installed SDK
+ABI matching and Python Runtime DLL requirements still apply; see the
+[toolchain contract](src/vinc/common/README.md#build-toolchain-policy).
+
+Windows 原生 MSVC 建置最低為 **19.44**，不限制修補版；SDK 的 ABI 配對與 Python Runtime
+DLL 要求仍須符合，詳見上述工具鏈契約。
+
 - **C++23 compiler and standard library**, **CMake 3.20+**, and **Ninja**. C++23 is required, with language extensions disabled; newer toolchains may need newer CMake. / **支援所用 C++23 功能的編譯器與標準庫**、**CMake 3.20 以上**及 **Ninja**；要求 C++23 且關閉語言擴充，較新工具鏈可能需要較新 CMake。
 - **Windows:** an x64 MSVC developer environment with NMAKE for Tcl. Keep build-directory paths free of spaces due to a known Tcl integration limitation. / **Windows：**使用含 NMAKE 的 x64 MSVC 開發環境；目前 Tcl 整合有已知限制，建置目錄路徑須避免空白。
 - **Linux/macOS:** a suitable C++ toolchain, make, and zlib development files for Tcl. Ubuntu 22.04 is the minimum Linux target; its default GCC 11 is not the C++23 baseline. / **Linux／macOS：**適用 C++ 工具鏈、make 與 Tcl 所需 zlib 開發檔。Linux 最低目標為 Ubuntu 22.04，不以預設 GCC 11 為 C++23 基準。
 - **Default Web UI build:** Node.js and npm; local validation records use Node.js 24.19.0. These are build-time tools, not browser/runtime requirements. / **預設 Web UI 建置：**需要 Node.js 與 npm，本機驗證紀錄使用 Node.js 24.19.0；部署後的瀏覽器與執行環境不需要 Node.js。
 - **Optional Python SDK:** compatible 64-bit, GIL-enabled CPython and Development.Module files. The deployment environment supplies Python. / **選用 Python SDK：**需要相容的 64 位元、含 GIL 的 CPython 與 Development.Module 開發檔，部署環境自行提供 Python。
-- **Application configuration:** Python 3.9+ runs the bundled Kconfig tool at configure time, even when Python Modules are disabled. Plain SDK lookup/linking does not need it. / **應用功能設定：**配置時需要 Python 3.9+ 執行內附 Kconfig 工具，與是否啟用 Python Module 無關；單純查找／連結 SDK 不需要。
+- **Application configuration:** Python 3.11+ (Python 3 only) runs the bundled Kconfig tool at configure time, even when Python Modules are disabled. Plain SDK lookup/linking does not need it. / **應用功能設定：**配置時需要 Python 3.11+（限 Python 3）執行內附 Kconfig 工具，與是否啟用 Python Module 無關；單純查找／連結 SDK 不需要。
 
 See [Tcl integration](library/tcl/README.md), [Python SDK](src/vinc/module_system/python/README.md), and [third-party dependencies](library/README.md) for detailed requirements.
 
@@ -98,16 +105,22 @@ See [Tcl integration](library/tcl/README.md), [Python SDK](src/vinc/module_syste
 Run `tools\setup.bat` on Windows, or `bash tools/setup.sh` on Ubuntu/macOS.
 These scripts install/check tools, restore pinned submodules and install UI npm
 dependencies. They **do not configure or build your project**. UI and optional
-Python SDK prerequisites are included by default; use `--no-ui` or `--no-python`
-to omit them, or `--check` to inspect without installing. Standalone temporary
+Python SDK prerequisites are included by default; `--no-ui` omits UI dependencies,
+while `--no-python` omits Module development files but still checks the build
+interpreter. Use `--check` to inspect without installing. Standalone temporary
 compiler probes check toolchain capabilities. See [setup instructions](tools/README.md)
 for platform requirements, environment selection and validation limits.
+Use `--recommended` for the recommended installation candidates. Successful setup
+remembers local tool selections for this checkout's root build wrappers; see the
+[toolchain selection contract](tools/README.md#remembering-selections--記住本機工具選擇).
 
 Windows 執行 `tools\setup.bat`，Ubuntu／macOS 執行 `bash tools/setup.sh`。
 腳本安裝／檢查工具、還原固定 submodule 並安裝 UI npm 套件，**不配置或編譯使用者專案**。
-預設包含 UI 與選用 Python SDK 的相依，可用 `--no-ui`／`--no-python` 略過；
+預設包含 UI 與選用 Python SDK 的相依；`--no-ui` 略過 UI，`--no-python` 略過 Module 開發檔，但仍檢查建置直譯器；
 `--check` 僅檢查、不安裝。工具鏈能力由獨立暫存小程式驗證。
 平台需求、環境選擇與驗證限制見 [setup 說明](tools/README.md)。
+`--recommended` 使用建議安裝候選；setup 成功後會記住本機工具選擇，供本 checkout 的
+根目錄 build 入口使用。已合格工具保留，檢查失敗不覆寫舊紀錄。
 
 ### Configure, build, test / 配置、建置、測試
 
@@ -115,11 +128,57 @@ Application features are selected in `vinc.conf`: UI and Bag Recorder default to
 enabled, Python Modules to disabled. Text editing, CLI, GUI and terminal editors
 are available; see [application configuration](tools/configure/README.md).
 The legacy CMake options below remain accepted but must agree with explicit file
-settings. Inclusion does not auto-start UI or recording.
+settings. Included UI and Bag Modules start before startup Tcl; Bag stays idle
+until commanded to record. New multi-App composition uses per-App configuration;
+see [the App guide](src/vinc/sdk/INSTALL.md).
 
 應用功能由 `vinc.conf` 選擇：UI、Bag Recorder 預設包含，Python Module 預設關閉。
 支援文字、CLI、GUI 與終端編輯器，詳見[應用功能設定](tools/configure/README.md)。
-下列舊 CMake 選項仍可使用，但不得與檔案明確設定衝突；包含功能不代表自動啟動 UI 或錄製。
+下列舊 CMake 選項仍可使用，但不得與檔案明確設定衝突；包含的 UI／Bag 會先於啟動 Tcl
+自動啟動，Bag 收到命令才錄製。新多 App 使用各 App 設定，詳見上述 App 指南。
+
+After preparing dependencies, the root build entry configures and builds in one
+command. Default is Debug; CMake also builds the UI frontend when selected. Tests,
+installation and dependency setup remain separate actions.
+
+相依準備完成後，可直接使用根目錄入口配置及建置；預設 Debug，UI 前端也由 CMake
+接續建置。不自動執行測試、安裝產物或補裝相依。
+
+```bat
+build.bat --jobs 4
+build.bat --config Release --jobs 4
+```
+
+```sh
+sh build.sh --jobs 4
+sh build.sh --config Release --jobs 4
+```
+
+The shared implementation is also at the root: `py -3 build.py` on Windows,
+or `./build.py` / `python3 build.py` on Linux/macOS, with the same options.
+
+共用實作也放在根目錄：Windows 可用 `py -3 build.py`，Linux／macOS 可用
+`./build.py` 或 `python3 build.py`，參數與上述入口相同。
+
+Windows automatically prepares an x64 MSVC environment for the child build.
+Outputs default to `build/windows-msvc-debug` or the corresponding platform/profile.
+Use `--source` for an external project's CMake entry and `--target` for selected
+Apps. See [build options and safety boundaries](tools/README.md#build-entry--統一建置入口).
+The direct CMake workflow below remains supported.
+
+Windows 自動為本次建置準備 x64 MSVC 環境；預設輸出在 `build/windows-msvc-debug`
+或對應平台／組態的目錄。外部專案用 `--source` 指定入口，`--target` 選擇 App；
+詳見上述工具說明。下方直接執行 CMake 的方式仍可使用。
+
+To install a reusable SDK, explicitly run `py -3 build.py --install-vinc-sdk`
+on Windows or `./build.py --install-vinc-sdk` on Linux/macOS. SDK mode defaults
+to Release, verifies the installed package and registers it for CMake lookup.
+Replacing an existing installer-owned SDK requires confirmation. See the
+[SDK installation/update contract](src/vinc/sdk/INSTALL.md#sdk-install-command).
+
+若要安裝可重複使用的 SDK，Windows 執行 `py -3 build.py --install-vinc-sdk`，
+Linux／macOS 執行 `./build.py --install-vinc-sdk`。預設 Release，安裝驗證後登記供
+CMake 查找；已有本工具安裝的 SDK 時，先詢問是否更新。完整契約見上述文件。
 
 Run from the repository root in a configured compiler environment. Restore pinned submodules first; CMake does not install npm packages automatically.
 
@@ -141,7 +200,7 @@ Release 請另用建置目錄並指定 `-DCMAKE_BUILD_TYPE=Release`。目前 Tcl
 | --- | --- | --- |
 | `VINC_BUILD_APPS` | `ON` | Build the central Vinc application. / 建置中央 Vinc 應用。 |
 | `VINC_BUILD_EXAMPLES` | `ON` | Build and register bundled example Modules. / 建置並登記內建範例 Module。 |
-| `VINC_BUILD_UI` | `ON` | Build the official Web UI when apps are enabled; does not auto-start it. / 啟用 apps 時建置官方 Web UI，但不自動啟動。 |
+| `VINC_BUILD_UI` | `ON` | Include the official Web UI in the legacy source App; included UI starts automatically. / 在舊來源 App 包含官方 UI，包含時會自動啟動。 |
 | `VINC_BUILD_PYTHON` | `OFF` | Build native bindings and bootstrap resources, without bundling Python. / 建置 Python 原生綁定與啟動資源，不附帶直譯器。 |
 | `BUILD_TESTING` | `ON` | Configure CTest tests. / 配置 CTest 測試。 |
 
@@ -151,18 +210,21 @@ To build without the UI, add `-DVINC_BUILD_UI=OFF` and omit `npm ci`. SDK-only c
 
 ### First run / 第一次執行
 
-Start Vinc from the repository root:
+Start Vinc from the repository root (paths below use the wrapper's default Debug
+directories; direct CMake users substitute their `-B` directory):
 
-從儲存庫根目錄啟動 Vinc：
+從儲存庫根目錄啟動 Vinc（下方採 wrapper 的預設 Debug 目錄；直接使用 CMake 時，
+請換成自己的 `-B` 目錄）：
 
 ```powershell
 # Windows PowerShell
-.\build\debug\Vinc.exe
+.\build\windows-msvc-debug\Vinc.exe
 ```
 
 ```sh
-# Linux / macOS
-./build/debug/Vinc
+# Linux / GCC
+./build/linux-gcc-debug/Vinc
+# macOS: ./build/macos-clang-debug/Vinc
 ```
 
 Enter the following in the **Vinc Shell**, not the OS terminal. `exampleModule` requires examples enabled; `ui status` requires the included UI Module to have started successfully.
@@ -173,7 +235,6 @@ Enter the following in the **Vinc Shell**, not the OS terminal. `exampleModule` 
 help
 exampleModule
 exampleNode status
-ui status
 ui status
 ```
 

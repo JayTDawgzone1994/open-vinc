@@ -67,6 +67,13 @@ set_tests_properties(module.process PROPERTIES TIMEOUT 90)
 add_test(NAME module.error_protocol COMMAND module_error_protocol_tests)
 set_tests_properties(module.error_protocol PROPERTIES TIMEOUT 10)
 
+add_executable(module_system_tests system_module_tests.cpp)
+target_link_libraries(module_system_tests PRIVATE vinc_test_manager)
+add_dependencies(module_system_tests module_process_helper module_context_helper)
+add_test(NAME module.system COMMAND module_system_tests
+    "$<TARGET_FILE:module_process_helper>" "$<TARGET_FILE:module_context_helper>")
+set_tests_properties(module.system PROPERTIES TIMEOUT 60)
+
 # Include the component implementation in isolated fixtures to inspect private
 # lifetime invariants without exposing test APIs in the production libraries.
 add_executable(module_manager_fault_tests manager_fault_tests.cpp)

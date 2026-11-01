@@ -27,6 +27,27 @@ Shared Memory 提供原始 bytes 的映射與資源生命週期；訊息布局�
 
 <a id="標頭與實作位置"></a>
 
+## Terminal text output / 終端文字輸出
+
+`Terminal::write_console(string_view)` synchronously writes a complete UTF-8 view
+to the standard-output terminal. Redirected stdout returns `Unsupported`; invalid
+UTF-8 returns `InvalidEncoding` before any write. Windows converts bounded chunks
+to UTF-16 and uses `WriteConsoleW`, bypassing CRT locale translation. POSIX writes
+UTF-8 bytes to the terminal, retrying interrupted writes. The conversion buffer is
+bounded; the caller retains ownership of the text and serializes Terminal access.
+Writes can block and OS errors may follow partial output; failure is not a promise
+of zero output and callers must not replay the whole request automatically.
+Errors use `WriteTerminal` and preserve native diagnostics. This method does not
+change CRT locale/stream modes or interpret application status/color policy.
+
+`Terminal::write_console(string_view)` 同步將完整 UTF-8 文字寫入標準輸出終端。
+stdout 重導向時回傳 `Unsupported`；非法 UTF-8 在寫入前回傳 `InvalidEncoding`。
+Windows 使用有界 UTF-16 轉換緩衝區與 `WriteConsoleW`，避開 CRT locale 轉碼；
+POSIX 寫出 UTF-8 bytes 並重試被訊號中斷的寫入。呼叫端持有文字並序列化 Terminal 操作。
+寫入可能阻塞，原生錯誤可能發生在部分輸出之後，不應自動重送整筆文字。
+錯誤使用 `WriteTerminal` 並保留原生診斷；不修改 CRT locale／串流模式，
+也不包含應用程式狀態或配色政策。
+
 ## Headers and implementation / 標頭與實作位置
 
 The generic cross-process [Notification](NOTIFICATION.md) API is available through `<vinc/osal/notification.hpp>`. Windows and POSIX backends are implemented; validation and platform limits are recorded below. Bus/Context integration is implemented outside OSAL; its separate contracts and validation are in [Pump wakeup](../module_system/PUMP_WAKEUP.md).

@@ -4,6 +4,7 @@ from ctypes import wintypes
 import json
 import os
 from pathlib import Path
+import re
 import sys
 
 
@@ -131,20 +132,26 @@ def _version_text(version):
     return ".".join(str(part) for part in version)
 
 
-def _check(path, minimum, windows):
+def _check(path, minimum, windows, *, loaded):
     actual = windows.file_version(path)
     if actual[0] != minimum[0] or actual < minimum:
+        if loaded:
+            remedy = (
+                "This DLL is already loaded. Update the Python/package deployment that supplies it "
+                "and restart Python; updating System32 alone cannot replace a loaded copy.")
+        else:
+            remedy = "Install a compatible Microsoft VC++ Runtime (or Debug development CRT) and restart Python."
+
         raise ImportError(
             f"VINC cannot load: incompatible MSVC Runtime '{path}': "
             f"{_version_text(actual)}; requires v{minimum[0]} >= {_version_text(minimum)}. "
-            "Install a compatible Microsoft VC++ Runtime and restart Python after correcting deployment. "
-            "Import vinc before other native packages. Python itself may also bundle an older Runtime."
+            f"{remedy}"
         )
 
 
 def _prepare(metadata, windows):
-    minimum = tuple(metadata["minimum"])
-    required = set(metadata["required"])
+    versions = {name: tuple(version) for name, version in metadata["required"].items()}
+    required = set(versions)
 
     def inspect_loaded():
         found = set()
@@ -152,7 +159,7 @@ def _prepare(metadata, windows):
             name = path.name.lower()
             if name in required:
                 # Check every copy, not only the first DLL with this basename.
-                _check(path, minimum, windows)
+                _check(path, versions[name], windows, loaded=True)
                 found.add(name)
         return found
 
@@ -160,7 +167,7 @@ def _prepare(metadata, windows):
     candidates = {}
     for name in sorted(required - present):
         path = windows.candidate(name, metadata["debug"])
-        _check(path, minimum, windows)
+        _check(path, versions[name], windows, loaded=False)
         candidates[name] = path
 
     # Validate all candidates before loading any. VCRUNTIME precedes the STL;
@@ -175,20 +182,32 @@ def _prepare(metadata, windows):
         raise ImportError(f"VINC Runtime preparation incomplete: {', '.join(sorted(missing))}")
 
 
+def _validate_metadata(metadata):
+    if (type(metadata) is not dict or type(metadata.get("format")) is not int
+            or metadata["format"] != 2 or type(metadata.get("required")) is not dict
+            or not metadata["required"] or type(metadata.get("debug")) is not bool):
+        raise ValueError("Invalid MSVC Runtime build metadata; rebuild/redeploy the complete Python binding")
+
+    for name, version in metadata["required"].items():
+        if (not isinstance(name, str)
+                or re.fullmatch(r"(?:msvcp140|vcruntime140|concrt140)[a-z0-9_]*\.dll", name) is None):
+            raise ValueError("Invalid MSVC Runtime DLL name")
+
+        if (type(version) is not list or len(version) != 4
+                or not all(type(part) is int and 0 <= part <= 65535 for part in version)
+                or version[0] != 14):
+            raise ValueError(f"Invalid MSVC Runtime DLL version: {name}")
+
+    expected = "msvcp140d.dll" if metadata["debug"] else "msvcp140.dll"
+    if expected not in metadata["required"]:
+        raise ValueError(f"Missing required CRT classification: {expected}")
+
+
 def prepare():
     try:
         path = Path(__file__).with_name("_msvc_runtime.json")
         metadata = json.loads(path.read_text(encoding="utf-8"))
-        if (not isinstance(metadata, dict) or metadata.get("format") != 1 or len(metadata["minimum"]) != 4
-                or not all(type(part) is int and 0 <= part <= 65535 for part in metadata["minimum"])
-                or type(metadata["required"]) is not list or not metadata["required"]
-                or type(metadata["debug"]) is not bool):
-            raise ValueError("Invalid MSVC Runtime build metadata")
-        for name in metadata["required"]:
-            if (not isinstance(name, str) or Path(name).name != name
-                    or not name.startswith(("msvcp140", "vcruntime140", "concrt140"))
-                    or not name.endswith(".dll") or not name.isascii()):
-                raise ValueError("Invalid MSVC Runtime DLL name")
+        _validate_metadata(metadata)
         _prepare(metadata, _Windows())
     except ImportError:
         raise

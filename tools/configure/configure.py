@@ -5,11 +5,19 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import sys
 import tempfile
 
 sys.dont_write_bytecode = True
 TOOL_DIR = Path(__file__).resolve().parent
+policy_directory = TOOL_DIR.parents[1] / "src/vinc/common/cmake"
+if not (policy_directory / "python_version.py").is_file():
+    # Installed SDK: share/vinc/configuration -> lib/cmake/vinc.
+    policy_directory = TOOL_DIR.parents[2] / "lib/cmake/vinc"
+python_error = runpy.run_path(str(policy_directory / "python_version.py"))["version_error"]()
+if python_error:
+    sys.exit(python_error)
 VENDORED = TOOL_DIR / "kconfiglib"
 if not VENDORED.is_dir():
     VENDORED = TOOL_DIR.parents[1] / "library/kconfiglib/upstream"
@@ -109,7 +117,7 @@ def write_if_changed(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or path.read_text(encoding="utf-8") != text:
         temporary = path.with_suffix(path.suffix + ".tmp")
-        # Path.write_text(newline=...) requires Python 3.10; keep the 3.9 floor.
+        # Keep generated configuration line endings stable on every platform.
         with temporary.open("w", encoding="utf-8", newline="\n") as output:
             output.write(text)
         temporary.replace(path)

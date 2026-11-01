@@ -47,7 +47,7 @@ class RunningApp:
         raise RuntimeError(f"Timed out waiting for {pattern}: {content}")
 
     def connect(self):
-        port = int(self.wait_log(r"Socket Shell listening on 127\.0\.0\.1:(\d+)"))
+        port = int(self.wait_log(r"Socket Shell ready - listening on 127\.0\.0\.1:(\d+)"))
         self.socket = socket.create_connection(("127.0.0.1", port), IO_SECONDS)
         self.receive_reply()
         return port
@@ -115,20 +115,18 @@ def verify_coexistence(first, second, python, work, run, require):
         first_port = first_app.connect()
         duplicate = run([str(first), "--shell-port", "0"], success=False, timeout=WAIT_SECONDS)
         require("A Vinc with this name is already running" in duplicate, duplicate)
-        require("Socket Shell listening" not in duplicate, duplicate)
+        require("Socket Shell ready" not in duplicate, duplicate)
 
-        # Move First's UI away from the default port using existing Shell APIs.
-        mid = first_app.wait_log(r"Official Module webUi ready: ui MID=(\d+)")
-        require("Module stopped" in first_app.command(f"debug stop {mid}"), "UI stop failed")
-        reply = first_app.command("webUi --port 0")
-        require("Started ui" in reply, reply)
-        ui_port = int(first_app.wait_log(r"Web UI listening on http://127\.0\.0\.1:((?!8080\b)\d+)/"))
+        # Inspect each App's graph sequentially on the default HTTP port. Turning
+        # HTTP off leaves First's protected UI process and central running.
+        first_types = {entry["type"] for entry in graph(8080)["modules"]}
+        reply = first_app.command("ui disable")
+        require("UI disable requested" in reply, reply)
 
         second_app = RunningApp(second, python, work / "coexist-second.log")
         second_app.wait_log("Second_SCRIPT_OK")
         second_port = second_app.connect()
-        require(first_port != second_port and ui_port != 8080, "Listener isolation failed")
-        first_types = {entry["type"] for entry in graph(ui_port)["modules"]}
+        require(first_port != second_port, "Shell listener isolation failed")
         second_types = {entry["type"] for entry in graph(8080)["modules"]}
         require("FirstModule" in first_types and "SecondModule" not in first_types
                 and "ScriptPeer" not in first_types, str(first_types))

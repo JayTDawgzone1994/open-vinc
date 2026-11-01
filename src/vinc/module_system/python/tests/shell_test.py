@@ -63,8 +63,9 @@ def main():
         output = run(executable, script, unrelated, environment=environment)
         assert "PYTHON_READY front" in output, output
         # Version mismatch must reject startup while the central stays operable.
-        (root / "python" / "vinc" / "_build.py").write_text(
-            "VERSION = (3, 0)\nPOINTER_BYTES = 8\n", encoding="utf-8")
+        metadata = root / "python" / "vinc" / "_build.py"
+        metadata.write_text(metadata.read_text(encoding="utf-8") + "\nVERSION = (3, 0)\n",
+                            encoding="utf-8")
         output = run(executable, script, unrelated, sys.executable)
         assert "VINC requires CPython" in output, output
         assert "PYTHON_READY" not in output, output

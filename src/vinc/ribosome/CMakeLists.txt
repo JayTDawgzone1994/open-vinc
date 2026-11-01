@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(ribosome LANGUAGES CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../common/cmake/VincToolchain.cmake")
+vinc_require_toolchain()
 
 # Use the same language level as the framework.
 set(CMAKE_CXX_STANDARD 23)

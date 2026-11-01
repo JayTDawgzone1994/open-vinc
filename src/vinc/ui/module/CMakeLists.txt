@@ -1,5 +1,6 @@
 add_module(vinc_module_ui MODULE_TYPE_NAME webUi STOP_TIMEOUT_CONFIG ui_stop_timeout SOURCES ui_module.cpp topic_monitor.cpp graph.cpp)
 set_property(TARGET vinc_module_ui PROPERTY VINC_MODULE_OFFICIAL TRUE)
+set_target_properties(vinc_module_ui PROPERTIES VINC_SYSTEM_MODULE_NAME ui VINC_SYSTEM_MODULE_TOGGLE TRUE)
 target_link_libraries(vinc_module_ui PRIVATE vinc::ui vinc_ui_json vinc_messages)
 get_property(ui_dist GLOBAL PROPERTY VINC_UI_DIST)
 set(ui_deploy_root "${VINC_BUILD_ROOT}/vinc_data/${VINC_NAME}/ui")

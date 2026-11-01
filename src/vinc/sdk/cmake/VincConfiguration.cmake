@@ -1,4 +1,9 @@
 include_guard(GLOBAL)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/VincPythonRequirements.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/VincPythonRequirements.cmake")
+else()
+    include("${CMAKE_CURRENT_LIST_DIR}/../../common/cmake/VincPythonRequirements.cmake")
+endif()
 
 # Internal composition entry: capture caller paths now, resolve after all Modules
 # have registered. Public App construction supplies its own official adapters.
@@ -27,7 +32,7 @@ function(vinc_register_app_configuration target)
         endif()
     endforeach()
 
-    find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+    vinc_find_python(Python3 REQUIRED COMPONENTS Interpreter)
     get_filename_component(config "${APP_CONFIG}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     get_filename_component(tool "${APP_TOOL_DIRECTORY}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     set(output "${CMAKE_BINARY_DIR}/vinc-config/${target}")
@@ -145,7 +150,7 @@ endfunction()
 # Only application composition needs Python. Plain SDK lookup/linking is inert.
 function(vinc_configure_application_features tool_directory)
     cmake_parse_arguments(PARSE_ARGV 1 FEATURE "INSTALLED;NO_UI;NO_BAG" "UI_AVAILABLE;BAG_AVAILABLE;PYTHON_AVAILABLE" "")
-    find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+    vinc_find_python(Python3 REQUIRED COMPONENTS Interpreter)
     set(config "${CMAKE_SOURCE_DIR}/vinc.conf")
     set(arguments)
     if(DEFINED VINC_CONFIG_FILE)

@@ -3,6 +3,7 @@
 #include <vinc/osal/path.hpp>
 #include <vinc/time.hpp>
 #include <vinc/shell/detail/socket_shell.hpp>
+#include <vinc/shell/detail/session_feedback.hpp>
 #include <vinc/osal/socket_poller.hpp>
 #include <vinc/osal/random.hpp>
 #include <vinc/output_hub/text_renderer.hpp>
@@ -133,6 +134,8 @@ struct SocketShell::Impl {
         std::uint64_t param_cursor = 0;
         std::uint64_t log_cursor = 0;
         log::View log_view;
+        SessionFeedback feedback;
+        std::string command_target;
         std::string resume_code;
         osal::Socket socket;
         osal::SocketRegistration registration{};
@@ -190,7 +193,7 @@ struct SocketShell::Impl {
 
     Impl(ModuleManager& module_manager, ScriptService& script_service, SocketShellOptions socket_options,
          osal::SocketPoller socket_poller)
-        : manager(module_manager), scripts(script_service), router(module_manager),
+        : manager(module_manager), scripts(script_service), router(module_manager, true),
           options(std::move(socket_options)), poller(std::move(socket_poller)) {
     }
 
@@ -370,8 +373,8 @@ struct SocketShell::Impl {
         } else {
             session.output_enabled = false;
             reply(session,
-                  vinc::error_to_string(wrap_error(ErrorCode::OutputUnavailable,
-                                                   ErrorOperation::SubscribeOutput, subscription.error())) +
+                  session.feedback.failure(wrap_error(ErrorCode::OutputUnavailable,
+                                                       ErrorOperation::SubscribeOutput, subscription.error()), "output") +
                       "; use output on to retry");
         }
     }
@@ -528,12 +531,12 @@ struct SocketShell::Impl {
     Result<bool> resume(Session& new_session, const std::vector<std::string>& arguments,
                         Session*& receiving_session) {
         if (arguments.size() != 2) {
-            reply(new_session, "Usage: resume <code>");
+            reply(new_session, new_session.feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Resume}, "resume"));
             return false;
         }
 
         if (new_session.job.valid() || scripts.active(new_session.id)) {
-            reply(new_session, "Busy: this session already owns work");
+            reply(new_session, new_session.feedback.failure(Error{ErrorCode::Busy, ErrorOperation::Resume}, "resume"));
             return false;
         }
 
@@ -568,7 +571,7 @@ struct SocketShell::Impl {
             return true;
         }
 
-        reply(new_session, "Resume rejected: code unavailable or expired");
+        reply(new_session, new_session.feedback.failure(Error{ErrorCode::ResumeRejected, ErrorOperation::Resume}));
         return false;
     }
 
@@ -576,6 +579,14 @@ struct SocketShell::Impl {
     Result<bool> handle_session_command(Session& session, const std::vector<std::string>& arguments,
                                         Session*& receiving_session) {
         const auto& name = arguments.front();
+        // A recovery-only entrance can explain resume, but cannot acquire normal session capabilities.
+        if (!session.provisional || name == "resume") {
+            if (const auto help = router.command_help(arguments)) {
+                reply(session, std::string(*help));
+                return true;
+            }
+        }
+
         if (name == "resume") {
             auto resumed = resume(session, arguments, receiving_session);
             if (!resumed) {
@@ -590,9 +601,18 @@ struct SocketShell::Impl {
             return true;
         }
 
+        if (name == "shell") {
+            if (arguments.size() == 2 && (arguments[1] == "-e" || arguments[1] == "--error")) {
+                reply(session, session.feedback.details());
+            } else {
+                reply(session, session.feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, name));
+            }
+            return true;
+        }
+
         if (name == "disconnect") {
             if (arguments.size() != 1) {
-                reply(session, "disconnect takes no arguments");
+                reply(session, session.feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, name));
             } else {
                 session.disconnect_requested = true;
             }
@@ -602,7 +622,7 @@ struct SocketShell::Impl {
 
         if (name == "scancel") {
             if (arguments.size() != 1) {
-                reply(session, "scancel takes no arguments");
+                reply(session, session.feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, name));
             } else {
                 reply(session, scripts.cancel() ? "Script cancellation requested" : "No script is running");
             }
@@ -612,7 +632,7 @@ struct SocketShell::Impl {
 
         if (name == "sstatus") {
             if (arguments.size() != 1) {
-                reply(session, "sstatus takes no arguments");
+                reply(session, session.feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, name));
             } else if (scripts.active()) {
                 reply(session, "Script running");
             } else {
@@ -624,12 +644,12 @@ struct SocketShell::Impl {
 
         if (name == "log" && arguments.size() > 1 && arguments[1] == "show") {
             auto result = log::detail::view_command(session.log_view, arguments);
-            reply(session, result ? *result : error_to_string(result.error()));
+            reply(session, result ? *result : session.feedback.failure(result.error(), name));
             return true;
         }
         if (name == "output") {
             if (arguments.size() != 2 || (arguments[1] != "on" && arguments[1] != "off")) {
-                reply(session, "Usage: output on|off");
+                reply(session, session.feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, name));
                 return true;
             }
 
@@ -646,13 +666,13 @@ struct SocketShell::Impl {
 
     Result<void> command(Session& session, std::string command_line, Session*& receiving_session) {
         if (!is_valid_command_line(command_line)) {
-            reply(session, "Rejected invalid UTF-8 or control character");
+            reply(session, session.feedback.failure(Error{ErrorCode::InvalidCharacter, ErrorOperation::ParseLine}));
             return {};
         }
 
         auto parsed = parse_line(command_line);
         if (!parsed) {
-            reply(session, "Parse error: " + vinc::error_to_string(parsed.error()));
+            reply(session, session.feedback.failure(parsed.error()));
             return {};
         }
 
@@ -673,7 +693,7 @@ struct SocketShell::Impl {
         }
 
         if (shutdown_started.load()) {
-            reply(session, "Framework is shutting down");
+            reply(session, session.feedback.failure(Error{ErrorCode::Closing, ErrorOperation::Execute}));
             return {};
         }
 
@@ -684,31 +704,32 @@ struct SocketShell::Impl {
         }
 
         if (session.job.valid()) {
-            reply(session, "Busy: this session already has a command in flight");
+            reply(session, session.feedback.failure(Error{ErrorCode::Busy, ErrorOperation::Execute}, name));
             return {};
         }
 
         if (name == "srun") {
             if (arguments.size() < 2) {
-                reply(session, "Usage: srun file.tcl [args...]");
+                reply(session, session.feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::StartScript}, name));
                 return {};
             }
 
             auto path = osal::path_from_utf8(arguments[1]);
             if (!path) {
-                reply(session, error_to_string(wrap_error(ErrorCode::InvalidArgument,
-                                                          ErrorOperation::StartScript, path.error())));
+                reply(session, session.feedback.failure(wrap_error(ErrorCode::InvalidArgument,
+                                                                    ErrorOperation::StartScript, path.error()), name));
                 return {};
             }
 
             auto result =
                 scripts.start(session.id, std::move(*path), {arguments.begin() + 2, arguments.end()});
             reply(session, result ? "Script running. scancel cancels the global script."
-                                  : vinc::error_to_string(result.error()));
+                                  : session.feedback.failure(result.error(), name));
             return {};
         }
 
         session.stop = {};
+        session.command_target = name;
         session.job = std::async(
             std::launch::async, [this, arguments = std::move(arguments), stop = session.stop.get_token()] {
                 try {
@@ -753,7 +774,7 @@ struct SocketShell::Impl {
             current.previous_was_cr = character == '\r';
             if (character == '\r' || character == '\n') {
                 if (current.line_oversized) {
-                    reply(current, "Rejected oversized command (maximum 4096 bytes)");
+                    reply(current, current.feedback.failure(Error{ErrorCode::LineTooLong, ErrorOperation::ParseLine}));
                 } else {
                     auto handled = command(current, std::move(current.command_line), receiving_session);
                     if (!handled) {
@@ -849,12 +870,13 @@ struct SocketShell::Impl {
         if ((can_collect_replies || !session.socket) && session.job.valid() &&
             session.job.wait_for(0ms) == std::future_status::ready) {
             auto result = session.job.get();
+            const auto text = session.feedback.command(result, session.command_target);
+            session.command_target.clear();
             if (result && result->shutdown) {
                 shutdown_requested.store(true);
             }
 
             if (session.socket) {
-                const auto text = command_text(result);
                 if (!text.empty()) {
                     reply(session, text);
                 } else if (result) {
@@ -869,6 +891,10 @@ struct SocketShell::Impl {
     void collect_script_result(Session& session, bool can_collect_replies) {
         if (can_collect_replies || !session.socket) {
             auto delivery = scripts.take(session.id);
+            std::string report_text;
+            if (delivery.result) {
+                report_text = session.feedback.script(*delivery.result);
+            }
             if (session.socket) {
                 if (!delivery.output.empty()) {
                     enqueue(session, std::move(delivery.output));
@@ -879,7 +905,7 @@ struct SocketShell::Impl {
                 }
 
                 if (delivery.result) {
-                    reply(session, script_text(*delivery.result));
+                    reply(session, std::move(report_text));
                 }
             }
         }

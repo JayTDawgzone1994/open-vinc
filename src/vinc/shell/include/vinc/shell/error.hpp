@@ -69,7 +69,8 @@ enum class ErrorOperation : std::int32_t {
     Send = 29,
     Receive = 30,
     CloseSocket = 31,
-    Accept = 32
+    Accept = 32,
+    WriteTerminal = 33
 };
 }
 

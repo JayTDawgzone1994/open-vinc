@@ -87,6 +87,15 @@ bool valid_policy(const ModulePolicy& policy) {
     return policy.restart_delay >= minimum_restart_delay && policy.max_restarts <= maximum_restart_count;
 }
 
+bool valid_system_policy(const detail::SystemModuleOptions& options) {
+    const bool valid_mode = options.restart_mode == config::SystemModuleRestartMode::Always ||
+                            options.restart_mode == config::SystemModuleRestartMode::OnFailure;
+    return valid_mode && options.restart_delay >= minimum_restart_delay &&
+           options.restart_delay <= maximum_policy_timeout && options.start_limit_interval > 0ms &&
+           options.start_limit_interval <= maximum_policy_timeout && options.start_limit_burst > 0 &&
+           options.start_limit_burst <= config::system_module_start_limit_burst;
+}
+
 Error failure(ErrorCode code, ErrorOperation operation) {
     return Error{code, operation};
 }
@@ -136,6 +145,8 @@ struct Record {
     std::condition_variable changed;
 
     ModuleType module_type;
+    std::optional<detail::SystemModuleOptions> system;
+    detail::SystemStartWindow start_window;
     ModuleSnapshot snapshot;
     std::vector<std::string> arguments;
 
@@ -181,6 +192,12 @@ struct Record {
     std::uint64_t pending_generation = 0;
     std::uint16_t pending_operation = 0;
     std::optional<control::Frame> response;
+};
+
+// Role is central-owned metadata, separate from the Plugin's public ModuleType.
+struct RegisteredType {
+    ModuleType module;
+    std::optional<detail::SystemModuleOptions> system;
 };
 
 // Lives inside request()'s record lock, including exceptional exits. Once a
@@ -401,7 +418,7 @@ struct ModuleManager::Impl {
     std::unique_ptr<detail::LockRegistry> locks;
     mutable std::mutex mutex;
     std::condition_variable wake;
-    std::map<std::string, ModuleType> module_types;
+    std::map<std::string, RegisteredType> module_types;
     std::vector<std::shared_ptr<Record>> records;
     std::map<std::string, microProgram> programs;
     std::set<std::string> reserved_commands;
@@ -419,6 +436,13 @@ struct ModuleManager::Impl {
     std::jthread worker;
     bool closing = false;
     std::atomic<std::uint64_t> contract_revision{0};
+
+    // Registry mutex is held by every caller, including name approval.
+    bool system_name(std::string_view name) const {
+        return std::ranges::any_of(module_types, [&](const auto& entry) {
+            return entry.second.system && entry.second.system->name == name;
+        });
+    }
 
     Impl(std::unique_ptr<control::Service> channel_service, osal::ProcessService process_service,
          std::unique_ptr<output_hub::OutputHub> output_service,
@@ -503,6 +527,7 @@ struct ModuleManager::Impl {
             auto mid = new_mid();
             if (!mid) {
                 record.startup_rejected = true;
+                record.snapshot.restart_failure = mid.error();
                 return std::unexpected(mid.error());
             }
             record.snapshot.mid = *mid;
@@ -510,6 +535,9 @@ struct ModuleManager::Impl {
         record.snapshot.generation =
             record.snapshot.mid; // Existing wire/Message Bus generation uses this same identity.
         record.name_confirmed = false;
+        if (record.system) {
+            record.startup_rejected = false;
+        }
         record.name_request.reset();
         record.module_query.reset();
         record.snapshot.pid = 0;
@@ -596,6 +624,10 @@ struct ModuleManager::Impl {
                              record.snapshot.debug ? "1" : "0",
                              record.notification_name};
         options.arguments.insert(options.arguments.end(), record.arguments.begin(), record.arguments.end());
+        if (record.snapshot.system_enabled) {
+            options.arguments.push_back("--enabled");
+            options.arguments.push_back(*record.snapshot.system_enabled ? "true" : "false");
+        }
 
         if (record.module_type.python) {
             auto prepared = detail::prepare_python_spawn(options, *record.module_type.python);
@@ -685,6 +717,12 @@ struct ModuleManager::Impl {
 
     // Each generation gets a fresh MID, token and endpoint before resource acquisition.
     void launch(Record& record) {
+        if (record.system) {
+            // Count resource/spawn failures as attempts too. No Ready-time reset.
+            record.start_window.record_start(Clock::now(), *record.system);
+        }
+        record.snapshot.next_restart.reset();
+        record.snapshot.restart_rate_limited = false;
         auto reset = reset_generation(record);
         if (!reset) {
             record_failure(record, reset.error());
@@ -767,13 +805,32 @@ struct ModuleManager::Impl {
         retire_command(record);
 
         record.snapshot.debug_waiting = false;
-        if (!record.snapshot.debug && !record.user_stop && !record.normal_completion && !record.startup_rejected &&
-            record.snapshot.restarts < record.module_type.policy.max_restarts) {
+        const bool restart_system = record.system && !record.user_stop && !record.snapshot.restart_failure &&
+            (!record.normal_completion || record.system->restart_mode == config::SystemModuleRestartMode::Always);
+        const bool restart_user = !record.system && !record.snapshot.debug && !record.user_stop &&
+            !record.normal_completion && !record.startup_rejected &&
+            record.snapshot.restarts < record.module_type.policy.max_restarts;
+        if (restart_system) {
+            const auto now = Clock::now();
+            const auto delayed = now + record.system->restart_delay;
+            const auto eligible = record.start_window.next_start(now, *record.system);
+            record.restart_at = (std::max)(delayed, eligible);
+            record.snapshot.next_restart = record.restart_at;
+            record.snapshot.restart_rate_limited = eligible > delayed;
+            // Diagnostic counts saturate; they must never wrap to zero and reuse a MID.
+            if (record.snapshot.restarts < (std::numeric_limits<std::uint32_t>::max)()) {
+                ++record.snapshot.restarts;
+            }
+            record.snapshot.state = ModuleState::RestartWaiting;
+        } else if (restart_user) {
             ++record.snapshot.restarts;
             record.restart_at = Clock::now() + record.module_type.policy.restart_delay;
             record.snapshot.state = ModuleState::RestartWaiting;
         } else {
-            record.snapshot.state = (record.user_stop || record.normal_completion) ? ModuleState::Stopped : ModuleState::Failed;
+            record.snapshot.next_restart.reset();
+            record.snapshot.restart_rate_limited = false;
+            const bool stopped = record.user_stop || (record.normal_completion && !record.snapshot.restart_failure);
+            record.snapshot.state = stopped ? ModuleState::Stopped : ModuleState::Failed;
         }
         record.changed.notify_all();
     }
@@ -1329,7 +1386,9 @@ struct ModuleManager::Impl {
             rejection = failure(ErrorCode::InvalidName, ErrorOperation::RegisterName);
         } else if (!record->snapshot.name.empty() && name != record->snapshot.name) {
             rejection = failure(ErrorCode::RestartNameChanged, ErrorOperation::RegisterName);
-        } else if (name == "vinc" || name == "param" || reserved_commands.contains(name) || module_types.contains(name) ||
+        } else if (record->system && name == record->system->name) {
+            // Only this trusted registration may occupy its reserved command name.
+        } else if (name == "vinc" || name == "param" || system_name(name) || reserved_commands.contains(name) || module_types.contains(name) ||
                    programs.contains(name)) {
             rejection = failure(ErrorCode::NameReserved, ErrorOperation::RegisterName);
         }
@@ -1438,7 +1497,7 @@ struct ModuleManager::Impl {
     // waiting, and never replay the request if timeout, cancellation or restart loses the result.
     Result<control::Frame> request(const ModuleKey& key, std::uint16_t operation,
                                    std::vector<std::string> args, Deadline deadline,
-                                   std::stop_token stop = {}) {
+                                   std::stop_token stop = {}, std::optional<bool> enabled = {}) {
         const auto action = operation == detail::execute ? ErrorOperation::Command : ErrorOperation::Complete;
         if (stop.stop_requested()) {
             return std::unexpected(failure(ErrorCode::Cancelled, action));
@@ -1456,6 +1515,9 @@ struct ModuleManager::Impl {
         std::unique_lock record_lock(record->mutex);
         if (!matches(*record, key)) {
             return std::unexpected(failure(ErrorCode::GenerationChanged, action));
+        }
+        if (enabled && (!record->system || !record->snapshot.system_enabled)) {
+            return std::unexpected(failure(ErrorCode::InvalidArgument, action));
         }
         if (record->snapshot.state != ModuleState::Running || record->user_stop) {
             return std::unexpected(failure(ErrorCode::NotRunning, action));
@@ -1495,6 +1557,11 @@ struct ModuleManager::Impl {
             record->pending_request = 0;
             record->pending_waiter = false;
             return std::unexpected(wrap_error(ErrorCode::ChannelFailed, action, sent.error()));
+        }
+        if (enabled) {
+            // Enqueue and intent update share the generation lock. A timeout
+            // cannot lose the desired state, and a rejected send does not change it.
+            record->snapshot.system_enabled = *enabled;
         }
 #ifdef VINC_MODULE_TESTING
         module_system::test::checkpoint(module_system::test::Point::AfterSend);
@@ -1707,8 +1774,24 @@ output_hub::OutputHub& ModuleManager::output_hub() noexcept {
 // ModuleType registration and Module startup.
 
 Result<void> ModuleManager::register_module_type(ModuleType module_type) {
+    return register_type(std::move(module_type), nullptr);
+}
+
+Result<void> detail::ManagerAccess::register_system_module(ModuleManager& manager, ModuleType type,
+                                                          SystemModuleOptions options) {
+    return manager.register_type(std::move(type), &options);
+}
+
+Result<void> ModuleManager::register_type(ModuleType module_type, const detail::SystemModuleOptions* system) {
     if (!valid_policy(module_type.policy)) {
         return std::unexpected(failure(ErrorCode::InvalidPolicy, ErrorOperation::RegisterType));
+    }
+    if (system && !valid_system_policy(*system)) {
+        return std::unexpected(failure(ErrorCode::InvalidPolicy, ErrorOperation::RegisterType));
+    }
+    if (system && (system->name.size() > module_name_limit_bytes || !param::valid_segment(system->name) ||
+                   system->name == "vinc" || system->name == "param" || system->name == module_type.name)) {
+        return std::unexpected(failure(ErrorCode::InvalidName, ErrorOperation::RegisterType));
     }
     if (module_type.name.empty() || module_type.name.size() > module_name_limit_bytes ||
         module_type.name.find('\0') != std::string::npos ||
@@ -1727,19 +1810,38 @@ Result<void> ModuleManager::register_module_type(ModuleType module_type) {
     if (impl_->closing) {
         return std::unexpected(failure(ErrorCode::Closing, ErrorOperation::RegisterType));
     }
-    if (impl_->reserved_commands.contains(module_type.name)) {
+    if (impl_->reserved_commands.contains(module_type.name) || impl_->system_name(module_type.name)) {
         return std::unexpected(failure(ErrorCode::NameReserved, ErrorOperation::RegisterType));
     }
     if (impl_->module_types.contains(module_type.name) || impl_->programs.contains(module_type.name) ||
         impl_->find_locked(module_type.name)) {
         return std::unexpected(failure(ErrorCode::NameExists, ErrorOperation::RegisterType));
     }
-    impl_->module_types.emplace(module_type.name, std::move(module_type));
+    if (system && (impl_->system_name(system->name) || impl_->module_types.contains(system->name) ||
+                   impl_->programs.contains(system->name) || impl_->find_locked(system->name))) {
+        return std::unexpected(failure(ErrorCode::NameExists, ErrorOperation::RegisterType));
+    }
+    RegisteredType registered{std::move(module_type), std::nullopt};
+    if (system) {
+        registered.system = *system;
+    }
+    const auto type_name = registered.module.name;
+    impl_->module_types.emplace(type_name, std::move(registered));
     return {};
 }
 
 Result<MID> ModuleManager::start_module(const std::string& name, std::vector<std::string> args,
                                        ModuleStartOptions options) {
+    return start_type(name, std::move(args), options, false);
+}
+
+Result<MID> detail::ManagerAccess::start_system_module(ModuleManager& manager, const std::string& name,
+                                                     std::vector<std::string> args) {
+    return manager.start_type(name, std::move(args), {}, true);
+}
+
+Result<MID> ModuleManager::start_type(const std::string& name, std::vector<std::string> args,
+                                    ModuleStartOptions options, bool system) {
     auto encoded = control::encode_arguments(args);
     if (!encoded) {
         return std::unexpected(
@@ -1754,6 +1856,19 @@ Result<MID> ModuleManager::start_module(const std::string& name, std::vector<std
     if (entry == impl_->module_types.end()) {
         return std::unexpected(failure(ErrorCode::ModuleTypeNotFound, ErrorOperation::Start));
     }
+    if (entry->second.system.has_value() != system) {
+        return std::unexpected(failure(ErrorCode::SystemModuleProtected, ErrorOperation::Start));
+    }
+    if (system) {
+        // Keep one logical owner even while failed/stopped; only framework recovery
+        // may replace its generation. Ordinary starts cannot reset its rate budget.
+        for (const auto& existing : impl_->records) {
+            std::lock_guard record_lock(existing->mutex);
+            if (existing->snapshot.module_type == name) {
+                return std::unexpected(failure(ErrorCode::SystemModuleProtected, ErrorOperation::Start));
+            }
+        }
+    }
     if (impl_->records.size() >= module_record_limit) {
         return std::unexpected(failure(ErrorCode::CapacityExceeded, ErrorOperation::Start));
     }
@@ -1763,13 +1878,19 @@ Result<MID> ModuleManager::start_module(const std::string& name, std::vector<std
     }
 
     auto record = std::make_shared<Record>();
-    record->module_type = entry->second;
+    record->module_type = entry->second.module;
+    record->system = entry->second.system;
+    if (record->system) {
+        record->snapshot.kind = ModuleKind::System;
+        record->snapshot.name = record->system->name;
+        record->snapshot.system_enabled = record->system->enabled;
+    }
     record->snapshot.mid = *mid;
     record->snapshot.generation = *mid;
     record->snapshot.module_type = name;
-    record->snapshot.plugin_path = entry->second.library;
-    if (entry->second.python) {
-        record->snapshot.python_script = entry->second.python->script;
+    record->snapshot.plugin_path = record->module_type.library;
+    if (record->module_type.python) {
+        record->snapshot.python_script = record->module_type.python->script;
     }
     record->snapshot.debug = options.debug;
     record->arguments = std::move(args);
@@ -1848,6 +1969,7 @@ Result<void> ModuleManager::wait_running(const ModuleKey& key, Deadline deadline
     std::unique_lock record_lock(record->mutex);
     while (!record->user_stop && record->snapshot.state != ModuleState::Running &&
            !terminal(record->snapshot.state) && !record->startup_rejected && matches(*record, key) &&
+           !(record->system && record->fault) &&
            !stop.stop_requested() && Clock::now() < deadline) {
         record->changed.wait_until(record_lock,
                                    (std::min)(deadline, Clock::now() + supervisor_poll_interval));
@@ -1960,6 +2082,9 @@ Result<void> ModuleManager::stop_module(const ModuleKey& key, vinc::Deadline dea
     if (!matches(*record, key)) {
         return std::unexpected(failure(ErrorCode::GenerationChanged, ErrorOperation::Stop));
     }
+    if (record->system) {
+        return std::unexpected(failure(ErrorCode::SystemModuleProtected, ErrorOperation::Stop));
+    }
 
     request_user_stop(*record);
     impl_->wake.notify_all();
@@ -1982,6 +2107,9 @@ Result<void> ModuleManager::forget_module(const ModuleKey& key) {
     std::lock_guard record_lock(record->mutex);
     if (!matches(*record, key)) {
         return std::unexpected(failure(ErrorCode::GenerationChanged, ErrorOperation::Forget));
+    }
+    if (record->system) {
+        return std::unexpected(failure(ErrorCode::SystemModuleProtected, ErrorOperation::Forget));
     }
 
     if (!terminal(record->snapshot.state) || record->process) {
@@ -2008,9 +2136,9 @@ std::optional<ModuleSnapshot> ModuleManager::inspect(const ModuleKey& key) const
 
 // Commands and completion requests execute inside the Module process.
 
-Result<int32_t> ModuleManager::command(const ModuleKey& key, std::vector<std::string> args, Deadline deadline,
-                                       std::stop_token stop) {
-    auto response = impl_->request(key, detail::execute, std::move(args), deadline, stop);
+namespace {
+// Both ordinary commands and framework service toggles use the same wire result.
+Result<int32_t> command_result(Result<control::Frame> response) {
     if (!response) {
         return std::unexpected(response.error());
     }
@@ -2024,6 +2152,66 @@ Result<int32_t> ModuleManager::command(const ModuleKey& key, std::vector<std::st
         return std::unexpected(failure(ErrorCode::Protocol, ErrorOperation::Command));
     }
     return std::bit_cast<int32_t>(value);
+}
+}
+
+Result<int32_t> ModuleManager::command(const ModuleKey& key, std::vector<std::string> args, Deadline deadline,
+                                       std::stop_token stop) {
+    return command_result(impl_->request(key, detail::execute, std::move(args), deadline, stop));
+}
+
+Result<void> detail::ManagerAccess::set_system_enabled(ModuleManager& manager, const std::string& name,
+                                                       bool enabled, Deadline deadline, std::stop_token cancellation) {
+    if (cancellation.stop_requested()) {
+        return std::unexpected(failure(ErrorCode::Cancelled, ErrorOperation::Command));
+    }
+
+    auto record = manager.impl_->find(name);
+    if (!record) {
+        return std::unexpected(failure(ErrorCode::ModuleNotFound, ErrorOperation::Command));
+    }
+
+    MID mid;
+    {
+        std::lock_guard lock(record->mutex);
+        if (!record->system || !record->snapshot.system_enabled) {
+            return std::unexpected(failure(ErrorCode::InvalidArgument, ErrorOperation::Command));
+        }
+
+        if (record->user_stop) {
+            return std::unexpected(failure(ErrorCode::Closing, ErrorOperation::Command));
+        }
+
+        if (Clock::now() >= deadline) {
+            return std::unexpected(failure(ErrorCode::Timeout, ErrorOperation::Command));
+        }
+
+        const auto state = record->snapshot.state;
+        if (state == ModuleState::Queued || state == ModuleState::RestartWaiting || state == ModuleState::Stopping) {
+            record->snapshot.system_enabled = enabled;
+            return {};
+        }
+
+        if (state == ModuleState::Starting) {
+            return std::unexpected(failure(ErrorCode::Busy, ErrorOperation::Command));
+        }
+
+        mid = record->snapshot.mid;
+    }
+
+    // Pin this attempt to its MID. A restart between inspection and enqueue must
+    // reject the request, rather than apply an old command to a replacement.
+    auto result = command_result(manager.impl_->request(mid, detail::execute,
+        {enabled ? "enable" : "disable"}, deadline, cancellation, enabled));
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+
+    if (*result != 0) {
+        return std::unexpected(failure(ErrorCode::HookFailed, ErrorOperation::Command));
+    }
+
+    return {};
 }
 
 Result<std::vector<std::string>> ModuleManager::complete(const ModuleKey& key, std::vector<std::string> args,
@@ -2045,6 +2233,10 @@ Result<std::vector<std::string>> ModuleManager::complete(const ModuleKey& key, s
 
 Result<void> ModuleManager::unregister_module_type(const std::string& name) {
     std::lock_guard registry_lock(impl_->mutex);
+    const auto entry = impl_->module_types.find(name);
+    if (entry != impl_->module_types.end() && entry->second.system) {
+        return std::unexpected(failure(ErrorCode::SystemModuleProtected, ErrorOperation::UnregisterType));
+    }
     if (!impl_->module_types.erase(name)) {
         return std::unexpected(failure(ErrorCode::ModuleTypeNotFound, ErrorOperation::UnregisterType));
     }
@@ -2090,7 +2282,7 @@ Result<void> ModuleManager::register_micro_program(const std::string& name, Comm
     if (impl_->closing) {
         return std::unexpected(failure(ErrorCode::Closing, ErrorOperation::RegisterMicroProgram));
     }
-    if (impl_->reserved_commands.contains(name)) {
+    if (impl_->reserved_commands.contains(name) || impl_->system_name(name)) {
         return std::unexpected(failure(ErrorCode::NameReserved, ErrorOperation::RegisterMicroProgram));
     }
     if (impl_->programs.contains(name) || impl_->module_types.contains(name) || impl_->find_locked(name)) {
@@ -2151,20 +2343,22 @@ ModuleManager::call_micro_program_autoComplete(const std::string& name, std::vec
 
 // Registry queries return copies, so callers do not retain internal locks or references.
 
-std::vector<std::string> ModuleManager::get_registered_module_type_names() const {
+std::vector<std::string> ModuleManager::get_registered_module_type_names(bool include_system) const {
     std::lock_guard registry_lock(impl_->mutex);
     std::vector<std::string> names;
-    for (const auto& [name, _] : impl_->module_types) {
-        names.push_back(name);
+    for (const auto& [name, type] : impl_->module_types) {
+        if (include_system || !type.system) {
+            names.push_back(name);
+        }
     }
     return names;
 }
 
-std::vector<std::string> ModuleManager::get_active_module_names() const {
+std::vector<std::string> ModuleManager::get_active_module_names(bool include_system) const {
     std::vector<std::string> names;
     for (auto& record : impl_->snapshot_records()) {
         std::lock_guard record_lock(record->mutex);
-        if (!record->snapshot.name.empty() && !terminal(record->snapshot.state)) {
+        if ((include_system || !record->system) && !record->snapshot.name.empty() && !terminal(record->snapshot.state)) {
             names.push_back(record->snapshot.name);
         }
     }
@@ -2218,6 +2412,15 @@ Result<std::string> ManagerAccess::log_command(ModuleManager& manager, const std
         return std::unexpected(wrap_error(module_system::ErrorCode::LogFailed, module_system::ErrorOperation::AccessLog, result.error()));
     }
     return result;
+}
+
+Result<void> ManagerAccess::log_diagnostic(ModuleManager& manager, std::string text) {
+    if (!manager.impl_->logs) {
+        return std::unexpected(Error{module_system::ErrorCode::LogFailed, module_system::ErrorOperation::AccessLog});
+    }
+
+    manager.impl_->logs->diagnostic(std::move(text), log::Level::Error);
+    return {};
 }
 
 std::string ManagerAccess::log_take(ModuleManager& manager, log::View& view) {

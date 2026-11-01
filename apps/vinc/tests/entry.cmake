@@ -46,7 +46,7 @@ function(check_flow app)
     string(REGEX MATCHALL "ENTRY_PID=[0-9]+" pids "${output}")
     list(REMOVE_DUPLICATES pids)
     list(LENGTH pids pid_count)
-    string(REGEX MATCHALL "Socket Shell listening on" listeners "${output}")
+    string(REGEX MATCHALL "Socket Shell ready - listening on" listeners "${output}")
     list(LENGTH listeners listener_count)
     if(NOT script_count EQUAL 1 OR NOT pid_count EQUAL 2 OR NOT listener_count EQUAL 1)
         message(FATAL_ERROR "Role isolation failed: ${output}${error}")
@@ -54,6 +54,70 @@ function(check_flow app)
 endfunction()
 check_flow("${plain}" -S "${script}" --vinc-module-v0)
 check_flow("${embedded}")
+
+# Verify real redirected stdout both through a pipe and directly to a UTF-8 file.
+# The console renderer must never bypass the redirected destination or add ANSI.
+set(unicode_script "${work}/unicode-output.tcl")
+file(WRITE "${unicode_script}" "puts {UTF8_OUTPUT: 中文 ✅}\nexit\n")
+string(ASCII 27 escape)
+foreach(destination pipe file)
+    if(destination STREQUAL "pipe")
+        execute_process(COMMAND "${plain}" --shell-port 0 -S "${unicode_script}"
+            WORKING_DIRECTORY "${work}" TIMEOUT ${launch_timeout_seconds}
+            RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error ENCODING UTF-8)
+    else()
+        execute_process(COMMAND "${plain}" --shell-port 0 -S "${unicode_script}"
+            WORKING_DIRECTORY "${work}" TIMEOUT ${launch_timeout_seconds}
+            RESULT_VARIABLE result OUTPUT_FILE "${work}/unicode-output.txt" ERROR_VARIABLE error)
+        file(READ "${work}/unicode-output.txt" output)
+    endif()
+    string(FIND "${output}" "${escape}" ansi_position)
+    if(NOT "${result}" STREQUAL "0" OR NOT output MATCHES "UTF8_OUTPUT: 中文 ✅" OR
+       NOT output MATCHES "\\[OK\\] Tcl ready" OR NOT ansi_position EQUAL -1)
+        message(FATAL_ERROR "Redirected UTF-8 ${destination} failed (${result}): ${output}${error}")
+    endif()
+endforeach()
+
+# The production entry keeps running after an official Module fails, prints one
+# concise row, and leaves the full cross-component cause chain in framework Log.
+get_filename_component(app_directory "${plain}" DIRECTORY)
+file(GLOB_RECURSE previous_logs "${app_directory}/vinc_data/entry-test/logs/*.log")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env VINC_TEST_OFFICIAL_FAILURE=1
+    "${plain}" --shell-port 0 -S "${script}"
+    WORKING_DIRECTORY "${work}" TIMEOUT ${launch_timeout_seconds}
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT "${result}" STREQUAL "0" OR NOT output MATCHES "ENTRY_FLOW_OK" OR
+   NOT output MATCHES "1 startup step failed" OR "${output}${error}" MATCHES "domain=")
+    message(FATAL_ERROR "Startup presentation/isolation failed: ${result}: ${output}${error}")
+endif()
+string(REGEX MATCHALL "\\[FAIL\\] Web UI failed" failures "${output}")
+list(LENGTH failures failure_count)
+if(NOT failure_count EQUAL 1)
+    message(FATAL_ERROR "Repeated/missing official failure: ${output}")
+endif()
+file(GLOB_RECURSE log_files "${app_directory}/vinc_data/entry-test/logs/*.log")
+if(previous_logs)
+    list(REMOVE_ITEM log_files ${previous_logs})
+endif()
+set(found_diagnostic FALSE)
+foreach(log_file IN LISTS log_files)
+    file(READ "${log_file}" contents)
+    if(contents MATCHES "Web UI startup:.*ModuleSystem.*OSAL")
+        set(found_diagnostic TRUE)
+    endif()
+endforeach()
+if(NOT found_diagnostic)
+    message(FATAL_ERROR "Startup error cause chain missing from framework Log")
+endif()
+
+execute_process(COMMAND "${plain}" --shell-ip invalid-address --shell-port 0
+    WORKING_DIRECTORY "${work}" TIMEOUT ${launch_timeout_seconds}
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT "${result}" STREQUAL "1" OR NOT error MATCHES "\\[FAIL\\] Socket Shell failed" OR
+   NOT error MATCHES "VINC startup aborted" OR NOT error MATCHES "domain=" OR
+   "${output}${error}" MATCHES "VINC ready")
+    message(FATAL_ERROR "Aborted startup lost details or claimed readiness: ${result}: ${output}${error}")
+endif()
 
 execute_process(COMMAND "${embedded}" -S "${script}"
     WORKING_DIRECTORY "${work}" TIMEOUT ${launch_timeout_seconds}

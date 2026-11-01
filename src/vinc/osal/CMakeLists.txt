@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(vinc_osal LANGUAGES CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../common/cmake/VincToolchain.cmake")
+vinc_require_toolchain()
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

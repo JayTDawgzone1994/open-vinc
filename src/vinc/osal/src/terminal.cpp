@@ -1,10 +1,12 @@
 #include <vinc/osal/detail/native_error.hpp>
+#include <vinc/osal/detail/utf8.hpp>
 // Own terminal modes and decode input without running framework shutdown in an OS handler.
 // Control handlers record an event; the Shell loop performs cancellation and cleanup.
 
 #include <vinc/time.hpp>
 #include <vinc/osal/terminal.hpp>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -266,9 +268,11 @@ vinc::Result<std::unique_ptr<Terminal>> Terminal::open() {
     state->handler = true;
     state->console = GetConsoleMode(state->input, &state->input_mode) != 0;
     if (state->console) {
+        // This text/key API does not consume mouse events. Leave selection to the
+        // terminal host; keep Quick Edit off to avoid pausing legacy consoles.
         const auto mode = (state->input_mode | ENABLE_EXTENDED_FLAGS) &
                           ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT |
-                            ENABLE_QUICK_EDIT_MODE | ENABLE_VIRTUAL_TERMINAL_INPUT);
+                            ENABLE_QUICK_EDIT_MODE | ENABLE_MOUSE_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT);
         if (!SetConsoleMode(state->input, mode)) {
             return std::unexpected(native_error(vinc::osal::ErrorOperation::OpenTerminal));
         }
@@ -327,6 +331,69 @@ bool Terminal::interactive() const noexcept {
 
 bool Terminal::ansi_output() const noexcept {
     return impl_->ansi;
+}
+
+Result<void> Terminal::write_console(std::string_view text) {
+    constexpr auto operation = ErrorOperation::WriteTerminal;
+    if (!impl_->ansi) {
+        return std::unexpected(Error{ErrorCode::Unsupported, operation});
+    }
+
+    if (!detail::valid_utf8_encoding(text)) {
+        return std::unexpected(Error{ErrorCode::InvalidEncoding, operation});
+    }
+
+    // Bound native call sizes and stack conversion storage; never split UTF-8 scalars.
+    constexpr std::size_t output_chunk_bytes = 4096;
+    while (!text.empty()) {
+        auto bytes = (std::min)(text.size(), output_chunk_bytes);
+        if (bytes < text.size()) {
+            while ((static_cast<unsigned char>(text[bytes]) & 0xc0) == 0x80) {
+                --bytes;
+            }
+        }
+#ifdef _WIN32
+        // UTF-16 code units never outnumber the validated UTF-8 input bytes.
+        std::array<wchar_t, output_chunk_bytes> native{};
+        const auto units = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+            static_cast<int>(bytes), native.data(), static_cast<int>(native.size()));
+        if (units == 0) {
+            return std::unexpected(native_error(operation));
+        }
+
+        DWORD offset = 0;
+        while (offset < static_cast<DWORD>(units)) {
+            DWORD written = 0;
+            if (!WriteConsoleW(impl_->output, native.data() + offset,
+                               static_cast<DWORD>(units) - offset, &written, nullptr)) {
+                return std::unexpected(native_error(operation));
+            }
+
+            if (written == 0) {
+                return std::unexpected(Error{ErrorCode::SystemError, operation});
+            }
+            offset += written;
+        }
+#else
+        std::size_t offset = 0;
+        while (offset < bytes) {
+            const auto written = ::write(STDOUT_FILENO, text.data() + offset, bytes - offset);
+            if (written < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                return std::unexpected(native_error(operation));
+            }
+
+            if (written == 0) {
+                return std::unexpected(Error{ErrorCode::SystemError, operation});
+            }
+            offset += static_cast<std::size_t>(written);
+        }
+#endif
+        text.remove_prefix(bytes);
+    }
+    return {};
 }
 
 std::size_t Terminal::columns() const noexcept {

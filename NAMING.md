@@ -10,6 +10,7 @@ This document owns names, meanings, and necessary distinctions. Component docume
 | --- | --- |
 | `ModuleType` | A launchable module type describing which kind of Module to create. |
 | `Module` | An instance created by starting a ModuleType. Use Module in discussion; there is no need to lengthen it to ModuleInstance. |
+| `System Module` | A framework-owned Module with a central-assigned role and protected lifecycle. It still runs in an isolated process under ModuleManager; it is not a separate container or a role a Plugin can claim. See the [System Module contract](src/vinc/module_system/README.md#system-modules). |
 | `BaseModule` | The C++ base class inherited by users, providing lifecycle and command hooks. Retain this name and `base_module.hpp`. |
 | `Context` | A Module's entry point to framework services, replacing the earlier PH/process header terminology. |
 

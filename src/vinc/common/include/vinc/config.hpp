@@ -10,6 +10,24 @@
 #include <cstdint>
 
 namespace vinc::config {
+// System Module recovery defaults; only framework composition selects this policy.
+// 系統 Module 的恢復政策，由框架接線選定，不開放一般 Module 設定。
+enum class SystemModuleRestartMode {
+    OnFailure,
+    Always
+};
+inline constexpr auto system_module_restart_mode = SystemModuleRestartMode::Always;
+// Minimum wait after a generation finishes; not a hard scheduling deadline.
+// 每次程序收尾完成後至少等待的重啟間隔。
+inline constexpr auto system_module_restart_delay = std::chrono::seconds{1};
+// Rolling start window; admission resumes automatically when its oldest attempt expires.
+// 滾動啟動時間窗，最舊嘗試過期後自動恢復啟動資格。
+inline constexpr auto system_module_start_limit_interval = std::chrono::seconds{60};
+// Includes the first start and failed launches. Also sizes fixed per-record history.
+// 包含首次與失敗的啟動嘗試；同時決定每個紀錄的固定歷史容量，變更須重新建置。
+inline constexpr std::size_t system_module_start_limit_burst = 3;
+static_assert(system_module_start_limit_burst > 0);
+
 // 【RPC】服務容量、呼叫排隊與期限。
 // RPC admission, storage and scheduling bounds; see rpc/README.md.
 // 每個 RPC 槽位的 request 完整訊息映像預設容量（bytes，含 metadata）。

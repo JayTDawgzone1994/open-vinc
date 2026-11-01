@@ -20,6 +20,14 @@ Python extension merely because Python support is packaged.
 
 ## Build and deploy / 建置與部署
 
+For the CPython 3.11 minimum-policy environment, results and remaining limits,
+see [CPython 3.11 validation](PYTHON311_VALIDATION.md). The shared
+[toolchain policy](../../common/README.md#build-toolchain-policy) owns the minimum;
+this does not promise cross-minor binary ABI.
+
+CPython 3.11 最低版本的環境、測試結果與限制見
+[相容性驗證紀錄](PYTHON311_VALIDATION.md)；最低版本由共用工具鏈規則維護，不承諾跨 minor 二進位相容。
+
 For the new multi-App constructor, put `CONFIG_VINC_APP_PYTHON=y` in that App's
 `VINC_BUILD_CONFIG` file. Compatible enabled Apps share one `vinc_python_native`
 target and the common message list; disabled Apps have no build dependency on it.
@@ -46,10 +54,10 @@ cmake -S src -B build/my-build -DVINC_BUILD_PYTHON=ON -DPython_EXECUTABLE=/absol
 cmake --build build/my-build
 ```
 
-Use the chosen compiler/configuration. VINC_BUILD_PYTHON defaults OFF so C++ needs no Python development files. Enabled builds require CPython 3.9+/Development.Module, a dependency floor rather than verified coverage of every version. Only 64-bit GIL-enabled CPython; no free-threading/subinterpreters/PyPy/Python 2.
+Use the chosen compiler/configuration. VINC_BUILD_PYTHON defaults OFF so C++ needs no Python development files. Enabled builds require CPython 3.11+/Development.Module (Python 3 only), a dependency floor rather than verified coverage of every version. Only 64-bit GIL-enabled CPython; no free-threading/subinterpreters/PyPy/Python 2.
 
 沿用所選建置目錄的編譯器與組態。`VINC_BUILD_PYTHON` 預設 OFF，讓只使用 C++ 的建置不要求 Python 開發檔。
-開啟後需要 CPython 3.9 以上及其 Development.Module 檔案；這是相依最低要求，不代表所有版本已通過驗證。
+開啟後需要 CPython 3.11 以上及其 Development.Module 檔案（限 Python 3）；這是相依最低要求，不代表所有版本已通過驗證。
 第一版限定 64-bit、含 GIL 的 CPython；不支援 free-threaded Python、subinterpreter 或 PyPy。
 Python 2 不支援。
 
@@ -209,7 +217,7 @@ import vinc checks required runtimes through Python/Windows APIs before _native.
 中央 bootstrap 本來就先 import Vinc 再載入使用者 Module；外部 Python 應在 WinRT 等原生套件前
 import Vinc。這不建立框架 session，也不新增背景執行緒。
 
-- Build-postprocessing uses dumpbin /DEPENDENTS for actual MSVCP/VCRUNTIME/CONCRT imports including Debug/sidecars. The same toolchain crtversion.h supplies a conservative four-part minimum, not System32 contents or compiler 19.xx. It is a deployment baseline, not per-function minimum; unknown metadata/dependencies fail the build.
+- Build-postprocessing uses dumpbin /DEPENDENTS for actual MSVCP/VCRUNTIME/CONCRT imports including Debug/sidecars. Format 2 records each imported DLL's actual file version from the selected Visual Studio deployment package. Header patch numbers are not DLL floors; System32 is not a build-time baseline. See the deployment selection contract below.
 - Generator supports standard MSVC bin/`Host<arch>`/<arch>/cl.exe layout, not unverified alternate Windows toolchains. Deploy the whole python/vinc package, not only .pyd.
 - Check every loaded required same-name DLL; any below baseline/different major raises ImportError. Compatible Python-directory/other DLLs may remain; System32 placement is not mandatory.
 - Missing Release imports are selected only from the Windows API system directory. Validate all, preload in order, recheck transitive loaded DLLs, and retain handles for process lifetime. Do not alter PATH/search policy.
@@ -218,9 +226,9 @@ import Vinc。這不建立框架 session，也不新增背景執行緒。
 - External callers may catch ImportError and stop using Vinc. Bootstrap prints stderr and exits 70; central applies startup policy while other Modules continue.
 
 - `_msvc_runtime.json` 由建置後的 `dumpbin /DEPENDENTS` 取得 MSVCP140、VCRUNTIME140、CONCRT140
-  家族的實際匯入名稱，包含 Debug 名稱與 STL sidecar。以同一 MSVC 工具鏈的 `crtversion.h`
-  四段版本作保守最低基準，另記工具鏈與組態；不從建置電腦 System32 或編譯器 `19.xx` 推算。
-  這是部署基準，不宣稱是每個所用函式的最低可運作版本。無法辨識工具鏈資料／相依時建置失敗。
+  家族的實際匯入名稱，包含 Debug 名稱與 STL sidecar。Format 2 逐一記錄選定 Visual Studio
+  部署套件中各 DLL 的實際檔案版本，不再拿 Header 修訂號當 DLL 門檻，也不拿 System32
+  當建置基準。這是部署基準，不宣稱是每個函式的最低 ABI 版本；選取契約見下方。
 - 目前生成器針對標準 MSVC `bin/Host<arch>/<arch>/cl.exe` 目錄布局；不假裝支援未驗證的
   Windows 替代工具鏈。更新原生擴充時須一起部署整個 `python/vinc`，不能只換 `.pyd`。
 - 已載入的必要同名 DLL 全部檢查；只要其中一份低於基準或主版本不同，即拋 `ImportError`。
@@ -242,6 +250,46 @@ import Vinc。這不建立框架 session，也不新增背景執行緒。
 相依並重新啟動程序。錯誤顯示實際路徑、版本與需求。Vinc 不自動修改 Python 安裝。
 
 Preflight is compatibility defense, not a sandbox. Direct link-time imports do not cover all later dependencies, concurrent native loader races, or later forced full-path loads. Import before starting threads. Maintain system/third-party deployment normally; native crashes still require a native stack to identify the function.
+
+#### Deployment baseline selection / 部署基準選取
+
+The compiler's `VC/Tools/MSVC/<toolset>` determines the **same VC installation's**
+`Redist/MSVC` directory. Select its newest numeric package directory with the same
+major and an equal/newer minor than the CRT header family. Microsoft documents
+the [deployment files and compatible toolset families](https://learn.microsoft.com/en-us/cpp/windows/determining-which-dlls-to-redistribute).
+Directory/header patch numbers need not equal serviced DLL file versions.
+For example, the 14.44.35112 directory contains 14.44.35211 DLLs.
+
+- Read the native image's PE architecture and each corresponding CRT file's PE
+  architecture/version, without loading those files. Release selects the desktop
+  CRT directory; Debug selects `debug_nonredist/.../DebugCRT`.
+- Missing/ambiguous package directories, missing imports, unreadable versions,
+  wrong architecture or older-family files fail the build. No environment PATH,
+  System32, unrelated VS installation, arbitrary version override or download is
+  used to supply a build baseline. A custom extracted toolchain needs its official
+  Redist files in the same VC layout.
+- CMake records the selected directory and tracks its DLL files as link inputs.
+  Reconfigure after changing Redist selection. A changed selection discovered
+  during metadata generation fails rather than silently using a new package.
+- Metadata contains per-DLL versions, toolset/configuration, informational header
+  version and a VC-relative source path; it contains no producer-specific absolute
+  path. Source and installed SDK consumers use the same generator. Deploy metadata,
+  loader and native extension together; old/malformed formats are rejected.
+- This is a supported deployment baseline, not proof that every older DLL crashes
+  or that arbitrary mixed DLL cohorts are safe. A newer selected package may raise
+  the baseline. This change neither promises old Python-bundled CRT compatibility
+  nor requires WinRT 4.x, and it does not distribute Microsoft's DLLs.
+
+依所選編譯器找到同一 VC 安裝下的 `Redist/MSVC`，選取主版本相同、次版本不低於 Header
+家族的最新數字目錄。目錄／Header 修訂號與 DLL 實際檔案版本不必一致。依原生映像的 PE
+架構選 Release CRT 或 Debug 非散布 CRT，逐檔驗證架構與版本，不載入這些檔案。
+套件缺失／不明確、缺 DLL、版本無法讀取、架構錯誤或家族過舊均使建置失敗；不從 PATH、
+System32 或其他 VS 安裝補猜，也不下載／自動安裝。自行解壓工具鏈須保留官方 Redist 布局。
+CMake 追蹤 DLL 檔案變更；改選 Redist 後須重新配置，生成時發現選取已改變會明確失敗。
+Metadata 只保留逐檔版本、工具鏈／組態、供診斷的 Header 版本及 VC 相對來源，不洩漏本機
+絕對路徑。來源建置與 installed SDK 使用同一生成器，部署須同步更新整套 Python binding。
+這不是所有舊 DLL 的最低 ABI 推導；新版部署套件也可能提高門檻，不承諾舊 Python CRT
+混搭、不要求 WinRT 4.x、不散布 Microsoft DLL。實測見 [Runtime 驗證](RUNTIME_VALIDATION.md)。
 
 這項檢查是啟動相容性防護，不是程序級安全沙箱。依賴清單是連結時的直接匯入，不涵蓋使用者
 日後動態載入的所有相依；不能阻止其他 native thread 並行載入／卸載 DLL，也不保證第三方稍後
@@ -278,8 +326,9 @@ Preflight is compatibility defense, not a sandbox. Direct link-time imports do n
 - `module.python_runtime` 的真實舊 DLL／WinRT 案例需要測試環境變數
   `VINC_TEST_OLD_MSVC_RUNTIME`（舊 DLL 完整路徑）與 `VINC_TEST_WINRT_DIR`（解壓套件根目錄）。
   未提供時會明確 skip，不自動下載或安裝第三方套件。一般 CTest 不依賴 WinRT。
-- Linux／macOS 未實機驗證；此防護僅由 Windows MSVC 建置啟用。MSVC 19.44 尚未在本機重建
-  本輪修改，外部提供的 19.44 崩潰報告不算本輪實作的驗證。
+- 此防護僅由 Windows MSVC 建置啟用；Linux／macOS 不套用此 DLL 檢查。
+  後續 MSVC 19.44 本機建置與 Python／Runtime 驗證已完成，見
+  [Windows 工具鏈報告](../../sdk/WINDOWS_TOOLCHAIN.md)。外部崩潰報告不等於本機驗證。
 
 <a id="掃描與-moduletype"></a>
 
@@ -541,6 +590,28 @@ Linux／macOS 未實機驗證。
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
+
+The [2026-11-02 Runtime diagnosis](RUNTIME_VALIDATION.md) separates the clean
+official-Python refusal from WinRT 3.2.1's old-MSVCP load order. Official 3.13.12
+is refused even by the 19.44 binding; official 3.14.10 with VINC first passes
+actual OCR and message operations. The follow-up in the same report replaces the
+header-derived floor with actual per-DLL deployment versions; old-DLL rejection,
+dynamic CRT linkage and the lack of a WinRT 4.x requirement remain.
+
+[2026-11-02 Runtime 診斷](RUNTIME_VALIDATION.md) 已分離官方 Python 原附 DLL 的門檻拒絕，
+與 WinRT 3.2.1 舊 MSVCP 的載入順序問題。乾淨 3.13.12 連 19.44 綁定也會拒絕；
+乾淨 3.14.10 的 VINC-first 實際 OCR／訊息操作通過。同份報告的後續修正改用逐 DLL
+實際部署版本；保留舊 DLL 防護及動態 CRT，不要求 WinRT 4.x。
+
+The [Windows toolchain evaluation](../../sdk/WINDOWS_TOOLCHAIN.md) separates
+source/compiler support from Python ABI and Runtime deployment. Its historical
+header-floor and bypass experiments are not the current deployment policy.
+The 19.44 deployment baseline still rejects Python's 14.42.34438 VCRUNTIME;
+passing limited probes with older files is not a compatibility guarantee.
+
+[Windows 工具鏈評估](../../sdk/WINDOWS_TOOLCHAIN.md) 區分來源建置、Python ABI 與 Runtime
+部署問題。其 Header 門檻及繞過防護實驗屬歷史紀錄；目前使用上述部署基準。
+19.44 基準仍拒絕 Python 的 14.42.34438 VCRUNTIME，有限探針通過不等於相容性保證。
 
 The exact native crash site from the external 2026-10-14 v0.1.1/MSVC 19.44/WinRT-first old-MSVCP report remains unknown without stack/dump; the UNC report was inaccessible. External tests showed new-first coexistence/OCR; isolated official wheels locally verify preflight rejection and reverse-order coexistence. [Microsoft compatibility](https://learn.microsoft.com/en-us/cpp/porting/binary-compat-2015-2017) requires Runtime at least as new as toolchain; [STL 17.10 notes](https://github.com/microsoft/STL/wiki/VS-2022-Changelog#vs-2022-1710) document mutex null dereference from violating it. pybind11 mutex initialization is a concrete candidate, not a confirmed function diagnosis. Rejecting unsupported Runtime does not require proving the precise site. No CRT switch/compatibility macros/DLL replacements were introduced.
 

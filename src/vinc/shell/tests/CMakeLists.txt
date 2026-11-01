@@ -4,6 +4,11 @@
 add_executable(shell_unit_tests unit_tests.cpp)
 target_link_libraries(shell_unit_tests PRIVATE vinc_shell vinc_test_manager)
 
+add_executable(shell_startup_report_tests startup_report_tests.cpp)
+target_link_libraries(shell_startup_report_tests PRIVATE vinc_shell)
+add_test(NAME shell.startup_report COMMAND shell_startup_report_tests)
+set_tests_properties(shell.startup_report PROPERTIES TIMEOUT 15)
+
 add_executable(shell_terminal_tests terminal_tests.cpp)
 target_link_libraries(shell_terminal_tests PRIVATE vinc::osal)
 
@@ -65,14 +70,18 @@ if(WIN32 AND VINC_BUILD_APPS)
     endif()
     add_dependencies(shell_console_tests shell)
     add_test(NAME shell.console COMMAND shell_console_tests "$<TARGET_FILE:shell>")
-    set_tests_properties(shell.console PROPERTIES TIMEOUT 20)
+    # Validate input modes/keys/shutdown independently of central App instance ownership.
+    add_test(NAME shell.console_input COMMAND shell_console_tests "$<TARGET_FILE:shell>" --input-only)
+    add_test(NAME shell.console_output COMMAND shell_console_tests "$<TARGET_FILE:shell>" --startup-only)
+    set_tests_properties(shell.console shell.console_input shell.console_output PROPERTIES TIMEOUT 20)
 endif()
 
 # Compile private Shell implementations with deterministic I/O fault hooks.
 # No production Shell object is linked into this fixture.
 add_executable(shell_fault_tests fault_tests.cpp
     ../src/command_line.cpp ../src/command_router.cpp
-    ../src/script_service.cpp ../src/tcl_runtime.cpp)
+    ../src/script_service.cpp ../src/tcl_runtime.cpp
+    ../src/startup_report.cpp ../src/session_feedback.cpp)
 target_include_directories(shell_fault_tests PRIVATE ../include "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(shell_fault_tests PRIVATE VINC_SHELL_TESTING)
 target_link_libraries(shell_fault_tests PRIVATE vinc_test_manager vinc::common vinc_tcl)

@@ -151,11 +151,164 @@ subscriber last
 exit
 ```
 
-Interactive Module submissions immediately restore input; startup prints Started <approved-name>. Before Ready, commands fail not-ready. Help lists actual type/instance state/PID/error, not every nonterminal state as Running.
+Interactive Module submissions immediately restore input; startup prints Started <approved-name>. Before Ready, commands fail not-ready. Help lists user types and instance state/MID/PID, not every nonterminal state as Running. System Modules and retained errors are available with `help --verbose`.
 
 互動式送出模組命令後會立即回到輸入。模組啟動完成會印出 `Started <完整節點名>`；
-在 Ready 前操作該節點會得到未就緒錯誤。`help` 顯示已登記種類與所有實例的狀態、PID、最後錯誤，
+在 Ready 前操作該節點會得到未就緒錯誤。`help` 顯示使用者種類與實例的狀態、MID、PID；System Module 與最後錯誤用 `help --verbose` 查看，
 不把所有非終止狀態都標成 Running。
+
+### Compact help / 精簡說明
+
+Usage is the first line. Commands use the same three-column layout as ModuleTypes;
+Socket Shell's Remote heading also occupies its own line above the command names.
+
+Usage 位於最前面，Commands 採與 ModuleTypes 相同的三欄對齊；Socket Shell 的
+Remote 標題也獨立一行，再列出指令名稱。
+
+ModuleTypes use a separate heading and three left-to-right columns, padded to each
+column's longest name with at least two spaces between columns. Names are not
+truncated; an empty list shows `(none)`. Local, remote and verbose help share this
+layout; narrow terminals may still wrap long rows.
+
+ModuleTypes 標題獨立一行，每行由左至右最多三個名稱，各欄依該欄最長名稱對齊，
+欄間至少兩格；不截斷名稱，空清單顯示 `(none)`。本機、遠端及詳細 help 共用排版，
+窄終端仍可能自行折行。
+
+Column-layout validation (2026-11-01): Windows x64 / MSVC 19.51, Debug and Release
+each passed `shell.unit`, `shell.integration` and `shell.socket`. Cases cover an
+empty list, unequal column widths, sorted multi-row output, a partial final row,
+verbose help, local input and TCP line endings. Both App builds succeeded; actual
+Debug Vinc TCP output confirmed the seven built-in/example types in three rows.
+Linux/macOS were not run for this formatting change.
+The same three suites passed again in both configurations after extending columns
+to Commands/Remote and moving Usage first; actual Debug Vinc TCP output was checked.
+
+三欄排版驗證（2026-11-01）：Windows x64／MSVC 19.51，Debug、Release 各通過
+`shell.unit`、`shell.integration`、`shell.socket`，涵蓋空清單、不同欄寬、排序換行、
+不足三欄的末行、詳細 help、本機輸入與 TCP 行尾。兩種 App 建置成功，另實際啟動
+Debug Vinc，確認七個官方／範例種類分為三行。本輪排版變更未執行 Linux／macOS。
+後續將 Commands／Remote 納入欄位排版並把 Usage 移至最前面後，兩種組態再次通過
+相同三組測試，亦確認實際 Debug Vinc 的 TCP 輸出。
+
+`help` shows command names, user ModuleTypes and Modules. Only Socket Shell adds the
+remote command overview. Use `<builtin> -h` or `<builtin> --help` for syntax;
+`help --verbose` includes retained primary failures, contract reports and cleanup
+failures with their original MIDs. Debug/waiting markers remain in the compact view.
+
+`help` 只列指令名稱、使用者 ModuleTypes 與 Module 狀態；只有 Socket Shell 額外列遠端指令。
+完整語法使用 `<內建指令> -h` 或 `--help`，不使用 `help log`。
+`help --verbose` 保留主要故障、契約報告與收尾故障及各自 MID；精簡版仍保留 DEBUG／等待標記。
+
+Official `ui` and `recorder` are builtins shared by local Shell, Socket Shell and
+Tcl. `ui enable|disable` toggles HTTP only; `ui status` and `recorder status` can
+report central recovery state even when the process is not Running. Once Running,
+status/Recorder operations are forwarded through the existing hook. `recorder
+record ...` and `finish` never control Module lifetime. Both support `-h`/`--help`.
+Ordinary help/completion hides their ModuleTypes/instances; `help --verbose` adds
+`[System Modules]`, desired UI state, MID/PID, retained faults and retry timing.
+See [System lifecycle](../module_system/README.md#system-modules) for protection,
+restart and shutdown contracts. Native `ui`/`recorder` names are reserved commands.
+
+官方 `ui`／`recorder` 是本機、Socket Shell、Tcl 共用的內建指令。UI 開關只控制 HTTP；
+兩者 status 在程序尚未 Running 時仍可查中央恢復狀態，就緒後才轉交既有 hook。
+`recorder record ...`／`finish` 不控制程序生命週期，兩者皆支援 `-h`／`--help`。
+一般 help／補全隱藏官方種類與實例；詳細 help 另列 System 區段、UI 意圖、MID／PID、
+保留錯誤及重試時間。上述兩個命令名稱由框架保留。
+
+Help interception requires exactly two tokens and a framework builtin name. It
+does not execute the operation (including exit, disconnect or script cancellation).
+ModuleType, Module and registered-command flags pass to their existing hooks
+unchanged; no generated Module help is promised. `srun file.tcl --help` passes the
+flag to Tcl `argv`. A recovery-only remote entrance can show `resume --help`, but
+still rejects other commands under its existing capacity policy.
+
+只有剛好兩個 token 且第一個是框架內建指令時才攔截說明旗標，不執行原操作
+（包括退出、斷線與取消腳本）。ModuleType、Module 及使用者登記指令的旗標原樣交給既有
+hook，框架不替模組生成說明。`srun file.tcl --help` 的旗標仍傳入 Tcl `argv`。
+容量滿載時的恢復專用入口可顯示 `resume --help`，其餘命令仍遵守原有拒絕政策。
+
+Validation (2026-11-01): Windows x64, MSVC 19.51, Debug and Release each passed
+11 suites: the ten `shell.*` tests and `app.entry`. Targeted builds included the
+actual Vinc executable and the entry fixtures. Coverage includes both help aliases,
+no shutdown/disconnect/script-cancel side effects, actual ModuleType/Module hook
+forwarding, Tcl script argv, compact failed state and retained verbose diagnostics.
+An actual Debug Vinc run also checked `help`, `log --help`, plain redirected output
+and normal exit. No Linux/macOS execution for this help change.
+
+驗證（2026-11-01）：Windows x64／MSVC 19.51，Debug、Release 各通過 11 組
+（十組 `shell.*` 與 `app.entry`），並建置實際 Vinc 與入口驗收程式。涵蓋兩種旗標、
+不關機／斷線／取消腳本、真實 ModuleType／Module hook 轉發、腳本 argv、精簡失敗狀態
+及詳細診斷保留。另外實際執行 Debug Vinc，確認 `help`、`log --help`、導向輸出的純文字
+及正常退出。本輪 help 修改未在 Linux／macOS 執行。
+
+### Session errors / Session 錯誤回應
+
+Interactive command, parsing, completion and script failures show concise summaries.
+`shell -e` / `shell --error` inspects this Session's latest observed failure;
+`shell -h` / `shell --help` shows usage. `shell` is a reserved framework name.
+An empty Session reports `No recorded error.` Success and inspection do not clear
+the slot. Concurrent jobs update it in result-observation order, not submission order.
+
+互動命令、解析、補全及腳本失敗顯示簡短摘要；`shell -e`／`shell --error` 查看該
+Session 最後觀察到的失敗，`shell -h`／`--help` 查看用法。`shell` 為框架保留名稱。
+尚無紀錄時顯示 `No recorded error.`；成功指令與查看紀錄不會清除它。並行工作按
+結果被收取的順序更新，不承諾依送出順序保存。
+
+`SessionFeedback` is Shell-internal presentation state owned by the local control
+loop or a remote Session's network loop; workers never mutate it. It retains the
+original numeric Error/cause chain, or an application status without converting
+that status into a framework Error. Only the command target is retained, not the
+full submitted argument list. Targets/script filenames reuse `shell_max_line_bytes`
+(4096 bytes); Tcl detail uses `shell_script_result_bytes` (256 KiB). Queries reserve
+`shell_script_result_suffix_reserve` (32 bytes) within the Socket payload budget for
+framing; truncated text is marked. No new thread, queue or mandatory Log write is added.
+
+`SessionFeedback` 是 Shell 內部呈現狀態，由本機控制迴圈或各遠端 Session 的網路迴圈
+持有，工作執行緒不修改它。保存原始 Error／原因鏈，或應用狀態碼；不把非零狀態碼
+改成框架錯誤。只保留命令目標，不另外保存整串參數。目標／腳本檔名沿用 4096-byte
+輸入限制，Tcl 細節沿用 256 KiB 診斷限制，查詢回覆預留既有 32-byte framing 空間並
+標記截短；沒有新增執行緒、佇列或強制 Log 寫入。
+
+Local and remote slots are independent. A disconnected Session retains its slot
+through the existing resume grace period, including failures collected while
+disconnected; expiry/destruction releases it. A fresh connection has no error.
+Script failures belong to the initiating Session, with file/line/reason in the
+summary and full bounded Tcl details available on inspection. Tcl `catch`,
+`return -options`, native `error` and framework numeric error options are unchanged;
+`shell -e` inside Tcl returns SessionRequired instead of reading interactive state.
+Tcl's own diagnostic text may quote script source/values; this is not a secret-redaction facility.
+
+本機與遠端紀錄互不影響；斷線後在既有恢復期限內保留，包括斷線期間才收取的失敗，
+Session 過期／銷毀後釋放。全新連線沒有紀錄。腳本失敗只屬於啟動者，摘要包含
+檔名／行號／原因，查詢可看有界的詳細 Tcl 資訊。Tcl `catch`、`return -options`、
+原生 `error` 與框架數值錯誤選項不變；腳本內 `shell -e` 回 SessionRequired，
+不讀取互動狀態。Tcl 自身診斷可能包含腳本來源／值；本功能不是機密遮罩機制。
+
+Unknown execution outcomes remain explicit: a timeout/cancel is never presented
+as proof that the operation did not execute or that retrying is safe. Unrecognized
+codes receive a generic summary but remain numeric in `shell -e`. Existing
+background fault notices, `log status`, `param status`, startup/shutdown diagnostics
+and `help --verbose` retain their diagnostic contracts; they are not command-error history.
+
+「執行結果未知」仍明確標示，不把逾時／取消說成操作沒發生或可安全重試。未知代碼
+使用一般摘要，數值仍可查。背景故障通知、`log status`、`param status`、啟停診斷及
+`help --verbose` 維持各自契約，不當作所有命令錯誤的歷史。
+
+Validation (2026-11-01): Windows x64 / MSVC 19.51, Debug and Release each passed
+all 11 selected suites (`shell.*` and `app.entry`). Coverage includes concise
+errors, unchanged numeric Results, unknown causes, uncertain outcomes, bounded
+details, Session isolation, reconnect retention (including a script failing while
+disconnected), local dispatch and Tcl regressions. A separately launched Debug
+Vinc also passed actual TCP checks for `ls`, invalid Param/Log arguments,
+`shell -e` / `shell --error`, retention after successful `help`, and normal `exit`.
+This round did not run Linux/macOS tests or perform a new GUI visual inspection.
+
+驗證（2026-11-01）：Windows x64／MSVC 19.51，Debug、Release 各通過選定的
+11 組測試（`shell.*` 與 `app.entry`），涵蓋簡短錯誤、原始數值 Result、未知原因、
+執行結果未知、診斷容量限制、Session 隔離、重連保留（含斷線期間腳本失敗）、
+本機派送與 Tcl 回歸。另實際啟動 Debug Vinc，以 TCP 驗證 `ls`、錯誤 Param／Log
+參數、兩種錯誤查詢語法、成功 `help` 後保留錯誤及正常 `exit`。
+本輪未執行 Linux／macOS 測試，也未新增 GUI 目視驗收。
 
 Quotes preserve spaces/empty args; double quotes escape quote/backslash, single quotes retain all text. Outside quotes, backslash escapes space/quotes/backslash, otherwise remains for Windows paths. Adjacent quoted/unquoted fragments join; unmatched quotes reject.
 
@@ -194,7 +347,7 @@ Python Source 會轉接為該語言文件定義的不含目標名稱之 args，�
 - Reject overlap per target; distinct targets may run concurrently. Manager permits only one pending remote command/instance.
 - Wait 5 s for commands,1 s completion, startup_timeout+1 s for launch, on workers so keyboard/help/exit stay responsive.
 - Timeout means unknown execution, no automatic resend/cancel. Manager keeps Busy until late reply/exit to avoid accumulating stuck work.
-- Full framework/native diagnostics are printed; nonzero hook status retains its number, unknown/parse failures print directly.
+- Interactive failures use concise summaries; `shell -e` retains full framework/native diagnostics. Nonzero hook status keeps its number.
 - Tab is asynchronous; discard responses after input changes. Show all candidates; insert single candidates with quoting, not only global node names.
 
 - 互動介面最多 16 個執行中的命令／補全工作；滿載立即回 Busy，沒有未執行命令的無界佇列。
@@ -204,8 +357,8 @@ Python Source 會轉接為該語言文件定義的不含目標名稱之 args，�
   等待在工作執行緒，鍵盤、內建 help 與退出仍可處理。
 - Timeout 表示命令結果未知，不代表未執行或已取消；不自動重送。
   ModuleManager 會保留該請求的 Busy 狀態直到遲到回覆或該次程序退出，避免繼續往卡住的模組排隊。
-- 顯示完整的 Timeout／Closed／Busy／Protocol／IO 與原生 OS 資訊，
-  遠端 hook 非零回傳則顯示實際回傳碼。未知命令、解析錯誤會直接印出。
+- 互動失敗顯示簡短摘要，`shell -e` 可查看完整錯誤鏈與原生 OS 資訊；
+  遠端 hook 非零回傳仍顯示實際回傳碼，不杜撰原因。
 - Tab 同樣非同步；結果抵達時，若輸入已改變便丟棄舊結果。
   多候選全部顯示，不要求候選本身是全域節點；單候選會依引號規則填入。
 
@@ -267,6 +420,24 @@ Shell 成功返回關閉流程時，所有受管理程序都已確認退出，�
 
 ## Terminal/platform behavior / 終端行為與平台邊界
 
+Framework-owned local Shell output uses OSAL `Terminal::write_console()` when its
+destination is `std::cout` attached to a terminal. This includes startup status,
+prompts, command/script results and rendered Module output. Injected ostream
+destinations and redirected stdout retain the ostream path; no global stream buffer,
+CRT locale or third-party printf is replaced. Formatting startup/shutdown summaries
+uses temporary strings; ordinary text passes directly to OSAL. A native console
+write failure disables further local display for this Shell and submits one wrapped
+diagnostic to the existing bounded Log. Input, remote Shell and central services
+continue; this does not promise Log delivery or automatic console recovery.
+
+框架自己的本機 Shell 輸出（啟動摘要、prompt、命令／腳本結果及格式化 Module 輸出）
+在目的地是終端的 `std::cout` 時，統一使用 OSAL `Terminal::write_console()`。
+注入的 ostream 與重導向 stdout 維持原串流路徑，不替換全域串流、CRT locale 或第三方 printf。
+啟動／關閉摘要組合時使用暫存字串，一般文字直接交給 OSAL。原生 console 寫入失敗後，
+停止該 Shell 的後續本機顯示並將一筆包裝錯誤送入既有有界 Log；輸入、遠端 Shell 與
+中央服務繼續運作，不承諾 Log 送達或自動恢復 console。
+
+- The local ANSI prompt uses Open-VINC blue `#246BDF` and restores the default foreground before input text. Redirected/non-ANSI output and Socket Shell remain plain text; exact RGB rendering requires a true-color terminal.
 - Up/down history restores the pending draft, omitting consecutive duplicate commands.
 - Tail entry/backspace deletes a UTF-8 code point, not arbitrary grapheme clusters. No middle insertion/cursor movement/full emoji editing.
 - Windows ReadConsoleInputW handles surrogate pairs; POSIX parses UTF-8/key escapes. Standalone Escape has a bounded recognition delay.
@@ -275,6 +446,7 @@ Shell 成功返回關閉流程時，所有受管理程序都已確認退出，�
 - Ctrl+C/SIGINT only signals stop; ordinary threads clean up. OS forced shutdown/terminal closure may impose deadlines and prevent cleanup.
 
 - 上／下取回歷史，返回最新位置時還原尚未送出的草稿；不記錄連續重複命令。
+- 本機 ANSI 提示符使用 Open-VINC 品牌藍 `#246BDF`，輸入文字前恢復預設前景色。重導向／非 ANSI 輸出與 Socket Shell 維持純文字；精確 RGB 顯色需要支援 true color 的終端。
 - 支援行尾輸入與 Backspace；刪除一個完整 UTF-8 code point，避免留下半個中文字元。
   本次未實作中間插入／游標左右移動、完整 grapheme cluster（組合字／複合 emoji）編輯。
 - Windows 使用 ReadConsoleInputW 並處理 UTF-16 代理對；POSIX 解碼 UTF-8 與方向鍵 escape sequence。
@@ -286,6 +458,17 @@ Shell 成功返回關閉流程時，所有受管理程序都已確認退出，�
   OS 強制關機／終端強制關閉另有 OS 時限，不承諾被 OS 強殺後仍能完成清理。
 
 Native references: [GetConsoleMode](https://learn.microsoft.com/en-us/windows/console/getconsolemode), [termios](https://www.man7.org/linux/man-pages/man3/termios.3.html), [poll](https://www.man7.org/linux/man-pages/man2/poll.2.html).
+
+Windows Terminal selection: OSAL Terminal disables inherited `ENABLE_MOUSE_INPUT`
+because its API delivers text/key events only. Mouse selection/copy belongs to the
+terminal host, not Shell. Legacy Console Quick Edit remains disabled to avoid
+selection pausing console I/O; this does not enable legacy Quick Edit selection.
+The original input mode is restored on Terminal destruction, including its mouse flag.
+
+Windows Terminal 文字選取：OSAL Terminal 的 API 只交付文字／按鍵事件，因此明確關閉
+繼承的 `ENABLE_MOUSE_INPUT`，讓滑鼠選取／複製由終端管理。傳統 Console 的 Quick Edit
+仍維持關閉，避免選取期間暫停 Console I/O；本次未啟用傳統 Quick Edit 選取。
+Terminal 解構時還原原本輸入模式，包括滑鼠旗標。
 
 Windows console 模式依據 [Microsoft GetConsoleMode](https://learn.microsoft.com/en-us/windows/console/getconsolemode)，
 POSIX 模式及等待依據 [termios](https://www.man7.org/linux/man-pages/man3/termios.3.html) 與
@@ -392,6 +575,74 @@ Tcl 核心靜態連結，初始化腳本、編碼資料及授權放在 `Vinc` �
 <a id="驗證"></a>
 
 ## Recorded validation / 驗證
+
+Windows x64 / MSVC 19.51.36257, Windows SDK 10.0.26100.0, CMake 4.3.2,
+Ninja 1.13.2 (2026-11-01): full Debug and Release builds passed. In each
+configuration, the ten `shell.*` tests and `app.entry` passed (11 distinct tests,
+across targeted runs). Debug initially hit LNK1168 on the running Bag DLL; after
+the owner authorized normal Socket Shell `exit`, central and Module shutdown
+completed and the full build succeeded. No forced termination was used.
+
+2026-11-01，Windows x64／上述工具鏈：完整 Debug、Release 建置成功，兩種組態各通過
+十項 `shell.*` 與 `app.entry`（分批執行，共 11 項不同測試）。Debug 最初因使用中的 Bag DLL
+遇到 LNK1168；使用者授權後經 Socket Shell `exit` 正常關閉中央與 Module，再完成建置，
+未強制終止程序。桌面工具仍回報 Vinc 沒有可擷取視窗，目視驗收限制見下方待辦。
+
+Native output regression (2026-11-01): before the fix, a hidden real Windows
+console with Tcl initialized and CRT locale `.950` failed at
+`actual console lost success check mark`. The same Shell/stdout test now passes
+under `.950`, `.1252` and `.UTF8`, reading back check/cross/Chinese characters and
+console color attributes, with no literal `[39m` and no foreground-color leak.
+It also checks locale/code-page preservation, invalid UTF-8 before any write,
+UTF-8 conversion across the 4096-byte boundary, and native failure diagnostics.
+Legacy console readback substitutes U+FFFD for the tested supplementary emoji
+even with direct `WriteConsoleW`; that case compares against native UTF-16 output,
+and does not claim pixel/font verification. Production-entry tests cover Unicode
+through redirected pipes and files, with no ANSI. CMake captures explicitly use
+UTF-8 so the test runner does not reinterpret correct bytes through its locale.
+
+原生輸出回歸（2026-11-01）：修復前在真正的隱藏 Windows console、初始化 Tcl 並設定
+CRT `.950` 後，實際 Shell/stdout 測試失敗於「畫面缺少成功勾號」。修復後 `.950`、
+`.1252`、`.UTF8` 均能讀回正確的勾叉、中文及顏色屬性，沒有 `[39m` 殘留或正文染色。
+另驗證 locale／code page 保留、非法 UTF-8 寫入前拒絕、4096-byte 分段及原生錯誤。
+舊 console 讀回 API 對測試用補充平面 emoji 會回傳 U+FFFD，直接 `WriteConsoleW`
+也相同；該項比對原生 UTF-16 寫入結果，不宣稱已驗證字型或像素。正式入口測試另涵蓋
+Pipe／檔案 UTF-8 重導向且不含 ANSI；CMake 明確以 UTF-8 解碼，避免測試工具自行誤轉碼。
+
+Mouse input mode fix, 2026-11-01: Windows x64/MSVC 19.51 Release build and
+`shell.terminal`, `shell.integration`, `shell.console_input` passed (3/3).
+The hidden-console case explicitly inherits mouse reporting, verifies it is disabled
+while Terminal is open and restored afterward, and checks Unicode/edit keys,
+Ctrl+C/Ctrl+D, OS Ctrl+C with normal Module cleanup, and prompt redraw.
+`shell.console_input` skips only the separate central-App deployment scenario;
+the full `shell.console` remains available. Actual Windows Terminal drag-to-clipboard
+interaction was not automated; no Linux/macOS run (the change is Windows-only).
+Debug binaries were not rebuilt because the user's Debug App was still running.
+
+滑鼠輸入模式修正（2026-11-01）：Windows x64／MSVC 19.51 Release 建置成功，
+`shell.terminal`、`shell.integration`、`shell.console_input` 共 3/3 通過。
+隱藏 Console 案例明確繼承開啟的滑鼠輸入旗標，驗證 Terminal 開啟時停用、結束時還原，
+並驗證 Unicode／編輯按鍵、Ctrl+C／Ctrl+D、OS Ctrl+C 與模組正常收尾、提示符重繪。
+`shell.console_input` 僅略過獨立的中央 App 部署案例，完整 `shell.console` 仍保留。
+尚未自動驗證 Windows Terminal 實際滑鼠拖曳到剪貼簿；本次只更動 Windows 路徑，
+未執行 Linux／macOS。使用者的 Debug App 仍在執行，因此未重建 Debug 產物。
+
+Brand prompt, 2026-10-31: Windows x64/MSVC 19.51 Release built successfully.
+`shell.integration` and `shell.socket` passed; `shell_console_tests <Vinc.exe> --redraw-only`
+passed in a hidden native console, checking RGB prompt bytes, input redraw, and foreground reset
+before submitted commands. This targeted mode skips unrelated App deployment scenarios.
+The full `shell.console` run failed at `headless_deployment`'s Tcl marker check before reaching
+the prompt scenario; another Debug Vinc was running (possible instance exclusion interference).
+Rerun the full suite with that App stopped before claiming full Console coverage. The Debug
+build hit LNK1168 on the occupied Bag DLL. No Linux/macOS validation in this round.
+
+品牌提示符（2026-10-31）：Windows x64／MSVC 19.51 Release 建置成功；
+`shell.integration`、`shell.socket` 通過，`shell_console_tests <Vinc.exe> --redraw-only`
+在獨立隱藏原生 Console 通過 RGB 提示符、輸入列重繪、送出命令前恢復前景色的檢查。
+此模式略過無關的 App 部署情境。完整 `shell.console` 在 `headless_deployment` 的 Tcl
+標記檢查失敗，尚未到達提示符案例；當時有另一份 Debug Vinc 執行中，可能受同名排他影響。
+須先停止該 App 再重跑，才能宣稱完整 Console 通過。Debug 建置則遇到 Bag DLL 被占用的
+LNK1168。本輪未驗證 Linux／macOS。
 
 Embedded-script Windows Debug/Release **12** related tests each (2026-10-14), including source/cancel/lines/regressions, are in [central evidence](../../../apps/vinc/README.md#驗證).
 
@@ -549,12 +800,12 @@ Strict OSAL UTF-8 replaces char→char8_t reinterpretation for scripts/Tcl execu
 
 ## Module contract-fault display (2026-10-05) / Module 契約故障顯示（2026-10-05）
 
-Local/remote collect Manager diagnostic revisions and show Module fault/name/MID/PID/actual exit code-signal/termination-request status/reason/index-size/detection file-line-function, without another thread. output off does not hide central faults; help retains the latest.
+Local/remote collect Manager diagnostic revisions and show Module fault/name/MID/PID/actual exit code-signal/termination-request status/reason/index-size/detection file-line-function, without another thread. output off does not hide central faults; `help --verbose` displays the latest retained diagnostic.
 
 本機與 SocketShell 在原有收集迴圈檢查 ModuleManager 的診斷 revision；變更時顯示
 `[Module fault]`、名稱、MID、PID、實際退出 code／signal、中央是否曾要求 OS 終止，
 以及原因、適用的 index／size、框架偵測 file／line／function。沒有新增診斷 thread。
-Module 的 `output off` 不關閉中央故障通知；`help` 也顯示已保留的最後一筆。
+Module 的 `output off` 不關閉中央故障通知；`help --verbose` 也顯示已保留的最後一筆。
 
 Escape C0/DEL/ESC and mark truncation before display. Malformed/incomplete records show errors, not partial fields. Distinguish actual exit from whether termination was requested. Fatal deadline expired means observed deadline expiry, not successful OS kill.
 
@@ -577,6 +828,15 @@ Recorded Windows local/real-TCP tests verified notices/help/output-off; see [Mod
 
 ## Outstanding issues / 待處理事項
 
+- **Startup output visual acceptance (2026-11-01, resolved on Windows):** after
+  the console character/color readback tests, the owner visually inspected the
+  application and confirmed that the display is normal. This is user acceptance,
+  not an assistant screenshot review. Linux/macOS validation of the new
+  `write_console()` path remains outstanding.
+- **啟動輸出目視驗收（2026-11-01，Windows 已解決）：** 真實 console 字元／顏色測試後，
+  使用者已親自檢視並確認畫面正常。此為使用者驗收，並非助手截圖驗證；新
+  `write_console()` 路徑的 Linux／macOS 驗證仍待完成。
+
 Remote input redraw/login are deferred in root TODO/SOCKET. Native Linux/macOS build/deployment/cancel/exit and PuTTY GUI remain unverified. Native Tcl blocking work may delay cancel; no central-thread force-abort promise.
 
 - 遠端背景輸出期間的輸入列重繪、密碼登入維持延後決策，見根目錄 TODO 與 SOCKET。
@@ -598,6 +858,11 @@ Shell 的 Module 故障顯示說明，移除誤置的 MessageArray 契約及已�
 <a id="module-除錯命令"></a>
 
 ## Module debug commands / Module 除錯命令
+
+These commands control user Modules. Protected System types/instances reject
+debug start and stop; use `ui`/`recorder` service commands instead.
+
+以下操作適用使用者 Module。System 種類／實例拒絕 debug start／stop，請用官方服務命令。
 
 - debug start TYPE [args] waits at a pre-load Host gate and prints MID/PID/Plugin path. Native argv starts with TYPE. Wait uses shell_command_timeout; timeout/script cancel does not stop the created Host—inspect/help/stop explicitly.
 - debug continue MID queues release immediately, not Ready or debugger operations.

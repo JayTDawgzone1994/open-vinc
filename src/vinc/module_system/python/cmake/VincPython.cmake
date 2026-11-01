@@ -1,10 +1,17 @@
 include_guard(GLOBAL)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../common/cmake/VincPythonRequirements.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/../../../common/cmake/VincPythonRequirements.cmake")
+else()
+    include("${CMAKE_CURRENT_LIST_DIR}/../../../../lib/cmake/vinc/VincPythonRequirements.cmake")
+endif()
 
 # Compatible applications share one binding image. Source and installed SDK builds
 # compile this adapter against their own message catalog and the same Runtime.
 function(vinc_build_python_bindings target source_root pybind_root output_directory)
     cmake_parse_arguments(PARSE_ARGV 4 BINDING "SOURCE_CHECKOUT" "" "")
-    find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+    vinc_find_python(Python REQUIRED COMPONENTS Interpreter Development.Module)
+    vinc_python_minimum(python_minimum)
+    string(REPLACE "." ", " python_minimum_tuple "${python_minimum}")
     execute_process(COMMAND "${Python_EXECUTABLE}" -c
         "import platform, struct, sysconfig; print(platform.python_implementation()); print(struct.calcsize('P')); print(sysconfig.get_platform()); print(int(bool(sysconfig.get_config_var('Py_GIL_DISABLED'))))"
         OUTPUT_VARIABLE abi OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
@@ -58,17 +65,26 @@ function(vinc_build_python_bindings target source_root pybind_root output_direct
         set(metadata_script "${source_root}/cmake/runtime_metadata.py")
         get_filename_component(msvc_binary_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
         get_filename_component(msvc_toolset_dir "${msvc_binary_dir}/../../.." ABSOLUTE)
+        execute_process(COMMAND "${Python_EXECUTABLE}" "${metadata_script}"
+            --compiler "${CMAKE_CXX_COMPILER}" --locate
+            OUTPUT_VARIABLE msvc_redist_dir OUTPUT_STRIP_TRAILING_WHITESPACE
+            COMMAND_ERROR_IS_FATAL ANY)
+        # Track the actual deployment files, including Debug CRTs. A serviced DLL
+        # must regenerate metadata even when no C++ source needs recompilation.
+        file(GLOB_RECURSE msvc_redist_files CONFIGURE_DEPENDS "${msvc_redist_dir}/*.dll")
         set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
-            "${metadata_script}" "${msvc_toolset_dir}/include/crtversion.h")
+            "${metadata_script}" "${msvc_toolset_dir}/include/crtversion.h"
+            "${source_root}/vinc/_windows_runtime.py" ${msvc_redist_files})
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${Python_EXECUTABLE}" "${metadata_script}"
                 --compiler "${CMAKE_CXX_COMPILER}" --native "$<TARGET_FILE:${target}>"
+                --redist-root "${msvc_redist_dir}"
                 --config "$<CONFIG>" --output "${output_directory}/_msvc_runtime.json"
             BYPRODUCTS "${output_directory}/_msvc_runtime.json" VERBATIM)
         list(APPEND resources _msvc_runtime.json)
     endif()
     file(GENERATE OUTPUT "${output_directory}/_build.py" CONTENT
-        "VERSION = (${Python_VERSION_MAJOR}, ${Python_VERSION_MINOR})\nPOINTER_BYTES = ${pointer_bytes}\nPLATFORM = '${python_platform}'\nMSVC_RUNTIME = ${msvc_runtime}\n")
+        "MINIMUM_VERSION = (${python_minimum_tuple})\nVERSION = (${Python_VERSION_MAJOR}, ${Python_VERSION_MINOR})\nPOINTER_BYTES = ${pointer_bytes}\nPLATFORM = '${python_platform}'\nMSVC_RUNTIME = ${msvc_runtime}\n")
     list(APPEND resources "$<TARGET_FILE_NAME:${target}>")
     foreach(name LICENSE NOTICE THIRD_PARTY_NOTICES.txt)
         list(APPEND resources "licenses/open-vinc/${name}")

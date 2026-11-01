@@ -100,12 +100,14 @@ catalog 範圍、個別保存、重新配置及錯誤恢復。驗證範圍是建
 Kconfig owns feature defaults and choices. CMake owns targets, actual SDK
 capabilities, toolchains and build profiles. This tool selects application
 composition; it does not promise complete library/dependency removal from the SDK.
-Core services and `vinc/config.hpp` are unchanged. UI/Bag inclusion does not start
-either Module automatically; Bag Recorder remains **enabled by default**.
+Core services and `vinc/config.hpp` are unchanged. Included UI/Bag Modules now
+start before startup Tcl; Bag remains idle until a recording command.
+Bag Recorder remains **enabled by default**.
 
 Kconfig 維護功能預設與選擇，CMake 管理 targets、SDK 實際能力、工具鏈與建置組態。
 這是應用組裝設定，不承諾從 SDK 徹底移除未使用函式庫／相依。
-核心服務及 `vinc/config.hpp` 未搬移。UI／Bag 開啟不代表自動啟動，Bag Recorder **預設包含**。
+核心服務及 `vinc/config.hpp` 未搬移。包含的 UI／Bag 會在啟動 Tcl 前自動啟動；
+Bag 收到錄製命令前保持待命，Bag Recorder **預設包含**。
 
 | Symbol / 選項 | Default / 預設 | Effect / 效果 |
 | --- | --- | --- |
@@ -180,14 +182,14 @@ CMake 配置成功後可用 `vinc_guiconfig`／`vinc_menuconfig` targets；配�
 
 ## Build integration / 建置整合
 
-Central application composition requires Python 3.9+ to resolve configuration,
+Central application composition requires Python 3.11+ (Python 3 only) to resolve configuration,
 even when Python Modules are disabled. This is an interpreter-only build tool;
 Tkinter is optional for GUI, curses for terminal UI. CMake uses `Python3_EXECUTABLE`
 for this tool; Python Module ABI selection remains `Python_EXECUTABLE`.
 Plain `find_package(vinc)`/linking does not run the configurator or require Python.
 SDK-only source builds with `VINC_BUILD_APPS=OFF` retain their existing build options.
 
-中央應用組裝需要 Python 3.9+ 解析設定，即使未開啟 Python Module 亦然。
+中央應用組裝需要 Python 3.11+（限 Python 3）解析設定，即使未開啟 Python Module 亦然。
 只需要直譯器；GUI 額外需要 Tkinter，終端選單需要 curses。
 設定工具使用 `Python3_EXECUTABLE`，Module 綁定仍使用 `Python_EXECUTABLE`。
 單純 find_package／連結不執行工具、不要求 Python。
@@ -269,12 +271,13 @@ using the existing isolated Windows Python, plus Ubuntu's system Python. See the
 匯入與 Module 流程驗證；結果見上述 Python SDK 紀錄，不更動前述舊 CRT 拒絕證據。
 
 This round did not repeat Debug builds, run native macOS integration, exercise an
-interactive curses terminal, or perform manual visual GUI acceptance. Python 3.9
-is the declared minimum, but these runs used 3.12/3.13. Earlier platform validation
+interactive curses terminal, or perform manual visual GUI acceptance. That historical
+round declared Python 3.9 but ran on 3.12/3.13; the current minimum follows the
+[Common toolchain policy](../../src/vinc/common/README.md#build-toolchain-policy). Earlier platform validation
 is not replaced by these results; upstream support is not local test evidence.
 
 本輪未重跑 Debug、未執行 macOS 原生整合、未操作 curses 互動終端，亦未完成人工 GUI
-視覺驗收。宣告最低 Python 3.9，但本輪實測為 3.12／3.13。這些紀錄不取代先前平台驗證，
+視覺驗收。該歷史輪次宣告最低 Python 3.9，但實測為 3.12／3.13；目前最低版本已依共用工具鏈規則更新。這些紀錄不取代先前平台驗證，
 也不把上游支援聲明當作本機測試證據。
 
 ## Outstanding issue / 待處理問題

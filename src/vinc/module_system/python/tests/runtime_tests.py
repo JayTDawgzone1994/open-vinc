@@ -8,6 +8,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from copy import deepcopy
 
 
 PACKAGE = Path(sys.argv.pop(1)).resolve()
@@ -45,7 +46,8 @@ class FakeWindows:
 
 class PolicyTests(unittest.TestCase):
     def setUp(self):
-        self.metadata = {"minimum": MINIMUM, "required": ["msvcp140.dll", "vcruntime140.dll"],
+        self.metadata = {"format": 2,
+                         "required": {"msvcp140.dll": list(MINIMUM), "vcruntime140.dll": list(MINIMUM)},
                          "debug": False}
 
     def test_preload_only_missing_and_check_actual_result(self):
@@ -53,6 +55,51 @@ class PolicyTests(unittest.TestCase):
         windows = FakeWindows([existing])
         runtime._prepare(self.metadata, windows)
         self.assertEqual(windows.loads, [Path("system/msvcp140.dll")])
+
+    def test_each_dll_uses_its_own_deployment_floor(self):
+        windows = FakeWindows()
+        stl = Path("system/msvcp140.dll")
+        crt = Path("system/vcruntime140.dll")
+        self.metadata["required"]["msvcp140.dll"] = [14, 44, 35211, 0]
+        self.metadata["required"]["vcruntime140.dll"] = [14, 44, 35210, 0]
+        windows.versions[stl] = (14, 44, 35211, 0)
+        windows.versions[crt] = (14, 44, 35210, 0)
+        runtime._prepare(self.metadata, windows)
+        self.assertEqual(set(windows.loads), {stl, crt})
+
+        windows.versions[crt] = (14, 44, 35209, 0)
+        with self.assertRaisesRegex(ImportError, "already loaded"):
+            runtime._prepare(self.metadata, windows)
+
+    def test_python_old_runtime_remains_rejected(self):
+        path = Path("python/vcruntime140.dll")
+        windows = FakeWindows([path])
+        windows.versions[path] = (14, 42, 34438, 0)
+        with self.assertRaisesRegex(ImportError, "System32 alone cannot replace"):
+            runtime._prepare(self.metadata, windows)
+        self.assertEqual(windows.loads, [])
+
+    def test_manifest_requires_complete_per_dll_versions(self):
+        runtime._validate_metadata(self.metadata)
+        variants = []
+        for version in (None, [], [14, 44, 1], [14, 44, -1, 0], [14, True, 1, 0],
+                        [14, 44, 65536, 0], [15, 0, 1, 0], "14.44.35211.0"):
+            metadata = deepcopy(self.metadata)
+            metadata["required"]["msvcp140.dll"] = version
+            variants.append(metadata)
+        for format_value in (1, True, 99):
+            metadata = deepcopy(self.metadata)
+            metadata["format"] = format_value
+            variants.append(metadata)
+        for names in ({}, [], {"../msvcp140.dll": list(MINIMUM)},
+                      {"msvcp140d.dll": list(MINIMUM)}):
+            metadata = deepcopy(self.metadata)
+            metadata["required"] = names
+            variants.append(metadata)
+        for metadata in variants:
+            with self.subTest(metadata=metadata):
+                with self.assertRaises(ValueError):
+                    runtime._validate_metadata(metadata)
 
     def test_reject_every_old_copy_before_loading_anything(self):
         first = Path("system/msvcp140.dll")
@@ -111,7 +158,7 @@ class PolicyTests(unittest.TestCase):
     def test_debug_uses_its_own_dependencies(self):
         windows = FakeWindows([Path("python/msvcp140.dll")])
         windows.versions[windows.paths[0]] = OLD
-        self.metadata["required"] = ["msvcp140d.dll"]
+        self.metadata["required"] = {"msvcp140d.dll": list(MINIMUM)}
         self.metadata["debug"] = True
         runtime._prepare(self.metadata, windows)
         self.assertEqual(windows.loads, [Path("system/msvcp140d.dll")])

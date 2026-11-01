@@ -19,6 +19,14 @@ or service startup during lookup. Lookup compiles/runs a small native ABI probe.
 
 ## Scope / 本輪範圍
 
+Native MSVC consumers must meet the [Common toolchain policy](../common/README.md#build-toolchain-policy)
+(19.44 or newer). This is only the minimum: a prebuilt SDK still requires the exact
+compiler version, build configuration and ABI recorded when it was built.
+
+原生 MSVC 使用者須符合 [Common 工具鏈規則](../common/README.md#build-toolchain-policy)
+（最低 19.44）。最低版本不代表 SDK 可混用版本：預編譯 SDK 仍要求原本的精確編譯器版本、
+建置組態與 ABI。
+
 - Component headers and static libraries, `vinc::sdk`, the compiled error catalog,
   and their necessary link dependencies. Headers under `detail/` retain their
   existing internal contracts; installation does not make them public API.
@@ -41,6 +49,205 @@ or service startup during lookup. Lookup compiles/runs a small native ABI probe.
   catalog 與中央身分。官方 Bag／UI 接線及選用的 Python 綁定會依該訊息清單重新編譯。
 
 ## Build and install / 建置與安裝
+
+<a id="sdk-install-command"></a>
+
+### One-command SDK installation / 一鍵安裝 SDK
+
+After preparing dependencies and pinned submodules, run from the checkout:
+先準備系統／UI 相依與固定版本 submodule，再執行：
+
+```powershell
+py -3 build.py --install-vinc-sdk
+# Equivalent Windows launcher: build.bat --install-vinc-sdk
+```
+
+```sh
+./build.py --install-vinc-sdk
+# Equivalent launcher: sh build.sh --install-vinc-sdk
+```
+
+This mode defaults to Release; ordinary builds still default to Debug. It builds
+this checkout's complete SDK (including UI/Bag resources and Python binding build
+material), not example Apps or prebuilt Python bindings. Dependencies are checked,
+not installed; missing UI npm packages still require `npm ci`. CMake owns all
+install rules, generated messages, assets and license delivery.
+
+此模式預設 Release，一般建置仍預設 Debug。建置完整 SDK，含 UI／Bag 資源及 Python
+綁定建置材料，不建置範例 App、不預先綁定 Python ABI。只檢查相依，不自動安裝工具；
+缺少 UI npm 套件時仍需先執行 `npm ci`。安裝清單、訊息、資源及授權均由 CMake 維護。
+
+| Platform / 平台 | Default dedicated directory / 預設專用目錄 |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\OpenVINC\sdk` |
+| Linux | `$XDG_DATA_HOME/open-vinc/sdk`, otherwise `~/.local/share/open-vinc/sdk` |
+| macOS | `~/Library/Application Support/OpenVINC/sdk` |
+
+`--sdk-root PATH` selects the **exact dedicated installation directory**, not a
+parent for versioned installations. One location holds one SDK. `--config Debug`
+selects Debug instead; `--no-register` leaves CMake registration unchanged.
+`--jobs`, `--build-dir` and non-conflicting `-D` settings remain available. External
+`--source`, partial `--target`, and overrides of the required SDK feature flags
+are rejected. SDK builds use a separate `build/<platform>-<compiler>-sdk-<config>`
+tree. No cache is automatically cleaned or reused across incompatible toolchains.
+New wrapper records also reject mixing ordinary-build and SDK-install purposes
+in one tree; legacy record migration follows the
+[build toolchain contract](../../../tools/README.md#toolchains-and-safety--工具鏈與保護邊界).
+
+`--sdk-root PATH` 是**實際專用安裝目錄**，不是多版本的上層目錄；同一位置只放一份 SDK。
+可選 `--config Debug`、`--no-register`、`--jobs`、`--build-dir` 與不衝突的 `-D`。
+不接受外部來源、部分 target 或覆蓋 SDK 必備功能開關。SDK 與一般 App 分開建置目錄，
+不自動清除 cache、不跨不相容工具鏈沿用。
+新紀錄也會拒絕一般建置與 SDK 安裝共用同一 build 目錄；舊紀錄升級依上述工具鏈契約處理。
+
+#### Update and failure contract / 更新與失敗契約
+
+The installer uses plain text, with no terminal UI dependency. Six numbered stages
+identify destination/tool checks, CMake configure, build, staged verification,
+replacement/final verification, and CMake registration. `--no-register` marks the
+last stage as skipped. CMake output remains streamed; the final summary states the
+configuration, destination, installation/recovery state, registration result and
+this invocation's bounded command-log path. Failures before opening that log say
+no log was created, rather than pointing to an earlier invocation's file.
+
+安裝器維持純文字，不增加終端 UI 相依。依序顯示六個編號階段：目的地／工具檢查、
+CMake 配置、建置、暫存驗證、替換／最終驗證、CMake 登記；`--no-register` 明確標為
+略過登記。CMake 輸出仍即時顯示，最後摘要列出組態、位置、安裝／還原狀態、登記結果及
+本次有容量上限的命令 log 路徑。開啟 log 前就失敗時會顯示本輪尚未建立 log，
+不把前次 log 當成本次結果。只有全部要求步驟成功才顯示 completed；登記失敗仍為失敗，
+但會明確說明新版 SDK 已安裝並提供 `vinc_DIR`。
+
+```text
+[1/6] Check destination and build tools
+[2/6] Configure SDK
+[3/6] Build SDK
+[4/6] Stage and verify SDK
+[5/6] Replace and verify installation
+[6/6] Register SDK with CMake
+
+SDK installation completed
+Location: ...
+Configuration: Release
+SDK status: New SDK installed and verified.
+CMake registration: Updated for this user; existing project caches unchanged.
+Log: .../.vinc-build.log (bounded command output)
+Explicit selection: -Dvinc_DIR=.../lib/cmake/vinc
+```
+
+- An existing installer-owned SDK requires `[y/N]` confirmation before toolchain
+  initialization or building. No, empty input, EOF or cancellation does not change
+  the SDK/registry or create build files. The prompt identifies the current build
+  profile, source checkout and requested configuration; CMake reports the newly
+  selected compiler/profile during configuration.
+- The `.vinc-sdk-install.json` inventory covers files, content hashes and empty
+  directories. Unowned directories, modified/missing/extra contents, links and
+  Windows reparse points are rejected. It is an accidental-data-loss guard, not
+  authentication against a malicious same-user process. Source/build trees and
+  user/filesystem roots cannot be SDK destinations.
+- Build/install into a sibling staging directory first. Compile, link and run a
+  small external SDK probe there; then rename the old SDK aside, move the new SDK
+  into place and repeat the probe at its final location. Ordinary failures and
+  interrupts during replacement attempt to restore the previous installation.
+  Delete the old SDK only after successful final verification. It does not retain
+  a history of successful SDK installs.
+- A sibling `.NAME.install-lock` protects this installer's operations against the
+  same destination. The build lock remains held through installation. These locks
+  do not stop external compilers or direct `cmake --install`; stop consumers before
+  updating. Two directory renames are not an atomic filesystem transaction.
+- A hard kill/power loss can leave `.NAME.sdk-backup` or `.NAME.stage-*`. A retained
+  backup blocks the next update for manual inspection/recovery. Do not delete the
+  only valid SDK; restore the backup to the destination if needed. Failed backup
+  cleanup/rollback is reported with its location, rather than deleting more data.
+- After verification, update only this installer's CMake user-registry entry.
+  Registration failure returns nonzero but preserves the installed SDK and prints
+  its explicit `vinc_DIR`. No machine PATH, system registry or other installer
+  entries are modified. Separate destinations may coexist; the last successful
+  registration becomes this installer's default, including a Debug installation.
+
+- 已有本工具安裝的 SDK 時先詢問 `[y/N]`；否、空輸入、EOF 或取消不變更 SDK／登記，
+  不開始建置。提示舊 profile、本次來源及組態；選定工具鏈會在配置時顯示。
+- 所有權清單包含檔案雜湊與空目錄；未知目錄、增刪／修改內容、連結或 junction 均停止。
+  這是防誤刪措施，不是防禦同權限惡意程序的安全沙箱。
+- 先暫存安裝並驗證，再備份舊目錄、替換及驗證最終位置；一般失敗／中斷嘗試還原。
+  新版成功才清掉舊版，不累積版本歷史。
+- 同目的地安裝互斥，但無法阻止直接 CMake 安裝或其他專案讀取；更新前須停止使用端
+  建置。兩次目錄 rename 不構成完全原子的交易。
+- 強制終止／斷電可能留下暫存或備份；備份存在時拒絕繼續更新，先人工確認及還原。
+  還原或清理受 OS 拒絕時明確回報保留位置。
+- 安裝驗證成功後才更新本工具自己的使用者 CMake 登記；登記失敗仍保留已安裝 SDK，
+  回傳失敗並提供 `vinc_DIR`。不改系統 PATH，不移除其他工具的登記。
+
+#### CMake discovery / CMake 查找
+
+New compatible projects can use `find_package(vinc CONFIG REQUIRED)` without a
+prefix argument. Windows uses HKCU's `Software\Kitware\CMake\Packages\vinc`;
+Linux/macOS use `~/.cmake/packages/vinc`. The owned entry is
+`open-vinc-build-installer`, pointing to `lib/cmake/vinc`, not the build tree.
+Other registry entries have unspecified search order and trigger a warning.
+An explicit `vinc_DIR`, an existing cache, or disabled package-registry lookup
+still controls the consumer. Existing project caches are not rewritten. Debug,
+compiler and ABI mismatches remain errors; no automatic SDK selection or fallback.
+See [CMake's registry contract](https://cmake.org/cmake/help/v3.20/manual/cmake-packages.7.html#package-registry).
+
+相容的新專案可直接 `find_package(vinc CONFIG REQUIRED)`。登記指向安裝目錄的
+`lib/cmake/vinc`，不指向建置目錄。其他登記可能影響搜尋順序，會提示但不擅自刪除；
+使用者明確指定的 `vinc_DIR`、既有 cache 或停用 registry 的設定仍有效。
+不替既有專案換 SDK，不自動挑選另一個 Debug／工具鏈版本，不放寬 ABI 檢查。
+
+#### Installer validation (2026-10-31) / 安裝器驗證
+
+```sh
+python3 -B -m unittest discover -s tools/tests -p test_sdk_install.py -v
+# Windows: replace python3 with py -3.
+```
+
+| Environment / 環境 | Evidence / 驗證 |
+| --- | --- |
+| Windows 11 x64 build 26200; MSVC 19.51.36257; CMake 4.3.2; Ninja 1.13.2; Python 3.13.12 | 18 installer cases: 16 passed, POSIX-only registry and unprivileged symlink cases skipped; Windows junction rejection passed. Clean full Release SDK install, decline/update, staged/final probe and external App with generated messages/Module DLLs passed. A separate space/Chinese-prefix install passed. / 18 項中 16 通過，2 項跳過；junction 防護、完整 Release 安裝、拒絕／接受更新、搬移前後探針、自訂訊息／DLL App，以及空白中文目錄通過。 |
+| WSL Ubuntu 24.04 x86_64; GCC 13.3.0; CMake 3.28.3; Ninja 1.11.1; Python 3.12.3 | 18 installer cases: 17 passed, Windows-only junction case skipped. Clean full Release SDK install, decline/update, staged/final probe and external App with generated messages/Module shared libraries passed. / 18 項中 17 通過，跳過 Windows junction；完整 Release 安裝、拒絕／接受更新、探針與外部訊息／Module App 建置通過。 |
+
+Both platforms additionally passed all 15 ordinary build-wrapper cases, including
+the real CMake fixture. Installer cases include injected build/install/registration
+failures, validation failure rollback, interruption immediately after rename,
+concurrent-installer rejection, unowned/modified-content rejection, and real CMake
+registry lookup using an isolated test package. The actual `vinc` user default was
+not changed. Windows also rejected replacement while a consumer was still using
+the SDK; the original SDK remained intact, and the sequential retry passed.
+
+兩平台另有一般 build wrapper 15 項全部通過，包含真實 CMake fixture。
+安裝測試包含注入建置／安裝／登記失敗、驗證失敗及 rename 後中斷還原、並行拒絕、
+未知／修改檔案拒絕，以及隔離測試套件的真實 CMake registry 查找；未改正式 Vinc 預設。
+Windows 實際遇過使用端仍開啟 SDK 時拒絕替換，舊版完整保留；使用端結束後依序重試通過。
+
+Local logs are under `build/script-validation/{windows,wsl}-sdk-*.log` and
+`{windows,wsl}-build-regression.log` (not tracked). Existing framework compiler
+warnings were not changed. Full runtime suites, native macOS installer execution,
+power-loss recovery and Ubuntu 22.04 deployment were not validated in this round;
+prior platform/runtime evidence is unchanged. The first installer validates a
+small external executable on each install, not the complete framework test suite.
+
+本機 log 留在上述 build 路徑，不提交 Git。既有編譯器警告未調整；本輪沒有重跑完整
+Runtime suites，也未驗證 macOS 原生安裝器、斷電還原或 Ubuntu 22.04 部署，
+不影響既有平台驗證紀錄。每次安裝自動執行的是小型外部探針，不是完整框架測試。
+
+Output follow-up (2026-10-31): 22 installer cases ran on each platform (Windows:
+20 passed/2 platform or permission skips; WSL: 21 passed/1 Windows-only skip).
+All 15 build-wrapper cases passed on both platforms, including real CMake builds.
+Real incremental Release SDK updates verified all six phase headings and final
+summaries on Windows/WSL, using isolated destinations and `--no-register`.
+Injected failures checked accurate stage/log reporting, rollback success versus
+blocked rollback, installed-but-registration-failed, and cleanup failure after
+verification. No native macOS follow-up or complete Runtime rerun was performed.
+Local logs: `build/script-validation/{windows,wsl}-sdk-output-*.log` and
+`{windows,wsl}-build-output-regression.log`.
+
+輸出整理追加驗證：兩平台各執行 22 項安裝器測試，Windows 20 通過／2 跳過，WSL
+21 通過／1 跳過；一般 build wrapper 含真實 CMake 的 15 項均通過。隔離目錄的
+Release 增量更新實測六階段與摘要；注入失敗驗證還原成功／受阻、登記失敗、
+驗證後清理失敗，以及尚未建立 log 的提示。不變更正式 SDK 登記，不宣稱 macOS
+已驗證，也未重跑完整 Runtime suites。
+
+### Direct CMake installation / 直接使用 CMake 安裝
 
 Use a prepared native toolchain and initialized pinned submodules. Windows requires
 the matching MSVC developer environment. Ninja single-config Debug/Release are the
@@ -65,10 +272,12 @@ the C++ toolchain are prepared.
 
 The component name `VincSDK` selects only these install rules. It is not a
 `find_package(... COMPONENTS ...)` selector: package components are not exposed yet.
-No installer, package manager, archive publication or system PATH change is provided.
+Direct CMake installation does not register the package or provide the wrapper's
+ownership/update transaction. No package manager, archive publication or system PATH change is provided.
 
 `VincSDK` 是安裝規則的 component 名稱，不是 `find_package(... COMPONENTS ...)` 的選項；
-尚未提供套件子集選擇。這輪不建立安裝器、套件管理器、發布壓縮檔，也不修改系統 PATH。
+尚未提供套件子集選擇。直接 CMake 安裝不會登記或建立 wrapper 的更新所有權；
+不提供套件管理器、發布壓縮檔，也不修改系統 PATH。
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
@@ -210,6 +419,9 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
 - A compatible Module target is shared. Each App gets a thin UI adapter with its
   own `vinc_data/<INSTANCE_NAME>/ui` default; UI server libraries remain shared.
   The official `webUi`/`bagRecorder` ModuleType names are reserved.
+  Generated catalogs register them as protected System Modules, with fixed `ui`
+  and `recorder` instances. Use their Shell builtins, not direct type launches or
+  `debug stop`; see [System lifecycle](../module_system/README.md#system-modules).
 - Python-enabled Apps share one binding target compiled against all registered
   messages. C++-only Apps do not depend on it. `Python3_EXECUTABLE` selects the
   configuration interpreter; `Python_EXECUTABLE` selects the binding ABI.
@@ -225,7 +437,9 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
   partially updated package. Repair/retry before starting it; hot update is unsupported.
 - Central starts `webUi`/`ui` and `bagRecorder`/`recorder` before Tcl, waiting for Ready
   or bounded failure. Recorder stays idle until commanded. Failure is reported and
-  central continues; explicit stop is not reversed by automatic startup.
+  central continues while System supervision schedules recovery. `ui disable`
+  closes HTTP only and survives process restart; `recorder finish` ends recording.
+  Ordinary lifecycle stop is forbidden; framework shutdown still stops both.
 
 - 設定檔必填、腳本選填，相對路徑以呼叫端 CMakeLists 為準；內嵌腳本仍拒絕 `-S`。
 - 各 App 有獨立執行檔、catalog、身分、腳本與生成標頭，預設輸出目錄也分開。
@@ -240,7 +454,8 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
 - 更新前先停止 App；同一目的地的複製會序列化，但不是整包原子替換。
   I/O 失敗可能留下部分更新，須修復／重試後再啟動，不支援執行中熱更新。
 - 中央在 Tcl 前啟動 UI／Bag 並等待就緒或有界失敗；Bag 待命不錄製。
-  官方 Module 失敗會回報後繼續，使用者明確停止後不自動重新啟動。
+  官方 Module 失敗會回報後繼續，由 System 監督排程恢復。`ui disable` 只關閉 HTTP，
+  程序重啟仍保留此意圖；`recorder finish` 只結束錄製。一般 stop 被拒絕，整體 shutdown 仍停止兩者。
 
 
 Version requests use exact matching. The current package version follows the
@@ -254,6 +469,14 @@ layout settings; editing `config.hpp` is detected on the next package lookup.
 不要修改安裝目錄中的標頭／設定；調整布局設定須重建 SDK，修改 `config.hpp` 會在下次查找時遭拒。
 
 ## Matching-build checks / 相容性檢查
+
+SDK application configuration and Python bindings use the same minimum-version
+policy as source builds; see [Common toolchain policy](../common/README.md#build-toolchain-policy).
+The SDK installs that policy with its CMake helpers. Merely finding and linking
+the C++ SDK does not discover or require Python.
+
+SDK 應用設定與 Python 綁定沿用來源建置的最低版本規則，見上述 Common 契約；
+SDK 會隨 CMake helper 交付規則。單純查找及連結 C++ SDK 不會搜尋或要求 Python。
 
 For Python Modules, enable `CONFIG_VINC_APP_PYTHON=y` in the App config file and select
 `Python_EXECUTABLE` when necessary. SDKs include the binding build material even

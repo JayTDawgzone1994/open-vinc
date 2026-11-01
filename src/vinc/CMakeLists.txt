@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(vinc LANGUAGES CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/common/cmake/VincToolchain.cmake")
+vinc_require_toolchain()
 
 # =================================================================
 # Require C++23 consistently across framework targets.

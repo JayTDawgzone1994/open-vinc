@@ -218,11 +218,15 @@ int main(int argc, char** argv) {
         auto manager = take(vinc::test::create_manager());
         vinc::ModuleType type{"webUi", std::filesystem::absolute(argv[1]), {}};
         type.policy.stop_timeout = vinc::config::ui_stop_timeout;
-        take(manager->register_module_type(type));
+        vinc::detail::SystemModuleOptions system;
+        system.name = "ui";
+        system.enabled = true;
+        take(vinc::detail::ManagerAccess::register_system_module(*manager, type, system));
         check(manager->get_active_module_names().empty(), "registered UI does not auto-start");
         auto output = take(manager->output_hub().subscribe());
         const auto root = take(vinc::osal::path_to_utf8(std::filesystem::absolute(argv[2])));
-        const auto mid = take(manager->start_module("webUi", {"--root", root, "--port", "0"}));
+        const auto mid = take(vinc::detail::ManagerAccess::start_system_module(
+            *manager, "webUi", {"--root", root, "--port", "0"}));
         take(manager->wait_started(mid));
         std::string trace;
         const auto deadline = std::chrono::steady_clock::now() + operation_budget;
@@ -245,19 +249,53 @@ int main(int argc, char** argv) {
         monitor(*manager, client, argv[3], argv[4]);
         graph(*manager, client, argv[5]);
         const auto old_headers = authorize(client);
-        take(manager->stop_module(mid, Clock::now() + operation_budget));
-        auto stopped = manager->inspect(mid);
-        check(stopped && stopped->state == vinc::ModuleState::Stopped && !stopped->last_failure,
-              "UI stopped through normal Module lifecycle");
-        const auto restarted = take(manager->start_module("webUi", {"--root", root, "--port", std::to_string(port)}));
-        take(manager->wait_started(restarted));
-        const auto expired = client.Get("/api/topics", old_headers);
-        check(expired && expired->status == 401, "UI restart invalidates old browser capability");
-        take(manager->stop_module(restarted, std::chrono::steady_clock::now() + operation_budget));
-        const auto failed = take(manager->start_module("webUi", {"--root", root, "--port", "invalid"}));
-        check(!manager->wait_started(failed), "bad option is a Module startup error");
+        const auto forbidden = manager->stop_module(mid, Clock::now() + operation_budget);
+        check(!forbidden && forbidden.error().is(vinc::module_system::ErrorCode::SystemModuleProtected),
+              "ordinary stop cannot terminate UI");
+        take(vinc::detail::ManagerAccess::set_system_enabled(*manager, "ui", false,
+            Clock::now() + operation_budget));
+        auto disabled = manager->inspect(mid);
+        check(disabled && disabled->state == vinc::ModuleState::Running && disabled->system_enabled == false,
+              "disable stops HTTP, not its Module process");
+        check(!client.Get("/api/ui"), "disabled HTTP listener is closed");
+        std::stop_source cancelled;
+        cancelled.request_stop();
+        const auto cancelled_enable = vinc::detail::ManagerAccess::set_system_enabled(*manager, "ui", true,
+            Clock::now() + operation_budget, cancelled.get_token());
+        check(!cancelled_enable && cancelled_enable.error().is(vinc::module_system::ErrorCode::Cancelled),
+              "cancelled toggle is not sent");
+        const auto expired_enable = vinc::detail::ManagerAccess::set_system_enabled(*manager, "ui", true, Clock::now());
+        check(!expired_enable && expired_enable.error().is(vinc::module_system::ErrorCode::Timeout),
+              "expired toggle is not sent");
+        check(manager->inspect(mid)->system_enabled == false, "rejected toggles preserve disabled intent");
+        output.take();
+        take(vinc::detail::ManagerAccess::set_system_enabled(*manager, "ui", true,
+            Clock::now() + operation_budget));
+        trace.clear();
+        const auto enable_deadline = Clock::now() + operation_budget;
+        while (trace.find(prefix) == std::string::npos) {
+            for (const auto& event : output.take().events) {
+                trace += event->bytes;
+            }
+            check(Clock::now() < enable_deadline, "re-enabled UI URL observed");
+            std::this_thread::sleep_for(observe_interval);
+        }
+        const auto enabled_port = std::stoi(trace.substr(trace.find(prefix) + prefix.size()));
+        httplib::Client enabled_client("127.0.0.1", enabled_port);
+        enabled_client.set_read_timeout(operation_budget);
+        const auto expired = enabled_client.Get("/api/topics", old_headers);
+        check(expired && expired->status == 401, "re-enable invalidates old browser capability");
+        check(manager->inspect(mid)->state == vinc::ModuleState::Running, "enable preserves MID");
         manager->begin_shutdown();
         take(manager->wait_shutdown(std::chrono::steady_clock::now() + operation_budget));
+        check(manager->inspect(mid)->state == vinc::ModuleState::Stopped, "shutdown stops System UI");
+
+        auto invalid_manager = take(vinc::test::create_manager());
+        take(invalid_manager->register_module_type(type));
+        const auto failed = take(invalid_manager->start_module("webUi", {"--root", root, "--port", "invalid"}));
+        check(!invalid_manager->wait_started(failed), "bad option is a Module startup error");
+        invalid_manager->begin_shutdown();
+        take(invalid_manager->wait_shutdown(Clock::now() + operation_budget));
         std::cout << "UI module tests passed\n";
         return 0;
     } catch (const std::exception& error) {

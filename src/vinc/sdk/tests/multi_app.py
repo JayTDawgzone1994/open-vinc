@@ -146,7 +146,7 @@ def main():
     first = moved / "First" / Path(recorded("First")).name
     output = run([str(first), "--shell-port", "0"], timeout=APP_TIMEOUT_SECONDS)
     require("First_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
-    require("bag: idle" in output and "Official Module webUi ready" in output, output)
+    require("bag: idle" in output and "[OK] Web UI ready" in output, output)
     output = run([str(first), "--shell-port", "0"],
                  env=dict(os.environ, VINC_TEST_STOP_UI="1"), timeout=APP_TIMEOUT_SECONDS)
     require("First_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
@@ -169,7 +169,7 @@ def main():
         occupied.listen()
         environment = dict(os.environ, VINC_TEST_UI_UNAVAILABLE="1")
         output = run([str(first), "--shell-port", "0"], env=environment, timeout=APP_TIMEOUT_SECONDS)
-    require("Official Module webUi MID=" in output and "failed:" in output, output)
+    require("[FAIL] Web UI failed" in output, output)
     require("First_SCRIPT_OK" in output and "bag: idle" in output and "APP_TEST_FAILED" not in output, output)
 
     # Missing official Plugin is also isolated, without disguising command failure.
@@ -179,7 +179,7 @@ def main():
     try:
         environment = dict(os.environ, VINC_TEST_BAG_UNAVAILABLE="1")
         output = run([str(first), "--shell-port", "0"], env=environment, timeout=APP_TIMEOUT_SECONDS)
-        require("Official Module bagRecorder MID=" in output and "First_SCRIPT_OK" in output
+        require("[FAIL] Bag Recorder failed" in output and "First_SCRIPT_OK" in output
                 and "APP_TEST_FAILED" not in output, output)
     finally:
         hidden.rename(recorder)
@@ -193,7 +193,7 @@ def main():
         output = run([str(first), "--shell-port", "0"],
                      env=dict(os.environ, VINC_TEST_UI_UNAVAILABLE="1"),
                      timeout=STARTUP_FAILURE_TIMEOUT_SECONDS)
-        require("Official Module webUi MID=" in output and "failed:" in output, output)
+        require("[FAIL] Web UI failed" in output, output)
         require("bag: idle" in output and "First_SCRIPT_OK" in output
                 and "APP_TEST_FAILED" not in output and "All module processes exited" in output, output)
     finally:
