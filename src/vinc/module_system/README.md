@@ -79,6 +79,13 @@ Windows 框架與 helper 使用動態 CRT（Debug `/MDd`、其他組態 `/MD`）
 STL／shared_ptr 物件也依賴此共同建置契約。入口版本／大小驗證不代表完整 ABI 探測。
 不支援使用者在單一 image 私自替換 allocator 後跨 image 釋放配置的做法。
 
+This dynamic-CRT contract applies to native C++ Host/Plugin boundaries. Windows
+source-built Python uses an isolated static-CRT extension with Python ownership
+APIs, not that C++ Plugin ABI; see the [Python Runtime policy](python/README.md#windows-msvc-runtime-載入前檢查).
+
+上述動態 CRT 契約適用原生 C++ Host／Plugin 邊界。Windows 來源版 Python 使用獨立的
+靜態 CRT 擴充及 Python 所有權 API，不混用該 C++ Plugin ABI；見上述 Python 契約。
+
 Responsibilities and targets:
 
 責任與 target：

@@ -440,14 +440,22 @@ Windows x64／MSVC／Ninja 驗證：
 ## Outstanding issues / 待處理事項
 
 - See the [Windows toolchain evaluation](WINDOWS_TOOLCHAIN.md) for the isolated
-  historical 19.42/19.44 results and remaining Runtime-floor question. Native MSVC
+  historical 19.42/19.44 results and Runtime-floor diagnosis. Python now uses the
+  [static SDK closure](INSTALL.md#static-python-sdk-validation) on MSVC; native C++
+  retains its dynamic CRT contract. Native MSVC
   now requires 19.44 or newer; see the [Common policy](../common/README.md#build-toolchain-policy).
   Exact installed-SDK compiler/ABI matching remains the
   current contract; cross-toolchain or cross-patch relaxation is not approved
   by successful same-toolchain builds.
-  Windows 舊工具鏈實測與 Runtime 門檻疑慮見上述評估。原生 MSVC 最低為 19.44，可使用較新版；
+  Windows 舊工具鏈與 Runtime 門檻歷史診斷見上述評估；Python 已改用上述靜態庫，
+  原生 C++ 動態 CRT 契約不變。原生 MSVC 最低為 19.44，可使用較新版；
   預編譯 SDK 的編譯器／ABI 比對仍維持原契約，不把同工具鏈成功擴張成混用版本保證。
 - Multi-App acceptance is recorded in the [plan](../../../apps/vinc/MULTI_APP.md#stage-4-acceptance).
+  The later Python Runtime policy has its own
+  [integration acceptance](INSTALL.md#runtime-final-acceptance), including
+  installed multi-App/System Module checks and an explicit native macOS handoff.
+  後續 Python Runtime 政策的整合驗收另見上述紀錄，包含安裝式多 App／System Module
+  與明確列出的 macOS 待驗證範圍。
   Linux installed composition, Windows Debug/Release complete multi-App retries,
   and both platforms' Runtime regressions passed. The Windows port-8080 conflict
   was resolved through an authorized preview pause and restoration; new multi-App
@@ -458,6 +466,15 @@ Windows x64／MSVC／Ninja 驗證：
   驗證仍待補，不改寫既有歷史證據。
 - Reproduced Windows Tcl build-root spaces break unquoted upstream rules/mkdir even with relative-path attempts. No upstream patches; a build-location strategy needs separate design. Spaced deployment/output paths are distinct and tested. See [Tcl issues](../../../library/tcl/README.md#待處理事項).
 - Source add_subdirectory remains supported. [Installed SDK](INSTALL.md) provides C++ app composition and optional consumer-built Python bindings; multi-config support remains pending. Platform evidence is scoped separately.
+- The 2026-11-02 WSL `/mnt/d` run exceeded `installed_consumer.cmake`'s default
+  90-second command limit while copying Tcl resources. A manual rerun with the
+  explicit 600-second test limit passed; the default CTest timeout is unchanged.
+  Prefer native filesystem validation or explicitly record raised limits; see
+  [SDK validation](INSTALL.md#static-python-sdk-validation). This is a validation
+  environment limit, not evidence of a framework lifecycle defect.
+  本輪 WSL `/mnt/d` 複製 Tcl 資源超過測試預設 90 秒，明確提高至 600 秒後完整通過。
+  預設 CTest 期限未變；後續宜使用原生檔案系統，或記錄調高的測試期限。
+  這是驗證環境限制，並非框架生命週期錯誤的證據。
 
 - **已重現：Windows Tcl 建置根目錄含空白時，NMAKE 失敗。** 上游 `rules.vc` 的
   inference rules 使用無引號來源／輸出路徑；改用相對路徑後，仍在上游絕對路徑 mkdir
@@ -669,10 +686,10 @@ Python Module。啟用測試與 UI 且有 Python interpreter 的 Ninja SDK 建�
 
 Windows Release acceptance passed for two installed-and-moved C++ Apps; see the
 [stage 3 evidence and platform limits](../module_system/README.md#system-module-stage3).
-The compatible-Python follow-up and the original Runtime limitation are recorded below.
+The compatible-Python follow-up and the historical dynamic-CRT limitation are recorded below.
 
 Windows Release 的兩個安裝並搬移 C++ App 已通過驗收；證據與平台限制見上述第三階段
-紀錄。下文分別記錄相容 Python 的補驗，以及原始環境仍存在的 Runtime 限制。
+紀錄。下文分別記錄相容 Python 的補驗，以及先前動態 CRT 建置的 Runtime 限制。
 
 2026-11-01, Windows x64 / MSVC 19.51.36257 Release: an installed SDK built the
 C++ `First` App, installed it with `VincApp_First`, moved the package, and passed
@@ -687,28 +704,29 @@ Full behavior and source Debug/Release evidence belong to the
 
 **Earlier blocked validation (environment):** `tests/multi_app.py` built First,
 Second and Third, then stopped at Second's Python Module startup. The local
-CPython 3.13 executable loads its bundled VCRUNTIME140 14.42.34438.0; the built
-SDK requires at least 14.51.36244.0. `python/vinc/_windows_runtime.py` correctly
-raises ImportError before loading native code. This run did not reach the later
+CPython 3.13 executable loaded its bundled VCRUNTIME140 14.42.34438.0; that dynamic
+SDK required at least 14.51.36244.0. `python/vinc/_windows_runtime.py` correctly
+raised ImportError before loading native code. This run did not reach the later
 multi-App concurrency and failure-injection checks. Compatible-environment
-acceptance subsequently passed as recorded below; the original environment's
-Runtime restriction remains. Linux/macOS verification of this stage is pending.
+acceptance subsequently passed as recorded below. This restriction applies to that
+dynamic-CRT package, not the current static binding. Linux/macOS were not verified
+in that run.
 Evidence: `build/system-stage2-sdk-multi.log` and
 `build/system-stage2-installed-services.log` (local build artifacts).
 
 **先前被擋住的驗證（環境限制）：**多 App 測試建好三個 App 後，在 Second 的 Python Module
 因上述 Runtime 版本不符而中止；guard 正確先回 ImportError，尚未執行後續多 App 並行與
-故障注入案例。相容 Python Runtime 的後續補驗見下文；原始環境的版本限制仍存在，
-未為此放寬 guard 或替換使用者 DLL。
-本輪 Linux／macOS 驗證亦待補，原始紀錄位於上述本機建置目錄。
+故障注入案例。相容 Python Runtime 的後續補驗見下文；此限制屬於當時的動態 CRT 套件，
+不代表目前靜態綁定仍有相同限制。當時未放寬 guard 或替換使用者 DLL。
+該次未驗證 Linux／macOS，原始紀錄位於上述本機建置目錄。
 
 **Follow-up (2026-11-01):** Windows MSVC 19.44.35229 Release with isolated
 CPython 3.13.12 / compatible 14.51 Runtime passed `sdk.multi_app` (418.28 s),
 including the later coexistence and failure cases, and `sdk.system_apps`
-(204.14 s). The user's original Python still fails the unchanged Runtime guard;
-this resolves the missing compatible-environment acceptance, not that deployment
+(204.14 s). The user's original Python still failed that dynamic Runtime guard;
+this resolved the missing compatible-environment acceptance, not that deployment
 restriction. See the [toolchain report](WINDOWS_TOOLCHAIN.md) for exact scope.
 
 **後續補驗（2026-11-01）：**19.44 Release 配合隔離的相容 Python／Runtime，完整
-`sdk.multi_app` 與 `sdk.system_apps` 通過，補到後續並行與故障案例。原始 Python 安裝仍
-被既有防護拒絕；解決的是相容環境的驗證缺口，不是已放寬部署限制。完整範圍見上述報告。
+`sdk.multi_app` 與 `sdk.system_apps` 通過，補到後續並行與故障案例。原始 Python 安裝當時仍
+被動態 CRT 防護拒絕；解決的是相容環境的驗證缺口，不是放寬部署限制。完整範圍見上述報告。

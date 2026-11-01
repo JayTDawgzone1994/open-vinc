@@ -17,6 +17,15 @@ Add/edit .msg under messages/. This package owns generation rules. Linking vinc:
 使用者在 `messages/` 新增或修改 `.msg`；本套件維護對應的生成建置規則。
 連結 `vinc::messages`（或既有的 `vinc_messages`）即可取得生成相依、標頭路徑及訊息儲存 library。
 
+The internal `vinc_message_headers` target in source and installed App builds owns shared generation
+dependencies and include paths without compiled Storage linkage. Windows Python
+uses it with its static-CRT Storage; ordinary C++ continues to use `vinc::messages`.
+There is one generator/output tree and no second schema format.
+
+來源及安裝式 App 建置內部的 `vinc_message_headers` 只傳遞共用生成順序與標頭，不連入 Storage。
+Windows Python 搭配自己的靜態 CRT Storage；一般 C++ 仍用 `vinc::messages`。
+仍只有一份生成輸出，沒有另一種訊息格式。
+
 ```cpp
 #include <vinc_messages/test.hpp>
 ```

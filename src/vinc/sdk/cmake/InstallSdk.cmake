@@ -31,6 +31,7 @@ install(FILES "${package_directory}/vincConfig.cmake" "${package_directory}/vinc
     "${CMAKE_CURRENT_LIST_DIR}/DeployLicenses.cmake"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincMsvcDependencies.cmake"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincToolchain.cmake"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincRuntime.cmake"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/msvc_minimum.txt"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonRequirements.cmake"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/python_minimum.txt"
@@ -66,7 +67,8 @@ set(python_source "${VINC_REPOSITORY_ROOT}/src/vinc/module_system/python")
 install(DIRECTORY "${python_source}/src" "${python_source}/include" "${python_source}/vinc"
     DESTINATION share/vinc/python COMPONENT VincSDK
     PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
-install(FILES "${python_source}/cmake/VincPython.cmake" "${python_source}/cmake/runtime_metadata.py"
+install(FILES "${python_source}/cmake/VincPython.cmake" "${python_source}/cmake/VincPythonRuntime.cmake"
+    "${python_source}/cmake/runtime_metadata.py"
     DESTINATION share/vinc/python/cmake COMPONENT VincSDK)
 set(pybind_source "${VINC_REPOSITORY_ROOT}/library/pybind11/upstream")
 find_package(Git REQUIRED)

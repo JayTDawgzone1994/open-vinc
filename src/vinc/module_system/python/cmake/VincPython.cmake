@@ -44,11 +44,22 @@ function(vinc_build_python_bindings target source_root pybind_root output_direct
         "${source_root}/src/bindings.cpp" "${source_root}/src/services.cpp"
         "${source_root}/src/messages.cpp" "${source_root}/src/rpc.cpp")
     target_include_directories(${target} PRIVATE "${source_root}/include")
-    target_link_libraries(${target} PRIVATE vinc::module_runtime vinc::errors vinc::messages)
+    set(runtime_mode dynamic)
+    if(MSVC)
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/VincPythonRuntime.cmake")
+        vinc_python_runtime_targets(runtime_target errors_target)
+        vinc_apply_runtime(${target} PYTHON)
+        # This is a selected binding, not an unused archive declaration.
+        set_property(TARGET ${target} PROPERTY EXCLUDE_FROM_ALL FALSE)
+        target_link_libraries(${target} PRIVATE ${runtime_target} ${errors_target} vinc_message_headers)
+        set(runtime_mode static)
+    else()
+        # Linux/macOS retain their validated system-runtime policy.
+        target_link_libraries(${target} PRIVATE vinc::module_runtime vinc::errors vinc::messages)
+    endif()
     set_target_properties(${target} PROPERTIES
         OUTPUT_NAME _native CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
         POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
         LIBRARY_OUTPUT_DIRECTORY "${output_directory}"
         RUNTIME_OUTPUT_DIRECTORY "${output_directory}")
     if(MSVC)
@@ -65,26 +76,31 @@ function(vinc_build_python_bindings target source_root pybind_root output_direct
         set(metadata_script "${source_root}/cmake/runtime_metadata.py")
         get_filename_component(msvc_binary_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
         get_filename_component(msvc_toolset_dir "${msvc_binary_dir}/../../.." ABSOLUTE)
-        execute_process(COMMAND "${Python_EXECUTABLE}" "${metadata_script}"
-            --compiler "${CMAKE_CXX_COMPILER}" --locate
-            OUTPUT_VARIABLE msvc_redist_dir OUTPUT_STRIP_TRAILING_WHITESPACE
-            COMMAND_ERROR_IS_FATAL ANY)
+        set(metadata_arguments --mode "${runtime_mode}")
+        set(msvc_redist_files)
+        if(runtime_mode STREQUAL "dynamic")
+            execute_process(COMMAND "${Python_EXECUTABLE}" "${metadata_script}"
+                --compiler "${CMAKE_CXX_COMPILER}" --locate
+                OUTPUT_VARIABLE msvc_redist_dir OUTPUT_STRIP_TRAILING_WHITESPACE
+                COMMAND_ERROR_IS_FATAL ANY)
+            file(GLOB_RECURSE msvc_redist_files CONFIGURE_DEPENDS "${msvc_redist_dir}/*.dll")
+            list(APPEND metadata_arguments --redist-root "${msvc_redist_dir}")
+        endif()
         # Track the actual deployment files, including Debug CRTs. A serviced DLL
         # must regenerate metadata even when no C++ source needs recompilation.
-        file(GLOB_RECURSE msvc_redist_files CONFIGURE_DEPENDS "${msvc_redist_dir}/*.dll")
         set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
             "${metadata_script}" "${msvc_toolset_dir}/include/crtversion.h"
             "${source_root}/vinc/_windows_runtime.py" ${msvc_redist_files})
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${Python_EXECUTABLE}" "${metadata_script}"
                 --compiler "${CMAKE_CXX_COMPILER}" --native "$<TARGET_FILE:${target}>"
-                --redist-root "${msvc_redist_dir}"
+                ${metadata_arguments}
                 --config "$<CONFIG>" --output "${output_directory}/_msvc_runtime.json"
             BYPRODUCTS "${output_directory}/_msvc_runtime.json" VERBATIM)
         list(APPEND resources _msvc_runtime.json)
     endif()
     file(GENERATE OUTPUT "${output_directory}/_build.py" CONTENT
-        "MINIMUM_VERSION = (${python_minimum_tuple})\nVERSION = (${Python_VERSION_MAJOR}, ${Python_VERSION_MINOR})\nPOINTER_BYTES = ${pointer_bytes}\nPLATFORM = '${python_platform}'\nMSVC_RUNTIME = ${msvc_runtime}\n")
+        "MINIMUM_VERSION = (${python_minimum_tuple})\nVERSION = (${Python_VERSION_MAJOR}, ${Python_VERSION_MINOR})\nPOINTER_BYTES = ${pointer_bytes}\nPLATFORM = '${python_platform}'\nMSVC_RUNTIME = ${msvc_runtime}\nMSVC_RUNTIME_MODE = '${runtime_mode}'\n")
     list(APPEND resources "$<TARGET_FILE_NAME:${target}>")
     foreach(name LICENSE NOTICE THIRD_PARTY_NOTICES.txt)
         list(APPEND resources "licenses/open-vinc/${name}")

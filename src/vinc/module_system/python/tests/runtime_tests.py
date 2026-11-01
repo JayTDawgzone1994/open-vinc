@@ -1,5 +1,6 @@
 """Loader policy tests and isolated-process checks; never alter installed DLLs."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
 
 
 PACKAGE = Path(sys.argv.pop(1)).resolve()
@@ -164,8 +166,68 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(windows.loads, [Path("system/msvcp140d.dll")])
 
 
+class StaticPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.metadata = {"format": 3, "mode": "static", "required": {}, "debug": False,
+                         "native": {"filename": "_native.cp313-win_amd64.pyd", "sha256": "a" * 64}}
+
+    def test_static_cannot_be_selected_by_dynamic_build(self):
+        runtime._validate_metadata(self.metadata, "static")
+        with self.assertRaises(ValueError):
+            runtime._validate_metadata(self.metadata, "dynamic")
+        with self.assertRaises(ValueError):
+            runtime._validate_metadata(self.metadata, "unknown")
+        with self.assertRaises(ValueError):
+            runtime._validate_metadata({"format": 2, "required": {}, "debug": False}, "static")
+
+    def test_corrupt_static_metadata_is_rejected(self):
+        changes = [("format", True), ("format", 99), ("mode", "dynamic"), ("mode", None),
+                   ("required", []), ("required", {"msvcp140.dll": [14, 44, 0, 0]}),
+                   ("debug", 0), ("native", None),
+                   ("native", {"filename": "../_native.pyd", "sha256": "a" * 64}),
+                   ("native", {"filename": "_native.pyd", "sha256": "x" * 64})]
+        for key, value in changes:
+            with self.subTest(key=key, value=value):
+                metadata = deepcopy(self.metadata)
+                metadata[key] = value
+                with self.assertRaises(ValueError):
+                    runtime._validate_metadata(metadata, "static")
+
+    def test_static_preflight_never_inspects_or_loads_crt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "_msvc_runtime.json"
+            manifest.write_text(json.dumps(self.metadata), encoding="utf-8")
+            with patch.object(runtime, "__file__", str(Path(directory) / "_windows_runtime.py")), \
+                    patch.object(runtime, "_Windows", side_effect=AssertionError("CRT touched")), \
+                    patch.object(runtime, "_verify_static_image") as verify:
+                runtime.prepare("static")
+                verify.assert_called_once()
+
+    def test_hash_and_selected_extension_must_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            native = directory / self.metadata["native"]["filename"]
+            native.write_bytes(b"test image")
+            self.metadata["native"]["sha256"] = hashlib.sha256(native.read_bytes()).hexdigest()
+            spec = importlib.util.spec_from_file_location("_native", native,
+                loader=runtime.importlib.machinery.ExtensionFileLoader("_native", str(native)))
+            with patch.object(runtime.importlib.machinery.PathFinder, "find_spec", return_value=spec):
+                runtime._verify_static_image(self.metadata, directory)
+                native.write_bytes(b"different image")
+                with self.assertRaisesRegex(ValueError, "does not match"):
+                    runtime._verify_static_image(self.metadata, directory)
+            with patch.object(runtime.importlib.machinery.PathFinder, "find_spec", return_value=None):
+                with self.assertRaisesRegex(ValueError, "selection"):
+                    runtime._verify_static_image(self.metadata, directory)
+
+
 @unittest.skipUnless(sys.platform == "win32", "Windows MSVC integration")
 class NativeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.metadata = json.loads((PACKAGE / "vinc/_msvc_runtime.json").read_text())
+        cls.static = cls.metadata.get("mode") == "static"
+
     def run_child(self, code, *arguments):
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(PACKAGE)
@@ -191,7 +253,9 @@ class NativeTests(unittest.TestCase):
             from vinc._windows_runtime import _Windows
             windows = _Windows()
             paths = [path for path in windows.loaded() if path.name.lower().startswith('msvcp140')]
-            assert paths
+            from vinc import _build
+            if _build.MSVC_RUNTIME_MODE == 'dynamic':
+                assert paths
             print([(str(path), windows.file_version(path)) for path in paths])
             """)
 
@@ -220,15 +284,58 @@ class NativeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 70)
             self.assertIn(b"preflight", result.stderr)
 
-    def test_real_old_dll_rejected_before_native(self):
+    def test_static_stale_image_and_mode_refuse_before_native(self):
+        if not self.static:
+            self.skipTest("Static deployment validation")
+        with tempfile.TemporaryDirectory(prefix="vinc-runtime-stale-") as directory:
+            package = Path(directory) / "vinc"
+            package.mkdir()
+            for name in ("__init__.py", "_build.py", "_windows_runtime.py", "bootstrap.py"):
+                (package / name).write_bytes((PACKAGE / "vinc" / name).read_bytes())
+            native = package / self.metadata["native"]["filename"]
+            native.write_bytes(b"stale native artifact")
+            manifest = package / "_msvc_runtime.json"
+            for metadata in (self.metadata, {"format": 2, "required": {"msvcp140.dll": list(MINIMUM)}, "debug": False}):
+                manifest.write_text(json.dumps(metadata), encoding="utf-8")
+                self.run_child("""
+                    import sys
+                    sys.path.insert(0, sys.argv[1])
+                    try:
+                        import vinc
+                    except ImportError as error:
+                        assert 'preflight' in str(error), str(error)
+                        assert 'vinc._native' not in sys.modules
+                    else:
+                        raise AssertionError('mixed deployment accepted')
+                    """, directory)
+            manifest.unlink()
+            self.run_child("""
+                import sys
+                sys.path.insert(0, sys.argv[1])
+                try:
+                    import vinc
+                except ImportError as error:
+                    assert 'preflight' in str(error), str(error)
+                    assert 'vinc._native' not in sys.modules
+                else:
+                    raise AssertionError('missing metadata accepted')
+                """, directory)
+
+    def test_real_old_dll_obeys_linkage_policy(self):
         old_dll = os.environ.get("VINC_TEST_OLD_MSVC_RUNTIME")
         metadata = json.loads((PACKAGE / "vinc/_msvc_runtime.json").read_text())
-        if not old_dll or metadata["debug"]:
+        if not old_dll or (metadata["debug"] and not self.static):
             self.skipTest("Requires an explicit old Release CRT test fixture")
         self.run_child("""
             import ctypes
             import sys
             dll = ctypes.WinDLL(sys.argv[1])
+            if sys.argv[2] == 'static':
+                import vinc
+                from vinc._windows_runtime import _Windows
+                assert any(path.resolve() == __import__('pathlib').Path(sys.argv[1]).resolve()
+                           for path in _Windows().loaded())
+                raise SystemExit(0)
             try:
                 import vinc
             except ImportError as error:
@@ -237,13 +344,32 @@ class NativeTests(unittest.TestCase):
                 print(error)
             else:
                 raise AssertionError('old DLL accepted')
-            """, old_dll)
+            """, old_dll, 'static' if self.static else 'dynamic')
 
     def test_winrt_import_order(self):
         winrt = os.environ.get("VINC_TEST_WINRT_DIR")
         metadata = json.loads((PACKAGE / "vinc/_msvc_runtime.json").read_text())
-        if not winrt or metadata["debug"]:
+        if not winrt or (metadata["debug"] and not self.static):
             self.skipTest("Requires an isolated WinRT wheel directory for Release")
+        if self.static:
+            for first in ("winrt", "vinc"):
+                self.run_child("""
+                    import sys
+                    import runpy
+                    sys.path.insert(0, sys.argv[1])
+                    if sys.argv[2] == 'winrt':
+                        import winrt.system
+                    import vinc
+                    import winrt.system
+                    assert list(winrt.system.Array('i', [1, 2, 3])) == [1, 2, 3]
+                    from vinc._windows_runtime import _Windows
+                    paths = [path for path in _Windows().loaded() if path.name.lower() == 'msvcp140.dll']
+                    assert any('winrt' in str(path).lower() for path in paths), paths
+                    test = sys.argv[3]
+                    sys.argv = [test, sys.argv[4]]
+                    runpy.run_path(test, run_name='__main__')
+                    """, winrt, first, str(Path(__file__).with_name("message_tests.py")), str(PACKAGE))
+            return
         self.run_child("""
             import sys
             sys.path.insert(0, sys.argv[1])

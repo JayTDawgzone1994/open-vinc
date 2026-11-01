@@ -4,6 +4,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 source = Path(__file__).resolve().parents[1] / "cmake/runtime_metadata.py"
@@ -94,6 +95,32 @@ class DeploymentTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "predates"):
             metadata.deployment_versions(directory, names, X64_MACHINE, (14, 44),
                                          lambda path: (14, 42, 34438, 0))
+
+    def test_static_has_no_redist_requirement_and_identifies_image(self):
+        native = Path(self.temporary.name) / "_native.cp313-win_amd64.pyd"
+        write_pe(native)
+        with patch.object(metadata, "imported_libraries", return_value=["kernel32.dll", "python313.dll"]):
+            result = metadata.static_metadata(self.compiler, native, "Release")
+        self.assertEqual(result["format"], 3)
+        self.assertEqual(result["mode"], "static")
+        self.assertEqual(result["required"], {})
+        self.assertFalse(result["debug"])
+        self.assertEqual(result["native"]["filename"], native.name)
+        self.assertEqual(len(result["native"]["sha256"]), 64)
+        self.assertFalse((self.vc / "Redist").exists())
+
+    def test_static_rejects_crt_sidecars_ucrt_and_unreviewed_dependencies(self):
+        baseline = ["kernel32.dll", "ws2_32.dll", "python313.dll"]
+        metadata.validate_static_imports(baseline)
+        for name in ("msvcp140.dll", "msvcp140d.dll", "msvcp140_atomic_wait.dll",
+                     "vcruntime140_1.dll", "concrt140.dll", "ucrtbase.dll",
+                     "api-ms-win-crt-runtime-l1-1-0.dll", "foreign.dll"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(RuntimeError, "unreviewed"):
+                    metadata.validate_static_imports(baseline + [name])
+        for names in ([], ["kernel32.dll"], baseline + ["python311.dll"]):
+            with self.assertRaises(RuntimeError):
+                metadata.validate_static_imports(names)
 
 
 if __name__ == "__main__":

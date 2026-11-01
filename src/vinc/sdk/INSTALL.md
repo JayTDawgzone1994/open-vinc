@@ -492,6 +492,32 @@ Python Module 可在各 App 設定檔啟用，必要時指定 `Python_EXECUTABLE
 不重建核心庫。啟用的 App 各自部署 `python/vinc`；使用者腳本及額外相依仍自行部署
 於 `data/module`。ABI、pybind11、產物所有權及執行期選擇契約由上述 Python 文件維護。
 
+On MSVC, SDK installation builds and ships a separate `/MT` (`/MTd` in Debug)
+archive closure for the binding, including its Common error catalog and fmt.
+This happens even with `VINC_BUILD_PYTHON=OFF` and requires no Python development
+files in the producer. Installed Apps compile their adapter and generated message
+headers with that closure; they do not recompile the framework. Central/C++ Plugins
+remain `/MD` (`/MDd`). The imported `*_python_runtime` targets are internal recipe
+dependencies, not a second public C++ SDK. CRT compatibility checks reject mixing
+the two closures; missing installed archives reject package lookup. Do not override
+the App's global CRT to select Python's private CRT.
+
+MSVC 的 SDK 安裝會另外建置及交付 `/MT`（Debug 為 `/MTd`）庫，含 Common 錯誤表及 fmt。
+即使 `VINC_BUILD_PYTHON=OFF` 也會交付，不要求製作者提供 Python 開發檔。
+下游只編譯 Python 接線與生成訊息；中央及 C++ Plugin 維持 `/MD`／`/MDd`。
+`*_python_runtime` 是內部建置相依，不是第二套公開 C++ SDK；混用 CRT 或套件缺庫會失敗。
+不要修改 App 全域 CRT 來選擇 Python 的私有 CRT。
+
+The binding recipe, runtime policy helper, generated metadata and deployment
+manifest travel with the SDK/App. Linux/macOS retain normal system runtimes.
+This adds producer build/archive storage cost, not extra runtime DLLs in each App.
+Static CRT updates require rebuilding/redeploying the binding; exact SDK compiler,
+configuration and Python ABI requirements are unchanged.
+
+接線 recipe、Runtime 政策 helper、metadata 與部署清單隨 SDK／App 交付。
+Linux／macOS 維持原本系統 Runtime。增加的是製作 SDK 的編譯與 archive 容量，
+不會為 App 增加額外 Runtime DLL；靜態 CRT 更新需重建與部署，原 ABI 配對要求不變。
+
 Lookup rejects cross-compilation, multi-config generators, non-64-bit builds,
 OS/compiler ID/compiler-version/configuration mismatches. A native probe compares
 architecture, selected standard-library version/ABI, string size and Windows
@@ -602,6 +628,140 @@ Platform results are recorded after running the tests; a successful package
 configure alone is not execution evidence. macOS requires native validation.
 
 平台結果須依實際測試記錄；套件配置成功不代表執行已通過。macOS 仍須原生驗證。
+
+For manual `installed_consumer.cmake` runs on slow mounted filesystems,
+`-DSDK_TEST_COMMAND_TIMEOUT=600` raises its per-command limit in seconds; the
+default stays 90. It also reports the process result, including timeout, on failure.
+This does not change production waits or CTest's separate outer timeout. Prefer a
+native filesystem for large SDK resource copies; record any increased test limit
+with the result.
+
+在較慢的掛載檔案系統手動執行 `installed_consumer.cmake` 時，可明確指定
+`-DSDK_TEST_COMMAND_TIMEOUT=600`（秒）；預設仍為 90，失敗會顯示包含逾時在內的執行結果。
+不改正式程式等待或 CTest 外層期限；大型 SDK 資源建議使用原生檔案系統，調高測試期限
+須隨驗證結果記錄。
+
+<a id="static-python-sdk-validation"></a>
+
+### Static Python SDK validation (2026-11-02) / Python 靜態庫交付驗證
+
+Fresh Windows SDK producers use MSVC 19.44.35229, CMake 4.3.2, Ninja 1.13.2 and
+Node 24.19.0, with UI enabled and Apps/examples/tests/Python binding disabled.
+Downstream Python Apps select unmodified official CPython 3.13.12 x64 with its
+original VCRUNTIME 14.42.34438.0. An isolated WinRT 3.2.1 MSVCP 14.29.30157.0 is
+deliberately loaded before Vinc in external-import and Module bootstrap tests;
+no system/interpreter DLL is replaced. `PYTHONMALLOC=debug` and faulthandler are enabled.
+
+Windows SDK 由上述工具鏈全新建置，製作者不啟用 Python 綁定，使用端才選擇 Python。
+測試刻意先載入舊 MSVCP，再使用 Vinc 自訂訊息、Context 服務；不替換系統或 Python DLL。
+
+| Environment / 環境 | Result / 結果 |
+| --- | --- |
+| Windows Release installed Python | Full `installed_python.cmake` fixture passed (500.17 s). / 完整安裝式 Python 驗收通過。 |
+| Windows Debug installed Python | Full `installed_python.cmake` fixture passed with `/MTd`, including old-DLL preloading, relocation, rejection, repair and cleanup. / Debug 完整安裝式 Python 驗收通過。 |
+| Windows Release native C++ | `installed_consumer.cmake` passed: relocation, generated messages, execution, ABI/version/header rejection and incremental header rebuild. / 原生 C++ 安裝回歸通過。 |
+| WSL2 Ubuntu 24.04, GCC/libstdc++ 13.3.0, Release | `installed_consumer.cmake` passed with `SDK_TEST_COMMAND_TIMEOUT=600`; the original 90-second install attempt stopped during Tcl resource copying on `/mnt/d`. / 原生 SDK 安裝、搬移與拒絕測試通過；記錄提高的測試期限，不改 Runtime 等待。 |
+| WSL2 Ubuntu 24.04, GCC/libstdc++ 13.3.0, CPython 3.12.3 | Independently installed Python recipe built a shared extension and passed custom `SdkPacket` creation/serialization/deserialization. No Node/UI App fixture was used. / 安裝式 Python 接線與自訂訊息通過；未跑 Linux UI App 全流程。 |
+
+The Python fixture moves the SDK, builds downstream with Git discovery disabled,
+installs/moves the App, hides the SDK/consumer build paths, and starts from an
+unrelated working directory. A native Module and Python Module exchange custom
+messages and RPC/Param updates, then shut down. Schema addition/removal/failure/
+recovery, Python ABI refusal, corrupted Runtime metadata isolation, missing
+deployment repair and Python-disable cleanup are checked. Installed static/native
+CRT mixing and a missing static archive must fail configuration; no `/MD` fallback
+is permitted. User Module sources and unowned files survive managed cleanup.
+
+測試搬移 SDK 與 App、暫藏 SDK／使用端 build 路徑，從無關工作目錄執行；驗證自訂訊息、
+RPC／Param、退出回收、schema 增刪與失敗復原、ABI／metadata 拒絕、補檔與停用清理。
+混用 CRT 或缺少靜態庫時須配置失敗；使用者檔案與 Module 原始碼須保留。
+
+Artifact inspection verified 20 Python static archives per SDK configuration,
+with no producer source/build path in the exported targets. Their combined size
+is 21.83 MiB in Release and 52.83 MiB in Debug. These archives are SDK build inputs,
+not additional App deployment files. The custom-message fixture's Python extension
+is 2.09 MiB in Release and 11.72 MiB in Debug; these are current artifact sizes,
+not a matched `/MD` size comparison. Its imports contain only Python and reviewed
+Windows system DLLs, while the central App retains dynamic MSVC CRT imports.
+
+產物檢查確認每個 SDK 組態含 20 個 Python 靜態庫，匯出 target 不含製作者路徑。
+上述靜態庫只供 SDK 建置使用，不隨每個 App 額外部署；Python 擴充不依賴動態 MSVC CRT，
+中央仍維持原本的動態 CRT。大小是本輪產物實測，並非與 `/MD` 的同條件差額比較。
+
+Evidence is in ignored `build/runtime-policy/stage3-*.log`,
+`build/runtime-policy/stage3-audit.json` and each
+`sdk-{release,debug}/sdk-python-test/*.log`. Native macOS, full Linux UI/Python App
+integration and repeat Application Verifier qualification are not covered here.
+The earlier [static-CRT experiment](../module_system/python/MT_VALIDATION.md) and
+[source-binding validation](../module_system/python/README.md#runtime-policy-rollout)
+remain separate evidence, not substitutes for this installed-package test.
+
+本輪未驗證 macOS 實機、完整 Linux UI／Python App，也未重跑 Application Verifier。
+先前靜態 CRT 實驗及來源版結果另存，不把它們當成本輪 installed SDK 驗證。
+
+<a id="runtime-final-acceptance"></a>
+
+### Runtime final acceptance (2026-11-02) / Runtime 整合驗收
+
+This acceptance uses the formal root `build.py` entry for fresh Release builds
+with Python, UI, Bag, Apps, examples and tests enabled. Windows uses MSVC
+19.44.35229, CMake 4.3.2, Ninja 1.13.2 and unmodified official CPython 3.13.12 x64.
+WSL2 uses Ubuntu 24.04.5 x86_64, GCC/libstdc++ 13.3.0, CMake 3.28.3, Ninja 1.11.1
+and CPython 3.12.3. Both frontend builds use Node 24.19.0.
+
+本輪由正式根目錄 `build.py` 全新建置 Release，啟用 Python、UI、Bag、Apps、範例與測試。
+Windows 保留官方 Python 原附的 Runtime DLL；Linux 使用一般非 root 帳號與原生檔案系統，
+沿用系統 Runtime，沒有套用 Windows `/MT`。Linux 來源快照核對了本輪 691 個非 Markdown
+第一方檔案，與 Windows 驗收來源一致。
+
+| Environment / 環境 | Result / 結果 |
+| --- | --- |
+| Windows and WSL2 / Windows 與 WSL2 | Fresh formal-entry builds passed. / 正式入口全新完整建置成功。 |
+| Windows Release regression | **120/120** CTests passed, run as two disjoint groups (96 + 24) to serialize UI port use with Linux validation. Includes source Python, OSAL, Bus, Module, RPC, Shell, external SDK consumer, App lifecycle, fault isolation, UI and Bag. / 來源建置的全部 120 項回歸通過，分組只為避免 UI port 干擾。 |
+| Windows build/setup tooling | `python -B -m unittest discover -s tools/tests -v`: 97 passed, 22 skipped (platform-specific or opt-in integration cases), no failures. / 建置與 setup 工具測試 97 項通過、22 項跳過，無失敗。 |
+| Windows installed multi-App | `multi_app.py` passed: per-App Python selection, shared binding, relocation, concurrent distinct Apps, same-name rejection, startup faults, resource repair and managed cleanup. / 多 App 組裝、Python 選取、並行隔離及部署回歸通過。 |
+| Windows installed System Modules | `system_apps.py` passed: real UI bind failure, restart rate limiting, recovery after releasing the port, isolated graphs/recording and orderly shutdown. / UI 真實綁定失敗、限流恢復、錄製與關閉隔離通過。 |
+| WSL2 Release integration | **13/13** selected CTests passed (674.85 s): installed Python, multi-App, System Modules, Python lifecycle/messages/services/Shell/RPC and UI graph/topics/server/Module/Shell. / Linux 本輪整合測試全數通過，不代表重跑所有元件測試。 |
+
+The Linux installed-Python fixture also passed custom-message schema changes,
+invalid-schema recovery, ABI refusal, relocation, deployment repair and
+Python-disable cleanup. It kept the existing per-command test bounds on the
+native filesystem. Windows-only CRT metadata/import checks are covered by the
+Windows stages, not counted as Linux coverage.
+
+Linux 安裝式 Python 另通過自訂訊息 schema 變更、錯誤復原、ABI 拒絕、搬移、部署修復
+與停用清理；原生檔案系統上的重驗沿用既有各指令期限。Windows 專用 CRT metadata／
+匯入檢查由 Windows 階段提供證據，不列為 Linux 已驗項目。
+
+The Windows installed tests use the stage-three SDK producer with Python disabled;
+downstream Apps enable it. Tests exercise HTTP and real subprocesses, not an
+interactive browser or debugger. Elapsed test times include fixture builds and
+other concurrent validation work; they are not comparative build-cost benchmarks.
+The earlier WinRT/OCR and Application Verifier experiments remain separate evidence.
+
+Windows 安裝式測試沿用第三階段「製作者關閉 Python、使用端才啟用」的 SDK。
+本輪驗證 HTTP 與真實子程序，沒有操作互動瀏覽器或 debugger；測試耗時包含建置 fixture
+與同期驗證負載，不用來比較 `/MD`／`/MT` 效能。先前 WinRT／OCR 與 Application Verifier
+實驗另存，不把先前結果描述為本輪重跑。
+
+An initial Linux build succeeded under `/tmp`, but WSL service startup later
+removed that temporary directory. Acceptance was rebuilt under a persistent
+non-root home directory. This was lost test state, not an observed framework
+failure. No production waits or existing test timeouts were relaxed for that retry.
+
+首次 Linux 建置雖成功，但 WSL 服務啟動清除了 `/tmp` 測試目錄，因此改用持久的使用者
+家目錄重新建置與驗收；這是測試狀態遺失，不是已證實的框架故障，也未因此放寬正式等待
+或既有測試期限。
+
+Evidence is under ignored `build/runtime-policy/final-*.log` and
+`final-windows-*.json`. Native macOS acceptance remains assigned to the project
+owner in the [root TODO](../../../TODO.md); existing macOS results retain their
+original scope. Passing this matrix does not promise arbitrary CPython minor ABI,
+third-party native-library or cross-toolchain compatibility.
+
+證據位於上述 Git 忽略的檔案。macOS 由專案擁有者後續實機驗證，清單已寫入根目錄 TODO；
+既有 Mac 結果保留原適用範圍。不因本輪通過就承諾任意 Python minor ABI、第三方原生庫
+或不同工具鏈可以混用。
 
 ### Stage-one results (2026-10-29) / 第一輪實測結果（2026-10-29）
 

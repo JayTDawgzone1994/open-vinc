@@ -1,7 +1,31 @@
 # Isolated tests need a Host without central composition. Keep its path and
 # build dependency on this test-only interface, never on the production Manager.
+if(MSVC)
+    # Explicitly built by runtime-policy validation; ordinary builds do not pay
+    # for the additional static-CRT closure during the stage-one rollout.
+    add_executable(module_python_runtime_link_tests EXCLUDE_FROM_ALL python_runtime_link.cpp)
+    vinc_apply_runtime(module_python_runtime_link_tests PYTHON)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../python/cmake/VincPythonRuntime.cmake")
+    vinc_python_runtime_targets(python_runtime python_errors)
+    target_link_libraries(module_python_runtime_link_tests PRIVATE
+        ${python_runtime} ${python_errors})
+    set_target_properties(module_python_runtime_link_tests PROPERTIES
+        CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+endif()
 add_executable(vinc_test_host host_main.cpp)
 target_link_libraries(vinc_test_host PRIVATE vinc::module_runtime)
+if(MSVC)
+    get_filename_component(compiler_directory "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    # This opt-in validation target builds both link closures, inspects actual
+    # imports and runs the static bootstrap probe without altering default builds.
+    add_custom_target(vinc_check_python_runtime
+        COMMAND "${CMAKE_COMMAND}"
+            "-DDUMPBIN=${compiler_directory}/dumpbin.exe"
+            "-DSTATIC_IMAGE=$<TARGET_FILE:module_python_runtime_link_tests>"
+            "-DNATIVE_IMAGE=$<TARGET_FILE:vinc_test_host>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/python_runtime_link.cmake"
+        DEPENDS module_python_runtime_link_tests vinc_test_host VERBATIM)
+endif()
 set_target_properties(vinc_test_host PROPERTIES
     CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
 set(test_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")

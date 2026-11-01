@@ -6,11 +6,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincToolchain.cmake")
 vinc_require_toolchain()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincRuntime.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincErrors.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincMsvcDependencies.cmake")
-add_library(vinc_common STATIC src/error.cpp src/contract.cpp src/runtime_services.cpp src/time.cpp)
-add_library(vinc::common ALIAS vinc_common)
-
 # The catalog is a separate composition target, never a dependency of common.
 set(error_catalog_input "${CMAKE_CURRENT_BINARY_DIR}/generated/error_catalog.cpp.in")
 set(error_catalog_source "${CMAKE_CURRENT_BINARY_DIR}/generated/error_catalog.cpp")
@@ -20,22 +18,41 @@ add_custom_command(OUTPUT "${error_catalog_source}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${error_catalog_input}" "${error_catalog_source}"
     DEPENDS "${error_catalog_input}"
     VERBATIM)
-add_library(vinc_errors STATIC "${error_catalog_source}")
-add_library(vinc::errors ALIAS vinc_errors)
-target_link_libraries(vinc_errors PUBLIC vinc::common)
-set_target_properties(vinc_errors PROPERTIES
-    CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-    VINC_ERROR_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
-cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _vinc_require_finalized_errors)
+function(_vinc_build_common variant)
+    vinc_runtime_name(vinc_common vinc_common ${variant})
+    vinc_runtime_name(vinc_errors vinc_errors ${variant})
 
-target_include_directories(vinc_common PUBLIC include)
-target_compile_features(vinc_common PUBLIC cxx_std_23)
-set_target_properties(vinc_common PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-    POSITION_INDEPENDENT_CODE ON
-)
+    add_library(${vinc_common} STATIC src/error.cpp src/contract.cpp src/runtime_services.cpp src/time.cpp)
+    vinc_apply_runtime(${vinc_common} ${variant})
+
+    add_library(${vinc_errors} STATIC "${error_catalog_source}")
+    vinc_apply_runtime(${vinc_errors} ${variant})
+
+    vinc_runtime_link_libraries(${vinc_errors} ${variant} PUBLIC ${vinc_common})
+    set_target_properties(${vinc_errors} PROPERTIES
+        CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+        VINC_ERROR_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+    target_include_directories(${vinc_common} PUBLIC include)
+    target_compile_features(${vinc_common} PUBLIC cxx_std_23)
+    set_target_properties(${vinc_common} PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON
+    )
+
+    if(MSVC)
+        target_compile_options(${vinc_common} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${vinc_common} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+vinc_runtime_variants(_vinc_build_common)
+add_library(vinc::common ALIAS vinc_common)
+add_library(vinc::errors ALIAS vinc_errors)
+
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _vinc_require_finalized_errors)
 
 # Metadata remains separate from runtime code, including in standalone Common builds.
 add_library(vinc_common_errors INTERFACE)
@@ -43,13 +60,18 @@ target_link_libraries(vinc_common_errors INTERFACE vinc::common)
 vinc_register_error_catalog(TARGET vinc_common_errors
     HEADER vinc/detail/common_error_catalog.hpp SYMBOL vinc::common::detail::error_catalog)
 
-if(MSVC)
-    target_compile_options(vinc_common PRIVATE /W4 /utf-8)
-else()
-    target_compile_options(vinc_common PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
 if(BUILD_TESTING)
+    if(MSVC)
+        add_test(NAME common.runtime_policy COMMAND "${CMAKE_COMMAND}"
+            "-DPOLICY=${CMAKE_CURRENT_SOURCE_DIR}/cmake/VincRuntime.cmake"
+            "-DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_policy"
+            "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/runtime-policy-tests"
+            "-DCOMPILER=${CMAKE_CXX_COMPILER}" "-DGENERATOR=${CMAKE_GENERATOR}"
+            "-DPLATFORM=${CMAKE_GENERATOR_PLATFORM}" "-DTOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+            "-DCONFIG=$<CONFIG>" "-DCTEST=${CMAKE_CTEST_COMMAND}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_policy.cmake")
+        set_tests_properties(common.runtime_policy PROPERTIES TIMEOUT 120)
+    endif()
     add_executable(common_time_tests tests/time_tests.cpp)
     target_link_libraries(common_time_tests PRIVATE vinc::common vinc::errors)
     add_test(NAME common.time COMMAND common_time_tests)

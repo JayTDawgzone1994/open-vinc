@@ -45,6 +45,54 @@ Python 建置工具與 Module 綁定統一最低 **3.11，限 Python 3，不鎖 
 版本門檻不代表已驗證所有更新版本。詳細結果見
 [Python 3.11 驗證](../module_system/python/PYTHON311_VALIDATION.md)。
 
+<a id="build-runtime-policy"></a>
+
+## Build runtime policy / 建置 Runtime 政策
+
+`cmake/VincRuntime.cmake` is build-only infrastructure, not a runtime OSAL API.
+Component-owned factories declare sources/settings once; `vinc_runtime_variants()`
+calls them for the native configuration and, on MSVC, an excluded-from-all Python
+configuration. Full framework composition enables these declarations with the
+internal directory variable `VINC_DECLARE_PYTHON_RUNTIME`; standalone Common/OSAL
+keeps only its native targets. This is not a user-facing build option. No target
+graph is cloned or reconstructed from generator expressions.
+
+- `vinc_runtime_name()` assigns separate target/object/archive names.
+- `vinc_apply_runtime()` selects native `/MD` (`/MDd` in Debug) or Python `/MT`
+  (`/MTd` in Debug) through target properties, not global flags.
+- `vinc_runtime_link_libraries()` resolves literal dependencies through declared
+  variants. Undeclared static/object dependencies fail on the Python path.
+- `VINC_CRT` compatible-interface checks reject mixed declared CRT dependencies,
+  including indirect ones. They do not inspect arbitrary foreign binaries or
+  prove ABI compatibility; actual image imports need separate validation.
+- Linux/macOS instantiate only the native version. No static standard-library
+  selection or new minimum-OS promise is introduced.
+
+Error catalog generation remains single-owned. Each CRT version compiles that
+same generated source. Header-only catalog providers contribute their direct
+compilation requirements without linking native Common; executable formatters
+must provide the matching runtime variant.
+
+此層只在建置時使用，不加入執行期 OSAL。元件用同一份來源與設定建立不同 CRT
+版本，物件及 archives 分開；未使用的靜態版本不加入預設建置。第三方上游不修改。
+Linux／macOS 暫保留原方式，不把 Windows 實驗當成跨平台驗證。
+
+Windows source and installed-SDK Python bindings select these static archives and
+verify static metadata before import. Native C++ keeps dynamic CRT.
+`VINC_INSTALL_SDK=ON` builds and exports the declared Python archive closure even
+when `VINC_BUILD_PYTHON=OFF`; a downstream App can enable Python without rebuilding
+framework libraries. Ordinary source builds still build these archives only when
+selected by Python or explicit validation. `build.py`/setup are unchanged;
+see the [Python rollout](../module_system/python/README.md#runtime-policy-rollout).
+
+Windows 來源版與 installed SDK 的 Python binding 都使用靜態庫，原生 C++ 維持動態 CRT。
+啟用 SDK 安裝時，即使製作者關閉 Python，也會建置及交付靜態庫，讓下游自行啟用 Python；
+一般來源建置仍按需建置。setup／build 入口不變。
+Windows 的 `common.runtime_policy` 測試實際編譯執行兩種 CRT、拒絕間接混用／缺少
+版本／無效政策，並確認預設建置不產生靜態版本。啟用 `BUILD_TESTING` 後，可明確建置
+`vinc_check_python_runtime`，驗證真正 Module Runtime 的靜態連結、imports 與 bootstrap
+拒絕／catalog 路徑；這不是 Python 或完整服務行為驗收。實測範圍見 Python 文件。
+
 <a id="shared-owner-identities"></a>
 
 ## Shared owner identities / 共享持有者身分

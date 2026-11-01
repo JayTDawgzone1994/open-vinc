@@ -83,11 +83,11 @@ See [Module System](src/vinc/module_system/README.md), [Message Bus](src/vinc/me
 ### Requirements / 工具需求
 
 Windows native MSVC builds require **19.44 or newer** (no patch pin). Installed SDK
-ABI matching and Python Runtime DLL requirements still apply; see the
+ABI matching and the selected Python binding's Runtime policy still apply; see the
 [toolchain contract](src/vinc/common/README.md#build-toolchain-policy).
 
-Windows 原生 MSVC 建置最低為 **19.44**，不限制修補版；SDK 的 ABI 配對與 Python Runtime
-DLL 要求仍須符合，詳見上述工具鏈契約。
+Windows 原生 MSVC 建置最低為 **19.44**，不限制修補版；SDK 的 ABI 配對與所選 Python
+綁定的 Runtime 政策仍須符合，詳見上述工具鏈契約。
 
 - **C++23 compiler and standard library**, **CMake 3.20+**, and **Ninja**. C++23 is required, with language extensions disabled; newer toolchains may need newer CMake. / **支援所用 C++23 功能的編譯器與標準庫**、**CMake 3.20 以上**及 **Ninja**；要求 C++23 且關閉語言擴充，較新工具鏈可能需要較新 CMake。
 - **Windows:** an x64 MSVC developer environment with NMAKE for Tcl. Keep build-directory paths free of spaces due to a known Tcl integration limitation. / **Windows：**使用含 NMAKE 的 x64 MSVC 開發環境；目前 Tcl 整合有已知限制，建置目錄路徑須避免空白。

@@ -1,5 +1,7 @@
 """Private MSVC preflight. Runs before importing any VINC native code."""
 import ctypes
+import hashlib
+import importlib.machinery
 from ctypes import wintypes
 import json
 import os
@@ -182,7 +184,12 @@ def _prepare(metadata, windows):
         raise ImportError(f"VINC Runtime preparation incomplete: {', '.join(sorted(missing))}")
 
 
-def _validate_metadata(metadata):
+def _validate_metadata(metadata, mode="dynamic"):
+    if mode == "static":
+        _validate_static_metadata(metadata)
+        return
+    if mode != "dynamic":
+        raise ValueError("Unknown MSVC Runtime linkage mode")
     if (type(metadata) is not dict or type(metadata.get("format")) is not int
             or metadata["format"] != 2 or type(metadata.get("required")) is not dict
             or not metadata["required"] or type(metadata.get("debug")) is not bool):
@@ -203,12 +210,46 @@ def _validate_metadata(metadata):
         raise ValueError(f"Missing required CRT classification: {expected}")
 
 
-def prepare():
+def _validate_static_metadata(metadata):
+    if (type(metadata) is not dict or type(metadata.get("format")) is not int
+            or metadata["format"] != 3 or metadata.get("mode") != "static"
+            or type(metadata.get("required")) is not dict or metadata["required"]
+            or type(metadata.get("debug")) is not bool):
+        raise ValueError("Invalid static MSVC Runtime metadata; rebuild/redeploy the complete binding")
+    native = metadata.get("native")
+    if type(native) is not dict:
+        raise ValueError("Missing static native image identity")
+    filename = native.get("filename")
+    digest = native.get("sha256")
+    if (type(filename) is not str or re.fullmatch(r"_native[.A-Za-z0-9_-]*\.pyd", filename) is None
+            or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+        raise ValueError("Invalid static native image identity")
+
+
+def _verify_static_image(metadata, directory):
+    # Detect a stale/mixed deployment before importing native code. This is not
+    # a signature or a defense against someone rewriting the complete package.
+    native = metadata["native"]
+    expected = (directory / native["filename"]).resolve()
+    selected = importlib.machinery.PathFinder.find_spec("_native", [str(directory)])
+    if (selected is None or not isinstance(selected.loader, importlib.machinery.ExtensionFileLoader)
+            or Path(selected.origin).resolve() != expected):
+        raise ValueError("Python native image selection does not match Runtime metadata")
+    with expected.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    if digest != native["sha256"]:
+        raise ValueError("Native image does not match static Runtime metadata; redeploy the complete binding")
+
+
+def prepare(mode="dynamic"):
     try:
         path = Path(__file__).with_name("_msvc_runtime.json")
         metadata = json.loads(path.read_text(encoding="utf-8"))
-        _validate_metadata(metadata)
-        _prepare(metadata, _Windows())
+        _validate_metadata(metadata, mode)
+        if mode == "static":
+            _verify_static_image(metadata, path.parent)
+        else:
+            _prepare(metadata, _Windows())
     except ImportError:
         raise
     except (OSError, ValueError, KeyError, TypeError) as error:
