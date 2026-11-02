@@ -19,9 +19,6 @@ PROFILE = Path("lib/cmake/vinc/profile.txt")
 SDK_DEFINITIONS = {
     "VINC_INSTALL_SDK": "ON",
     "VINC_BUILD_APPS": "OFF",
-    "VINC_BUILD_EXAMPLES": "OFF",
-    "VINC_BUILD_UI": "ON",
-    "VINC_BUILD_PYTHON": "OFF",
     "BUILD_TESTING": "OFF",
 }
 PROBE_TIMEOUT_SECONDS = 30

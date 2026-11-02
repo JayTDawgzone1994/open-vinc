@@ -81,6 +81,7 @@ inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::PathToUtf8, "PathToUtf8"},
     ErrorOperationEntry{ErrorOperation::ExecutablePath, "ExecutablePath"},
     ErrorOperationEntry{ErrorOperation::WriteTerminal, "WriteTerminal"},
+    ErrorOperationEntry{ErrorOperation::CheckExecutable, "CheckExecutable"},
     ErrorOperationEntry{ErrorOperation::OpenLibrary, "OpenLibrary"},
     ErrorOperationEntry{ErrorOperation::FindSymbol, "FindSymbol"},
     ErrorOperationEntry{ErrorOperation::CloseLibrary, "CloseLibrary"},

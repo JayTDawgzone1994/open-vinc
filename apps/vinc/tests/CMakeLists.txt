@@ -35,7 +35,7 @@ foreach(mode plain embedded)
     set(target "app_entry_${mode}")
     add_executable(${target} ../src/main.cpp)
     target_compile_definitions(${target} PRIVATE VINC_COMPOSED_APP)
-    target_include_directories(${target} PRIVATE "${entry_generated}" "${CMAKE_BINARY_DIR}/vinc-config")
+    target_include_directories(${target} PRIVATE "${entry_generated}" "${config_output}/preflight")
     target_link_libraries(${target} PRIVATE vinc::shell vinc::module_runtime)
     if(TARGET vinc_ui_errors)
         target_link_libraries(${target} PRIVATE vinc_ui_errors)
@@ -43,7 +43,7 @@ foreach(mode plain embedded)
     endif()
     set_target_properties(${target} PROPERTIES
         CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/entry space 測試/$<CONFIG>")
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/entry space 皜祈岫/$<CONFIG>")
     add_dependencies(${target} app_entry_plugin app_startup_failure_plugin)
     vinc_deploy_tcl(${target})
     vinc_deploy_licenses(${target})
@@ -85,25 +85,25 @@ add_app_host_test(rpc rpc_process_tests "$<TARGET_FILE:rpc_module_fixture>")
 # Compile the production entry/catalog renderer against the real official Plugins.
 # Test-only executable wiring avoids adding an installable App to user packages.
 # A distinct identity isolates persistence and admission from the user's App.
-if(TARGET vinc_module_ui AND TARGET vinc_bag_recorder)
+if(TARGET Vinc_vinc_ui AND TARGET vinc_app_bag_recorder)
     include("${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonRequirements.cmake")
     vinc_find_python(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         set(system_generated "${CMAKE_CURRENT_BINARY_DIR}/system-services/$<CONFIG>")
-        vinc_render_module_catalog(system_catalog vinc_module_ui vinc_bag_recorder)
+        vinc_render_module_catalog(system_catalog Vinc_vinc_ui vinc_app_bag_recorder)
         file(GENERATE OUTPUT "${system_generated}/module_catalog.hpp" CONTENT
             "#pragma once\n#include <vinc/module/detail/manager_access.hpp>\nnamespace vinc {\ninline Result<void> register_built_modules(ModuleManager& manager, const std::filesystem::path&) {\n${system_catalog}return {};\n}\n}\n")
         file(GENERATE OUTPUT "${system_generated}/vinc_app_config.hpp" CONTENT
             "#pragma once\n#include <string_view>\nnamespace vinc::app { inline constexpr std::string_view instance_name = \"system-services-test\"; }\n")
         add_executable(system_services_app ../src/main.cpp)
-        target_include_directories(system_services_app PRIVATE "${CMAKE_BINARY_DIR}/vinc-config")
+        target_include_directories(system_services_app PRIVATE "${config_output}/preflight")
         target_compile_definitions(system_services_app PRIVATE VINC_COMPOSED_APP VINC_STARTUP_UI_ERRORS)
         target_include_directories(system_services_app PRIVATE "${system_generated}")
         target_link_libraries(system_services_app PRIVATE vinc::shell vinc::module_runtime vinc_ui_errors)
         set_target_properties(system_services_app PROPERTIES
             CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/system_services_app/$<CONFIG>")
-        add_dependencies(system_services_app vinc_module_ui vinc_bag_recorder)
+        add_dependencies(system_services_app Vinc_vinc_ui vinc_app_bag_recorder)
         vinc_deploy_tcl(system_services_app)
         vinc_deploy_licenses(system_services_app)
         add_test(NAME app.system_services COMMAND "${Python3_EXECUTABLE}"

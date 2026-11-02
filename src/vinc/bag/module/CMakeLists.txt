@@ -1,7 +1,0 @@
-add_module(vinc_bag_recorder MODULE_TYPE_NAME bagRecorder STOP_TIMEOUT_CONFIG bag_stop_timeout SOURCES recorder_module.cpp)
-set_property(TARGET vinc_bag_recorder PROPERTY VINC_MODULE_OFFICIAL TRUE)
-set_property(TARGET vinc_bag_recorder PROPERTY VINC_SYSTEM_MODULE_NAME recorder)
-target_link_libraries(vinc_bag_recorder PRIVATE vinc::bag)
-if(BUILD_TESTING)
-    add_subdirectory(../tests "${CMAKE_CURRENT_BINARY_DIR}/../tests")
-endif()

@@ -33,27 +33,26 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_defaults_do_not_write_user_file(self):
         output = self.run_tool("--output", str(self.root / "build"))
-        self.assertIn("CONFIG_VINC_APP_BAG=y", output)
-        self.assertIn("CONFIG_VINC_APP_UI=y", output)
+        self.assertNotIn("CONFIG_VINC_APP_BAG", output)
+        self.assertNotIn("CONFIG_VINC_APP_UI", output)
         self.assertIn("CONFIG_VINC_APP_PYTHON=n", output)
         self.assertFalse(self.config.exists())
 
     def test_save_round_trip_and_stable_generated_file(self):
-        self.run_tool("--save", "--set", "VINC_APP_UI=n")
+        self.run_tool("--save", "--set", "VINC_APP_PYTHON=y")
         build = self.root / "build"
         self.run_tool("--output", str(build))
         generated = build / "features.cmake"
         timestamp = generated.stat().st_mtime_ns
         self.run_tool("--output", str(build))
         self.assertEqual(timestamp, generated.stat().st_mtime_ns)
-        self.assertIn("set(VINC_APP_UI OFF)", generated.read_text())
-        self.assertIn("set(VINC_APP_BAG ON)", generated.read_text())
+        self.assertIn("set(VINC_APP_PYTHON ON)", generated.read_text())
 
     def test_invalid_inputs_are_not_normalized_away(self):
         cases = [
             ("CONFIG_BAD=y\n", "unknown option"),
-            ("CONFIG_VINC_APP_UI=yes\n", "requires y or n"),
-            ("CONFIG_VINC_APP_UI=n\nCONFIG_VINC_APP_UI=y\n", "duplicate"),
+            ("CONFIG_VINC_APP_PYTHON=yes\n", "requires y or n"),
+            ("CONFIG_VINC_APP_PYTHON=n\nCONFIG_VINC_APP_PYTHON=y\n", "duplicate"),
             ("set(VINC_APP_UI ON)\n", "invalid configuration syntax"),
         ]
         for text, diagnostic in cases:
@@ -65,33 +64,13 @@ class ConfigurationTests(unittest.TestCase):
     def test_missing_explicit_file(self):
         self.assertIn("does not exist", self.run_tool("--require-file", success=False))
 
-    def test_capabilities_and_legacy_conflicts(self):
-        self.config.write_text("CONFIG_VINC_APP_UI=y\n")
-        self.assertIn("unavailable", self.run_tool("--ui-available", "n", success=False))
-        self.assertIn("conflicts", self.run_tool("--legacy", "VINC_APP_UI=n", success=False))
+    def test_capabilities_and_editor_save(self):
         self.config.write_text("CONFIG_VINC_APP_PYTHON=y\n")
         self.assertIn("unavailable", self.run_tool("--python-available", "n", success=False))
-
-    def test_gui_public_save_uses_same_validation(self):
         config = module.ApplicationConfig({"UI": False, "BAG": True, "PYTHON": False})
         with self.assertRaises(OSError):
-            config.write_config(str(self.config))
-        self.assertFalse(self.config.exists())
-        config.syms["VINC_APP_UI"].set_value("n")
-        config.write_config(str(self.config))
-        self.assertIn("CONFIG_VINC_APP_UI is not set", self.config.read_text())
-        self.run_tool("--ui-available", "n", "--python-available", "n")
-
-    def test_legacy_inputs_cannot_silently_override_each_other(self):
-        self.assertIn("conflicting legacy", self.run_tool(
-            "--legacy", "VINC_APP_BAG=y", "--legacy", "VINC_APP_BAG=n", success=False))
-
-    def test_editor_cannot_save_against_legacy_input(self):
-        config = module.ApplicationConfig({"UI": True, "BAG": True, "PYTHON": True})
-        config.legacy_values = {"VINC_APP_UI": "n"}
-        with self.assertRaisesRegex(OSError, "legacy CMake"):
-            config.write_config(str(self.config))
-        self.assertFalse(self.config.exists())
+            config.write_config(str(self.root / "rejected.conf"))
+        self.assertFalse((self.root / "rejected.conf").exists())
 
     def write_modules(self, names):
         manifest = self.root / "modules.json"

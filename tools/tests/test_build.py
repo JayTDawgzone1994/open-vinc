@@ -22,9 +22,16 @@ PROCESS = BUILD.process
 
 
 class CompilerMinimumTests(unittest.TestCase):
-    def test_module_python_cmake_override_is_rejected(self):
-        with self.assertRaises(SystemExit):
-            BUILD.arguments(["-DPython_EXECUTABLE=" + sys.executable])
+    def test_python_cache_input_is_forwarded_like_other_definitions(self):
+        definition = "-DPython_EXECUTABLE:FILEPATH=/other/component/python"
+        args = BUILD.arguments([definition])
+        self.assertEqual(args.cache_values["Python_EXECUTABLE"], "/other/component/python")
+        self.assertIn(definition[2:], args.definitions)
+
+    def test_removed_feature_switches_are_forwarded_even_for_sdk_install(self):
+        args = BUILD.arguments(["--install-vinc-sdk", "-DVINC_BUILD_PYTHON=ON", "-DVINC_BUILD_BAG=OFF"])
+        self.assertEqual(args.cache_values["VINC_BUILD_PYTHON"], "ON")
+        self.assertEqual(args.cache_values["VINC_BUILD_BAG"], "OFF")
 
     def test_native_msvc_boundary(self):
         for version in ("19.42.34444", "19.43.99999"):

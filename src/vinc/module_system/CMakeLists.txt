@@ -2,14 +2,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(vinc_module_system LANGUAGES CXX)
 
-set(VINC_NAME "open-vinc" CACHE STRING "Central instance name (lowercase ASCII, digits, underscore, hyphen)")
-string(LENGTH "${VINC_NAME}" vinc_name_length)
-if(NOT VINC_NAME MATCHES "^[a-z0-9_-]+$" OR vinc_name_length GREATER 48)
-    message(FATAL_ERROR "VINC_NAME must contain 1..48 lowercase ASCII letters, digits, _ or -")
-endif()
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/vinc/module/detail/instance_name.hpp"
-    CONTENT "#pragma once\n#include <string_view>\nnamespace vinc::detail { inline constexpr std::string_view instance_name = \"${VINC_NAME}\"; }\n")
-
 function(_vinc_build_module variant)
     vinc_runtime_name(vinc_module vinc_module ${variant})
     vinc_runtime_name(vinc_module_contract vinc_module_contract ${variant})
@@ -36,7 +28,6 @@ function(_vinc_build_module variant)
         add_library(vinc_module_manager STATIC src/host/module_manager.cpp src/host/python_modules.cpp src/host/instance.cpp src/host/lock_registry.cpp)
 
         target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-        target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/generated")
         target_link_libraries(vinc_module_manager PUBLIC vinc::common vinc::log vinc::param vinc::message_bus vinc::control vinc::output_hub PRIVATE ${vinc_module_contract} vinc::concurrency vinc::param_manager vinc::log_manager vinc::rpc_manager)
     endif()
 
@@ -72,11 +63,6 @@ target_include_directories(vinc_module_system_errors INTERFACE "${CMAKE_CURRENT_
 target_link_libraries(vinc_module_system_errors INTERFACE vinc::common)
 vinc_register_error_catalog(TARGET vinc_module_system_errors
     HEADER vinc/module/detail/error_catalog.hpp SYMBOL vinc::module_system::detail::error_catalog)
-
-option(VINC_BUILD_PYTHON "Build the optional Python Module SDK" OFF)
-if(VINC_BUILD_PYTHON)
-    add_subdirectory(python)
-endif()
 
 # Installation keeps ownership here; standalone component builds remain unchanged.
 if(COMMAND vinc_install_component)

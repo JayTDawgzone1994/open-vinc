@@ -86,8 +86,7 @@ def arguments(argv):
                 "CMAKE_HOME_DIRECTORY", "CMAKE_CACHEFILE_DIR", "CMAKE_MAKE_PROGRAM",
                 "CMAKE_SYSTEM_NAME", "CMAKE_SYSTEM_PROCESSOR", "CMAKE_OSX_ARCHITECTURES"}
     if args.install_vinc_sdk:
-        reserved.update({"VINC_INSTALL_SDK", "VINC_BUILD_APPS", "VINC_BUILD_EXAMPLES",
-                         "VINC_BUILD_UI", "VINC_BUILD_PYTHON", "BUILD_TESTING",
+        reserved.update({"VINC_INSTALL_SDK", "VINC_BUILD_APPS", "BUILD_TESTING",
                          "CMAKE_INSTALL_PREFIX"})
     args.cache_values = {}
     for definition in args.definitions:
@@ -96,9 +95,6 @@ def arguments(argv):
             parser.error("expected -DNAME[:TYPE]=VALUE")
 
         name, value = match.groups()
-        if name == "Python_EXECUTABLE":
-            parser.error("Python_EXECUTABLE was removed; select Module Python in App Kconfig. "
-                         "Python3_EXECUTABLE selects only the configuration tool.")
         if name in reserved or name.startswith("CMAKE_GENERATOR"):
             parser.error(name + " is controlled by this native Ninja wrapper; use CMake directly")
 

@@ -154,7 +154,7 @@ if(BUILD_TESTING)
         "-DFIXTURE=${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_application"
         "-DCOMPILER=${CMAKE_CXX_COMPILER}" "-DCONFIG=${CMAKE_BUILD_TYPE}"
         "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DGENERATOR=${CMAKE_GENERATOR}"
-        "-DWITH_UI=${VINC_BUILD_UI}"
+        "-DWITH_UI=ON"
         -P "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_application.cmake")
     set_tests_properties(sdk.installed_application PROPERTIES TIMEOUT 360 RUN_SERIAL TRUE)
 endif()

@@ -454,8 +454,46 @@ vinc::Result<void> register_exit_wait(ProcessImpl& process, HANDLE wake_event) {
     return {};
 }
 
+// Only the launching thread suppresses critical-error dialogs. Do not change
+// the process-wide mode inherited by children or the caller's WER policy.
+class LaunchErrorMode {
+public:
+    LaunchErrorMode() = default;
+    LaunchErrorMode(const LaunchErrorMode&) = delete;
+    LaunchErrorMode& operator=(const LaunchErrorMode&) = delete;
+
+    vinc::Result<void> enable() {
+        const DWORD mode = GetThreadErrorMode() | SEM_FAILCRITICALERRORS;
+        if (!SetThreadErrorMode(mode, &previous_)) {
+            return std::unexpected(
+                native_error(vinc::osal::ErrorOperation::Spawn, static_cast<int>(GetLastError())));
+        }
+
+        active_ = true;
+        return {};
+    }
+
+    ~LaunchErrorMode() {
+        if (active_) {
+            // Restore a mode returned by the OS. Cleanup is best-effort and
+            // cannot discard a successfully owned child or replace its spawn error.
+            (void)SetThreadErrorMode(previous_, nullptr);
+        }
+    }
+
+private:
+    DWORD previous_ = 0;
+    bool active_ = false;
+};
+
 vinc::Result<void> launch_process(ProcessImpl& owner, const SpawnOptions& options, std::wstring& command,
                                   std::vector<wchar_t>& environment, STARTUPINFOEXW& startup) {
+    LaunchErrorMode error_mode;
+    auto prepared = error_mode.enable();
+    if (!prepared) {
+        return std::unexpected(prepared.error());
+    }
+
     PROCESS_INFORMATION process{};
     if (!CreateProcessW(options.executable.c_str(), command.data(), nullptr, nullptr, TRUE,
                         EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |

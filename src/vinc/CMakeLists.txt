@@ -52,9 +52,7 @@ if(BUILD_TESTING)
     add_subdirectory(rpc/tests)
 endif()
 
-if(VINC_BUILD_UI)
-    add_subdirectory(ui)
-endif()
+add_subdirectory(ui)
 
 # Every provider has registered C++ metadata; freeze one catalog for this build.
 vinc_finalize_error_catalog()

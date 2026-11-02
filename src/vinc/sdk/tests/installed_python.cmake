@@ -19,10 +19,16 @@ string(REPLACE "\\" "\\\\" python_config "${PYTHON}")
 string(REPLACE "\"" "\\\"" python_config "${python_config}")
 file(APPEND "${work}/source/vinc.conf"
     "\nCONFIG_VINC_PYTHON_CUSTOM=y\nCONFIG_VINC_PYTHON_EXECUTABLE=\"${python_config}\"\n")
+run_checked(foreign_python "${PYTHON}" -m venv --without-pip "${work}/foreign python")
+if(WIN32)
+    set(foreign_python "${work}/foreign python/Scripts/python.exe")
+else()
+    set(foreign_python "${work}/foreign python/bin/python3")
+endif()
 set(configuration -G "${GENERATOR}" "-DCMAKE_CXX_COMPILER=${COMPILER}"
     "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}" "-DCMAKE_BUILD_TYPE=${CONFIG}"
     "-Dvinc_DIR=${work}/moved SDK/lib/cmake/vinc" "-DPython3_EXECUTABLE=${PYTHON}"
-    -DCMAKE_DISABLE_FIND_PACKAGE_Git=ON)
+    "-DTEST_FOREIGN_PYTHON=${foreign_python}" -DCMAKE_DISABLE_FIND_PACKAGE_Git=ON)
 if(WIN32)
     # Missing archives must fail lookup rather than silently selecting /MD.
     set(archive "${work}/moved SDK/lib/vinc_common_python_runtime.lib")

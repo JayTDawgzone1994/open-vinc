@@ -12,22 +12,35 @@ function(vinc_build_python_bindings target source_root pybind_root output_direct
     if(NOT VINC_SELECTED_PYTHON)
         message(FATAL_ERROR "Internal error: resolve App Kconfig before creating Python bindings")
     endif()
+    foreach(field APP VERSION VERSION_MAJOR VERSION_MINOR POINTER_BYTES PLATFORM)
+        if(NOT DEFINED VINC_SELECTED_PYTHON_${field})
+            message(FATAL_ERROR "Internal error: missing selected Python ${field} before creating bindings")
+        endif()
+    endforeach()
     # FindPython receives an explicit internal selection, never a user cache input.
     set(Python_EXECUTABLE "${VINC_SELECTED_PYTHON}")
     vinc_find_python(Python REQUIRED COMPONENTS Interpreter Development.Module)
     vinc_python_minimum(python_minimum)
     string(REPLACE "." ", " python_minimum_tuple "${python_minimum}")
-    execute_process(COMMAND "${Python_EXECUTABLE}" -c
-        "import platform, struct, sysconfig; print(platform.python_implementation()); print(struct.calcsize('P')); print(sysconfig.get_platform()); print(int(bool(sysconfig.get_config_var('Py_GIL_DISABLED'))))"
-        OUTPUT_VARIABLE abi OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    string(REPLACE "\n" ";" abi "${abi}")
-    list(GET abi 0 implementation)
-    list(GET abi 1 pointer_bytes)
-    list(GET abi 2 python_platform)
-    list(GET abi 3 free_threaded)
-    if(NOT implementation STREQUAL "CPython" OR NOT pointer_bytes EQUAL 8 OR free_threaded)
-        message(FATAL_ERROR "Vinc bindings require 64-bit, GIL-enabled CPython")
+    # Discovery still owns development artifacts. Compare major/minor ABI rather
+    # than pinning a serviced patch release; metadata uses the fresh selection.
+    set(selected_identity "${VINC_SELECTED_PYTHON}")
+    set(discovered_identity "${Python_EXECUTABLE}")
+    if(WIN32)
+        string(TOLOWER "${selected_identity}" selected_identity)
+        string(TOLOWER "${discovered_identity}" discovered_identity)
     endif()
+    set(discovered_abi "invalid")
+    if(Python_VERSION MATCHES "^([0-9]+)[.]([0-9]+)[.][0-9]+$")
+        set(discovered_abi "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+    endif()
+    set(selected_abi "${VINC_SELECTED_PYTHON_VERSION_MAJOR}.${VINC_SELECTED_PYTHON_VERSION_MINOR}")
+    if(NOT discovered_identity STREQUAL selected_identity OR
+            NOT discovered_abi STREQUAL selected_abi)
+        message(FATAL_ERROR "App ${VINC_SELECTED_PYTHON_APP}: Python discovery disagrees with selection.\nSelected: ${VINC_SELECTED_PYTHON} (${VINC_SELECTED_PYTHON_VERSION})\nDiscovered: ${Python_EXECUTABLE} (${Python_VERSION})\nReconfigure with a consistent Python environment; no files were cleaned.")
+    endif()
+    set(pointer_bytes "${VINC_SELECTED_PYTHON_POINTER_BYTES}")
+    set(python_platform "${VINC_SELECTED_PYTHON_PLATFORM}")
     if(MSVC AND NOT python_platform MATCHES "^win-")
         message(FATAL_ERROR "MSVC bindings require Windows CPython; select it in App Kconfig")
     endif()
@@ -81,31 +94,27 @@ function(vinc_build_python_bindings target source_root pybind_root output_direct
         set(metadata_script "${source_root}/cmake/runtime_metadata.py")
         get_filename_component(msvc_binary_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
         get_filename_component(msvc_toolset_dir "${msvc_binary_dir}/../../.." ABSOLUTE)
-        set(metadata_arguments --mode "${runtime_mode}")
-        set(msvc_redist_files)
-        if(runtime_mode STREQUAL "dynamic")
-            execute_process(COMMAND "${Python_EXECUTABLE}" "${metadata_script}"
-                --compiler "${CMAKE_CXX_COMPILER}" --locate
-                OUTPUT_VARIABLE msvc_redist_dir OUTPUT_STRIP_TRAILING_WHITESPACE
-                COMMAND_ERROR_IS_FATAL ANY)
-            file(GLOB_RECURSE msvc_redist_files CONFIGURE_DEPENDS "${msvc_redist_dir}/*.dll")
-            list(APPEND metadata_arguments --redist-root "${msvc_redist_dir}")
-        endif()
-        # Track the actual deployment files, including Debug CRTs. A serviced DLL
-        # must regenerate metadata even when no C++ source needs recompilation.
+        # MSVC bindings always use static CRT. Track the generator, loader and
+        # informational toolset header so metadata is refreshed after they change.
+        # The retained dynamic-mode generator is not part of this build recipe.
         set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
             "${metadata_script}" "${msvc_toolset_dir}/include/crtversion.h"
-            "${source_root}/vinc/_windows_runtime.py" ${msvc_redist_files})
+            "${source_root}/vinc/_windows_runtime.py")
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${Python_EXECUTABLE}" "${metadata_script}"
                 --compiler "${CMAKE_CXX_COMPILER}" --native "$<TARGET_FILE:${target}>"
-                ${metadata_arguments}
+                --mode "${runtime_mode}"
                 --config "$<CONFIG>" --output "${output_directory}/_msvc_runtime.json"
             BYPRODUCTS "${output_directory}/_msvc_runtime.json" VERBATIM)
         list(APPEND resources _msvc_runtime.json)
     endif()
+    # Platform text is data in a Python string literal, not generated source code.
+    string(REPLACE "\\" "\\\\" platform_literal "${python_platform}")
+    string(REPLACE "'" "\\'" platform_literal "${platform_literal}")
+    string(REPLACE "\r" "\\r" platform_literal "${platform_literal}")
+    string(REPLACE "\n" "\\n" platform_literal "${platform_literal}")
     file(GENERATE OUTPUT "${output_directory}/_build.py" CONTENT
-        "MINIMUM_VERSION = (${python_minimum_tuple})\nVERSION = (${Python_VERSION_MAJOR}, ${Python_VERSION_MINOR})\nPOINTER_BYTES = ${pointer_bytes}\nPLATFORM = '${python_platform}'\nMSVC_RUNTIME = ${msvc_runtime}\nMSVC_RUNTIME_MODE = '${runtime_mode}'\n")
+        "MINIMUM_VERSION = (${python_minimum_tuple})\nVERSION = (${VINC_SELECTED_PYTHON_VERSION_MAJOR}, ${VINC_SELECTED_PYTHON_VERSION_MINOR})\nPOINTER_BYTES = ${pointer_bytes}\nPLATFORM = '${platform_literal}'\nMSVC_RUNTIME = ${msvc_runtime}\nMSVC_RUNTIME_MODE = '${runtime_mode}'\n")
     list(APPEND resources "$<TARGET_FILE_NAME:${target}>")
     foreach(name LICENSE NOTICE THIRD_PARTY_NOTICES.txt)
         list(APPEND resources "licenses/open-vinc/${name}")
