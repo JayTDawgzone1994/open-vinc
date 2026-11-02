@@ -748,7 +748,9 @@ does not link a Python dylib. The built extension records deployment minimum 26.
 this run does not establish support for an older macOS release.
 
 **Validation boundary:** Debug built selected targets and passed eight Bus/Module
-CTests; it did not validate the full Python/App/SDK matrix. The Release SDK producer
+CTests in that initial round; the later
+[full Debug validation](#macos-full-debug-validation) supplies the broader evidence.
+The Release SDK producer
 in this run has Python enabled. The separate producer-Python-OFF/downstream-ON
 acceptance subsequently passed in the
 [clean macOS SDK round](../../sdk/INSTALL.md#macos-clean-sdk-acceptance).
@@ -778,6 +780,60 @@ Commands, environment, runtime audit and validation limits are maintained in the
 [SDK acceptance record](../../sdk/INSTALL.md#macos-clean-sdk-acceptance).
 後續已補齊 Python-OFF producer、下游才啟用 Python 的交付流程；本段先前的
 Python-enabled 結果仍保留原範圍，不把兩輪描述成同一次全套測試。
+
+<a id="macos-full-debug-validation"></a>
+
+##### Full native macOS Debug validation (2026-11-02) / macOS 完整 Debug 驗證
+
+Source: merged commit `599e7af11147a0c2e678799b7b31507e1c24d663`, on
+`codex/macos-debug-acceptance`. Environment: macOS 26.3.1(a), build 25D771280a,
+arm64, Apple Clang 21.0.0 (`clang-2100.1.1.101`), Apple libc++ 21.1.6,
+SDK 26.5, CMake 4.4.4, Ninja 1.13.2 and GIL-enabled CPython 3.12.14.
+Debug refers to VINC and its C++ bindings; it does not claim a Py_DEBUG interpreter.
+
+A fresh Debug tree enabled Python through Kconfig System selection, UI, Bag,
+Apps, examples, SDK installation and testing. `VINC_BUILD_BUS_BENCHMARK=OFF`.
+The complete build passed, including the Python extension and SDK public-header
+smoke compilation. Of 294 compile commands, all 291 C++ commands contain `-g`
+and none defines `NDEBUG`; this is not a reused Release binary tree.
+
+| Check / 檢查 | Result / 結果 |
+| --- | --- |
+| First complete Debug CTest run | **125 passed, 1 failed out of 126**, no skips. The sole failure was an installed-Python downstream build timeout overlapping system sleep, described below. / 保留原始失敗，不描述成一次全綠。 |
+| Unchanged installed-Python rerun | **1/1 passed**, 124.53 s, with temporary sleep prevention and the original fixture deadlines. / 未修改程式或放寬期限。 |
+| Combined coverage | All **126 distinct Debug suites have passing evidence**, including four Python Module suites, 12 App suites and all 14 SDK suites; also OSAL, Bus, Module, Control, Storage, Concurrency, Param, Log, RPC, Shell, UI and Bag. / 完整功能涵蓋為兩次執行的合併證據。 |
+
+The initial `sdk.installed_python` failure occurred while compiling the downstream
+Debug binding, before its runtime flow. `pmset` records show maintenance sleep
+from 18:30:20 to 18:40:40 (Asia/Taipei), overlapping the test's 18:30–18:40 interval.
+The original CTest reports 635.39 s for this failure. Repeating the same fixture
+with `caffeinate -i -s` passed without a source change or a longer timeout. This is
+a sleep-overlapped validation failure, not evidence of a compiler diagnostic or
+Python runtime defect. Temporary assertions are scoped to test execution; no
+persistent power setting was changed.
+
+首次唯一失敗與系統休眠重疊：測試尚在編譯下游 Debug binding，未進入 Python 執行。
+保留 `pmset` 時間對照與失敗輸出；暫時防睡眠後，同一測試於原期限內完整通過。
+因此記錄為初次 125/126 加重跑 1/1，沒有修改正式程式或測試來消除失敗。
+
+Evidence: ignored `build/macos-debug-acceptance-20261102/` contains
+`run_full_debug.py`, exact configure/build/CTest commands in `full-results.json`,
+`build.log`, `ctest.log`, `ctest.xml`, `full-LastTest.log`, `sleep-events.log`,
+`installed-python-rerun.log`/`.xml`, the test inventory and source/environment
+metadata in `validation.json`. The original CTest total is 1423.67 s; its wall
+clock includes sleep, so it must not be confused with the runner's monotonic
+elapsed value. This round does not establish other Python minors, Intel Mac,
+older macOS, arbitrary third-party extension coexistence, interactive GUI/browser
+acceptance or performance. Benchmarks were explicitly excluded.
+
+**Clean Debug SDK follow-up:** the separate Python-OFF producer, native consumer,
+downstream Python, installed App and source/installed multi-App fixtures all
+passed. Deployment interpreter probes passed **6/6**. Runtime audit confirms both
+Debug extensions retain system libc++/libSystem without `LC_RPATH`. Exact commands,
+results and cleanup are maintained in the
+[Debug SDK record](../../sdk/INSTALL.md#macos-debug-sdk-acceptance).
+後續乾淨 Debug SDK 交付矩陣與部署探測亦全部通過，補齊本環境 Python／App／SDK
+驗收；沒有修改正式程式，也沒有執行 benchmark。
 
 #### Historical rollout validation / 歷史導入驗證
 

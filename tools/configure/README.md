@@ -141,6 +141,16 @@ Custom 使用設定的絕對路徑；兩種組裝均驗證中文／空白路徑�
 紀錄在 `build/macos-sdk-acceptance-20261102/selection.log`、`selection.xml`
 及上方 SDK 驗收所列證據。未宣稱 Debug、其他 Python minor 或人工 GUI／curses 驗收。
 
+**Debug follow-up (2026-11-02):** the full Debug CTest run passed the three
+configuration suites above. Separate source/installed Debug multi-App fixtures
+and all six deployment interpreter probes also passed with Chinese/space-path
+venvs. See the [Debug SDK record](../../src/vinc/sdk/INSTALL.md#macos-debug-sdk-acceptance)
+for the exact environment and evidence. This adds Debug framework coverage with
+CPython 3.12.14; other Python minors and manual editor acceptance remain outside
+the record.
+後續 Debug 已補驗上述設定 CTest、來源／安裝式多 App 與六項部署 Python 探測，
+全部通過；不再把 Debug 列為此環境的驗證缺口。
+
 <a id="stage-1-module-selection"></a>
 
 ## Stage 1 Module selection / 第一階段 Module 選擇
