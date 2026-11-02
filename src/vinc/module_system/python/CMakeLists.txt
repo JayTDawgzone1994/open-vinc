@@ -1,5 +1,7 @@
 # Opt-in bindings: neither the central nor ordinary C++ consumers link Python.
 include(cmake/VincPython.cmake)
+vinc_reject_python_override()
+vinc_select_module_python(Vinc)
 vinc_build_python_bindings(vinc_python_native "${CMAKE_CURRENT_SOURCE_DIR}"
     "${VINC_REPOSITORY_ROOT}/library/pybind11/upstream"
     "${VINC_BUILD_ROOT}/python/$<CONFIG>/vinc" SOURCE_CHECKOUT)
@@ -23,5 +25,6 @@ function(vinc_deploy_python target)
 endfunction()
 
 if(BUILD_TESTING)
+    set(Python_EXECUTABLE "${VINC_SELECTED_PYTHON}")
     add_subdirectory(tests)
 endif()

@@ -1,14 +1,19 @@
 include_guard(GLOBAL)
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../common/cmake/VincPythonRequirements.cmake")
-    include("${CMAKE_CURRENT_LIST_DIR}/../../../common/cmake/VincPythonRequirements.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/../../../common/cmake/VincPythonSelection.cmake")
 else()
-    include("${CMAKE_CURRENT_LIST_DIR}/../../../../lib/cmake/vinc/VincPythonRequirements.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/../../../../lib/cmake/vinc/VincPythonSelection.cmake")
 endif()
 
 # Compatible applications share one binding image. Source and installed SDK builds
 # compile this adapter against their own message catalog and the same Runtime.
 function(vinc_build_python_bindings target source_root pybind_root output_directory)
     cmake_parse_arguments(PARSE_ARGV 4 BINDING "SOURCE_CHECKOUT" "" "")
+    if(NOT VINC_SELECTED_PYTHON)
+        message(FATAL_ERROR "Internal error: resolve App Kconfig before creating Python bindings")
+    endif()
+    # FindPython receives an explicit internal selection, never a user cache input.
+    set(Python_EXECUTABLE "${VINC_SELECTED_PYTHON}")
     vinc_find_python(Python REQUIRED COMPONENTS Interpreter Development.Module)
     vinc_python_minimum(python_minimum)
     string(REPLACE "." ", " python_minimum_tuple "${python_minimum}")
@@ -24,7 +29,7 @@ function(vinc_build_python_bindings target source_root pybind_root output_direct
         message(FATAL_ERROR "Vinc bindings require 64-bit, GIL-enabled CPython")
     endif()
     if(MSVC AND NOT python_platform MATCHES "^win-")
-        message(FATAL_ERROR "MSVC bindings require Windows CPython; set Python_EXECUTABLE")
+        message(FATAL_ERROR "MSVC bindings require Windows CPython; select it in App Kconfig")
     endif()
     if(TARGET pybind11::module)
         message(FATAL_ERROR "Vinc Python bindings must initialize their pinned pybind11 before other pybind11 consumers")
@@ -113,5 +118,4 @@ function(vinc_build_python_bindings target source_root pybind_root output_direct
     set_property(TARGET ${target} PROPERTY VINC_PYTHON_ABI_EXECUTABLE "${Python_EXECUTABLE}")
     set_property(TARGET ${target} PROPERTY VINC_PYTHON_DIRECTORY "${output_directory}")
     set_property(GLOBAL PROPERTY VINC_PYTHON_TEST_EXECUTABLE "${Python_EXECUTABLE}")
-    set(Python_EXECUTABLE "${Python_EXECUTABLE}" PARENT_SCOPE)
 endfunction()

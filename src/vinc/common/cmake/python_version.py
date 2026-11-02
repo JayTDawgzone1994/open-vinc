@@ -30,7 +30,7 @@ def version_error(version=None, executable=None):
             + ("tools\\setup.bat" if sys.platform == "win32" else "bash tools/setup.sh")
             + " --recommended (in the Open-VINC source checkout)."
             + "\nBuild: VINC_BUILD_INTERPRETER; CMake tools: Python3_EXECUTABLE;"
-            + " Python Modules: Python_EXECUTABLE; setup: VINC_SETUP_PYTHON.")
+            + " Python Modules: App Kconfig System/Custom selection; setup: VINC_SETUP_PYTHON.")
 
 
 if __name__ == "__main__":

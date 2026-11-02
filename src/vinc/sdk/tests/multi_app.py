@@ -72,8 +72,14 @@ def main():
     shutil.copytree(fixture, source, dirs_exist_ok=True)
     configure = [args.cmake, "-S", str(source), "-B", str(build), "-G", args.generator,
                  f"-DCMAKE_CXX_COMPILER={args.compiler}", f"-DCMAKE_MAKE_PROGRAM={args.make_program}",
-                 f"-DCMAKE_BUILD_TYPE={args.config}", f"-DPython_EXECUTABLE={args.python}",
+                 f"-DCMAKE_BUILD_TYPE={args.config}",
                  f"-DPython3_EXECUTABLE={sys.executable}"]
+    python_path = str(Path(args.python).absolute()).replace("\\", "\\\\").replace('"', '\\"')
+    # System/Custom must resolve to the same interpreter without a CMake override.
+    os.environ["PATH"] = str(Path(args.python).parent) + os.pathsep + os.environ.get("PATH", "")
+    custom_config = source / "second/app.config"
+    with custom_config.open("a", encoding="utf-8") as output:
+        output.write(f'\nCONFIG_VINC_PYTHON_CUSTOM=y\nCONFIG_VINC_PYTHON_EXECUTABLE="{python_path}"\n')
     if args.sdk_build:
         sdk = work / "sdk"
         run([args.cmake, "--install", str(args.sdk_build), "--component", "VincSDK", "--prefix", str(sdk)])
@@ -127,7 +133,7 @@ def main():
             module = destination / "data/module/ScriptPeer/ScriptPeer.py"
             module.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source / "ScriptPeer.py", module)
-        output = run([str(executable), "--shell-port", "0", "--python", args.python], timeout=APP_TIMEOUT_SECONDS)
+        output = run([str(executable), "--shell-port", "0"], timeout=APP_TIMEOUT_SECONDS)
         require(f"{app}_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
         require(f"{expected} SELF_HOST_OK 42" in output, output)
         require("All module processes exited" in output, output)

@@ -132,7 +132,9 @@ def apply(args, environment, values):
         if not Path(directory).is_dir():
             raise RuntimeError("Remembered Apple developer directory is unavailable: " + directory)
         environment["DEVELOPER_DIR"] = directory
-    for cmake_key, key in (("Python3_EXECUTABLE", "config_python"), ("Python_EXECUTABLE", "module_python")):
+    # Legacy profiles may contain module_python. Kconfig now owns that selection;
+    # do not validate or inject the remembered path, even if it no longer exists.
+    for cmake_key, key in (("Python3_EXECUTABLE", "config_python"),):
         if cmake_key not in args.cache_values and values.get(key):
             path = require_file(values[key])
             args.cache_values[cmake_key] = path
@@ -150,27 +152,6 @@ def apply(args, environment, values):
             if directory not in directories:
                 directories.append(directory)
     environment["PATH"] = os.pathsep.join(directories + [environment.get("PATH", "")])
-
-
-def check_python_cache(cache, args):
-    # Do not overwrite a previous binding ABI merely because setup picked another
-    # Python. Interpreter patch updates do not change the CPython minor ABI.
-    key = "Python_EXECUTABLE"
-    if not cache.get("_Python_INTERPRETER_PROPERTIES"):
-        # A supplied but unused CMake variable does not establish a binding ABI.
-        return
-    selected = args.cache_values.get(key)
-    old = cache.get(key) or cache.get("_Python_EXECUTABLE")
-    if not selected or not old or old.endswith("-NOTFOUND"):
-        return
-    if Path(selected).resolve() != Path(old).resolve():
-        raise RuntimeError("Python Module interpreter differs from this build cache.\nPrevious: " + old
-                           + "\nSelected: " + selected + "\nSelect another --build-dir; no files were cleaned.")
-    properties = cache.get("_Python_INTERPRETER_PROPERTIES", "").split(";")
-    if len(properties) >= 3:
-        actual = query([selected, "-c", "import sys; print(str(sys.version_info[0])+'.'+str(sys.version_info[1]))"])
-        if actual != ".".join(properties[1:3]):
-            raise RuntimeError("Python Module ABI changed in place. Select another --build-dir; no files were cleaned.")
 
 
 def main():

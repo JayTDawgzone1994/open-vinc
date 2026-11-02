@@ -34,6 +34,7 @@ install(FILES "${package_directory}/vincConfig.cmake" "${package_directory}/vinc
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincRuntime.cmake"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/msvc_minimum.txt"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonRequirements.cmake"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonSelection.cmake"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/python_minimum.txt"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/python_version.py"
     DESTINATION lib/cmake/vinc COMPONENT VincSDK)

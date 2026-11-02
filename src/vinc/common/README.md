@@ -10,6 +10,14 @@ The public entry points are `error.hpp` and `result.hpp`. The unused legacy inte
 
 ## Build toolchain policy / 建置工具鏈規則
 
+Module Python selection uses `cmake/VincPythonSelection.cmake` alongside the
+minimum-version policy. It performs build-only PATH/Custom resolution and shared
+binding/cache checks, without initializing runtime services. Kconfig owns its
+user-facing contract; see [Python selection](../../../tools/configure/README.md#module-python-selection--module-python-選擇).
+
+Module Python 的建置期 PATH／Custom 選擇與共用 binding／cache 檢查由此處 helper 維護，
+不啟動執行期服務；使用者設定與遷移契約統一放在上述 Kconfig 文件。
+
 Native MSVC requires **19.44 or newer**, with no patch pin. The single numeric
 source is `cmake/msvc_minimum.txt`; `VincToolchain.cmake`, the root build wrapper
 and Windows setup read it. Source configuration rejects older enabled C/C++

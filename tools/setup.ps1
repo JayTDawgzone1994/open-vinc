@@ -405,9 +405,6 @@ function Save-Toolchain {
         '--compiler-version', $script:CompilerVersion,
         '--toolset', $env:VCToolsVersion.TrimEnd('\'),
         '--windows-sdk', $env:WindowsSDKVersion.TrimEnd('\'))
-    if ($script:WithPython) {
-        $arguments += @('--module-python', $script:Python)
-    }
     if ($script:WithUi) {
         $arguments += @('--node', (Get-Command node.exe).Source, '--npm', (Get-Command npm.cmd).Source)
     }
@@ -444,7 +441,7 @@ function Invoke-Setup {
             Write-Host "Build interpreter: $script:Python"
             Write-Host 'For direct CMake, select Python3_EXECUTABLE explicitly; root wrappers use the saved selection.'
             if ($script:WithPython) {
-                Write-Host "For Python SDK builds, select Python_EXECUTABLE=$script:Python"
+                Write-Host "For Python Module builds, choose Custom in App Kconfig and set CONFIG_VINC_PYTHON_EXECUTABLE to: $script:Python"
             }
         }
         return 0

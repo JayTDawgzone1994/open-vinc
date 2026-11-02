@@ -112,6 +112,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME sdk.configuration COMMAND "${Python3_EXECUTABLE}" -B
         "${VINC_REPOSITORY_ROOT}/tools/configure/tests/test_configuration.py")
     set_tests_properties(sdk.configuration PROPERTIES TIMEOUT 60)
+    add_test(NAME sdk.python_selection COMMAND "${Python3_EXECUTABLE}" -B
+        "${VINC_REPOSITORY_ROOT}/tools/configure/tests/test_python_selection.py")
+    set_tests_properties(sdk.python_selection PROPERTIES TIMEOUT 120)
     add_test(NAME sdk.app_selection COMMAND "${Python3_EXECUTABLE}" -B
         "${CMAKE_CURRENT_SOURCE_DIR}/app_selection.py"
         --cmake "${CMAKE_COMMAND}" --compiler "${CMAKE_CXX_COMPILER}"

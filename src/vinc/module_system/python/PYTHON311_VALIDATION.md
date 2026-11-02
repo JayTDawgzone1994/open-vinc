@@ -141,6 +141,14 @@ environment, subject to the Runtime and platform limits above and below.
 
 ## Initial evaluation reproduction and limits / 初次評估重現與限制
 
+The commands below record the original evaluation interface. Current builds
+select Module Python through [App Kconfig](../../../../tools/configure/README.md#module-python-selection--module-python-選擇);
+`-DPython_EXECUTABLE` has been removed. Keep the same test interpreter in that
+configuration; `VINC_TEST_SDK_PYTHON_EXECUTABLE` remains test-only.
+
+下方保留初次評估的歷史命令。現在需將直譯器選擇寫入 App Kconfig，不能再使用
+`-DPython_EXECUTABLE`；SDK 驗收用參數仍只供測試，不是 App 設定入口。
+
 Use a complete x64 MSVC 19.44 developer environment and a compatible isolated
 CPython 3.11 installation with development headers/libraries. Build tooling may
 use another Python; `Python_EXECUTABLE` chooses the native binding ABI.

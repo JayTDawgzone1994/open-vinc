@@ -8,6 +8,112 @@ single-App path during the [multi-App migration](../../apps/vinc/MULTI_APP.md).
 來源／安裝式公開 `vinc_add_app()` 已接入下方各 App 選擇流程，必須提供 `VINC_BUILD_CONFIG`，
 不隱式讀取專案 `vinc.conf` 或全域 `VINC_CONFIG_FILE`。遷移期間只有舊來源 shell 保留舊流程。
 
+## Module Python selection / Module Python 選擇
+
+Kconfig is the only public build-time interpreter selection. Both the built-in
+Vinc and `vinc_add_app()` use it. Enable Python, then choose System (default) or
+Custom in the text file, GUI or menuconfig:
+
+```ini
+CONFIG_VINC_APP_PYTHON=y
+CONFIG_VINC_PYTHON_CUSTOM=y
+CONFIG_VINC_PYTHON_EXECUTABLE="D:/Python313/python.exe"
+```
+
+For System, use `CONFIG_VINC_PYTHON_SYSTEM=y` instead of Custom/path. The first
+`python.exe` (Windows) or `python3` (Linux/macOS) in the current PATH is selected,
+including an activated venv. No registry search or fallback to another version
+is made. Custom requires an absolute executable path; Kconfig strings escape
+backslashes as `\\` and quotes as `\"`. Editors accept a not-yet-installed path;
+configuration checks the actual CPython, version, ABI and development files.
+
+The App embeds only Custom's path. System resolves the deployment PATH, not a
+saved build-machine location. `--python PATH` overrides either mode for that
+invocation. A missing/incompatible runtime fails the affected Python Module;
+central and other Modules remain available. The binding still requires matching
+CPython minor/platform/bitness/GIL ABI; this is not cross-minor compatibility.
+
+Enabled Apps in one build must resolve to the same interpreter; System and Custom
+may coexist when they do. Different environments require separate build directories.
+Venv symlinks are not collapsed to their base executable. Reconfiguration rejects
+changes to the selected interpreter or ABI without deleting anything. A serviced
+patch version with the same path and ABI is allowed.
+
+`-DPython_EXECUTABLE` is removed and rejected, even if its value happens to match.
+After moving the selection into Kconfig, remove that old cache entry explicitly
+with `cmake -U Python_EXECUTABLE ...`; an actual environment change still needs a
+new build directory. `Python3_EXECUTABLE` and the Python running `build.py` select
+configuration/build tools only. Old setup `module_python` records are ignored;
+setup no longer saves one. There is no automatic interpreter installation.
+
+Kconfig 是 Module Python 唯一的公開建置設定來源；內建 Vinc 與多 App 共用。
+預設 System 按目前 PATH 選第一個 Python，包含 venv，不查登錄檔、不改找其他版本。
+Custom 僅接受絕對路徑，建置時檢查 CPython／ABI／開發檔；App 也以該路徑為執行預設。
+System 在部署環境重新依 PATH 尋找；`--python` 可覆寫本次執行，未更動設定檔。
+執行環境不合只拒絕該 Python Module，不關閉中央。多 App 必須選到同一直譯器；
+切換環境／ABI 需另一個 build 目錄，不自動清除。原 `-DPython_EXECUTABLE` 已移除，
+舊 cache 須明確用 `-U Python_EXECUTABLE` 移除；設定工具的 `Python3_EXECUTABLE` 保留。
+setup 的舊 `module_python` 不再生效，也不再保存這項預設。
+
+Generated strings use literal CMake arguments and escaped UTF-8 C++ bytes; paths
+are data, not shell commands, CMake expressions or generator expressions. Disabled
+Python/Custom choices do not retain an active runtime path. Upstream editor choice
+changes are supported without treating their previous selection as a conflict.
+Control characters and CMake's `$<` generator-expression introducer are rejected
+in executable paths before they reach the build graph.
+
+生成路徑只當資料處理，不執行其中的 CMake／shell 表達式；關閉 Python 或切回 System
+不會留下有效的 Custom 預設。文字與編輯器共用驗證，明確衝突的選擇會拒絕。
+執行檔路徑不得包含控制字元或 `$<`，避免被後續建置生成器解讀。
+
+### Selection validation (2026-11-02) / 選擇接線驗證
+
+Windows x64 uses MSVC 19.44 (toolset 14.44.35207), CMake 4.3.2, Ninja 1.13.2,
+official GIL-enabled CPython 3.13.12 and Release. WSL Ubuntu 24.04 x86-64 uses
+GCC/libstdc++ 13.3, CMake 3.28.3, Ninja 1.11.1 and CPython 3.12.3, Release.
+
+- Both platforms: 20 parser/editor-save/UTF-8/literal-path cases and 9 real CMake
+  selection/cache cases passed. Version-floor and missing-development diagnostics
+  use a deliberately raised test policy and a FindPython failure double; these
+  are not claims of running an old interpreter or removing system headers.
+- Windows: source build passed; Python/Context/messages/Runtime/Shell/App and
+  configuration CTest 10/10 passed. Build/setup/profile tools: 117 tests,
+  22 platform-inapplicable skips, no failures. PowerShell setup syntax passed.
+- WSL: source build passed; final selected CTest 11/11 passed, including installed
+  Python SDK, multi-App, Python/services/messages, configuration, Shell and App entry.
+- Windows installed SDK: fresh consumer, custom-message Bus/RPC/Param flow,
+  relocation, schema add/edit/remove, ABI rejection, missing `--python` override,
+  central/native survival, repair and Python-disable cleanup passed. Normal flows
+  now omit `--python` to verify the Kconfig default.
+- Windows multi-App: System/Custom shared a venv under a Chinese/space-containing
+  path. Three-App execution, same-name exclusion, concurrent isolation, relocation,
+  failure isolation, resource repair and selection cleanup passed.
+
+兩平台解析／編輯器保存測試各 20 項、CMake 選擇／快取各 9 項通過。Windows 來源建置與
+相關 CTest 10/10、WSL 來源建置與最終選定 CTest 11/11 通過（含 installed SDK、多 App、
+Python／服務／訊息、設定、Shell 與 App 入口）。Windows 安裝式測試已確認搬移、
+自訂訊息、Bus／RPC／Param、失敗隔離與清理；正常流程不帶 `--python`，直接驗證設定預設。
+Windows 多 App 測試另以中文／空白路徑的 venv 驗證 System／Custom 共用、三 App 執行、
+同名排他、並行隔離、搬移、故障隔離、資源修復及選擇清理，全部通過。
+最低版本／缺開發檔的診斷使用刻意調高的測試門檻及 FindPython 替身，並非實際移除系統套件。
+
+Reproduce the fast checks with:
+
+```sh
+python -B tools/configure/tests/test_configuration.py
+python -B tools/configure/tests/test_python_selection.py
+ctest --test-dir <build> --output-on-failure -R '^sdk\.(configuration|python_selection|app_selection)$'
+```
+
+Installed runtime checks are `sdk.installed_python` and `sdk.multi_app` in an SDK
+producer configured with `BUILD_TESTING=ON` and the test-only
+`VINC_TEST_SDK_PYTHON_EXECUTABLE`. That variable selects the fixtures' Kconfig
+content; it is not an App setting. No native macOS, Debug rerun or manual
+GUI/curses visual acceptance is claimed here; macOS handoff is in root TODO.
+
+安裝式測試的直譯器參數只用來產生測試 Kconfig，不是新的 App 設定入口。
+本輪不宣稱 macOS、Debug 重測或人工 GUI／curses 畫面驗收；macOS 已列入根目錄 TODO。
+
 <a id="stage-1-module-selection"></a>
 
 ## Stage 1 Module selection / 第一階段 Module 選擇
@@ -162,13 +268,13 @@ Use `--config /path/to/vinc.conf` to select a file. Plain invocation validates a
 prints the effective choices. Only `--save` or the editor's explicit Save writes
 the user file; omitted choices follow this framework version's defaults. Editors
 save full choices and retain upstream `.old` backup behavior. GUI Save As/Open
-use the same validation hooks. Files contain only boolean options in this first
-schema; unknown names, invalid values, duplicates, incompatible legacy choices,
+use the same validation hooks. Files contain boolean choices and the quoted Python path;
+unknown names, invalid values, duplicates, incompatible legacy choices,
 and unavailable capabilities fail rather than silently normalize.
 
 使用 `--config` 選檔；無其他模式時僅驗證並列出結果。只有 `--save` 或編輯器明確保存
 才寫入使用者檔案。未指定項目跟隨該框架版本預設；編輯器保存完整選擇並保留上游 `.old`
-備份行為。另存／開檔共用驗證。第一版只有布林設定；未知名稱、非法值、重複項目、
+備份行為。另存／開檔共用驗證。設定包含布林選擇與引號包住的 Python 路徑；未知名稱、非法值、重複項目、
 舊選項衝突與不可用能力都會報錯，不默默忽略。
 
 After successful CMake configuration, `vinc_guiconfig` and `vinc_menuconfig` are
@@ -185,13 +291,13 @@ CMake 配置成功後可用 `vinc_guiconfig`／`vinc_menuconfig` targets；配�
 Central application composition requires Python 3.11+ (Python 3 only) to resolve configuration,
 even when Python Modules are disabled. This is an interpreter-only build tool;
 Tkinter is optional for GUI, curses for terminal UI. CMake uses `Python3_EXECUTABLE`
-for this tool; Python Module ABI selection remains `Python_EXECUTABLE`.
+for this tool; Module Python selection belongs to App Kconfig.
 Plain `find_package(vinc)`/linking does not run the configurator or require Python.
 SDK-only source builds with `VINC_BUILD_APPS=OFF` retain their existing build options.
 
 中央應用組裝需要 Python 3.11+（限 Python 3）解析設定，即使未開啟 Python Module 亦然。
 只需要直譯器；GUI 額外需要 Tkinter，終端選單需要 curses。
-設定工具使用 `Python3_EXECUTABLE`，Module 綁定仍使用 `Python_EXECUTABLE`。
+設定工具使用 `Python3_EXECUTABLE`，Module 綁定直譯器由 App Kconfig 選擇。
 單純 find_package／連結不執行工具、不要求 Python。
 `VINC_BUILD_APPS=OFF` 的 SDK-only 來源建置保留原有建置開關。
 
@@ -280,27 +386,15 @@ is not replaced by these results; upstream support is not local test evidence.
 視覺驗收。該歷史輪次宣告最低 Python 3.9，但實測為 3.12／3.13；目前最低版本已依共用工具鏈規則更新。這些紀錄不取代先前平台驗證，
 也不把上游支援聲明當作本機測試證據。
 
-## Outstanding issue / 待處理問題
+## Redirected Unicode diagnostics / Unicode 重導診斷
 
-Windows redirected console encoding can reject a valid Unicode project path.
-During the 2026-10-30 SDK relocation checks, a local PowerShell script decoded its
-UTF-8 path incorrectly, producing a path containing U+E918. Configuration failed
-with `cp950 codec can't encode character` when `configure.py` printed the path.
-The tool's final `print()` uses the inherited stdout encoding even though its
-configuration files use UTF-8. Correctly encoded Chinese/space paths passed the
-subsequent SDK tests; arbitrary Unicode paths are not thereby covered.
+Resolved in the Kconfig Python selection work (2026-11-02): `configure.py`
+emits UTF-8 and its CMake callers explicitly decode UTF-8. The parser suite
+checks a real config path containing U+E918/Chinese while the inherited
+`PYTHONIOENCODING` is cp950. The earlier failure was diagnostic encoding, not
+a Module self-launch failure. This does not repair incorrectly decoded input
+from an external script; the caller must still supply the intended path.
 
-Status: confirmed diagnostic-output limitation, not a Module self-launch failure.
-Follow-up: define UTF-8 output consistently between the Python tool and its CMake
-caller, and test redirected output with a path outside the active code page. This
-is recorded separately from the single-executable change; no encoding policy has
-been changed in that work.
-
-Windows 重導輸出的主控台編碼可能拒絕合法 Unicode 專案路徑。2026-10-30 的 SDK 搬移
-檢查中，本機 PowerShell 腳本誤讀 UTF-8 後產生含 U+E918 的路徑，`configure.py` 印出
-路徑時發生 `cp950 codec can't encode character`。設定檔雖用 UTF-8，末尾 `print()`
-仍沿用 stdout 編碼。修正腳本編碼後的中文／空白路徑通過，不代表所有 Unicode 路徑皆通過。
-
-狀態：已確認的診斷輸出限制，不是 Module 自我啟動失敗。建議後續統一 Python 工具與
-CMake 呼叫端的 UTF-8 輸出，並測試重導輸出及目前 code page 之外的路徑。本次單一
-執行檔工作只另行記錄，沒有更動編碼政策。
+2026-11-02 已修正設定工具與 CMake 呼叫端的 UTF-8 輸出契約；測試以 cp950 環境
+重導含 U+E918／中文的實際設定檔路徑。這解決診斷編碼失敗，不會替外部腳本猜測
+已經誤解碼的路徑，也不是 Module 啟動架構修正。

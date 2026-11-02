@@ -8,6 +8,7 @@
 #include <vinc/shell/detail/shell.hpp>
 #include <vinc/shell/detail/tcl_runtime.hpp>
 #include <module_catalog.hpp>
+#include <vinc_python_config.hpp>
 #include <vinc/config.hpp>
 #include <iostream>
 #include <charconv>
@@ -135,6 +136,16 @@ ParseAction parse_arguments(int argc, char** argv, StartupOptions& options) {
         } else {
             return ParseAction::InvalidArguments;
         }
+    }
+
+    if (options.python.empty() && !vinc::app::python_executable.empty()) {
+        auto path = vinc::osal::path_from_utf8(vinc::app::python_executable);
+        if (!path) {
+            std::cerr << "Invalid configured Python path: " << vinc::error_to_string(path.error()) << '\n';
+            return ParseAction::InvalidArguments;
+        }
+
+        options.python = std::move(*path);
     }
 
     return ParseAction::Start;

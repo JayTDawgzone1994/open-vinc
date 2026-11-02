@@ -15,9 +15,13 @@ file(MAKE_DIRECTORY "${work}/unrelated cwd")
 run_checked(install_sdk "${CMAKE_COMMAND}" --install "${SDK_BUILD}" --component VincSDK --prefix "${work}/original SDK")
 file(RENAME "${work}/original SDK" "${work}/moved SDK")
 file(COPY "${FIXTURE}/" DESTINATION "${work}/source")
+string(REPLACE "\\" "\\\\" python_config "${PYTHON}")
+string(REPLACE "\"" "\\\"" python_config "${python_config}")
+file(APPEND "${work}/source/vinc.conf"
+    "\nCONFIG_VINC_PYTHON_CUSTOM=y\nCONFIG_VINC_PYTHON_EXECUTABLE=\"${python_config}\"\n")
 set(configuration -G "${GENERATOR}" "-DCMAKE_CXX_COMPILER=${COMPILER}"
     "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}" "-DCMAKE_BUILD_TYPE=${CONFIG}"
-    "-Dvinc_DIR=${work}/moved SDK/lib/cmake/vinc" "-DPython_EXECUTABLE=${PYTHON}"
+    "-Dvinc_DIR=${work}/moved SDK/lib/cmake/vinc" "-DPython3_EXECUTABLE=${PYTHON}"
     -DCMAKE_DISABLE_FIND_PACKAGE_Git=ON)
 if(WIN32)
     # Missing archives must fail lookup rather than silently selecting /MD.
@@ -58,7 +62,7 @@ function(verify_app root revision extra)
     file(READ "${bootstrap}" original_bootstrap)
     file(READ "${work}/source/preload_runtime.py" preload)
     file(WRITE "${bootstrap}" "${preload}\n${original_bootstrap}")
-    execute_process(COMMAND "${root}/PythonApp${suffix}" --shell-port 0 --python "${PYTHON}"
+    execute_process(COMMAND "${root}/PythonApp${suffix}" --shell-port 0
         -S "${work}/run.tcl" WORKING_DIRECTORY "${work}/unrelated cwd"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 35)
     file(WRITE "${bootstrap}" "${original_bootstrap}")
@@ -110,10 +114,17 @@ run_checked(removed_import "${PYTHON}" -B "${work}/source/check_import.py" "${bu
 # Wrong ABI must reject just the Python Module, with the central still able to
 # command another Module and complete its normal shutdown sequence.
 set(metadata "${build_app}/python/vinc/_build.py")
-file(READ "${metadata}" original_metadata)
-file(APPEND "${metadata}" "\nVERSION = (0, 0)\n")
 file(WRITE "${work}/bad-python.tcl"
     "NativePeer\nif {[catch {PythonPeer --name rejected}]} {puts PYTHON_REJECTED}\nnative status\nexit\n")
+execute_process(COMMAND "${build_app}/PythonApp${suffix}" --shell-port 0 --python "${work}/missing-python"
+    -S "${work}/bad-python.tcl" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 35)
+file(WRITE "${work}/missing-python-override.log" "${output}\n${errors}")
+if(NOT result STREQUAL "0" OR NOT output MATCHES "PYTHON_REJECTED"
+        OR NOT output MATCHES "NATIVE_ALIVE" OR NOT output MATCHES "All module processes exited")
+    message(FATAL_ERROR "Runtime override was ignored or escaped isolation: ${output}\n${errors}")
+endif()
+file(READ "${metadata}" original_metadata)
+file(APPEND "${metadata}" "\nVERSION = (0, 0)\n")
 execute_process(COMMAND "${build_app}/PythonApp${suffix}" --shell-port 0 --python "${PYTHON}"
     -S "${work}/bad-python.tcl" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 35)
 file(WRITE "${work}/wrong-abi.log" "${output}\n${errors}")

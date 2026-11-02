@@ -22,6 +22,10 @@ PROCESS = BUILD.process
 
 
 class CompilerMinimumTests(unittest.TestCase):
+    def test_module_python_cmake_override_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            BUILD.arguments(["-DPython_EXECUTABLE=" + sys.executable])
+
     def test_native_msvc_boundary(self):
         for version in ("19.42.34444", "19.43.99999"):
             with self.subTest(version=version):

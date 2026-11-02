@@ -280,9 +280,9 @@ The umbrella header does not include generated messages. Include `<vinc_messages
 
 ### Python
 
-Build with `-DVINC_BUILD_PYTHON=ON` and select the build interpreter with `-DPython_EXECUTABLE=/absolute/path/to/python3`. Vinc does not embed Python or install packages. At runtime, it selects Python from PATH unless overridden with `Vinc --python PATH`.
+Enable `CONFIG_VINC_APP_PYTHON=y` in the App's Kconfig file. Select System Python (PATH) or a Custom absolute executable path there; the App uses the same selection as its runtime default. `Vinc --python PATH` overrides one invocation. `-DPython_EXECUTABLE` is no longer supported. Vinc does not embed Python or install packages. See [Python selection](tools/configure/README.md#module-python-selection--module-python-選擇).
 
-建置時加入 `-DVINC_BUILD_PYTHON=ON`，並以 `-DPython_EXECUTABLE=/absolute/path/to/python3` 指定建置用直譯器。Vinc 不嵌入 Python、不安裝套件；執行時預設從 PATH 選取 Python，可用 `Vinc --python PATH` 覆寫。
+在 App 的 Kconfig 啟用 `CONFIG_VINC_APP_PYTHON=y`，並選擇 System（PATH）或 Custom 絕對路徑，建置與執行預設共用此設定。`Vinc --python PATH` 僅覆寫本次執行，舊 `-DPython_EXECUTABLE` 入口已移除。Vinc 不嵌入 Python、不安裝套件。
 
 Place Modules beside Vinc as `data/module/<ModuleType>/<ModuleType>.py`. Vinc scans once at startup; use the ModuleType name in the same Shell as C++ Modules. Python ABI must match the native extension. On Windows, MSVC Runtime dependencies are checked before loading it. See the [Python guide](src/vinc/module_system/python/README.md).
 

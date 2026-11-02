@@ -90,9 +90,9 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(environment["CC"], "explicit-c")
         self.assertEqual(environment["CXX"], "explicit-cxx")
 
-    def test_defaults_and_no_module_python_when_skipped(self):
+    def test_old_module_python_is_never_injected_or_validated(self):
         data = values()
-        del data["module_python"]
+        data["module_python"] = "/no-longer-installed/python"
         args = arguments()
         PROFILE.apply(args, {"PATH": ""}, data)
         self.assertEqual(args.cache_values, {"Python3_EXECUTABLE": sys.executable})
@@ -102,26 +102,6 @@ class ProfileTests(unittest.TestCase):
             PROFILE.selected_tool("cmake", {"cmake": "/missing/cmake"}, {})
         self.assertEqual(PROFILE.selected_tool("cmake", {"cmake": "/missing/cmake"},
                                              {"VINC_BUILD_CMAKE": "explicit"}), "explicit")
-
-    def test_same_python_patch_is_accepted_but_minor_change_is_not(self):
-        version = sys.version_info
-        args = arguments({"Python_EXECUTABLE": sys.executable})
-        cache = {"Python_EXECUTABLE": sys.executable,
-                 "_Python_INTERPRETER_PROPERTIES": f"Python;{version.major};{version.minor};0"}
-        PROFILE.check_python_cache(cache, args)
-        cache["_Python_INTERPRETER_PROPERTIES"] = "Python;3;0;0"
-        with self.assertRaisesRegex(RuntimeError, "ABI changed"):
-            PROFILE.check_python_cache(cache, args)
-
-    def test_changed_module_python_requires_new_build_directory(self):
-        with self.assertRaisesRegex(RuntimeError, "another --build-dir"):
-            PROFILE.check_python_cache({"Python_EXECUTABLE": "/previous/python",
-                                        "_Python_INTERPRETER_PROPERTIES": "Python;3;11;0"},
-                                       arguments({"Python_EXECUTABLE": sys.executable}))
-
-    def test_unused_python_cache_entry_does_not_pin_an_abi(self):
-        PROFILE.check_python_cache({"Python_EXECUTABLE": "/previous/python"},
-                                   arguments({"Python_EXECUTABLE": sys.executable}))
 
     @unittest.skipUnless(os.name == "nt", "Windows NMAKE integration contract")
     def test_saved_compiler_does_not_pollute_nmake_cc_environment(self):

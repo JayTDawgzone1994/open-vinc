@@ -68,7 +68,8 @@ New-build configuration in an appropriate compiler environment:
 新建置目錄的設定範例（在適用的編譯器環境執行）：
 
 ```sh
-cmake -S src -B build/my-build -DVINC_BUILD_EXAMPLES=ON -DVINC_BUILD_PYTHON=ON -DPython_EXECUTABLE=/absolute/path/to/python3
+# Enable CONFIG_VINC_APP_PYTHON=y and choose System/Custom in src/vinc.conf first.
+cmake -S src -B build/my-build -DVINC_BUILD_EXAMPLES=ON
 cmake --build build/my-build --target user_examples_python
 ```
 

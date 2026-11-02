@@ -416,9 +416,6 @@ save_toolchain() {
         --cc "$(command -v "$c_compiler")" --cxx "$(command -v "$compiler")"
         --cmake "$(command -v cmake)" --ninja "$(command -v ninja)"
         --compiler-version "$("$compiler" --version | head -1)")
-    if (( with_python == 1 )); then
-        arguments+=(--module-python "$python")
-    fi
     if (( with_ui == 1 )); then
         arguments+=(--node "$(command -v node)" --npm "$(command -v npm)")
     fi
@@ -453,7 +450,7 @@ main() {
     if [[ -n $python ]]; then
         printf 'Build interpreter: %s\nFor direct CMake, select Python3_EXECUTABLE explicitly; root wrappers use the saved selection.\n' "$python"
         if (( with_python == 1 )); then
-            printf 'For Python SDK builds, select Python_EXECUTABLE=%s\n' "$python"
+            printf 'For Python Module builds, choose Custom in App Kconfig and set CONFIG_VINC_PYTHON_EXECUTABLE to: %s\n' "$python"
         fi
     fi
 }

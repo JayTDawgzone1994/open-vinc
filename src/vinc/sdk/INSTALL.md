@@ -424,7 +424,8 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
   `debug stop`; see [System lifecycle](../module_system/README.md#system-modules).
 - Python-enabled Apps share one binding target compiled against all registered
   messages. C++-only Apps do not depend on it. `Python3_EXECUTABLE` selects the
-  configuration interpreter; `Python_EXECUTABLE` selects the binding ABI.
+  configuration interpreter; App Kconfig selects the binding interpreter and runtime
+  default. `-DPython_EXECUTABLE` is rejected. See the [selection contract](../../../tools/configure/README.md#module-python-selection--module-python-選擇).
 - GUI/menu targets are `<App>_vinc_guiconfig` and `<App>_vinc_menuconfig`.
   See [configuration](../../../tools/configure/README.md) for validation and editing.
 - Install one App with `cmake --install build --component VincApp_CameraApp --prefix package`.
@@ -479,7 +480,7 @@ SDK 應用設定與 Python 綁定沿用來源建置的最低版本規則，見�
 SDK 會隨 CMake helper 交付規則。單純查找及連結 C++ SDK 不會搜尋或要求 Python。
 
 For Python Modules, enable `CONFIG_VINC_APP_PYTHON=y` in the App config file and select
-`Python_EXECUTABLE` when necessary. SDKs include the binding build material even
+System/Custom Python in that same file. SDKs include the binding build material even
 when produced with `VINC_BUILD_PYTHON=OFF`; consumer builds require a compatible
 CPython development environment and compile only the adapter, not framework
 libraries. Enabled Apps deploy their own `python/vinc` package. User Module
@@ -487,7 +488,7 @@ scripts/dependencies remain the application's responsibility under `data/module`
 See [Python SDK](../module_system/python/README.md#installed-sdk-applications--安裝式-sdk-應用)
 for ABI, pinned pybind11, resource ownership and runtime-selection contracts.
 
-Python Module 可在各 App 設定檔啟用，必要時指定 `Python_EXECUTABLE`。即使製作 SDK
+Python Module 可在各 App 設定檔啟用，並以同份 Kconfig 選擇 System／Custom Python。即使製作 SDK
 時關閉 Python，套件仍附帶建置材料；使用端需相容的 CPython 開發環境，只編譯接線，
 不重建核心庫。啟用的 App 各自部署 `python/vinc`；使用者腳本及額外相依仍自行部署
 於 `data/module`。ABI、pybind11、產物所有權及執行期選擇契約由上述 Python 文件維護。

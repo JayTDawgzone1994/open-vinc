@@ -96,6 +96,9 @@ def arguments(argv):
             parser.error("expected -DNAME[:TYPE]=VALUE")
 
         name, value = match.groups()
+        if name == "Python_EXECUTABLE":
+            parser.error("Python_EXECUTABLE was removed; select Module Python in App Kconfig. "
+                         "Python3_EXECUTABLE selects only the configuration tool.")
         if name in reserved or name.startswith("CMAKE_GENERATOR"):
             parser.error(name + " is controlled by this native Ninja wrapper; use CMake directly")
 
@@ -172,7 +175,6 @@ def build_with_environment(args, environment, colors, after_build, progress):
     with build_lock(directory):
         toolchain.validate_cache(directory, args, identity, reporter=display)
         cache = toolchain.read_cache(directory)
-        profiles.check_python_cache(cache, args)
         configure = [cmake, "-S", str(args.source), "-B", str(directory), "-G", "Ninja",
                      "-DCMAKE_BUILD_TYPE=" + args.config, "-DCMAKE_MAKE_PROGRAM=" + ninja]
         if color_definition:

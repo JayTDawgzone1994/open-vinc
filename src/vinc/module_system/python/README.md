@@ -44,13 +44,14 @@ Source application builds may select bindings with `CONFIG_VINC_APP_PYTHON=y`
 in `vinc.conf`. Legacy `VINC_BUILD_PYTHON` remains a compatibility input and must
 not contradict the file. Installed SDK applications use the same binding recipe.
 The Kconfig interpreter (`Python3_EXECUTABLE`) is independent of this extension's
-ABI interpreter (`Python_EXECUTABLE`); see [configuration](../../../../tools/configure/README.md).
+ABI interpreter selected by Kconfig; see [configuration](../../../../tools/configure/README.md#module-python-selection--module-python-選擇).
 
 來源版應用可用 `vinc.conf` 選擇 Python；舊開關保留但不能與檔案衝突。
 安裝式應用共用同一份綁定建置流程。設定工具直譯器與此處原生綁定使用的 Python ABI 分開選擇。
 
 ```sh
-cmake -S src -B build/my-build -DVINC_BUILD_PYTHON=ON -DPython_EXECUTABLE=/absolute/path/to/python3
+# First set CONFIG_VINC_APP_PYTHON=y and System/Custom in src/vinc.conf.
+cmake -S src -B build/my-build
 cmake --build build/my-build
 ```
 
@@ -99,15 +100,16 @@ See [SDK license delivery](../../sdk/README.md#license-delivery) for binary pack
 其中附帶 Open-VINC 條款／署名及原生相依聲明，含完整 pybind11 授權。
 二進位打包契約見 [SDK 授權交付](../../sdk/README.md#license-delivery)。
 
-User code lives in data/module, distinct from vinc_data persistence. Editing existing Python Modules does not rebuild central. Compiled vinc_messages type lists define vinc.messages; new .msg requires regenerating/rebuilding consumers/native extension, without runtime schema parsing. --python selects interpreter/venv; relative paths become absolute on central startup. Otherwise launch searches PATH for Windows python.exe/POSIX python3, not the build interpreter, without silently trying another incompatible environment.
+User code lives in data/module, distinct from vinc_data persistence. Editing existing Python Modules does not rebuild central. Compiled vinc_messages type lists define vinc.messages; new .msg requires regenerating/rebuilding consumers/native extension, without runtime schema parsing. --python selects interpreter/venv; relative paths become absolute on central startup. Otherwise Kconfig Custom uses its absolute path, while System searches the deployment PATH for Windows python.exe/POSIX python3 without silently trying another environment.
 
 `data/module` 是使用者程式的位置，與 Param／Log 的 `vinc_data` 不同。
 只修改既有 Python Module 程式不需編譯中央。`vinc.messages` 由 `vinc_messages` 的
 編譯期型別清單建立；新增 `.msg` 後須重新生成並建置所有使用它的程式及 Python 擴充。
 不提供 runtime `.msg` 解析器或動態訊息型別。
 `Vinc --python /absolute/path/to/python` 可指定 Python 或 venv，CLI 亦可接受相對路徑並在中央啟動時轉成絕對路徑。
-省略時，在啟動 Module 當下依 PATH 順序尋找 Windows `python.exe` 或 POSIX `python3`。
-不使用建置時選定的 Python 位置作為部署端的隱含預設，不在第一個 Python 不相容時偷偷換另一個環境。
+省略時使用 Kconfig 的預設：Custom 使用明確設定的絕對路徑，System 在啟動 Module 當下
+依部署環境 PATH 順序尋找 Windows `python.exe` 或 POSIX `python3`，不偷偷換另一個環境。
+公開 `-DPython_EXECUTABLE` 已移除；設定方法、舊 cache 遷移與多 App 限制見上述設定工具契約。
 
 ### Installed SDK applications / 安裝式 SDK 應用
 
@@ -141,7 +143,7 @@ versions or Python environments. Other bindings can use those targets afterward.
 不默默混用版本或 Python 環境。之後其他綁定可使用同一組 targets。
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/vinc-sdk -DPython_EXECUTABLE=/path/to/python3
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/vinc-sdk
 cmake --build build --target MyApp
 cmake --install build --prefix /path/to/deployed-app
 ```
@@ -153,13 +155,13 @@ when Python is disabled or the extension filename changes; untracked/modified
 files are preserved. User `.py` Modules and extra dependencies remain application-
 owned deployment inputs under `data/module`. Never overlay a running application.
 Use separate build directories when changing Python environments to avoid stale
-CMake discovery. Runtime still uses PATH or `--python`, never the producer's path.
+CMake discovery. Runtime follows the consumer App's Kconfig default or `--python`, never the SDK producer's Python path.
 
 build／install 僅部署明確列出的擴充、ABI／CRT 資訊與授權，不掃描並複製另一 ABI
 遺留的擴充。功能關閉或檔名改變時清理未被修改的舊產物，保留未納管／修改過檔案。
 使用者 `.py` 與額外相依仍由應用自行部署到 `data/module`。不要覆蓋執行中的程式；
 切換 Python 環境建議使用不同 build 目錄，避免沿用 CMake 探測快取。
-執行時仍透過 PATH／`--python` 選擇直譯器，不使用製作者路徑。
+執行時使用消費端 App 的 Kconfig 預設／`--python`，不使用 SDK 製作者路徑。
 
 #### Installed SDK validation (2026-10-29) / 安裝式 SDK 驗證
 

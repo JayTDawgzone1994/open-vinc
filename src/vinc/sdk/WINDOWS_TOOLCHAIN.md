@@ -188,8 +188,8 @@ Runtime; do not replace a user's installed DLLs to reproduce these experiments.
 
 ```powershell
 $vincPython = 'C:/path/to/compatible/python.exe'
+# Current builds: enable Python and select this interpreter in App Kconfig first.
 py -3 build.py --config Release --build-dir build/msvc1944-release --jobs 6 `
-    -D VINC_BUILD_PYTHON=ON -D "Python_EXECUTABLE=$vincPython" `
     -D VINC_INSTALL_SDK=ON -D "VINC_TEST_SDK_PYTHON_EXECUTABLE=$vincPython"
 ctest --test-dir build/msvc1944-release -C Release --output-on-failure
 ```

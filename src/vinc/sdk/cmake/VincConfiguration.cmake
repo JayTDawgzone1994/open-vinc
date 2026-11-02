@@ -1,9 +1,10 @@
 include_guard(GLOBAL)
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/VincPythonRequirements.cmake")
-    include("${CMAKE_CURRENT_LIST_DIR}/VincPythonRequirements.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/VincPythonSelection.cmake")
 else()
-    include("${CMAKE_CURRENT_LIST_DIR}/../../common/cmake/VincPythonRequirements.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/../../common/cmake/VincPythonSelection.cmake")
 endif()
+vinc_reject_python_override()
 
 # Internal composition entry: capture caller paths now, resolve after all Modules
 # have registered. Public App construction supplies its own official adapters.
@@ -116,7 +117,7 @@ function(vinc_resolve_app_configuration app)
         "${FILE}" "${TOOL}/configure.py" "${TOOL}/Kconfig.python")
     execute_process(COMMAND "${INTERPRETER}" -B "${TOOL}/configure.py"
         ${ARGUMENTS} --output "${OUTPUT}"
-        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors)
+        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors ENCODING UTF-8)
     if(NOT result STREQUAL "0")
         message(FATAL_ERROR "App ${app}: ${summary}${errors}\nEditor: ${INTERPRETER} ${TOOL}/configure.py ${ARGUMENTS} --gui")
     endif()
@@ -196,7 +197,7 @@ function(vinc_configure_application_features tool_directory)
     endforeach()
     execute_process(COMMAND "${Python3_EXECUTABLE}" -B "${tool_directory}/configure.py"
         --config "${config}" --output "${output}" ${arguments}
-        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors)
+        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors ENCODING UTF-8)
     if(NOT result STREQUAL "0")
         message(FATAL_ERROR "${summary}${errors}")
     endif()
@@ -204,6 +205,9 @@ function(vinc_configure_application_features tool_directory)
     include("${output}/features.cmake")
     foreach(name UI BAG PYTHON)
         set(VINC_APP_${name} "${VINC_APP_${name}}" PARENT_SCOPE)
+    endforeach()
+    foreach(name SYSTEM CUSTOM EXECUTABLE)
+        set(VINC_PYTHON_${name} "${VINC_PYTHON_${name}}" PARENT_SCOPE)
     endforeach()
     # Glob tracks creation/deletion as well as edits to an optional default file.
     file(GLOB config_presence CONFIGURE_DEPENDS "${config}")

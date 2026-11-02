@@ -19,6 +19,7 @@ add_custom_command(TARGET shell POST_BUILD
         "$<TARGET_FILE_DIR:shell>/licenses/tomlplusplus/LICENSE"
     VERBATIM)
 target_include_directories(shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
+target_include_directories(shell PRIVATE "${CMAKE_BINARY_DIR}/vinc-config")
 target_link_libraries(shell PRIVATE vinc::shell vinc::module_runtime)
 # Startup explanations use metadata only, never the UI server implementation.
 if(TARGET vinc_ui_errors)

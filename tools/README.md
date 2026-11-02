@@ -93,7 +93,7 @@ CMake, including each App's existing deployment layout.
   selection, Windows tries `py -3`, then PATH's `python`; POSIX uses `python3`. `VINC_BUILD_INTERPRETER` names an explicit
   interpreter executable, not a command with extra flags. An invalid explicit
   selection fails without fallback. A one-shot interpreter override does **not** change the
-  saved Python Module ABI; use `-DPython_EXECUTABLE=...` for that, and
+  Module Python selection; use App Kconfig System/Custom for that, and
   `-DPython3_EXECUTABLE=...` for the existing Kconfig interpreter selection.
 - Windows preserves a complete x64 MSVC developer environment. Otherwise it uses
   `vswhere` and the selected installation's `VsDevCmd.bat` in a child process.
@@ -155,7 +155,7 @@ CMake, including each App's existing deployment layout.
   SDK consumers do not compile Tcl. See [Tcl limitations](../library/tcl/README.md).
 
 - 需要 64 位元 Python 3.11+（限 Python 3）、CMake 3.20+、Ninja；可用 `VINC_BUILD_INTERPRETER` 指定腳本
-  直譯器，與 Python Module ABI 的 `Python_EXECUTABLE` 分開，不偷偷綁定。
+  直譯器，與 Kconfig 的 Module Python 選擇分開，不偷偷綁定。
 - Windows 自動載入的 MSVC 環境只影響本次建置；已選定的完整 x64 開發環境會保留。
   POSIX 保留指定的 CC／CXX；工具不合規時報錯，不偷偷換另一套。
 - Windows 建置／安裝步驟使用隱藏、獨立的 UTF-8 console；worker 在啟動工具前設定
@@ -501,11 +501,12 @@ installed before a later failure are not uninstalled.
   Windows bootstrap and setup discovery disable Python launchers' automatic
   installation in their process environment, including `--check`.
 - Explicit choices override saved defaults: `VINC_BUILD_INTERPRETER`, complete x64
-  Developer environment, `CC`/`CXX`, compiler/Python CMake `-D` options, and
+  Developer environment, `CC`/`CXX`, compiler/configuration-Python CMake `-D` options, and
   `VINC_BUILD_CMAKE`, `VINC_BUILD_NINJA`, `VINC_BUILD_NODE`, `VINC_BUILD_NPM` (single
   executable paths, no embedded arguments). Keep Node/npm from the same installation.
-- Setup's checked Python becomes the default build/Kconfig/Module interpreter.
-  `--no-python` records no Module interpreter. Build still decides feature enablement.
+- Setup's checked Python becomes the default build/Kconfig-tool interpreter only.
+  App Kconfig owns Module Python; old `module_python` profile fields are ignored.
+  Setup no longer records a Module interpreter. `-DPython_EXECUTABLE` is rejected.
 - Missing saved tools fail with a repair hint; no silent fallback. Explicit overrides
   do not rewrite the record. Rerun setup to refresh it, or remove just this platform's
   record to restore discovery. Version text is diagnostic, not an exact patch lock.
@@ -520,7 +521,8 @@ installed before a later failure are not uninstalled.
 Windows 入口與 setup 偵測會在自己的程序環境關閉 Python 啟動器的自動下載功能，
 避免 build／check 意外安裝 Runtime。
 明確環境／`-D` 設定優先，一次覆寫不改紀錄。setup 檢查過的 Python 預設共用於
-build、Kconfig 與 Module；`--no-python` 不記錄 Module 直譯器，也不更改功能開關。
+build 與 Kconfig 工具；Module Python 改由 App Kconfig 選擇，舊 `module_python` 紀錄忽略，
+setup 不再寫入這個欄位。`-DPython_EXECUTABLE` 已移除，功能開關不受 setup 更動。
 工具消失就失敗，不改找另一套；可重跑 setup 更新，或刪除本平台紀錄恢復自動偵測。
 既有建置目錄的編譯器與實際使用過的 Python ABI 不相容時要求另選目錄，不自動清除。
 外部 `--source` 專案與直接 CMake 不套用本 checkout 的紀錄。
@@ -582,7 +584,7 @@ build 不因發行版版本拒絕，仍須滿足工具、標準庫及 OS 能力�
 - Python must be 64-bit, GIL-enabled CPython 3.11+ (Python 3 only) with matching `Python.h` and,
   on Windows, its x64 import library. `VINC_SETUP_PYTHON` selects an explicit
   executable; an incompatible choice is reported rather than replaced. Setup
-  prints its path for your `Python_EXECUTABLE` selection. Windows tries the
+  prints its path for your Kconfig Custom Python selection. Windows tries the
   Python launcher's interpreter before PATH candidates. `--no-python` skips
   development-file requirements, but still checks the build interpreter.
   The shared [minimum policy](../src/vinc/common/README.md#build-toolchain-policy)
