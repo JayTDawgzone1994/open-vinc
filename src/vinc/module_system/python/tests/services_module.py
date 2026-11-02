@@ -23,6 +23,7 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         raises(TypeError, lambda: vinc.format_utc(-1))
         raises(TypeError, lambda: vinc.format_utc(2**64))
         self.mode = args[0] if args else "normal"
+        self.expected_publisher_id = int(args[1])
         self.received = []
         self.snapshots = []
         self.pump_thread = threading.get_ident()
@@ -61,12 +62,18 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         if self.mode == "vinc-error":
             self.context.pumpOnce()
         assert message.publisher_name() == "nativeNode"
-        assert message.publisher_instance() != self.get_mid()
+        assert message.topic_name() == "python/reply"
+        # Publisher IDs and Module MIDs are independent namespaces and may coincide.
+        assert message.publisher_instance() == self.expected_publisher_id, "Unexpected reply Publisher ID"
+        if self.mode == "same-id":
+            assert message.publisher_instance() == self.get_mid(), "ID overlap fixture was not exercised"
         assert message.get_topic_count() > 0
         assert message.get_message_timestamp() > 1_000_000_000_000_000_000
         assert message.get_message_monotonic_timestamp() > 0
         assert vinc.format_utc(message.get_message_timestamp()).endswith("Z")
         copied = message.copy()
+        assert copied.publisher_instance() == self.expected_publisher_id
+        assert copied.publisher_name() == "nativeNode"
         assert copied.get_message_timestamp() == message.get_message_timestamp()
         assert copied.get_message_monotonic_timestamp() == message.get_message_monotonic_timestamp()
         assert message.data().x == 42
@@ -105,11 +112,13 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         raises(ReferenceError, loan.data)
         raises(ReferenceError, lambda: self.publisher.commit(loan))
         self.wait(lambda: len(self.received) >= 2)
-        if self.mode != "normal":
+        if self.mode not in ("normal", "same-id"):
             return
         retained = self.received[0]
         assert retained.copy().publisher_instance() == retained.publisher_instance()
         latest = self.subscriber.get_last()
+        assert latest.publisher_instance() == self.expected_publisher_id
+        assert latest.publisher_name() == "nativeNode"
         assert latest.data().y == 84
         latest.data().y = 999
         assert self.subscriber.get_last().data().y == 84

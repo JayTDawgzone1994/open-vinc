@@ -36,15 +36,27 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     take(detail::ManagerAccess::configure_log(*manager, root));
     ModuleType native{"nativePeer", plugin, {}};
     take(manager->register_module_type(native));
-    auto native_mid = take(manager->start_module(native.name));
+    auto native_mid = take(manager->start_module(native.name, {mode}));
     take(manager->wait_started(native_mid));
+    const auto publisher_id = take(manager->command(native_mid, {"publisher-id"},
+                                                    control::Clock::now() + finish_timeout));
     ModuleType type;
     type.name = "pythonServices";
 
     type.python = PythonLaunch{script, bootstrap, python};
     take(manager->register_module_type(type));
-    auto mid = take(manager->start_module(type.name, {"--name", "pythonNode", mode}));
+    // A wrong expected identity must still fail; accepting coincident IDs must
+    // not weaken the actual Publisher identity check.
+    const auto expected_publisher_id = mode == "identity-error" ? publisher_id + 1 : publisher_id;
+    auto mid = take(manager->start_module(type.name,
+        {"--name", "pythonNode", mode, std::to_string(expected_publisher_id)}));
     take(manager->wait_started(mid));
+    std::cout << "Identity case=" << mode << " Publisher=" << publisher_id << " Python MID=" << mid << '\n';
+    if (mode == "same-id") {
+        check(static_cast<std::uint64_t>(publisher_id) == mid, "fixture must reproduce equal Publisher ID and MID");
+    } else if (mode == "normal") {
+        check(static_cast<std::uint64_t>(publisher_id) != mid, "fixture must also exercise distinct numeric IDs");
+    }
     const auto deadline = control::Clock::now() + finish_timeout;
     std::optional<ModuleSnapshot> record;
     while (control::Clock::now() < deadline) {
@@ -63,7 +75,7 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     if (record && record->last_failure) {
         std::cout << error_to_string(record->last_failure->error) << '\n';
     }
-    if (mode == "normal") {
+    if (mode == "normal" || mode == "same-id") {
         check(record && record->state == ModuleState::Stopped, "Python services must finish successfully");
         check(captured.find("PYTHON_SERVICES_PASSED") != std::string::npos, "all Python service checks ran");
         check(captured.find("PYTHON_SERVICE_REFERENCES_RELEASED") != std::string::npos,
@@ -81,6 +93,10 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
         check(record->last_failure->error.is_operation(operation), "callback operation retained");
         check(captured.find("services_module.py(") != std::string::npos,
               "callback traceback retains source location");
+        if (mode == "identity-error") {
+            check(captured.find("Unexpected reply Publisher ID") != std::string::npos,
+                  "wrong Publisher identity must be rejected by the identity assertion");
+        }
         if (mode == "vinc-error") {
             const auto causes = record->last_failure->error.causes();
             check(!causes.empty() && causes.back().code == static_cast<std::int32_t>(module_system::ErrorCode::Busy) &&
@@ -98,7 +114,7 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
 int main(int argc, char** argv) {
     try {
         check(argc == 5, "interpreter/bootstrap/script/plugin arguments");
-        for (const auto* mode : {"normal", "param-error", "bus-error", "vinc-error"}) {
+        for (const auto* mode : {"same-id", "normal", "identity-error", "param-error", "bus-error", "vinc-error"}) {
             run(std::filesystem::absolute(argv[1]), std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]), mode);
         }
