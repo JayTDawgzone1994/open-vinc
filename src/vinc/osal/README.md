@@ -27,6 +27,27 @@ Shared Memory 提供原始 bytes 的映射與資源生命週期；訊息布局�
 
 <a id="標頭與實作位置"></a>
 
+## Terminal text output / 終端文字輸出
+
+`Terminal::write_console(string_view)` synchronously writes a complete UTF-8 view
+to the standard-output terminal. Redirected stdout returns `Unsupported`; invalid
+UTF-8 returns `InvalidEncoding` before any write. Windows converts bounded chunks
+to UTF-16 and uses `WriteConsoleW`, bypassing CRT locale translation. POSIX writes
+UTF-8 bytes to the terminal, retrying interrupted writes. The conversion buffer is
+bounded; the caller retains ownership of the text and serializes Terminal access.
+Writes can block and OS errors may follow partial output; failure is not a promise
+of zero output and callers must not replay the whole request automatically.
+Errors use `WriteTerminal` and preserve native diagnostics. This method does not
+change CRT locale/stream modes or interpret application status/color policy.
+
+`Terminal::write_console(string_view)` 同步將完整 UTF-8 文字寫入標準輸出終端。
+stdout 重導向時回傳 `Unsupported`；非法 UTF-8 在寫入前回傳 `InvalidEncoding`。
+Windows 使用有界 UTF-16 轉換緩衝區與 `WriteConsoleW`，避開 CRT locale 轉碼；
+POSIX 寫出 UTF-8 bytes 並重試被訊號中斷的寫入。呼叫端持有文字並序列化 Terminal 操作。
+寫入可能阻塞，原生錯誤可能發生在部分輸出之後，不應自動重送整筆文字。
+錯誤使用 `WriteTerminal` 並保留原生診斷；不修改 CRT locale／串流模式，
+也不包含應用程式狀態或配色政策。
+
 ## Headers and implementation / 標頭與實作位置
 
 The generic cross-process [Notification](NOTIFICATION.md) API is available through `<vinc/osal/notification.hpp>`. Windows and POSIX backends are implemented; validation and platform limits are recorded below. Bus/Context integration is implemented outside OSAL; its separate contracts and validation are in [Pump wakeup](../module_system/PUMP_WAKEUP.md).
@@ -570,6 +591,17 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
 <a id="待處理事項"></a>
 
 ## Outstanding issues and resolved findings / 待處理事項與已解決發現
+
+- **Standalone MSVC encoding warnings (2026-11-02, confirmed):** An isolated
+  OSAL/Common Release build with MSVC 19.44 and code page 950 succeeds, but
+  `vinc_osal_errors` and the generated `vinc_errors` catalog emit C4819 for
+  `config.hpp`. These targets do not independently request `/utf-8`; full framework
+  composition supplies it at directory scope. Follow up by making their encoding
+  requirement local to the owning targets and validating standalone builds. This
+  runtime-policy stage records the issue without changing encoding behavior.
+  **獨立建置編碼警告：** 上述獨立建置成功，但兩個錯誤格式化／catalog target 依賴
+  外層提供 `/utf-8`，在 CP950 出現 C4819。可能錯誤解讀非 ASCII 原始碼；後續應將
+  編碼需求補到 target 並驗證。本輪僅記錄，不混入 CRT 政策修正。
 
 - **Descriptor rollback fixture, resolved (2026-10-27):** On Ubuntu 24.04 / WSL 2, GCC 13.3 and CMake 3.28.3, the original `osal.descriptor` passed directly but failed under CTest. `strace` confirmed that CTest's log occupied inherited fd 3; the fixture obtained fd 4 and rejected it before setting the resource limit or exercising rollback. The fixture now limits new descriptor numbers to `filler + 1`, verifies non-stdio exhaustion with `EMFILE`, and explicitly checks limit restoration. Anonymous shared diagnostics preserve child assertions without consuming a descriptor. Additional cases inherit occupied low descriptors and a sparse high descriptor. Direct execution, an explicit inherited-fd-3 launcher, and CTest passed; the descriptor test also passed 20 consecutive CTest runs. Related Linux descriptor/Process/SharedMemory/FileLock tests passed **4/4**. Tracing confirmed low-fd acquisition, relocation failure, close/unlink of new resources, and preservation of existing names after failed open. Five isolated negative controls (the old fixture assumption, omitted FileLock/SharedMemory create rollback, and erroneous unlink on either open failure) all failed as expected; restoring the copied sources passed. Production OSAL code was not changed. This validates these rollback paths, not all Linux behavior or the separately deferred creation/spawn race. Existing macOS validation remains recorded in the [validated environment](../../../README.md#macos-validation); this fixture revision was exercised on Ubuntu 24.04.
 - **Descriptor 回滾測試準備邏輯，已修正（2026-10-27）：** Ubuntu 24.04／WSL 2、GCC 13.3、CMake 3.28.3 上，原版直接執行通過，CTest 則失敗。`strace` 確認 CTest 日誌占用繼承的 fd 3，測試取得 fd 4 後，在設定資源上限及驗證回滾之前就誤判失敗。現在依實際 `filler + 1` 設限，明確驗證非標準串流 fd 已耗盡並回報 `EMFILE`，也檢查上限還原是否成功。匿名共享診斷保留子程序 assertion，且不占用 fd；新增繼承低編號與不連續高編號 fd 的案例。直接執行、明確繼承 fd 3、CTest 均通過，descriptor 另連跑 20 次通過；Linux descriptor／Process／SharedMemory／FileLock 共 **4/4** 通過。追蹤確認低 fd 建立、搬移失敗、新資源 close／unlink，以及 open 失敗保留既有名稱。隔離副本的五個負向對照（舊 fixture 假設、兩種 create 回滾缺漏、兩種 open 誤刪名稱）均被測試攔下，還原後通過。正式 OSAL 未修改；本次結論限於這些路徑，不代表所有 Linux 行為或另列的建立／spawn 競爭窗口已驗證。macOS 已有的驗證結果見[已驗證環境](../../../README.md#macos-validation)；本次 fixture 修訂於 Ubuntu 24.04 執行驗證。

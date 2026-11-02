@@ -5,11 +5,22 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import sys
 import tempfile
 
 sys.dont_write_bytecode = True
+for stream in (sys.stdout, sys.stderr):
+    if stream is not None and hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8")
 TOOL_DIR = Path(__file__).resolve().parent
+policy_directory = TOOL_DIR.parents[1] / "src/vinc/common/cmake"
+if not (policy_directory / "python_version.py").is_file():
+    # Installed SDK: share/vinc/configuration -> lib/cmake/vinc.
+    policy_directory = TOOL_DIR.parents[2] / "lib/cmake/vinc"
+python_error = runpy.run_path(str(policy_directory / "python_version.py"))["version_error"]()
+if python_error:
+    sys.exit(python_error)
 VENDORED = TOOL_DIR / "kconfiglib"
 if not VENDORED.is_dir():
     VENDORED = TOOL_DIR.parents[1] / "library/kconfiglib/upstream"
@@ -41,8 +52,7 @@ def assignments(path, symbols):
             raise ValueError(f"{path}:{line_number}: unknown option CONFIG_{name}")
         if name in requested:
             raise ValueError(f"{path}:{line_number}: duplicate CONFIG_{name}")
-        if symbols[name].type != kconfiglib.BOOL or value not in ("y", "n"):
-            raise ValueError(f"{path}:{line_number}: CONFIG_{name} requires y or n")
+        value = parse_value(symbols[name], value)
         requested[name] = value
     return requested
 
@@ -73,7 +83,7 @@ class ApplicationConfig(kconfiglib.Kconfig):
                 raise OSError(str(error)) from error
             result = super().load_config(str(path), replace=replace)
             for name, value in requested.items():
-                if self.syms[name].str_value != value:
+                if self.syms[name].visibility and self.syms[name].str_value != value:
                     raise OSError(f"{path}: CONFIG_{name} requested {value}, effective {self.syms[name].str_value}")
             return result
         return super().load_config(str(path), replace=replace)
@@ -92,9 +102,22 @@ class ApplicationConfig(kconfiglib.Kconfig):
                 raise OSError(f"CONFIG_{name}=y is unavailable in this SDK/build; disable it or use a capable SDK")
         for symbol in self.unique_defined_syms:
             if symbol.user_value is not None:
-                requested = kconfiglib.TRI_TO_STR[symbol.user_value]
-                if requested != symbol.str_value:
+                requested = symbol.user_value
+                if symbol.type == kconfiglib.BOOL:
+                    requested = kconfiglib.TRI_TO_STR[requested]
+                # Upstream retains the old member's user_value when a GUI choice
+                # changes. The choice owns the current selection; file/CLI input
+                # is checked separately so contradictory explicit input still fails.
+                if symbol.choice is None and symbol.visibility and requested != symbol.str_value:
                     raise OSError(f"CONFIG_{symbol.name}: requested {requested}, effective {symbol.str_value}")
+        if self.syms["VINC_PYTHON_CUSTOM"].str_value == "y":
+            path = self.syms["VINC_PYTHON_EXECUTABLE"].str_value
+            if not path or not Path(path).is_absolute():
+                raise OSError("CONFIG_VINC_PYTHON_EXECUTABLE requires an absolute executable path")
+            if any(ord(character) < 32 for character in path):
+                raise OSError("CONFIG_VINC_PYTHON_EXECUTABLE must not contain control characters")
+            if "$<" in path:
+                raise OSError("CONFIG_VINC_PYTHON_EXECUTABLE must not contain CMake generator-expression syntax ($<)")
 
     def write_config(self, filename=None, header=None, save_old=True, verbose=None):
         self.validate()
@@ -109,10 +132,39 @@ def write_if_changed(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or path.read_text(encoding="utf-8") != text:
         temporary = path.with_suffix(path.suffix + ".tmp")
-        # Path.write_text(newline=...) requires Python 3.10; keep the 3.9 floor.
+        # Keep generated configuration line endings stable on every platform.
         with temporary.open("w", encoding="utf-8", newline="\n") as output:
             output.write(text)
         temporary.replace(path)
+
+
+def parse_value(symbol, value):
+    if symbol.type == kconfiglib.BOOL:
+        if value in ("y", "n"):
+            return value
+        raise ValueError(f"CONFIG_{symbol.name} requires y or n")
+    if symbol.type == kconfiglib.STRING and re.fullmatch(r'"(?:[^"\\]|\\["\\])*"', value):
+        # Kconfig strings escape only quotes and backslashes, not JSON's \n/\t.
+        return kconfiglib.unescape(value[1:-1])
+    raise ValueError(f"CONFIG_{symbol.name}: expected y/n or a quoted, escaped string matching the option type")
+
+
+def cmake_literal(value):
+    # Bracket arguments preserve $, backslashes and semicolons without evaluation.
+    delimiter = "="
+    while "]" + delimiter + "]" in value:
+        delimiter += "="
+    return "[" + delimiter + "[" + value + "]" + delimiter + "]"
+
+
+def python_defaults_header(config):
+    value = config.syms["VINC_PYTHON_EXECUTABLE"].str_value
+    # ASCII source with explicit UTF-8 bytes avoids compiler execution-charset
+    # assumptions and prevents path text from becoming C++/CMake source code.
+    literal = "".join(f"\\{byte:03o}" for byte in value.encode("utf-8"))
+    return ('#pragma once\n#include <string_view>\nnamespace vinc::app {\n'
+            f'inline constexpr std::string_view python_executable = "{literal}";\n'
+            '}\n')
 
 
 def module_schema(modules):
@@ -161,7 +213,7 @@ def main():
         parser.add_argument(f"--{feature.lower()}-available", choices=("y", "n"),
                             default="y" if capabilities[feature] else "n")
     parser.add_argument("--legacy", action="append", default=[], metavar="OPTION=y|n")
-    parser.add_argument("--set", action="append", default=[], metavar="OPTION=y|n")
+    parser.add_argument("--set", action="append", default=[], metavar="OPTION=VALUE")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--gui", action="store_true")
     mode.add_argument("--menu", action="store_true")
@@ -207,9 +259,15 @@ def main():
             raise ValueError(f"{args.config}: CONFIG_{name} conflicts with legacy CMake option ({value})")
         config.syms[name].set_value(value)
     config.legacy_values = legacy_values
+    explicit_values = {}
     for entry in args.set:
         name, value = parse_assignment(entry, config)
         config.syms[name].set_value(value)
+        explicit_values[name] = value
+    for name, value in explicit_values.items():
+        symbol = config.syms[name]
+        if symbol.visibility and symbol.str_value != value:
+            raise ValueError(f"CONFIG_{name}: requested {value}, effective {symbol.str_value}")
 
     if args.gui or args.menu:
         # Upstream owns the editor. Saves and file opens call the validated public
@@ -232,9 +290,13 @@ def main():
         config.write_config(str(args.output / ".config"), save_old=False)
         cmake = "# Generated from Kconfig; do not edit.\n"
         for symbol in config.unique_defined_syms:
-            value = "ON" if symbol.str_value == "y" else "OFF"
+            if symbol.type == kconfiglib.STRING:
+                value = cmake_literal(symbol.str_value)
+            else:
+                value = "ON" if symbol.str_value == "y" else "OFF"
             cmake += f"set({symbol.name} {value})\n"
         write_if_changed(args.output / "features.cmake", cmake)
+        write_if_changed(args.output / "vinc_python_config.hpp", python_defaults_header(config))
     print(f"Vinc application configuration: {args.config}")
     for symbol in config.unique_defined_syms:
         print(f"  CONFIG_{symbol.name}={symbol.str_value}")
@@ -244,9 +306,9 @@ def parse_assignment(entry, config):
     name, separator, value = entry.partition("=")
     if name.startswith("CONFIG_"):
         name = name[len("CONFIG_"):]
-    if not separator or name not in config.syms or value not in ("y", "n"):
-        raise ValueError(f"Invalid assignment: {entry}; expected known OPTION=y|n")
-    return name, value
+    if not separator or name not in config.syms:
+        raise ValueError(f"Invalid assignment: {entry}; expected known OPTION=VALUE")
+    return name, parse_value(config.syms[name], value)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,72 @@
 
 # Vinc central application / Vinc 中央程式
 
+## Official System Modules / 官方 System Module
+
+Both the source App and `vinc_add_app()` register UI (`ui`) and Bag Recorder
+(`recorder`) with the [Module System policy](../../src/vinc/module_system/README.md#system-modules).
+Startup waits for Ready or failure before continuing to Tcl. A failed attempt is
+reported but remains supervised for retry; central and other services continue.
+Shell exposes `ui enable|disable|status` and `recorder record|status|finish|info`.
+They are hidden from ordinary Module listings, with process/recovery details in
+`help --verbose`. Only whole-framework shutdown stops these protected processes.
+
+來源版 App 與 `vinc_add_app()` 都以 System 政策登記 UI／Recorder；啟動等待就緒或失敗後
+才繼續 Tcl。失敗會回報，但仍由中央監督重試，不關閉其他服務。
+Shell 以上述內建命令操作，一般 Module 清單隱藏它們，`help --verbose` 保留程序與恢復診斷。
+只有整個框架 shutdown 才停止這些受保護程序。
+
+## Startup status / 初始化狀態
+
+Central records each completed initialization step, then Shell renders one status
+row per step after OSAL Terminal is ready. ANSI terminals use green/red check/cross
+markers; redirected output uses plain `[OK]` / `[FAIL]`. The final summary counts
+failed steps without implying that a failed official Module stopped the framework.
+Initialization order, deadlines, cancellation, and official-Module cleanup policies
+are unchanged. Readiness describes startup completion, not ongoing health.
+
+中央收集各初始化步驟的結果，待 Shell 的 OSAL Terminal 準備好後統一顯示每項一行。
+ANSI 終端使用綠／紅勾叉，重導向則用純文字 `[OK]`／`[FAIL]`。最後列出失敗步驟數；
+官方 Module 啟動失敗不代表中央停止。初始化順序、期限、取消與收尾政策不變；
+ready 表示完成啟動，不保證之後一直健康。
+
+Complete startup errors (including a distinct Manager failure, when present) are
+submitted to the existing bounded framework Log before entering Shell. Log's queue,
+disk-failure and durability limits still apply; files live beside the executable
+under `vinc_data/<instance>/logs/`. If Log could not be configured, details remain
+on screen. A fatal failure before Shell starts prints a plain aborted-startup report
+with full details, never a ready banner. Failure descriptions do not infer a busy
+port from a generic Module hook failure. Runtime output/Log formatting is unchanged.
+
+完整錯誤鏈及有差異的 Manager 故障送入既有框架 Log，沿用有界佇列、磁碟故障與保存限制；
+檔案位於執行檔旁 `vinc_data/<instance>/logs/`。Log 無法配置時，完整細節仍留在畫面。
+Shell 啟動前必須中止的錯誤會顯示純文字中止摘要與完整原因，不印 ready。
+不從一般 hook 失敗推論 port 被占用；本輪不更動 runtime Log 的呈現格式。
+
+Validation (2026-11-01): Windows x64 / MSVC 19.51 / Release passed
+`shell.startup_report`, `shell.integration`, `shell.console_input`, and `app.entry`.
+The production-entry fixture checks a synthetic official-Module startup failure,
+one console failure row, the complete cause chain in a new log file, continued
+script execution, and a fatal listener-configuration failure without a ready banner.
+This is not native socket fault injection. Linux/macOS and a fresh installed-SDK
+consumer were not rerun for this presentation change.
+
+驗證（2026-11-01）：Windows x64／MSVC 19.51／Release 通過上述四項測試。
+正式入口測試以替身 Module 製造啟動失敗，確認畫面只有一筆失敗、完整原因鏈寫入新 Log、
+腳本繼續執行，以及 listener 設定失敗時不誤印 ready；這不代表原生 socket 故障注入。
+本輪未重跑 Linux／macOS 與全新 installed-SDK 使用端。
+
+Follow-up: the full Windows Debug build exposed a missing `startup_report.cpp`
+source in `shell_fault_tests`, which compiles its own Shell implementation.
+After adding that source, the full Debug build and `shell.faults` /
+`shell.startup_report` passed. The earlier selected-target Release build had not
+covered this fixture.
+
+後續完整 Windows Debug 建置發現 `shell_fault_tests` 自行編譯 Shell 時漏列
+`startup_report.cpp`。補齊後，完整 Debug 建置及上述兩項測試通過；
+前次選定 target 的 Release 建置未涵蓋此故障測試。
+
+
 The confirmed next-step design is tracked in the
 [Multi-App composition plan](MULTI_APP.md): shared Modules/messages, per-App Kconfig
 selection and deployment, and automatic official UI/Bag startup. Stage 2 adds the

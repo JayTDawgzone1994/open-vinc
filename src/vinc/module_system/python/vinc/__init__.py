@@ -3,9 +3,15 @@ from enum import Enum
 import sys
 from . import _build
 
+if sys.version_info[0] != 3 or sys.version_info[:2] < _build.MINIMUM_VERSION:
+    raise ImportError(
+        f"VINC requires Python >= {'.'.join(map(str, _build.MINIMUM_VERSION))} and < 4; "
+        f"found {sys.version.split()[0]} at {sys.executable}. Select a compatible interpreter."
+    )
+
 if sys.platform == "win32" and _build.MSVC_RUNTIME:
     from ._windows_runtime import prepare as _prepare_runtime
-    _prepare_runtime()
+    _prepare_runtime(_build.MSVC_RUNTIME_MODE)
     del _prepare_runtime
 
 from ._native import Error, ErrorRecord, NativeError, PumpStats, error_to_string, format_utc

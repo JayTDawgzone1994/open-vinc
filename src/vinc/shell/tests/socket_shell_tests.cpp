@@ -203,6 +203,34 @@ void test_sessions_and_backpressure(Files& files) {
     Client owner_client(server.endpoint());
     Client observer_client(server.endpoint());
     check(owner_client.code != observer_client.code, "sessions have distinct recovery tokens");
+    check(owner_client.command("shell -e").find("No recorded error.") != std::string::npos,
+          "new remote session has no error");
+    const auto missing = owner_client.command("missingRemote private_argument");
+    check(missing.find("Unknown command: missingRemote") != std::string::npos &&
+              missing.find("domain=") == std::string::npos, "remote unknown command is concise");
+    const auto detail = owner_client.command("shell --error");
+    check(detail.find("code=6") != std::string::npos && detail.find("private_argument") == std::string::npos,
+          "remote error retains code without full user command");
+    owner_client.command("help");
+    check(owner_client.command("shell -e") == detail, "successful command and repeated query preserve error");
+    check(observer_client.command("shell -e").find("No recorded error.") != std::string::npos,
+          "remote errors are session-local");
+    check(observer_client.command("param invalid").find("domain=") == std::string::npos,
+          "Param command error is concise");
+    check(observer_client.command("shell -e").find("Param (domain=") != std::string::npos,
+          "Param failure retains its cause chain");
+    check(owner_client.command("shell -e") == detail, "another session cannot overwrite the error");
+    for (const std::string name : {"help", "shell", "log", "param", "debug", "srun", "scancel", "sstatus",
+                                   "output", "exit", "disconnect", "resume"}) {
+        for (const std::string flag : {"-h", "--help"}) {
+            check(owner_client.command(name + " " + flag).find("Usage: " + name) != std::string::npos,
+                  "remote builtin help returns without side effects");
+        }
+    }
+    check(!server.shutdown_requested() && !scripts.active() && manager.snapshots().empty(),
+          "remote help cannot start scripts, Modules or shutdown");
+    check(owner_client.command("help").find("[Remote]\r\n  disconnect  resume\r\n") != std::string::npos,
+          "remote overview includes session commands");
     check(owner_client.command("output off").find("off") != std::string::npos, "output off");
     owner_client.send("hel");
     std::this_thread::sleep_for(fragment_gap);
@@ -230,6 +258,8 @@ void test_sessions_and_backpressure(Files& files) {
     owner_client.pending.clear();
     check(observer_client.command("sstatus").find("Script running") != std::string::npos,
           "another session can inspect the job");
+    check(observer_client.command("scancel --help").find("Usage: scancel") != std::string::npos && scripts.active(),
+          "cancellation help leaves the running script alone");
     check(observer_client.command("srun " + shell::quote_argument(text(forever))).find("Busy") !=
               std::string::npos,
           "global script exclusion");
@@ -238,10 +268,14 @@ void test_sessions_and_backpressure(Files& files) {
     check(!scripts.start(local_script_owner, forever, {}).has_value(),
           "local script shares the same exclusion");
     const auto old_code = owner_client.code;
+    owner_client.command("beforeResume secret");
+    const auto before_resume = owner_client.command("shell -e");
     owner_client.close();
     std::this_thread::sleep_for(reconnect_probe_delay);
     check(scripts.active(), "script continues during reconnect grace");
     Client resumed(server.endpoint());
+    check(resumed.command("shell -e").find("No recorded error.") != std::string::npos,
+          "fresh connection does not inherit another session");
     // A single TCP read can contain the handoff, another command and a partial next line.
     resumed.send("resume " + old_code + "\r\nsstatus\nout");
     auto restored = resumed.until("VINC > ");
@@ -254,6 +288,7 @@ void test_sessions_and_backpressure(Files& files) {
     resumed.send("\nhelp\n");
     check(resumed.until("VINC > ").find("[Commands]") != std::string::npos,
           "split CRLF stays one delimiter after handoff");
+    check(resumed.command("shell -e") == before_resume, "resume keeps the retained session's error");
     auto code_start = restored.find("Resume code: ");
     resumed.code = restored.substr(code_start + resume_code_prefix.size(), resume_code_hex_chars);
     check(resumed.code != old_code, "resume rotates recovery code");
@@ -419,6 +454,82 @@ void test_remote_shutdown(Files& files, char** argv) {
           "local output drained during remote shutdown");
 }
 
+void test_remote_help_forwarding(Files& files, const std::filesystem::path& helper) {
+    auto manager = take(vinc::test::create_manager());
+    take(manager->register_module_type({"shellHelper", helper, {}}));
+    shell::ScriptService scripts(*manager);
+    take(scripts.initialize());
+    shell::SocketShellOptions options;
+    options.port = 0;
+    auto server = take(shell::SocketShell::create(*manager, scripts, options));
+    Client client(server->endpoint());
+    check(client.command("help").find("[ModuleTypes]\r\n  shellHelper\r\n\r\n[Modules]") != std::string::npos,
+          "TCP help preserves ModuleTypes rows with protocol line endings");
+    client.command("output off");
+    check(client.command("shellHelper --help").find("Started node") != std::string::npos,
+          "remote ModuleType help is forwarded to startup");
+    check(client.command("node startup-help").find("node returned 43") != std::string::npos,
+          "remote startup keeps the help flag");
+    check(client.command("node -h").find("node returned 41") != std::string::npos &&
+              client.command("node --help").find("node returned 42") != std::string::npos,
+          "remote Module hook owns both help flags");
+
+    const auto script = files.write("help-argv.tcl", "puts script-help=$argv\n");
+    client.send("srun " + shell::quote_argument(text(script)) + " --help\n");
+    client.until("script-help=--help");
+    client.close();
+    server.reset();
+    manager->begin_shutdown();
+    take(manager->wait_shutdown(Clock::now() + fixture_wait_timeout));
+}
+
+void test_remote_script_error(Files& files) {
+    constexpr auto late_script_failure_delay = 250ms;
+    auto manager = take(vinc::test::create_manager());
+    shell::ScriptService scripts(*manager);
+    take(scripts.initialize());
+    shell::SocketShellOptions options;
+    options.port = 0;
+    auto server = take(shell::SocketShell::create(*manager, scripts, options));
+    Client owner(server->endpoint());
+    Client observer(server->endpoint());
+    const auto file = files.write("failure.tcl", "error unique-script-failure\n");
+    owner.send("srun " + shell::quote_argument(text(file)) + "\n");
+    owner.until("Script running.");
+    owner.until("VINC > ");
+    const auto summary = owner.until("VINC > ");
+    check(summary.find("unique-script-failure") != std::string::npos &&
+              summary.find("line 1") != std::string::npos && summary.find("domain=") == std::string::npos,
+          "script failure has a concise file/line/reason summary");
+    const auto details = owner.command("shell -e");
+    check(details.find("domain=") != std::string::npos && details.find("while executing") != std::string::npos,
+          "script numeric failure and Tcl stack remain inspectable");
+    check(observer.command("shell -e").find("No recorded error.") != std::string::npos,
+          "script failure belongs only to its initiating session");
+    std::ostringstream local_output;
+    auto local = take(Shell::create(*manager, local_output));
+    take(local->process_line("shell -e"));
+    check(local_output.str().find("No recorded error.") != std::string::npos,
+          "local Shell does not inherit remote script errors");
+    const auto late_script = files.write("late-failure.tcl",
+        "after " + std::to_string(late_script_failure_delay.count()) + "\nerror disconnected-script-failure\n");
+    const auto recovery_code = owner.code;
+    owner.send("srun " + shell::quote_argument(text(late_script)) + "\n");
+    owner.until("Script running.");
+    owner.until("VINC > ");
+    owner.close();
+    check(eventually([&] { return !scripts.active(); }), "script completes while owner is disconnected");
+    Client resumed(server->endpoint());
+    check(resumed.command("resume " + recovery_code).find("Session resumed") != std::string::npos,
+          "resume after background script failure");
+    check(resumed.command("shell -e").find("disconnected-script-failure") != std::string::npos,
+          "failure collected during disconnection survives recovery");
+    resumed.close();
+    observer.close();
+    server.reset();
+    local->wait_shutdown();
+}
+
 void test_remote_contract(Files& files, const std::filesystem::path& helper) {
     auto manager = take(vinc::test::create_manager());
     take(manager->register_module_type({"shellHelper", helper, {}}));
@@ -438,7 +549,7 @@ void test_remote_contract(Files& files, const std::filesystem::path& helper) {
     client.until("VINC > ");
     // Fatal exit may also queue a Log disconnect notification with its own prompt.
     // Identify the command reply before consuming its terminating prompt.
-    client.send("help\r\n");
+    client.send("help --verbose\r\n");
     client.until("[Commands]");
     const auto help = client.until("VINC > ");
     check(help.find("[Module fault] faultNode MID=") != std::string::npos,
@@ -466,6 +577,8 @@ int main(int argc, char** argv) {
         test_sessions_and_backpressure(files);
         test_connection_capacity();
         test_ipv6_listener();
+        test_remote_help_forwarding(files, argv[1]);
+        test_remote_script_error(files);
         test_remote_contract(files, argv[1]);
         test_remote_shutdown(files, argv);
         std::cout << "Socket Shell tests passed\n";

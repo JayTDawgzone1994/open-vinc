@@ -3,6 +3,7 @@
 // No child process is needed for these command/editor contracts.
 
 #include <vinc/shell/detail/command_router.hpp>
+#include <vinc/shell/detail/session_feedback.hpp>
 #include <vinc/shell/detail/shell.hpp>
 #include <vinc/shell/detail/tcl_runtime.hpp>
 #include <vinc/shell/detail/error_catalog.hpp>
@@ -246,6 +247,131 @@ void test_contract_rendering() {
           "deadline expiry does not imply successful OS termination");
 }
 
+void test_builtin_help() {
+    auto manager = checked_value(vinc::test::create_manager());
+    shell::CommandRouter router(*manager);
+    check(router.initialize(), "reserve help commands");
+    for (const std::string name : {"help", "shell", "log", "param", "debug", "srun", "scancel", "sstatus",
+                                   "output", "ui", "recorder", "exit", "disconnect", "resume"}) {
+        for (const std::string flag : {"-h", "--help"}) {
+            const auto reply = checked_value(router.execute({name, flag}));
+            check(reply.code == 0 && !reply.shutdown && reply.message.starts_with("Usage: " + name),
+                  "builtin help succeeds without executing the operation");
+        }
+    }
+    check(manager->snapshots().empty(), "debug help cannot start a Module");
+    check(!manager->register_micro_program("shell", [](auto&) { return 0; }), "shell name is reserved");
+    const auto no_session = router.execute({"shell", "-e"});
+    check(!no_session && no_session.error().is(shell::ErrorCode::SessionRequired),
+          "session-free dispatch cannot read another session's error");
+    check(!router.command_help({"srun", "script.tcl", "--help"}), "script argv is not builtin help");
+    check(!router.command_help({"log", "show", "--help"}), "nested help is not intercepted");
+    check(!router.execute({"help", "log"}), "help does not introduce a second command-help syntax");
+    check(!router.execute({"help", "--verbose", "extra"}), "verbose rejects extra arguments");
+    const auto overview = checked_value(router.execute({"help"})).message;
+    check(overview.starts_with(
+              "Usage: <command> -h / --help; last error: shell -e\n\n"
+              "[Commands]\n  help     shell     log\n  param    debug     srun\n"
+              "  scancel  sstatus   output\n  ui       recorder  exit\n\n"),
+          "overview starts with usage and aligned three-column command names");
+    check(overview.find("[ModuleTypes]\n  (none)\n\n[Modules]") != std::string::npos,
+          "empty ModuleTypes has a separate heading and explicit empty state");
+    check(overview.find("log level") == std::string::npos && overview.find("[Remote]") == std::string::npos,
+          "local overview omits detailed syntax and remote-only commands");
+    shell::CommandRouter remote(*manager, true);
+    check(checked_value(remote.execute({"help"})).message.find("[Remote]\n  disconnect  resume\n") != std::string::npos,
+          "remote overview lists session commands");
+    std::vector<std::string> received;
+    check(manager->register_micro_program("customHelp", [&](auto& arguments) {
+        received = arguments;
+        return 23;
+    }), "register custom help owner");
+    const std::vector<std::string> arguments{"customHelp", "--help"};
+    check(checked_value(router.execute(arguments)).code == 23 && received == arguments,
+          "registered commands own their help flags");
+
+    // Registration alone is sufficient: help must not load or start any Module.
+    const auto unused_library = std::filesystem::absolute("unused-help-fixture.dll");
+    for (const std::string name : {"g", "f", "ee", "dddd", "ccc", "bb", "a"}) {
+        check(manager->register_module_type({name, unused_library, {}}), "register layout fixture");
+    }
+    const std::string layout = "[ModuleTypes]\n  a     bb  ccc\n  dddd  ee  f\n  g\n\n[Modules]";
+    check(checked_value(router.execute({"help"})).message.find(layout) != std::string::npos &&
+              checked_value(router.execute({"help", "--verbose"})).message.find(layout) != std::string::npos &&
+              checked_value(remote.execute({"help"})).message.find(layout) != std::string::npos,
+          "help preserves sorting, aligns columns and wraps the incomplete final row");
+    check(manager->snapshots().empty(), "formatting does not start registered Modules");
+
+    detail::SystemModuleOptions system;
+    system.name = "ui";
+    system.enabled = true;
+    check(detail::ManagerAccess::register_system_module(*manager, {"webUi", unused_library, {}}, system),
+          "trusted System name may share its builtin command");
+    check(checked_value(router.execute({"help"})).message.find(layout) != std::string::npos,
+          "registered System types do not leak into ordinary help");
+    check(checked_value(router.complete("web")).choices.empty(), "System type hidden from completion");
+    check(checked_value(router.complete("ui")).choices == std::vector<std::string>{"ui"},
+          "System builtin appears only once in completion");
+    check(checked_value(router.complete("ui en")).choices == std::vector<std::string>{"enable"},
+          "UI builtin completes its service operations without a running Module");
+    check(manager->snapshots().empty(), "System help and completion cannot start a process");
+}
+
+void test_session_feedback() {
+    shell::SessionFeedback feedback;
+    check(feedback.details() == "No recorded error.", "empty failure slot");
+    const Error unknown{shell::ErrorCode::UnknownCommand, shell::ErrorOperation::Execute};
+    const auto summary = feedback.failure(unknown, "ls");
+    check(summary == "Unknown command: ls. Type 'help' for available commands.", "concise unknown command");
+    const auto stored = feedback.details();
+    check(stored.find(error_to_string(unknown)) != std::string::npos, "complete numeric error retained");
+    feedback.command(shell::CommandReply{0, false, "OK"}, "help");
+    check(feedback.details() == stored && feedback.details() == stored, "success and inspection preserve error");
+
+    const auto nested = wrap_error(shell::ErrorCode::CommandFailed, shell::ErrorOperation::Execute,
+        Error::from_raw(ErrorDomain::Unknown, 1234, 5678, {NativeErrorSource::LinuxErrno, 13}));
+    check(feedback.failure(nested, "node").find("shell -e") != std::string::npos &&
+              feedback.details().find(error_to_string(nested)) != std::string::npos,
+          "unrecognized code and native cause remain available");
+    for (const auto code : {shell::ErrorCode::TimeoutOutcomeUnknown, shell::ErrorCode::CancelledOutcomeUnknown,
+                            shell::ErrorCode::OutcomeUnknown}) {
+        check(feedback.failure(Error{code}, "node").find("outcome is unknown") != std::string::npos,
+              "unknown outcome is never presented as safe to retry");
+    }
+    const auto uncertain = wrap_error(shell::ErrorCode::CommandFailed, shell::ErrorOperation::Execute,
+        wrap_error(module_system::ErrorCode::HookFailed, module_system::ErrorOperation::Command,
+                   Error{module_system::ErrorCode::TimeoutOutcomeUnknown}));
+    check(feedback.failure(uncertain, "node").find("outcome is unknown") != std::string::npos,
+          "generic wrappers cannot hide uncertainty retained in the cause chain");
+    feedback.command(shell::CommandReply{-17, false, "ignored"}, "node");
+    check(feedback.details() == "node returned -17", "application status stays separate from framework Error");
+
+    shell::ScriptReport report{std::unexpected(Error{shell::ErrorCode::ScriptFailed, shell::ErrorOperation::RunScript}),
+                              {"startup.tcl", 7, "bad value\nwhile executing\nsource context"}};
+    const auto script_summary = feedback.script(report);
+    check(script_summary.find("startup.tcl (line 7): bad value") != std::string::npos &&
+              script_summary.find("while executing") == std::string::npos &&
+              feedback.details().find("source context") != std::string::npos,
+          "script summary separates location and reason from retained stack");
+    report.diagnostic.details = std::string(config::shell_script_result_bytes + 100, 'x') + "\x1b[2J";
+    feedback.script(report);
+    const auto bounded = feedback.details();
+    check(bounded.size() < config::shell_socket_payload_bytes && bounded.find("truncated") != std::string::npos,
+          "error query fits remote reply budget and marks truncation");
+    feedback.failure(unknown, "bad\x1b[2J\nname");
+    check(feedback.details().find('\x1b') == std::string::npos, "error context cannot inject terminal controls");
+
+    auto manager = checked_value(vinc::test::create_manager());
+    std::ostringstream output;
+    auto owner = checked_value(Shell::create(*manager, output));
+    const auto failure = owner->process_line("missingCommand private_argument");
+    check(!failure && failure.error() == unknown, "C++ process_line still returns the original Error");
+    check(owner->process_line("help"), "success after failure");
+    check(owner->process_line("shell --error"), "local failure inspection");
+    check(output.str().find("code=6") != std::string::npos && output.str().find("private_argument") == std::string::npos,
+          "only target and diagnostics are retained, not the full submitted line");
+}
+
 int main(int, char** argv) {
     try {
         test_initialization_failure();
@@ -256,6 +382,8 @@ int main(int, char** argv) {
         test_line_editor();
         test_parser_boundaries();
         test_dispatch_and_lifetime();
+        test_builtin_help();
+        test_session_feedback();
         std::cout << "shell unit tests passed\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

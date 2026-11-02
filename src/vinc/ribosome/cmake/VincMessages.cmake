@@ -60,4 +60,7 @@ function(vinc_finalize_messages)
         COMMENT "Ribosome: generate all registered message directories"
         VERBATIM)
     add_dependencies(vinc_messages generate_messages)
+    if(TARGET vinc_message_headers)
+        add_dependencies(vinc_message_headers generate_messages)
+    endif()
 endfunction()

@@ -4,3 +4,31 @@ config VINC_APP_PYTHON
     help
       Build bindings with the selected CPython development environment.
       This is separate from the interpreter running this configurator.
+
+if VINC_APP_PYTHON
+
+choice
+    prompt "Module Python interpreter"
+    default VINC_PYTHON_SYSTEM
+
+config VINC_PYTHON_SYSTEM
+    bool "System Python (current PATH, including an active virtual environment)"
+    help
+      Use the first python.exe on Windows or python3 on Linux/macOS in PATH.
+      Build and deployment resolve PATH independently; the runtime must match
+      the binding's CPython ABI. No fallback to another installation is made.
+
+config VINC_PYTHON_CUSTOM
+    bool "Custom Python executable"
+
+endchoice
+
+config VINC_PYTHON_EXECUTABLE
+    string "Absolute path to the Python executable"
+    depends on VINC_PYTHON_CUSTOM
+    default ""
+    help
+      Used for both building bindings and launching Modules. The App's
+      --python option overrides this path for that invocation only.
+
+endif

@@ -9,9 +9,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../library/tcl" "${CMAKE_BINARY_DIR}/library/tcl")
 add_library(vinc_shell STATIC
     src/shell.cpp
+    src/startup_report.cpp
     src/tcl_runtime.cpp
     src/command_line.cpp
     src/command_router.cpp
+    src/session_feedback.cpp
     src/script_service.cpp
     src/socket_shell.cpp
 )

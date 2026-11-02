@@ -76,25 +76,47 @@ reported without terminating central. Query the default instance in Shell or Tcl
 ui status
 ```
 
-Open http://127.0.0.1:8080/. To change listener settings, stop the current UI MID first, then launch it again:
+Open http://127.0.0.1:8080/. UI is a protected **System Module**. Use the central
+commands to toggle HTTP without stopping its process:
 
-用瀏覽器開啟 `http://127.0.0.1:8080/`。需要變更時，先用 `debug stop <MID>` 停止目前 UI，再重新啟動：
+用瀏覽器開啟 `http://127.0.0.1:8080/`。UI 現在是受保護的 **System Module**；
+透過中央命令切換 HTTP，程序仍保持運作：
 
 ```tcl
-webUi --ip 127.0.0.1 --port 8090
+ui disable
+ui enable
+ui status
+ui --help
 ```
 
---ip accepts numeric IPv4/IPv6 or localhost (127.0.0.1), without DNS guessing. --port 0 prints an OS-assigned URL. Nonloopback requires explicit configuration. Current endpoints serve assets/catalog and capability-checked read-only diagnostics, with no user login, HTTPS, or remote-administration guarantee. Public listeners expose assets/diagnostics to connected clients; the capability does not block native clients able to connect.
+Central retains the desired enabled state for this App lifetime, including across
+UI process crashes. A command accepted during retry waiting affects the next
+attempt; Starting returns Busy. Enable acknowledgement is not a promise of future
+HTTP health. A bind/listener failure uses the shared System recovery policy.
+Disable releases HTTP, graph requests and monitor resources; enable creates a new
+browser capability. `help --verbose` shows the process and retry diagnostics.
+Ordinary `debug stop`, `debug start webUi`, and `webUi ...` launches are rejected.
+Only complete framework shutdown stops the System Module. Listener settings and
+persistent enable policy are left for future framework Param integration; there is
+no replacement user-facing port-setting command in this change.
 
-`--ip` 接受數字 IPv4／IPv6 或 `localhost`（轉為 127.0.0.1），不做 DNS 猜測。
-`--port 0` 由 OS 分配並印出 URL；非 loopback 位址須明確指定。現在服務 UI、套件清單及經 browser capability 驗證的唯讀 Topic 診斷，
-沒有使用者登入、HTTPS 或遠端管理保證。改成對外監聽會讓連入者取得套件及唯讀診斷；browser capability 不阻止能直接連入的原生客戶端。
+中央在本次 App 存活期間保留啟用意圖，UI crash 重啟也沿用。待重試期間接受的切換套用於
+下次啟動；正在 Starting 時回傳 Busy。接受 enable 不保證之後 HTTP 一直健康，綁定／監聽
+失敗交由共同 System 重啟政策處理。disable 釋放 HTTP、graph 請求及監控資源；重新 enable
+會換發 browser capability。`help --verbose` 可查程序與重試診斷。
+不允許一般 `debug stop`、`debug start webUi` 或 `webUi ...` 建立／停止官方實例。
+完整框架關閉才會停止此 System Module；監聽設定與持久化啟用政策留待框架 Param 接線，
+本輪沒有新增替代的使用者 port 設定命令。
 
-Default instance ui follows duplicate-name rejection. Stop with debug stop <MID> (MID shown at startup/help), also valid for non-debug Modules. Central orderly exit stops it; afterward webUi may restart.
+HTTP endpoints still have no user login or HTTPS guarantee. The browser capability
+does not block native clients able to connect. See [System policy](../module_system/README.md#system-modules).
 
-預設實例名稱 `ui`，沿用 Module System 的重名拒絕規則。
-停止使用既有 Shell 命令 `debug stop <MID>`（啟動輸出及 `help` 顯示 MID）；
-這個命令同樣可停止非 debug 啟動的 Module。中央正常退出亦會停止它。停止後可重新執行 `webUi`。
+HTTP 仍沒有使用者登入或 HTTPS 保證，browser capability 不阻止能連入的原生客戶端。
+重啟與權限契約見上述 System 政策。
+
+System Module acceptance, including actual port conflicts and automatic recovery,
+is recorded in the [stage 3 validation](../module_system/README.md#system-module-stage3).
+System Module 的真實 port 衝突、自動恢復及平台驗證範圍，見上述第三階段紀錄。
 
 <a id="部署"></a>
 
@@ -113,11 +135,14 @@ Default instance ui follows duplicate-name rejection. Stop with debug stop <MID>
         └── style.css
 ```
 
-Default root is the build-fixed **absolute** path above, independent of cwd. Relocation can use webUi --root /absolute/path/to/ui for complete app+plugins. No complete relocatable install/package exists; central catalog path limits still apply.
+The legacy source shell uses the build-fixed absolute root above. Composed Apps
+use executable-relative resources and support relocatable installation through
+[`vinc_add_app()`](../sdk/INSTALL.md). Deploy their complete App directory; UI
+resource configuration is framework-owned, not a `webUi` relaunch command.
 
-預設 root 在建置時固定為上列**絕對路徑**，不依使用者當前 cwd。搬移部署可用
-`webUi --root /absolute/path/to/ui` 指定完整的 app＋plugins 目錄。
-這版沒有完整可重定位 install/package 規則；中央自己的 Module catalog 路徑契約仍適用。
+舊來源版 Shell 使用上述建置時固定的絕對 root。組裝式 App 透過 `vinc_add_app()` 使用
+執行檔相對資源並支援搬移安裝；須交付完整 App 目錄。UI 資源設定由框架持有，
+不再以 `webUi` 重新啟動命令調整。
 
 vinc_ui_deploy replaces build-owned app/plugins/vinc.example/plugins/vinc.topics/plugins/vinc.graph including stale generated files, never other plugin directories. Do not save custom work there. Carry the complete app directory when deploying: app/third-party.txt combines Open-VINC's terms/attribution, the shared dependency inventory, and installed frontend licenses. The three shared files are also downloadable under app/licenses/open-vinc/. Native Module binaries follow [SDK license delivery](../sdk/README.md#license-delivery).
 
@@ -281,7 +306,7 @@ Debug 既有 `module.shell`、`message_bus.shell`、`bag.shell` 亦通過。
 
 ## Topic Monitor contract (2026-10-25) / Topic Monitor 契約（2026-10-25）
 
-Start webUi, then open Topics→Topic Monitor. Lists registered topics, known type/hash, active Publisher/Subscriber counts, publication Hz, collisions, and Reader loss. Subscriber-only topics can appear; topics disappear under Bus rules when no registrations remain.
+With UI enabled, open Topics→Topic Monitor. Lists registered topics, known type/hash, active Publisher/Subscriber counts, publication Hz, collisions, and Reader loss. Subscriber-only topics can appear; topics disappear under Bus rules when no registrations remain.
 
 預設 `ui` 就緒後，在左側 **Topics → Topic Monitor** 開啟。清單列出登記中的 Topic、
 編譯時已知訊息型別／hash、活動 Publisher 與 Subscriber 數、發布 Hz、碰撞與讀者漏資料。

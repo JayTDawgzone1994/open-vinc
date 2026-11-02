@@ -27,6 +27,20 @@ function(vinc_register_error_catalog)
     # Providers expose only error metadata and optional native formatting code.
     # Never pass a runtime component target here: it may depend on vinc::errors.
     target_link_libraries(vinc_errors PRIVATE "${ERROR_TARGET}")
+    if(TARGET vinc_errors_python_runtime)
+        get_target_property(kind "${ERROR_TARGET}" TYPE)
+        if(kind STREQUAL "INTERFACE_LIBRARY")
+            # Catalog providers expose header metadata, not component runtimes.
+            # Carry their declared compilation requirements without pulling the
+            # native Common archive into the static-CRT catalog.
+            foreach(property IN ITEMS INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS COMPILE_FEATURES)
+                set_property(TARGET vinc_errors_python_runtime APPEND PROPERTY "${property}"
+                    "$<TARGET_PROPERTY:${ERROR_TARGET},INTERFACE_${property}>")
+            endforeach()
+        else()
+            vinc_runtime_link_libraries(vinc_errors_python_runtime PYTHON PRIVATE "${ERROR_TARGET}")
+        endif()
+    endif()
 endfunction()
 
 function(vinc_finalize_error_catalog)

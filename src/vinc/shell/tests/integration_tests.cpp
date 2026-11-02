@@ -362,7 +362,12 @@ void test_contract_notification(const std::filesystem::path& executable) {
     check(notification.find("[Module fault] node MID=") != std::string::npos &&
               notification.find("index=10 size=3") != std::string::npos, "central fault notification");
     check(router.contract_notifications(cursor).empty(), "notification cursor avoids duplicates");
-    const auto help = checked_value(router.execute({"help"}));
+    const auto compact = checked_value(router.execute({"help"}));
+    check(compact.message.find("node Failed MID=") != std::string::npos &&
+              compact.message.find("[Module fault]") == std::string::npos &&
+              compact.message.find("domain=") == std::string::npos,
+          "compact help retains failed state without full diagnostics");
+    const auto help = checked_value(router.execute({"help", "--verbose"}));
     check(help.message.find("[Module fault] node MID=") != std::string::npos, "help retains diagnostic");
     check(!std::filesystem::exists(files.path / (module + ".stopped")), "no fatal cleanup hook");
     InputPipe input;
@@ -404,6 +409,46 @@ void test_debug_gate_shutdown(const std::filesystem::path& executable) {
     check(output.str().find("DEBUG") != std::string::npos, "help remains usable at debug gate");
 }
 
+void test_help_dispatch(const std::filesystem::path& executable) {
+    auto manager = checked_value(vinc::test::create_manager());
+    register_helper(*manager, executable);
+    shell::CommandRouter router(*manager);
+    check(router.initialize(), "initialize help router");
+    check(router.execute({"shellHelper", "--help"}), "ModuleType help reaches startup hook");
+    check(checked_value(router.execute({"node", "startup-help"})).code == 43,
+          "startup hook received the original help flag");
+    check(checked_value(router.execute({"node", "-h"})).code == 41 &&
+              checked_value(router.execute({"node", "--help"})).code == 42,
+          "Module help reaches its command hook unchanged");
+
+    InputPipe input;
+    std::ostringstream output;
+    auto shell = checked_value(Shell::create(*manager, output));
+    input.send("output private_argument\nshell -e\nparam nonsense\nshell --error\n");
+    for (const std::string name : {"help", "shell", "log", "param", "debug", "srun", "scancel", "sstatus",
+                                   "output", "exit", "disconnect", "resume"}) {
+        input.send(name + " -h\n" + name + " --help\n");
+    }
+    input.send("sstatus\nhelp\nexit\n");
+    check(shell->run(), "local help and normal exit");
+    const auto rendered = output.str();
+    check(rendered.find("output: Invalid arguments.") != std::string::npos &&
+              rendered.find("Param (domain=") != std::string::npos &&
+              rendered.find("private_argument") == std::string::npos,
+          "local interactive failures are summarized and inspectable without retaining arguments");
+    for (const std::string name : {"help", "shell", "log", "param", "debug", "srun", "scancel", "sstatus",
+                                   "output", "exit", "disconnect", "resume"}) {
+        const auto first = rendered.find("Usage: " + name);
+        check(first != std::string::npos && rendered.find("Usage: " + name, first + 1) != std::string::npos,
+              "both local help aliases render before shutdown");
+    }
+    check(rendered.find("No script is running") != std::string::npos &&
+              rendered.find("[Modules]") != std::string::npos,
+          "help neither launches a script nor shuts down the Shell");
+    check(rendered.find("[ModuleTypes]\n  shellHelper\n\n[Modules]") != std::string::npos,
+          "local interactive help renders ModuleTypes below its heading");
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         return 2;
@@ -412,6 +457,7 @@ int main(int argc, char** argv) {
     try {
         check(shell::initialize_tcl(argv[0]), "initialize Tcl");
         const auto exe = std::filesystem::absolute(argv[1]);
+        test_help_dispatch(exe);
         test_debug_gate_shutdown(exe);
         test_contract_notification(exe);
         test_output_and_prompt(exe);

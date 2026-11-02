@@ -39,6 +39,10 @@ bind/listen 失敗時印出錯誤並結束啟動，部署腳本尚未執行；�
 
 ## 命令
 
+`help` 提供精簡總覽；`log -h`／`log --help` 等內建指令顯示各自完整語法。
+`help --verbose` 顯示保留的完整故障診斷。ModuleType／Module 的說明旗標仍轉發給
+使用者 hook；框架只處理自身指令。完整契約見 [Shell 說明](README.md#compact-help--精簡說明)。
+
 ```text
 help
 exampleModule
@@ -67,6 +71,11 @@ Module 除錯同樣使用 `debug start <ModuleType> [args...]`、`debug continue
 操作及等待限制見 [除錯指南](../module_system/DEBUGGING.md)。
 
 ## 斷線與恢復
+
+本機與每個 Socket Session 各自保存一筆最後失敗；使用 `shell -e`／`shell --error`
+查詢，成功指令不清除。正常命令顯示簡短原因，完整錯誤鏈與腳本診斷由此查看。
+恢復原 Session 會保留該紀錄，新連線不繼承；過期／銷毀後釋放。不新增命令 Log。
+完整契約與容量見 [Shell Session 錯誤回應](README.md#session-errors--session-錯誤回應)。
 
 歡迎訊息提供 256-bit 隨機恢復碼，由 OSAL 的 OS 隨機來源產生，不印到中央日誌。
 斷線後腳本先繼續；期限內建立新連線並輸入 `resume <恢復碼>`，恢復原 Session 所有權。

@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -25,7 +26,8 @@ class ConfigurationTests(unittest.TestCase):
     def run_tool(self, *arguments, success=True):
         result = subprocess.run(
             [sys.executable, "-B", str(TOOL), "--config", str(self.config), *arguments],
-            capture_output=True, text=True, timeout=20)
+            capture_output=True, text=True, encoding="utf-8", timeout=20,
+            env=dict(os.environ, PYTHONIOENCODING="utf-8"))
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
@@ -176,6 +178,67 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("unavailable", self.run_tool(
             "--preflight", "--python-available", "n", success=False))
         self.run_tool("--preflight", "--save", success=False)
+
+    def custom_config(self, path):
+        escaped = module.kconfiglib.escape(path)
+        self.config.write_text('CONFIG_VINC_APP_PYTHON=y\nCONFIG_VINC_PYTHON_CUSTOM=y\n'
+                               f'CONFIG_VINC_PYTHON_EXECUTABLE="{escaped}"\n', encoding="utf-8")
+
+    def test_python_choice_and_editor_round_trip(self):
+        path = str(self.root / "中文 path" / "python.exe")
+        self.custom_config(path)
+        config = module.ApplicationConfig({"UI": True, "BAG": True, "PYTHON": True})
+        config.load_config(str(self.config))
+        self.assertEqual(config.syms["VINC_PYTHON_EXECUTABLE"].str_value, path)
+        config.write_config(str(self.config))
+        self.run_tool("--output", str(self.root / "build"))
+        config.syms["VINC_PYTHON_SYSTEM"].set_value("y")
+        config.write_config(str(self.config))
+        output = self.run_tool("--output", str(self.root / "build"))
+        self.assertIn("CONFIG_VINC_PYTHON_SYSTEM=y", output)
+        header = (self.root / "build/vinc_python_config.hpp").read_text()
+        self.assertIn('python_executable = "";', header)
+
+    def test_custom_path_requires_absolute_and_valid_encoding(self):
+        for path in ("", "relative/python", "a\npython"):
+            self.custom_config(path)
+            self.run_tool(success=False)
+        self.config.write_text('CONFIG_VINC_APP_PYTHON=y\nCONFIG_VINC_PYTHON_CUSTOM=y\n'
+                               'CONFIG_VINC_PYTHON_EXECUTABLE="bad\\q"\n')
+        self.run_tool(success=False)
+        self.custom_config(str(self.root / "absent-python"))
+        # Editors do not require the selected environment to be installed yet.
+        self.run_tool("--save")
+        self.custom_config(str(self.root / "$<CONFIG>" / "python"))
+        self.assertIn("generator-expression", self.run_tool(success=False))
+
+    def test_redirected_diagnostics_are_utf8_outside_console_codepage(self):
+        self.config = self.root / "project-\ue918-中文.conf"
+        self.custom_config(str(self.root / "python-\ue918"))
+        result = subprocess.run([sys.executable, "-B", str(TOOL), "--config", str(self.config)],
+                                env=dict(os.environ, PYTHONIOENCODING="cp950"), capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+        self.assertIn(str(self.config), result.stdout.decode("utf-8"))
+
+    def test_conflicting_choice_is_rejected(self):
+        self.custom_config(sys.executable)
+        with self.config.open("a", encoding="utf-8") as output:
+            output.write("CONFIG_VINC_PYTHON_SYSTEM=y\n")
+        self.run_tool(success=False)
+
+    @unittest.skipUnless(shutil.which("cmake"), "CMake required")
+    def test_generated_paths_are_literal_not_cmake_code(self):
+        path = str(self.root / '空白 path;${UNSET}]===]\\"python')
+        self.custom_config(path)
+        build = self.root / "build"
+        self.run_tool("--output", str(build))
+        script = self.root / "check.cmake"
+        script.write_text(f'include("{build.as_posix()}/features.cmake")\n'
+                          f'file(WRITE "{self.root.as_posix()}/actual" "${{VINC_PYTHON_EXECUTABLE}}")\n',
+                          encoding="utf-8")
+        subprocess.run([shutil.which("cmake"), "-P", str(script)], check=True, timeout=20)
+        self.assertEqual((self.root / "actual").read_text(encoding="utf-8"), path)
+        self.assertNotIn(path, (build / "vinc_python_config.hpp").read_text())
 
 
 if __name__ == "__main__":

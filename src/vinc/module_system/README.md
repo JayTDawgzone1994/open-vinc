@@ -79,6 +79,13 @@ Windows 框架與 helper 使用動態 CRT（Debug `/MDd`、其他組態 `/MD`）
 STL／shared_ptr 物件也依賴此共同建置契約。入口版本／大小驗證不代表完整 ABI 探測。
 不支援使用者在單一 image 私自替換 allocator 後跨 image 釋放配置的做法。
 
+This dynamic-CRT contract applies to native C++ Host/Plugin boundaries. Windows
+source-built Python uses an isolated static-CRT extension with Python ownership
+APIs, not that C++ Plugin ABI; see the [Python Runtime policy](python/README.md#windows-msvc-runtime-載入前檢查).
+
+上述動態 CRT 契約適用原生 C++ Host／Plugin 邊界。Windows 來源版 Python 使用獨立的
+靜態 CRT 擴充及 Python 所有權 API，不混用該 C++ Plugin ABI；見上述 Python 契約。
+
 Responsibilities and targets:
 
 責任與 target：
@@ -331,6 +338,12 @@ RPC 亦接入固定 pump 批次，見 [RPC README](../rpc/README.md)。timer 註
 
 ### Normal completion, faults, and cleanup / 正常完成、故障及收尾
 
+The no-restart rule for successful completion below describes ordinary Modules.
+System Modules share the same completion proof, then apply their [restart mode](#system-modules).
+
+下方成功完成不重啟的規則適用於一般 Module。
+System Module 沿用相同完成判定，再套用其[重啟模式](#system-modules)。
+
 After main() succeeds, framework stops dispatch and starts the stop deadline, runs on_stop, waits for pump callers to leave, then destroys Module and callback wrappers. Plugin unload follows service shutdown. Application threads must stop/join during on_stop. Framework cannot safely preempt user callbacks; watchdog/central terminate a stuck process according to stop_timeout.
 
 `main()` 成功返回後先停止 pump 派送並開始停止期限，再執行 on_stop，等待 pump 離開，
@@ -360,6 +373,11 @@ RuntimeServices bridge 仍僅供 fatal，未加入一般 Context 服務。
 <a id="中央-api-與命名"></a>
 
 ## Central APIs and naming / 中央 API 與命名
+
+The ordinary registration/naming/forget rules below have a framework-only
+[System Module exception](#system-modules): fixed reserved names and protected records.
+
+下方一般登記／命名／移除規則有框架專用的 [System Module 例外](#system-modules)：固定保留名稱及受保護紀錄。
 
 Framework-owned ModuleManager::create(limits, host_executable) returns `Result<std::unique_ptr<ModuleManager>>`; there is no implicit singleton/get compatibility entry. Shell explicitly owns/injects Manager. register_module_type registers ModuleType, absolute Plugin path, and policy; instance names belong to source. start_module returns `Result<MID>`, a nonzero central-assigned uint64_t identity; supervision performs startup asynchronously. Success does not mean spawn/Ready succeeded: use wait_started(mid), then inspect(mid)->name. ModuleSnapshot separates module_type, mid, and OS pid. Inspect/wait/command/stop/forget APIs accept MID or name; use MID before naming approval.
 
@@ -406,6 +424,11 @@ OS 原生 spawn 本身仍遵循 OSAL 的限制，不具有可取消的硬期限�
 
 ## States and policies / 狀態與政策
 
+The defaults and cumulative retry policy below apply to ordinary Modules.
+System Modules use the separate recovery policy described [below](#system-modules).
+
+下表與累計重試次數政策適用於一般 Module；System Module 使用[下方](#system-modules)的恢復政策。
+
 Queued → Starting → Running → Stopping → Stopped/Failed. After unexpected exit/disconnection, terminate and confirm old-process exit before RestartWaiting → Starting according to policy.
 
 Queued → Starting → Running → Stopping → Stopped／Failed。
@@ -446,6 +469,210 @@ begin_shutdown() seals admission; wait_shutdown(deadline) waits for completion. 
 Timeout 時仍持續監督，可以再次等待；成功代表受管理程序已確認退出且 Message Bus 回收佇列已排空。
 `snapshots()` 可顯示等待中的模組與 OS 錯誤。互動 Shell 的 Ctrl+C／exit 使用此流程，
 等待到完成才退出，不把析構的時間限制當成程序已退出的證明。
+
+<a id="system-modules"></a>
+
+## System Modules: central policy / System Module 中央政策
+
+**Stages 1–2:** identity, lifecycle protection, bounded restart scheduling, local
+diagnostics, official UI/Recorder registration and Shell commands. A System Module uses the same isolated Host,
+heartbeat, cleanup, and supervisor as an ordinary Module; no new worker is added.
+
+**第一、二階段範圍：**身分、生命週期保護、有界重啟排程、本地診斷、
+官方 UI／Recorder 登記與 Shell 命令接線。
+System Module 沿用既有獨立 Host、heartbeat、回收及監督執行緒，沒有新增 worker。
+
+- Only framework composition uses `detail::ManagerAccess::register_system_module`
+  and `start_system_module`. Role and fixed instance name belong to central
+  registration, never Plugin metadata or Context. This is an API boundary, not
+  a security sandbox against native code in the central process.
+- Ordinary start (including debug), stop by name/MID, forget, and unregister
+  return `SystemModuleProtected`. Even the internal start entry cannot create
+  a second logical instance or reset its attempt history. `begin_shutdown`
+  still stops every Module and cancels all scheduled restarts.
+- The reserved instance name cannot be claimed by another type, micro-program,
+  or ordinary Module, including before startup and after failure/completion.
+  Trusted registration may share that exact name with a framework command.
+  The Plugin's `on_name` must still match; changing it fails that attempt.
+
+- 僅框架接線可透過上述 detail 入口登記／啟動。角色與固定名稱由中央決定，
+  Plugin 及 Context 不能自行宣告；這是 API 邊界，不是對中央原生程式碼的安全沙箱。
+- 一般 start（含 debug）、以名稱／MID stop、forget、unregister 均回傳
+  `SystemModuleProtected`。內部 start 也不能重複建立或重置嘗試紀錄。
+  整體 `begin_shutdown` 仍會停止全部 Module，取消待執行的重啟。
+- 系統實例名稱自登記起即保留，啟動前、失敗或完成後都不能被其他 ModuleType、
+  micro-program 或一般 Module 占用。只有可信登記可以與指定的框架命令同名；
+  Plugin 的 `on_name` 仍須吻合，不能自行改名。
+
+Source catalogs and `vinc_add_app()` register `webUi` → `ui` and `bagRecorder` →
+`recorder` through the trusted integration entry. Ordinary Shell help/completion
+hides those ModuleTypes and instances; `ui` and `recorder` are built-in commands.
+`help --verbose` has a separate System section with MID/PID, faults and retry delay.
+Startup readiness failure reports a fault but leaves recovery active and continues
+the remaining services/startup script. It does not call ordinary stop.
+
+來源版 catalog 與 `vinc_add_app()` 都透過可信入口登記上述固定實例。一般 Shell help／
+補全隱藏其 ModuleType 與實例，改由 `ui`／`recorder` 內建命令操作。
+`help --verbose` 的 System 區段保留 MID／PID、錯誤與重試等待。啟動就緒失敗只回報，
+保留重試並繼續其他服務／啟動腳本，不再呼叫一般 stop。
+
+The optional `SystemModuleOptions.enabled` / `ModuleSnapshot.system_enabled` is
+central-owned desired service state, currently used only for UI HTTP. It is passed
+as a final `--enabled true|false` Host argument. `set_system_enabled` pins a running
+command to its MID and updates intent only after successful enqueue under the same
+generation lock; timeout/cancellation after enqueue may leave an unknown outcome
+but cannot discard intent. Failed admission/send does not change it. Queued,
+Stopping and RestartWaiting accept the intent for the next attempt; Starting
+returns Busy without changing it. Framework shutdown rejects changes. No ordinary
+commands are replayed after restart. Recorder starts with empty arguments and is
+always idle after recovery. This does not persist settings or integrate Param.
+
+上述 optional enabled 是中央持有的服務啟用意圖，目前只控制 UI HTTP。中央以最後一組
+`--enabled true|false` 傳入 Host。Running 的切換固定 MID，送出成功後在同一代鎖內更新
+意圖；送出後逾時／取消仍可能結果未知，但不遺失意圖。拒收／送出失敗則不更動。
+Queued、Stopping、RestartWaiting 接受下次啟動意圖；Starting 回 Busy 且不更動。
+框架 shutdown 拒絕切換。重啟不重播一般命令，Recorder 以空參數回到待命。
+此設定尚未持久化，也尚未接入 Param。
+
+Defaults live in `vinc/config.hpp`; the table is the authoritative policy description.
+Only internal composition may override options within the validation limits.
+Ordinary `ModulePolicy::max_restarts` and `restart_delay` do not select System recovery.
+
+預設集中於 `vinc/config.hpp`，完整政策由本節維護；僅內部接線可在驗證限制內覆寫。
+一般 `ModulePolicy` 的 `max_restarts`／`restart_delay` 不決定 System Module 的恢復方式。
+
+| Setting / 設定 | Default / 預設 | Meaning / 語意 |
+| --- | --- | --- |
+| `system_module_restart_mode` | `Always` | `OnFailure`: failures only; `Always`: also confirmed normal completion. / 前者只重啟故障；後者亦重啟正常完成。 |
+| `system_module_restart_delay` | 1 s | Minimum delay after cleanup, allowed 100 ms–24 h. / 收尾後至少等待，允許 100ms～24h。 |
+| `system_module_start_limit_interval` | 60 s | Rolling steady-clock interval, greater than zero and at most 24 h. / 單調時鐘滾動時間窗，大於零且最多 24h。 |
+| `system_module_start_limit_burst` | 3 | Maximum attempts per window and fixed history capacity; internal burst must be 1–capacity. / 時間窗內最多嘗試次數，也是固定歷史容量；內部設定須介於 1 與此容量。 |
+
+After start admission creates the managed record, initial startup and resource/spawn
+failures count. Invalid registration, a full registry, or initial MID exhaustion
+return an admission error without creating a retrying record. Ready never resets history.
+After confirmed exit (or failed acquisition before any process exists), schedule
+the later of the restart delay and the oldest attempt's expiry. Limit exhaustion
+waits and automatically retries; it does not permanently disable the service.
+No restart overlaps an unconfirmed old process. Timing is not a hard OS deadline.
+The fixed history cannot grow with repeated failures. Changing its capacity
+requires rebuilding connected components; this setting is not runtime Param.
+
+成功接受啟動並建立受管理紀錄後，首次啟動及資源準備／spawn 失敗皆計數，Ready 不清空紀錄。
+無效登記、registry 已滿或初次 MID 配置耗盡則直接回傳 admission 錯誤，不建立待重試紀錄。
+確認舊程序退出（或從未成功建立程序）後，取「重啟等待」與「最舊嘗試過期」的較晚時刻。
+用盡額度時先等待，到期自動重試，不永久停用服務；未確認退出前絕不啟動替代程序。
+不承諾 OS 硬期限。歷史紀錄固定容量，不隨失敗累積成長；更改容量須重建，不能搬到 runtime Param。
+
+`ModuleSnapshot.kind` identifies the central role. `RestartWaiting`, `next_restart`
+and `restart_rate_limited` expose recovery status locally; the flag means the
+window extends the fixed delay. Timestamps use local steady clock, not UTC/wire
+layouts. `last_failure`, `cleanup_failure`, and `last_exit` retain the old generation's
+diagnostics. Each admitted retry receives a new MID; stale MIDs never select it.
+MID exhaustion stops retries as Failed and sets separate `restart_failure` without
+discarding the original process fault. Ordinary Module query protocol is unchanged.
+
+本地 `ModuleSnapshot.kind` 區分角色；`RestartWaiting`、`next_restart` 與
+`restart_rate_limited` 提供恢復狀態，旗標表示時間窗使等待超過固定間隔。
+時間為本地 steady clock，非 UTC 或可直接傳送的布局。保留上一代主要／收尾錯誤及退出原因。
+每次可接受的重試取得新 MID；舊 MID 不會選中新程序。MID 耗盡則停止重試，狀態為 Failed，
+另存 `restart_failure`，不覆蓋原程序故障。一般 Module 查詢協定未改動。
+
+<a id="system-module-stage3"></a>
+
+**Stage 3 acceptance (2026-11-01):** The installed Release C++ SDK built two
+Apps with Python Modules disabled, installed and moved their packages, and passed
+the `sdk/tests/system_apps.py` runtime checks. They cover same-name exclusion,
+independent Shell/Recorder processes, real port-8080 bind failures, observable
+rate limiting, recovery after the actual 60-second window, HTTP graph ownership,
+and recording/shutdown isolation. The first harness attempt incorrectly queried
+a nonexistent graph PID field; the corrected MID assertion passed against the
+same built Apps. This was a test defect, not a product failure.
+
+Windows 11 x64 / MSVC 19.51.36257 (toolset 14.51.36231, MSVC STL), CMake 4.3.2
+and Ninja: full Debug and Release builds passed. Debug passed **110/110 distinct
+cases** after correcting the obsolete assertion below: the initial group passed
+101/102 (570.29 s), the remaining group passed 8/8 (17.65 s), and the corrected
+external SDK case passed 1/1 (148.19 s). Release CTest passed **110/110**
+(681.08 s), including the real official-Plugin crash/shutdown test. The Recorder
+test now reads SQLite metadata: interrupted recording remains incomplete, while
+normal framework shutdown marks the new recording complete. The external SDK
+fixture's old Socket Shell startup-text assertion was updated to match the
+current readiness output; no runtime behavior was changed for this repair.
+
+WSL Ubuntu 24.04.5 x86_64 / GCC 13.3.0 (libstdc++), CMake 3.28.3 / Ninja Debug:
+`module.system`, `module.manager_faults`, `module.context`, `module.process`,
+`module.debug`, `shell.socket`, `shell.unit`, and `shell.integration` passed
+**8/8** (44.97 s). This configuration disables UI and Apps: it verifies the
+supervisor and Shell contracts, not Linux official-Plugin deployment. macOS
+has not run this System Module acceptance. The Python Runtime limitation below
+remains deferred; C++ acceptance does not substitute for Python verification.
+
+Local evidence: `build/system-stage3-sdk-apps.log`,
+`build/system-stage3-sdk-runtime.log`, `build/system-stage3-*-tests.log`,
+`build/system-stage3-debug-sdk-recheck.log`, `build/system-stage3-*-build.log`,
+and `build/system-stage3-linux-*.log`.
+
+**第三階段驗收（2026-11-01）：**安裝式 Release C++ SDK 建置兩個不含 Python Module
+的 App，安裝並搬移後通過同名排他、Shell／Recorder 獨立、真實 8080 綁定失敗、限流
+狀態、實際 60 秒時間窗後恢復、HTTP 關係圖歸屬及錄製／關閉隔離。首次腳本誤查圖中的
+PID 欄位，改用公開 MID 後，以相同產物重跑通過；這是測試錯誤，不是產品故障。
+Windows Debug／Release 完整建置通過。Debug 最初分組為 101/102 與 8/8，修正過時斷言
+後單獨重跑 SDK 案例 1/1 通過，合計 **110 個不同案例皆通過**；Release CTest 一次完整
+執行 **110/110** 通過（681.08 秒）。
+Recorder 案例直接檢查 SQLite 完成旗標，分辨 crash 中斷與正常收尾；亦修正外部 SDK
+fixture 沿用舊 Socket Shell 啟動文字的斷言，沒有為此修改 runtime 行為。
+WSL Ubuntu 24.04.5／GCC 13.3.0 Debug 的上述核心案例 **8/8** 通過；該配置關閉 UI／Apps，
+不代表 Linux 官方 Plugin 部署已驗證。macOS 本次驗收及下述 Python Runtime 問題仍待補。
+
+**Stage 2 validation (2026-11-01):** Windows 11 x64 / MSVC 19.51.36257
+(toolset 14.51.36231, MSVC STL), CMake 4.3.2 and Ninja: Debug and Release builds
+passed, with `module.system`, `shell.socket`, `shell.unit`, `shell.integration`,
+`ui.module`, `ui.shell`, `app.entry`, and `app.system_services` **8/8 each**
+(64.23 s / 63.71 s). The final test-only fixture packaging adjustment was also
+rechecked in Release (`app.system_services`, 4.72 s). HTTP tests cover disable,
+same-MID enable, fresh browser credentials, and rejected cancelled/expired toggles.
+Real official-Plugin tests kill only their own UI/Recorder children, confirming
+disabled UI intent after restart, Recorder idle after an interrupted recording,
+hidden ordinary listings, protected lifecycle commands and complete shutdown.
+The same service test passed against an installed-and-moved C++ SDK App.
+
+The broader installed multi-App suite built all three Apps but stopped at Python:
+the local CPython 3.13 bundles VCRUNTIME140 14.42.34438.0, below the SDK's required
+14.51.36244.0. Its guard rejected loading; later multi-App cases did not run.
+This is an environment limitation, not a passing Python test or evidence of a
+System Module defect. See [SDK follow-up](../sdk/README.md#system-module-validation).
+Linux/macOS have not run this stage. No process-notification or wire-version change
+is claimed. Local artifacts: `build/system-stage2-*-tests.log`,
+`build/system-stage2-installed-services.log`, `build/system-stage2-sdk-multi.log`.
+
+**第二階段驗證（2026-11-01）：**上述 Windows 工具鏈下 Debug／Release 各通過 8/8，
+最後調整測試用 App 包裝後亦重跑 Release 整合案例。HTTP 驗證開關、MID 不變、憑證換發，
+以及取消／逾時拒收不改意圖。真實官方 Plugin 案例只終止測試自己的子程序，驗證 UI 停用
+意圖跨重啟、Recorder 中斷錄製後待命、清單隱藏、生命週期保護與完整關閉。
+已安裝且搬移的 C++ SDK App 亦通過相同服務測試。
+完整多 App 測試建置三個 App 後，因本機 Python 夾帶舊 Runtime 被既有 guard 拒絕；
+後續案例未執行，不算 Python 通過，也不是已證實的 System Module 缺陷。
+本輪尚未執行 Linux／macOS，未更動通知或 wire 版本。
+
+**Stage 1 validation (2026-11-01):** `module.system` covers namespace/lifecycle protection, real crash
+recovery, startup/spawn failure limits, automatic resumption, normal completion,
+and shutdown during retry waiting. `module.manager_faults` covers permanent MID
+exhaustion. Windows 11 x64 (build 26200), MSVC 19.51.36257 / toolset 14.51.36231,
+MSVC STL, CMake 4.3.2 and Ninja: Debug and Release builds passed. The five tests
+`module.system`, `module.process`, `module.context`, `module.manager_faults`, and
+`module.debug` passed in both configurations (Debug 61.47 s; Release 53.12 s).
+After strengthening the failure-classification assertions, the final Debug
+`module.system` also passed (12.16 s); Release includes those assertions.
+Linux/macOS execution of this new policy remains pending; prior platform evidence
+for other features is unchanged. These are targeted tests, not a full-suite run.
+
+**驗證（2026-11-01）：** `module.system` 涵蓋命名／生命週期保護、實際 crash、啟動／spawn 失敗限流、
+自動恢復、正常完成與待重啟時關閉；`module.manager_faults` 驗證 MID 耗盡。
+Windows 11 x64、MSVC 19.51.36257／工具集 14.51.36231、MSVC STL、CMake 4.3.2／Ninja：
+Debug、Release 建置與上述五組測試皆通過，分別 61.47s／53.12s。
+補強失敗分類斷言後，最終 Debug `module.system` 再次通過（12.16s）；Release 已包含該斷言。
+這輪為針對性驗證，未跑全測試套件；新增政策的 Linux／macOS 執行仍待驗證，未否定既有平台紀錄。
 
 <a id="命令與後續擴充"></a>
 
@@ -893,9 +1120,9 @@ last_failure retains the first primary fault per MID; earlier Socket closure can
 也不遮蔽後續共享紀錄。成功重啟保留上一筆 contract 診斷；再次 contract 故障覆寫為較新一筆，
 `forget_module` 移除整個 logical Module 的紀錄。這是有界的最後診斷，不是完整歷史日誌或磁碟保存。
 
-Local/remote Shell automatically displays observed diagnostics independently of Module output switches; help can query again. A stalled Shell/fault storm may expose only the latest record per logical Module. TCP acceptance/display does not prove human reading. Committed payload remains recoverable after Socket loss while central retains that generation. Kill before commit, corruption, central/OS/machine failure can still lose it; universal delivery is not promised.
+Local/remote Shell automatically displays observed diagnostics independently of Module output switches; `help --verbose` can query again (see [Shell help](../shell/README.md#compact-help--精簡說明)). A stalled Shell/fault storm may expose only the latest record per logical Module. TCP acceptance/display does not prove human reading. Committed payload remains recoverable after Socket loss while central retains that generation. Kill before commit, corruption, central/OS/machine failure can still lose it; universal delivery is not promised.
 
-Shell 本機／遠端自動顯示已觀察的診斷，`help` 可再次查詢；顯示不受 Module output 開關影響。
+Shell 本機／遠端自動顯示已觀察的診斷，`help --verbose` 可再次查詢；顯示不受 Module output 開關影響。
 Shell 停滯或故障風暴時可能只觀察到每個 logical Module 最後一筆；TCP 接受或畫面輸出不代表
 操作者已閱讀。完整提交後，只要中央仍保留該 generation 資源，即使 Socket 已斷仍能取回。
 提交前的外部強殺、記憶體損毀、中央／OS／整台機器崩潰仍可能丟失，不能承諾任何故障都送達。

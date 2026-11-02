@@ -2,6 +2,19 @@
 
 Date / 日期：2026-10-31
 
+**System Module update (2026-11-01):** the historical explicit-UI-stop policy and
+startup-failure cleanup wording below are superseded by the
+[System Module contract](../../src/vinc/module_system/README.md#system-modules).
+Official instances remain supervised; `ui disable` stops HTTP without stopping
+the process, and recovery preserves that intent. Recorder recovery is idle.
+Current multi-App tests use this service toggle and inspect each graph sequentially
+on the default HTTP port; no runtime port-reconfiguration API was added.
+
+**System Module 更新（2026-11-01）：**下方歷史版本的明確停止 UI／初次啟動失敗清理政策，
+已由上述 System 契約取代。官方實例持續受監督；UI disable 只關閉 HTTP，程序恢復時保留
+此意圖，Recorder 恢復後待命。目前多 App 測試使用服務開關，依序在預設 HTTP port
+驗證各 App 的 graph，沒有新增 runtime port 調整 API。
+
 **Status: stages 1–3 implemented and validated within the scopes recorded below.**
 The user authorized stage 4 tests and documentation on 2026-10-31. Acceptance is
 in progress under [AGENTS.md](../../AGENTS.md).

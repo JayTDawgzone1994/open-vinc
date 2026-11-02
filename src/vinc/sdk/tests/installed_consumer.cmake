@@ -1,10 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Slow mounted filesystems can take longer to install the Tcl resource tree.
+# Keep ordinary CI's bound; manual platform runs may explicitly raise it.
+if(NOT DEFINED SDK_TEST_COMMAND_TIMEOUT)
+    set(SDK_TEST_COMMAND_TIMEOUT 90)
+endif()
+if(NOT SDK_TEST_COMMAND_TIMEOUT MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "SDK_TEST_COMMAND_TIMEOUT must be positive seconds")
+endif()
+
 function(run_checked)
     execute_process(COMMAND ${ARGV} RESULT_VARIABLE result
-        OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 90)
+        OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT ${SDK_TEST_COMMAND_TIMEOUT})
     if(NOT result STREQUAL "0")
-        message(FATAL_ERROR "Command failed: ${ARGV}\n${output}\n${errors}")
+        message(FATAL_ERROR "Command failed (${result}): ${ARGV}\n${output}\n${errors}")
     endif()
 endfunction()
 
@@ -92,6 +101,11 @@ if(result STREQUAL "0" OR NOT errors MATCHES "Install this SDK with --config")
     message(FATAL_ERROR "Wrong install configuration was not rejected: ${output}\n${errors}")
 endif()
 expect_rejected(version "version" -DTEST_WRONG_VERSION=ON)
+run_checked("${CMAKE_COMMAND}" -S "${WORK}/source" -B "${WORK}/old-msvc-optional"
+    -G "${GENERATOR}" "-DCMAKE_CXX_COMPILER=${COMPILER}"
+    "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}" "-DCMAKE_BUILD_TYPE=${CONFIG}"
+    "-Dvinc_DIR=${moved}/lib/cmake/vinc" -DTEST_POLICY_OLD_MSVC=ON)
+expect_rejected(compiler "SDK requires native" -DTEST_POLICY_DIFFERENT_COMPILER=ON)
 if(WIN32)
     expect_rejected(crt "ABI mismatch" -DTEST_STATIC_CRT=ON)
 else()

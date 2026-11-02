@@ -72,8 +72,14 @@ def main():
     shutil.copytree(fixture, source, dirs_exist_ok=True)
     configure = [args.cmake, "-S", str(source), "-B", str(build), "-G", args.generator,
                  f"-DCMAKE_CXX_COMPILER={args.compiler}", f"-DCMAKE_MAKE_PROGRAM={args.make_program}",
-                 f"-DCMAKE_BUILD_TYPE={args.config}", f"-DPython_EXECUTABLE={args.python}",
+                 f"-DCMAKE_BUILD_TYPE={args.config}",
                  f"-DPython3_EXECUTABLE={sys.executable}"]
+    python_path = str(Path(args.python).absolute()).replace("\\", "\\\\").replace('"', '\\"')
+    # System/Custom must resolve to the same interpreter without a CMake override.
+    os.environ["PATH"] = str(Path(args.python).parent) + os.pathsep + os.environ.get("PATH", "")
+    custom_config = source / "second/app.config"
+    with custom_config.open("a", encoding="utf-8") as output:
+        output.write(f'\nCONFIG_VINC_PYTHON_CUSTOM=y\nCONFIG_VINC_PYTHON_EXECUTABLE="{python_path}"\n')
     if args.sdk_build:
         sdk = work / "sdk"
         run([args.cmake, "--install", str(args.sdk_build), "--component", "VincSDK", "--prefix", str(sdk)])
@@ -127,7 +133,7 @@ def main():
             module = destination / "data/module/ScriptPeer/ScriptPeer.py"
             module.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source / "ScriptPeer.py", module)
-        output = run([str(executable), "--shell-port", "0", "--python", args.python], timeout=APP_TIMEOUT_SECONDS)
+        output = run([str(executable), "--shell-port", "0"], timeout=APP_TIMEOUT_SECONDS)
         require(f"{app}_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
         require(f"{expected} SELF_HOST_OK 42" in output, output)
         require("All module processes exited" in output, output)
@@ -146,7 +152,7 @@ def main():
     first = moved / "First" / Path(recorded("First")).name
     output = run([str(first), "--shell-port", "0"], timeout=APP_TIMEOUT_SECONDS)
     require("First_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
-    require("bag: idle" in output and "Official Module webUi ready" in output, output)
+    require("bag: idle" in output and "[OK] Web UI ready" in output, output)
     output = run([str(first), "--shell-port", "0"],
                  env=dict(os.environ, VINC_TEST_STOP_UI="1"), timeout=APP_TIMEOUT_SECONDS)
     require("First_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
@@ -169,7 +175,7 @@ def main():
         occupied.listen()
         environment = dict(os.environ, VINC_TEST_UI_UNAVAILABLE="1")
         output = run([str(first), "--shell-port", "0"], env=environment, timeout=APP_TIMEOUT_SECONDS)
-    require("Official Module webUi MID=" in output and "failed:" in output, output)
+    require("[FAIL] Web UI failed" in output, output)
     require("First_SCRIPT_OK" in output and "bag: idle" in output and "APP_TEST_FAILED" not in output, output)
 
     # Missing official Plugin is also isolated, without disguising command failure.
@@ -179,7 +185,7 @@ def main():
     try:
         environment = dict(os.environ, VINC_TEST_BAG_UNAVAILABLE="1")
         output = run([str(first), "--shell-port", "0"], env=environment, timeout=APP_TIMEOUT_SECONDS)
-        require("Official Module bagRecorder MID=" in output and "First_SCRIPT_OK" in output
+        require("[FAIL] Bag Recorder failed" in output and "First_SCRIPT_OK" in output
                 and "APP_TEST_FAILED" not in output, output)
     finally:
         hidden.rename(recorder)
@@ -193,7 +199,7 @@ def main():
         output = run([str(first), "--shell-port", "0"],
                      env=dict(os.environ, VINC_TEST_UI_UNAVAILABLE="1"),
                      timeout=STARTUP_FAILURE_TIMEOUT_SECONDS)
-        require("Official Module webUi MID=" in output and "failed:" in output, output)
+        require("[FAIL] Web UI failed" in output, output)
         require("bag: idle" in output and "First_SCRIPT_OK" in output
                 and "APP_TEST_FAILED" not in output and "All module processes exited" in output, output)
     finally:

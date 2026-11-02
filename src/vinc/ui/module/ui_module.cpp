@@ -6,6 +6,7 @@
 #include <vinc_ui_paths.hpp>
 #include <charconv>
 #include <iostream>
+#include <optional>
 #include <thread>
 
 namespace {
@@ -24,7 +25,7 @@ public:
     }
 
     vinc::Result<void> on_start(const std::vector<std::string>& args) override {
-        vinc::ui::Options options;
+        auto& options = options_;
         auto root = vinc::osal::path_from_utf8(vinc_ui_default_root);
         if (!root) {
             return std::unexpected(vinc::wrap_error(vinc::ui::ErrorCode::InvalidArgument,
@@ -49,7 +50,9 @@ public:
             }
 
             const auto& value = args[index + 1];
-            if (args[index] == "--ip") {
+            if (args[index] == "--enabled" && (value == "true" || value == "false")) {
+                enabled_ = value == "true";
+            } else if (args[index] == "--ip") {
                 options.ip = value;
             } else if (args[index] == "--port") {
                 unsigned port = 0;
@@ -72,6 +75,16 @@ public:
             }
         }
 
+        if (!enabled_) {
+            return {};
+        }
+        return start_server();
+    }
+
+    vinc::Result<void> start_server() {
+        // Each enable takes a fresh asset/plugin snapshot. Context work stays on
+        // this Module's pump thread; the HTTP workers only access bounded caches.
+        auto options = options_;
         const auto ip = options.ip;
         monitor_ = std::make_shared<vinc::ui::detail::TopicMonitor>(context);
         options.read_topics = [monitor = monitor_](const std::string& topic) {
@@ -98,9 +111,16 @@ public:
             if (!pumped) {
                 return std::unexpected(pumped.error());
             }
-
-            graph_->process();
-            monitor_->poll();
+            if (enabled_ && (!server_ || !server_->running())) {
+                return std::unexpected(start_failure_.value_or(vinc::Error{
+                    vinc::ui::ErrorCode::WorkerFailed, vinc::ui::ErrorOperation::Start}));
+            }
+            if (graph_) {
+                graph_->process();
+            }
+            if (monitor_) {
+                monitor_->poll();
+            }
             std::this_thread::sleep_for(vinc::config::ui_monitor_poll_interval);
         }
         return {};
@@ -111,31 +131,56 @@ public:
             args.erase(args.begin());
         }
 
-        if (args.size() != 1 || args[0] != "status") {
+        if (args.size() != 1) {
+            return std::unexpected(vinc::Error{vinc::ui::ErrorCode::InvalidArgument,
+                                              vinc::ui::ErrorOperation::Command});
+        }
+        if (args[0] == "disable") {
+            enabled_ = false;
+            stop_server();
+        } else if (args[0] == "enable") {
+            enabled_ = true;
+            if (!server_) {
+                auto started = start_server();
+                if (!started) {
+                    start_failure_ = started.error();
+                    return std::unexpected(started.error());
+                }
+                start_failure_.reset();
+            }
+        } else if (args[0] != "status") {
             return std::unexpected(vinc::Error{vinc::ui::ErrorCode::InvalidArgument,
                                               vinc::ui::ErrorOperation::Command});
         }
 
-        std::cout << "UI running=" << server_->running() << " port=" << server_->port() << '\n' << std::flush;
+        std::cout << "UI running=" << (server_ && server_->running())
+                  << " port=" << (server_ ? server_->port() : options_.port)
+                  << " enabled=" << enabled_ << '\n' << std::flush;
         return 0;
     }
 
     vinc::Result<void> on_stop() override {
+        stop_server();
+        return {};
+    }
+
+private:
+    void stop_server() {
         if (graph_) {
             graph_->stop();
         }
         server_.reset();
         graph_.reset();
         monitor_.reset();
-        return {};
     }
-
-private:
     vinc::Result<void> invalid_argument() {
         return std::unexpected(vinc::Error{vinc::ui::ErrorCode::InvalidArgument,
                                           vinc::ui::ErrorOperation::Start});
     }
     std::unique_ptr<vinc::ui::Server> server_;
+    vinc::ui::Options options_;
+    bool enabled_ = true;
+    std::optional<vinc::Error> start_failure_;
     std::shared_ptr<vinc::ui::detail::TopicMonitor> monitor_;
     std::shared_ptr<vinc::ui::detail::GraphRequests> graph_;
 };

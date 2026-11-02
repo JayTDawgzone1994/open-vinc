@@ -1,6 +1,7 @@
 # Final SDK composition. Runtime components own their target/header install rules.
 # Applications compile their catalog, identity and typed Modules in the consumer.
 include(CMakePackageConfigHelpers)
+include("${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonRequirements.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/CheckSdkAbi.cmake")
 vinc_check_sdk_abi(VINC_SDK_ABI)
 file(SHA256 "${VINC_REPOSITORY_ROOT}/src/vinc/common/include/vinc/config.hpp" VINC_CONFIG_HASH)
@@ -29,6 +30,13 @@ install(FILES "${package_directory}/vincConfig.cmake" "${package_directory}/vinc
     "${VINC_REPOSITORY_ROOT}/apps/vinc/cmake/EmbedScript.cmake"
     "${CMAKE_CURRENT_LIST_DIR}/DeployLicenses.cmake"
     "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincMsvcDependencies.cmake"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincToolchain.cmake"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincRuntime.cmake"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/msvc_minimum.txt"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonRequirements.cmake"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonSelection.cmake"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/python_minimum.txt"
+    "${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/python_version.py"
     DESTINATION lib/cmake/vinc COMPONENT VincSDK)
 install(FILES "${VINC_REPOSITORY_ROOT}/LICENSE" "${VINC_REPOSITORY_ROOT}/NOTICE"
     "${VINC_REPOSITORY_ROOT}/THIRD_PARTY_NOTICES.txt"
@@ -60,7 +68,8 @@ set(python_source "${VINC_REPOSITORY_ROOT}/src/vinc/module_system/python")
 install(DIRECTORY "${python_source}/src" "${python_source}/include" "${python_source}/vinc"
     DESTINATION share/vinc/python COMPONENT VincSDK
     PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
-install(FILES "${python_source}/cmake/VincPython.cmake" "${python_source}/cmake/runtime_metadata.py"
+install(FILES "${python_source}/cmake/VincPython.cmake" "${python_source}/cmake/VincPythonRuntime.cmake"
+    "${python_source}/cmake/runtime_metadata.py"
     DESTINATION share/vinc/python/cmake COMPONENT VincSDK)
 set(pybind_source "${VINC_REPOSITORY_ROOT}/library/pybind11/upstream")
 find_package(Git REQUIRED)
@@ -102,10 +111,19 @@ if(TARGET vinc_ui)
 endif()
 
 if(BUILD_TESTING)
+    vinc_find_python(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND AND TARGET vinc_ui AND CMAKE_GENERATOR STREQUAL "Ninja")
+        add_test(NAME sdk.system_apps COMMAND "${Python3_EXECUTABLE}" -B
+            "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/system_apps.py"
+            --sdk-build "${VINC_BUILD_ROOT}" --work "${VINC_BUILD_ROOT}/system-apps-test"
+            --cmake "${CMAKE_COMMAND}" --compiler "${CMAKE_CXX_COMPILER}"
+            --make-program "${CMAKE_MAKE_PROGRAM}" --config "${CMAKE_BUILD_TYPE}")
+        set_tests_properties(sdk.system_apps PROPERTIES TIMEOUT 900 RUN_SERIAL TRUE)
+    endif()
     set(VINC_TEST_SDK_PYTHON_EXECUTABLE "" CACHE FILEPATH "Interpreter/development environment for installed Python SDK integration tests")
     if(VINC_TEST_SDK_PYTHON_EXECUTABLE)
         if(TARGET vinc_ui AND CMAKE_GENERATOR STREQUAL "Ninja")
-            find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+            vinc_find_python(Python3 REQUIRED COMPONENTS Interpreter)
             add_test(NAME sdk.multi_app COMMAND "${Python3_EXECUTABLE}" -B
                 "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/multi_app.py"
                 --cmake "${CMAKE_COMMAND}" --compiler "${CMAKE_CXX_COMPILER}"

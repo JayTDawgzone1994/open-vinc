@@ -7,6 +7,7 @@
 #include <vinc/osal/error.hpp>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace vinc::osal {
 // Interrupt = Ctrl+C, Cancel = Ctrl+D, End = actual input EOF, Idle = no event yet.
@@ -38,6 +39,11 @@ public:
     Terminal(const Terminal&) = delete;
     Terminal& operator=(const Terminal&) = delete;
     vinc::Result<TerminalEvent> read_until(vinc::Deadline);
+    // Synchronously write complete UTF-8 text to the standard-output terminal.
+    // Redirected stdout is Unsupported; invalid UTF-8 is rejected before writing.
+    // Caller serializes writes/read/destruction. OS failure may follow partial output;
+    // do not replay the entire text. No CRT locale or global stream mode is changed.
+    vinc::Result<void> write_console(std::string_view text);
     bool interactive() const noexcept;
     bool ansi_output() const noexcept;
     std::size_t columns() const noexcept;

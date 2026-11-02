@@ -65,7 +65,8 @@ enum class ErrorCode : std::int32_t {
     PythonDiscoveryFailed = 60,
     PythonException = 61,
     RpcFailed = 62,
-    NotificationFailed = 63
+    NotificationFailed = 63,
+    SystemModuleProtected = 64
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,

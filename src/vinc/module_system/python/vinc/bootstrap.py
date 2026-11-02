@@ -12,6 +12,11 @@ from pathlib import Path
 def main():
     package = Path(__file__).resolve().parent
     build = runpy.run_path(str(package / "_build.py"))
+    if sys.version_info[0] != 3 or sys.version_info[:2] < build["MINIMUM_VERSION"]:
+        raise RuntimeError(
+            f"VINC requires Python >= {'.'.join(map(str, build['MINIMUM_VERSION']))} and < 4; "
+            f"found {sys.version.split()[0]} at {sys.executable}. Select a compatible interpreter."
+        )
     if (platform.python_implementation() != "CPython"
             or sys.version_info[:2] != build["VERSION"]
             or struct.calcsize("P") != build["POINTER_BYTES"]

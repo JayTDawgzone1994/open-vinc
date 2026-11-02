@@ -7,12 +7,15 @@
 #include <vinc/time.hpp>
 #include <vinc/shell/detail/shell.hpp>
 #include <vinc/shell/detail/command_router.hpp>
+#include <vinc/shell/detail/session_feedback.hpp>
 #include <vinc/shell/detail/tcl_runtime.hpp>
 #include <vinc/osal/terminal.hpp>
 #include <vinc/output_hub/text_renderer.hpp>
 #include <atomic>
 #include <future>
 #include <iostream>
+#include <sstream>
+#include <string_view>
 #include <thread>
 #include <variant>
 
@@ -26,6 +29,9 @@ namespace {
 constexpr std::uint64_t local_script_session = 1;
 // Reserve the prompt and cursor margin when displaying the editable UTF-8 tail.
 constexpr std::size_t prompt_columns = 8;
+// Open-VINC brand blue (#246BDF); restore only foreground before user text.
+constexpr std::string_view prompt_blue = "\x1b[38;2;36;107;223m";
+constexpr std::string_view default_foreground = "\x1b[39m";
 }
 
 struct Shell::Impl {
@@ -34,9 +40,11 @@ struct Shell::Impl {
     output_hub::Subscription captured_output;
     output_hub::TextRenderer output_renderer;
     shell::CommandRouter router;
+    shell::SessionFeedback feedback;
     shell::LineEditor editor;
     std::atomic<bool> closing{false};
     std::optional<Error> run_failure;
+    bool console_output_failed = false;
     std::uint64_t reported_remote_failures = 0;
     std::uint64_t contract_cursor = 0;
     std::uint64_t param_cursor = 0;
@@ -56,6 +64,7 @@ struct Shell::Impl {
     bool prompt = false;
     bool shutdown_complete = false;
     bool rejected_line = false;
+    std::optional<shell::StartupReport> startup_report;
     vinc::Deadline next_report{};
     // Join the shared script service before destroying the Shell's command/output state.
     shell::ScriptService script;
@@ -128,12 +137,55 @@ struct Shell::Impl {
         return terminal && terminal->interactive() && terminal->ansi_output();
     }
 
+    // Only the framework's stdout console bypasses CRT locale translation.
+    // Injected streams and redirected stdout retain their ordinary ostream path.
+    void emit(std::string_view text, bool flush = false) {
+        if (terminal && terminal->ansi_output() && &output == &std::cout) {
+            if (console_output_failed) {
+                return;
+            }
+            const auto written = terminal->write_console(text);
+            if (!written) {
+                console_output_failed = true;
+                const auto error = wrap_error(ErrorCode::TerminalFailed, ErrorOperation::WriteTerminal,
+                                              written.error());
+                // A lost local display must not stop central services or the remote Shell.
+                // Existing bounded Log delivery remains best effort, without replaying output.
+                (void)detail::ManagerAccess::log_diagnostic(manager, vinc::error_to_string(error));
+            }
+            return;
+        }
+
+        output << text;
+        if (flush) {
+            output.flush();
+        }
+    }
+
+    void show_startup_report() {
+        std::ostringstream rendered;
+        startup_report->write(rendered, interactive());
+        emit(rendered.str(), true);
+        startup_report.reset();
+    }
+
     void clear_prompt() {
         if (prompt && interactive()) {
-            output << "\r\x1b[2K";
+            emit("\r\x1b[2K");
         }
 
         prompt = false;
+    }
+
+    void write_prompt() {
+        if (interactive()) {
+            emit(prompt_blue);
+            emit("VINC >");
+            emit(default_foreground);
+            emit(" ");
+        } else {
+            emit("VINC > ");
+        }
     }
 
     void redraw() {
@@ -142,8 +194,9 @@ struct Shell::Impl {
         }
 
         const auto columns = terminal->columns();
-        output << "\r\x1b[2KVINC > "
-               << editor.visible_tail(columns > prompt_columns ? columns - prompt_columns : 0) << std::flush;
+        emit("\r\x1b[2K");
+        write_prompt();
+        emit(editor.visible_tail(columns > prompt_columns ? columns - prompt_columns : 0), true);
         prompt = true;
     }
 
@@ -153,7 +206,8 @@ struct Shell::Impl {
         }
 
         clear_prompt();
-        output << message << '\n' << std::flush;
+        emit(message);
+        emit("\n", true);
         redraw();
     }
 
@@ -169,11 +223,17 @@ struct Shell::Impl {
 
         manager.begin_shutdown();
         clear_prompt();
-        output << "Shutting down: waiting for all module processes...\n" << std::flush;
+        emit("Shutting down: waiting for all module processes...\n", true);
     }
 
     Result<shell::CommandReply> execute(const std::vector<std::string>& args, std::stop_token stop = {}) {
         try {
+            if (!args.empty() && args[0] == "shell" && !router.command_help(args)) {
+                if (args.size() == 2 && (args[1] == "-e" || args[1] == "--error")) {
+                    return shell::CommandReply{0, false, feedback.details()};
+                }
+                return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute});
+            }
             return router.execute(args, stop);
         } catch (const std::exception&) {
             return std::unexpected(Error{ErrorCode::UnexpectedException, ErrorOperation::Execute});
@@ -206,7 +266,7 @@ struct Shell::Impl {
         clear_prompt();
         auto started = script.start_source(local_script_session, std::move(source), std::move(args));
         show(started ? "Script running. scancel cancels the global script."
-                     : vinc::error_to_string(started.error()));
+                     : feedback.failure(started.error(), "srun"));
     }
 
     void cancel_script() {
@@ -220,7 +280,7 @@ struct Shell::Impl {
 
         auto parsed = shell::parse_line(input, completion);
         if (!parsed) {
-            show("Parse error: " + vinc::error_to_string(parsed.error()));
+            show(feedback.failure(parsed.error()));
             return;
         }
 
@@ -235,7 +295,7 @@ struct Shell::Impl {
 
         auto admitted = available(target);
         if (!admitted) {
-            show(vinc::error_to_string(admitted.error()));
+            show(feedback.failure(admitted.error(), target));
             return;
         }
 
@@ -245,10 +305,15 @@ struct Shell::Impl {
     // Session commands execute on the Shell thread, which owns prompt and output state.
     // Returning true means the command was handled, including any reported failure.
     bool handle_local_command(const std::vector<std::string>& arguments) {
+        if (const auto help = router.command_help(arguments)) {
+            show(std::string(*help));
+            return true;
+        }
+
         const auto& target = arguments.front();
         if (target == "sstatus") {
             if (arguments.size() != 1) {
-                show("sstatus takes no arguments");
+                show(feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, target));
             } else if (script.active()) {
                 show("Script running");
             } else {
@@ -260,12 +325,12 @@ struct Shell::Impl {
 
         if (target == "log" && arguments.size() > 1 && arguments[1] == "show") {
             auto result = log::detail::view_command(log_view, arguments);
-            show(result ? *result : error_to_string(result.error()));
+            show(result ? *result : feedback.failure(result.error(), target));
             return true;
         }
         if (target == "output") {
             if (arguments.size() != 2 || (arguments[1] != "on" && arguments[1] != "off")) {
-                show("Usage: output on|off");
+                show(feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, target));
             } else {
                 captured_output.set_enabled(arguments[1] == "on");
                 output_renderer = {};
@@ -277,14 +342,14 @@ struct Shell::Impl {
 
         if (target == "srun") {
             if (arguments.size() < 2) {
-                show("Usage: srun file.tcl [args...]");
+                show(feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::StartScript}, target));
                 return true;
             }
 
             auto path = osal::path_from_utf8(arguments[1]);
             if (!path) {
-                show(error_to_string(wrap_error(shell::ErrorCode::InvalidArgument,
-                                                shell::ErrorOperation::StartScript, path.error())));
+                show(feedback.failure(wrap_error(shell::ErrorCode::InvalidArgument,
+                                                  shell::ErrorOperation::StartScript, path.error()), target));
                 return true;
             }
 
@@ -294,7 +359,7 @@ struct Shell::Impl {
 
         if (target == "scancel") {
             if (arguments.size() != 1) {
-                show("scancel takes no arguments");
+                show(feedback.failure(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute}, target));
             } else {
                 cancel_script();
             }
@@ -308,7 +373,7 @@ struct Shell::Impl {
             if (result && result->shutdown) {
                 shutdown();
             } else {
-                show(shell::command_text(result));
+                show(feedback.command(result, target));
             }
 
             return true;
@@ -344,10 +409,10 @@ struct Shell::Impl {
                                            return execute_job(input, args, completion);
                                        })});
         } catch (const std::system_error& failure) {
-            show(vinc::error_to_string(Error{ErrorCode::WorkerFailed, ErrorOperation::StartWorker,
-                                             osal::native_error(failure.code())}));
+            show(feedback.failure(Error{ErrorCode::WorkerFailed, ErrorOperation::StartWorker,
+                                         osal::native_error(failure.code())}, target));
         } catch (const std::exception&) {
-            show(vinc::error_to_string(Error{ErrorCode::WorkerFailed, ErrorOperation::StartWorker}));
+            show(feedback.failure(Error{ErrorCode::WorkerFailed, ErrorOperation::StartWorker}, target));
         }
     }
 
@@ -381,7 +446,7 @@ struct Shell::Impl {
         const auto& script_output = delivery.output;
         if (!script_output.empty()) {
             clear_prompt();
-            output << script_output << std::flush;
+            emit(script_output, true);
             redraw();
         }
 
@@ -390,7 +455,7 @@ struct Shell::Impl {
         }
 
         if (delivery.result) {
-            show(shell::script_text(*delivery.result));
+            show(feedback.script(*delivery.result));
             redraw();
         }
     }
@@ -423,13 +488,14 @@ struct Shell::Impl {
             }
 
             const auto input = std::move(it->input);
+            const auto target = std::move(it->target);
             auto reply = it->reply.get();
             it = jobs.erase(it);
             if (const auto* command = std::get_if<Result<shell::CommandReply>>(&reply)) {
                 if (*command && (*command)->shutdown) {
                     shutdown();
                 } else {
-                    show(shell::command_text(*command));
+                    show(feedback.command(*command, target));
                 }
 
                 continue;
@@ -441,7 +507,7 @@ struct Shell::Impl {
             }
 
             if (!completion) {
-                show(vinc::error_to_string(completion.error()));
+                show(feedback.failure(completion.error(), target));
                 continue;
             }
 
@@ -483,27 +549,29 @@ struct Shell::Impl {
 
         if (!text.empty()) {
             clear_prompt();
-            output << text << std::flush;
+            emit(text, true);
             redraw();
         }
     }
 
     void report_shutdown_wait(const std::string& reason) {
-        output << "Still waiting:";
+        std::ostringstream message;
+        message << "Still waiting:";
         for (const auto& snapshot : manager.snapshots()) {
             if (snapshot.state == ModuleState::Stopped || snapshot.state == ModuleState::Failed) {
                 continue;
             }
 
-            output << " " << (snapshot.name.empty() ? "<unnamed>" : snapshot.name) << "(MID=" << snapshot.mid
+            message << " " << (snapshot.name.empty() ? "<unnamed>" : snapshot.name) << "(MID=" << snapshot.mid
                    << ", PID=" << snapshot.pid << ")";
             if (snapshot.cleanup_failure) {
-                output << " [cleanup MID=" << snapshot.cleanup_failure->mid << ": "
+                message << " [cleanup MID=" << snapshot.cleanup_failure->mid << ": "
                        << vinc::error_to_string(snapshot.cleanup_failure->error) << "]";
             }
         }
 
-        output << " " << reason << '\n' << std::flush;
+        message << " " << reason << '\n';
+        emit(message.str(), true);
     }
 
     // Shutdown is a wait for observed completion, not just a batch of terminate requests.
@@ -546,12 +614,14 @@ struct Shell::Impl {
 
         const auto output_stats = manager.output_hub().stats();
         if (output_stats.truncated_streams || output_stats.failed_streams) {
-            output << "Output summary: " << output_stats.truncated_streams << " streams not fully drained, "
+            std::ostringstream message;
+            message << "Output summary: " << output_stats.truncated_streams << " streams not fully drained, "
                    << output_stats.failed_streams << " read failures.\n";
+            emit(message.str());
         }
 
         shutdown_complete = true;
-        output << "All module processes exited; Message Bus cleanup complete.\n" << std::flush;
+        emit("All module processes exited; Message Bus cleanup complete.\n", true);
     }
 
     void submit_edited_line() {
@@ -566,12 +636,14 @@ struct Shell::Impl {
         auto line = editor.submit();
         clear_prompt();
         if (terminal->interactive()) {
-            output << "VINC > " << line << '\n';
+            write_prompt();
+            emit(line);
+            emit("\n");
         }
 
         if (rejected_line) {
             rejected_line = false;
-            show("Rejected oversized command");
+            show(feedback.failure(Error{ErrorCode::LineTooLong, ErrorOperation::ParseLine}));
         } else {
             submit(std::move(line));
         }
@@ -663,6 +735,28 @@ Result<std::unique_ptr<Shell>> Shell::create(ModuleManager& manager, std::ostrea
 
 Shell::~Shell() = default;
 
+void Shell::set_startup_report(shell::StartupReport report) {
+    if (report.diagnostics_available) {
+        for (const auto& entry : report.entries) {
+            if (!entry.error) {
+                continue;
+            }
+
+            auto diagnostic = entry.name + " startup: " + entry.description + ": " + error_to_string(*entry.error);
+            if (entry.related_error) {
+                diagnostic += "; related: " + error_to_string(*entry.related_error);
+            }
+
+            auto logged = detail::ManagerAccess::log_diagnostic(impl_->manager, std::move(diagnostic));
+            if (!logged) {
+                report.diagnostics_available = false;
+            }
+        }
+    }
+
+    impl_->startup_report = std::move(report);
+}
+
 void Shell::request_shutdown() {
     impl_->shutdown();
 }
@@ -692,18 +786,21 @@ Result<std::int32_t> Shell::process_line(const std::string& line) {
 
     auto parsed = shell::parse_line(line);
     if (!parsed) {
+        (void)impl_->feedback.failure(parsed.error());
         return std::unexpected(parsed.error());
     }
 
     auto result = impl_->execute(parsed->arguments);
+    const auto target = parsed->arguments.empty() ? std::string{} : parsed->arguments.front();
     if (!result) {
+        (void)impl_->feedback.failure(result.error(), target);
         return std::unexpected(result.error());
     }
 
     if (result->shutdown) {
         impl_->shutdown();
     } else {
-        impl_->show(result->message);
+        impl_->show(impl_->feedback.command(result, target));
     }
 
     return result->code;
@@ -723,6 +820,7 @@ Result<void> Shell::run_source(shell::ScriptSource startup_script, std::vector<s
         return {};
     }
 
+    impl_->output.flush();
     auto opened = osal::Terminal::open();
     if (!opened) {
         impl_->run_failure =
@@ -752,7 +850,11 @@ Result<void> Shell::run_source(shell::ScriptSource startup_script, std::vector<s
         impl_->start_script_source(std::move(startup_script), std::move(script_args));
     }
 
-    impl_->show("VINC ready. Type help; exit or Ctrl+C shuts down all modules.");
+    if (impl_->startup_report) {
+        impl_->show_startup_report();
+    } else {
+        impl_->show("VINC ready. Type help; exit or Ctrl+C shuts down all modules.");
+    }
     impl_->redraw();
     try {
         while (!impl_->closing.load()) {

@@ -1,6 +1,8 @@
 # Root composition: libraries first, then examples and the central application.
 cmake_minimum_required(VERSION 3.20)
 project(vinc_root VERSION 0.1.4 LANGUAGES C CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/vinc/common/cmake/VincToolchain.cmake")
+vinc_require_toolchain()
 option(VINC_INSTALL_SDK "Enable the native, matching-build C++ SDK installation" OFF)
 set(VINC_SDK_VERSION "${PROJECT_VERSION}")
 

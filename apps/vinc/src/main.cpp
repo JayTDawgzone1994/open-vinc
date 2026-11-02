@@ -8,11 +8,15 @@
 #include <vinc/shell/detail/shell.hpp>
 #include <vinc/shell/detail/tcl_runtime.hpp>
 #include <module_catalog.hpp>
+#include <vinc_python_config.hpp>
 #include <vinc/config.hpp>
 #include <iostream>
 #include <charconv>
 #include <chrono>
 #include <limits>
+#ifdef VINC_STARTUP_UI_ERRORS
+#include <vinc/ui/error.hpp>
+#endif
 #ifdef VINC_COMPOSED_APP
 #include <vinc_app_config.hpp>
 #endif
@@ -134,70 +138,102 @@ ParseAction parse_arguments(int argc, char** argv, StartupOptions& options) {
         }
     }
 
+    if (options.python.empty() && !vinc::app::python_executable.empty()) {
+        auto path = vinc::osal::path_from_utf8(vinc::app::python_executable);
+        if (!path) {
+            std::cerr << "Invalid configured Python path: " << vinc::error_to_string(path.error()) << '\n';
+            return ParseAction::InvalidArguments;
+        }
+
+        options.python = std::move(*path);
+    }
+
     return ParseAction::Start;
 }
 
-// Each official Module is attempted once. Ready waits retain Manager's existing
-// startup deadline; failure remains local, and explicit stops are never undone.
+// Admit each official instance once. Manager owns retries after this initial
+// readiness wait; a failed attempt must not stop central or cancel recovery.
+std::string module_start_reason(const vinc::Error& error) {
+#ifdef VINC_STARTUP_UI_ERRORS
+    // Presentation may explain a cause; control flow still uses the outer error.
+    for (const auto& cause : error.causes()) {
+        const auto detail = vinc::Error::from_raw(cause.domain, cause.code, cause.operation, cause.native);
+        if (detail.is(vinc::ui::ErrorCode::BindFailed)) {
+            return "unable to listen on 127.0.0.1:" + std::to_string(vinc::config::ui_port);
+        }
+    }
+#endif
+    using Code = vinc::module_system::ErrorCode;
+    if (error.is(Code::HookFailed)) {
+        return "initialization hook failed; see diagnostic details";
+    }
+    if (error.is(Code::HookException)) {
+        return "initialization hook raised an exception";
+    }
+    if (error.is(Code::PluginLoadFailed)) {
+        return "unable to load the Module plugin";
+    }
+
+    return "unable to start the Module; see diagnostic details";
+}
+
 void start_official(vinc::ModuleManager& manager, const std::string& type,
-                    std::chrono::milliseconds stop_timeout) {
+                    const std::string& display_name, const std::string& ready_description,
+                    vinc::shell::StartupReport& report) {
     // Legacy library-only fixtures may omit official types. Composed Apps always
     // include them; failures here remain local so later startup can continue.
     if (!manager.has_module_type(type)) {
         return;
     }
 
-    auto started = manager.start_module(type);
+    auto started = vinc::detail::ManagerAccess::start_system_module(manager, type);
     if (!started) {
-        std::cerr << "Official Module " << type << " failed: "
-                  << vinc::error_to_string(started.error()) << '\n';
+        report.entries.push_back({display_name, module_start_reason(started.error()), started.error()});
         return;
     }
 
+    const auto identity = " (MID=" + std::to_string(*started) + ")";
     auto ready = manager.wait_started(*started);
     if (ready) {
-        const auto snapshot = manager.inspect(*started);
-        std::cout << "Official Module " << type << " ready: "
-                  << (snapshot ? snapshot->name : "<exited>") << " MID=" << *started << '\n';
+        report.entries.push_back({display_name, ready_description + identity, {}});
         return;
     }
 
-    std::cerr << "Official Module " << type << " MID=" << *started << " failed: "
-              << vinc::error_to_string(ready.error()) << '\n';
+    report.entries.push_back({display_name, module_start_reason(ready.error()) + identity, ready.error()});
     const auto snapshot = manager.inspect(*started);
-    if (snapshot && snapshot->last_failure) {
-        std::cerr << "Module failure: " << vinc::error_to_string(snapshot->last_failure->error) << '\n';
+    if (snapshot && snapshot->last_failure && snapshot->last_failure->error != ready.error()) {
+        report.entries.back().related_error = snapshot->last_failure->error;
     }
 
-    // A wait timeout alone does not cancel startup. Request an explicit stop;
-    // supervision keeps owning any child whose OS exit is not yet confirmed.
-    auto stopped = manager.stop_module(*started, std::chrono::steady_clock::now() + stop_timeout);
-    if (!stopped) {
-        std::cerr << "Official Module cleanup " << type << " MID=" << *started << ": "
-                  << vinc::error_to_string(stopped.error()) << '\n';
-    }
+    // The supervisor retains ownership and applies the System Module retry
+    // window. A failed initial readiness wait must not disable that recovery.
 }
 
-vinc::Result<void> run_services(StartupOptions& options) {
+vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupReport& report) {
+    auto failed = [&](std::string name, std::string description, const vinc::Error& error) -> vinc::Result<void> {
+        report.entries.push_back({std::move(name), std::move(description), error});
+        return std::unexpected(error);
+    };
     // Both roles use this executable. Query the OS instead of trusting argv[0],
     // cwd or a producer build path; only central creates Manager and Tcl.
     auto native_executable = vinc::osal::executable_path();
     if (!native_executable) {
-        return std::unexpected(native_executable.error());
+        return failed("Application", "unable to locate the executable", native_executable.error());
     }
 
     auto executable_text = vinc::osal::path_to_utf8(*native_executable);
     if (!executable_text) {
-        return std::unexpected(executable_text.error());
+        return failed("Application", "unable to convert the executable path", executable_text.error());
     }
 
     auto initialized = vinc::shell::initialize_tcl(executable_text->c_str());
     if (!initialized) {
-        return initialized;
+        return failed("Tcl", "unable to initialize script runtime", initialized.error());
     }
+    report.entries.push_back({"Tcl", "script runtime initialized", {}});
     auto directory = vinc::shell::executable_directory();
     if (!directory) {
-        return std::unexpected(directory.error());
+        return failed("Application", "unable to locate runtime resources", directory.error());
     }
 #ifdef VINC_COMPOSED_APP
     auto owner = vinc::detail::ManagerAccess::create(std::string(vinc::app::instance_name), {},
@@ -206,62 +242,68 @@ vinc::Result<void> run_services(StartupOptions& options) {
     auto owner = vinc::ModuleManager::create({}, *native_executable);
 #endif
     if (!owner) {
-        return std::unexpected(owner.error());
+        return failed("Module Manager", "unable to initialize process supervision", owner.error());
     }
 
+    report.entries.push_back({"Module Manager", "process supervision initialized", {}});
     auto& manager = **owner;
     auto logging = vinc::detail::ManagerAccess::configure_log(manager, *directory / "vinc_data");
     if (!logging) {
-        std::cerr << "Log file: " << vinc::error_to_string(logging.error()) << '\n';
+        report.entries.push_back({"Log", "file output unavailable", logging.error()});
+    } else {
+        report.diagnostics_available = true;
+        report.entries.push_back({"Log", "file output configured", {}});
     }
     auto parameters = vinc::detail::ManagerAccess::configure_params(manager, *directory / "vinc_data");
     if (!parameters) {
         // Persistence failure leaves the live service available with registered defaults.
-        std::cerr << "Parameter file: " << vinc::error_to_string(parameters.error()) << '\n';
+        report.entries.push_back({"Parameters", "persistence unavailable; live parameters remain available",
+                                  parameters.error()});
+    } else {
+        report.entries.push_back({"Parameters", "persistence configured", {}});
     }
     // Shell must be destroyed before its manager. Reserve Shell/Tcl command names
     // before registering module factories, so collisions fail at registration.
     auto shell_owner = vinc::Shell::create(manager, std::cout);
     if (!shell_owner) {
-        return std::unexpected(shell_owner.error());
+        return failed("Shell", "unable to initialize command services", shell_owner.error());
     }
     auto& shell = **shell_owner;
+    report.entries.push_back({"Shell", "command and script services initialized", {}});
 #ifdef VINC_COMPOSED_APP
     auto registered = vinc::register_built_modules(manager, *directory);
 #else
     auto registered = vinc::register_built_modules(manager);
 #endif
     if (!registered) {
-        return std::unexpected(registered.error());
+        return failed("Module Catalog", "unable to register ModuleTypes", registered.error());
     }
+    report.entries.push_back({"Module Catalog", "built-in ModuleTypes registered", {}});
 
     auto discovered = vinc::discover_python_modules(manager, *directory / "data" / "module",
         *directory / "python" / "vinc" / "bootstrap.py", options.python);
     if (!discovered) {
-        std::cerr << "Python discovery: " << vinc::error_to_string(discovered.error()) << '\n';
+        report.entries.push_back({"Python discovery", "unable to scan Module sources", discovered.error()});
     } else {
         for (const auto& issue : discovered->issues) {
             auto path = vinc::osal::path_to_utf8(issue.path);
-            std::cerr << "Python module " << (path ? *path : "<invalid path>") << ": "
-                      << vinc::error_to_string(issue.error) << '\n';
+            report.entries.push_back({"Python Module", "unable to register " + (path ? *path : "<invalid path>"),
+                                      issue.error});
         }
     }
 
     const auto endpoint = shell.start_socket_shell(std::move(options.network));
     if (!endpoint) {
-        return std::unexpected(endpoint.error());
+        return failed("Socket Shell", "unable to start listener", endpoint.error());
     }
-    std::cout << "Socket Shell listening on "
-              << std::visit(
-                     [](const auto& ip) {
-                         return ip.to_string();
-                     },
-                     endpoint->address)
-              << ':' << endpoint->port << " (Raw TCP)\n"
-              << std::flush;
+    const auto address = std::visit([](const auto& ip) { return ip.to_string(); }, endpoint->address);
+    report.entries.push_back({"Socket Shell", "listening on " + address + ':' +
+        std::to_string(endpoint->port) + " (Raw TCP)", {}});
 
-    start_official(manager, "webUi", vinc::config::ui_stop_timeout);
-    start_official(manager, "bagRecorder", vinc::config::bag_stop_timeout);
+    start_official(manager, "webUi", "Web UI", "browser workspace initialized", report);
+    start_official(manager, "bagRecorder", "Bag Recorder", "idle, waiting for recording commands", report);
+    shell.set_startup_report(std::move(report));
+    report = {};
 
 #ifdef VINC_EMBEDDED_STARTUP
     return shell.run_source(vinc::shell::ScriptSource::embedded(std::string(vinc::app::startup_script)));
@@ -291,9 +333,17 @@ int application(int argc, char** argv) {
             return invalid_arguments_exit_code;
         }
 
-        auto result = run_services(options);
+        vinc::shell::StartupReport report;
+        auto result = run_services(options, report);
         if (!result) {
-            std::cerr << "Shell startup failed: " << vinc::error_to_string(result.error()) << '\n';
+            if (!report.entries.empty()) {
+                // Before Shell takes ownership, no startup diagnostics were queued to Log.
+                report.diagnostics_available = false;
+                report.write(std::cerr, false, false);
+            } else {
+                std::cerr << "Shell failed: " << vinc::error_to_string(result.error()) << '\n';
+            }
+
             return startup_failure_exit_code;
         }
         return success_exit_code;

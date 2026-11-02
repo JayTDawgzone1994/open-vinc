@@ -439,7 +439,23 @@ Windows x64／MSVC／Ninja 驗證：
 
 ## Outstanding issues / 待處理事項
 
+- See the [Windows toolchain evaluation](WINDOWS_TOOLCHAIN.md) for the isolated
+  historical 19.42/19.44 results and Runtime-floor diagnosis. Python now uses the
+  [static SDK closure](INSTALL.md#static-python-sdk-validation) on MSVC; native C++
+  retains its dynamic CRT contract. Native MSVC
+  now requires 19.44 or newer; see the [Common policy](../common/README.md#build-toolchain-policy).
+  Exact installed-SDK compiler/ABI matching remains the
+  current contract; cross-toolchain or cross-patch relaxation is not approved
+  by successful same-toolchain builds.
+  Windows 舊工具鏈與 Runtime 門檻歷史診斷見上述評估；Python 已改用上述靜態庫，
+  原生 C++ 動態 CRT 契約不變。原生 MSVC 最低為 19.44，可使用較新版；
+  預編譯 SDK 的編譯器／ABI 比對仍維持原契約，不把同工具鏈成功擴張成混用版本保證。
 - Multi-App acceptance is recorded in the [plan](../../../apps/vinc/MULTI_APP.md#stage-4-acceptance).
+  The later Python Runtime policy has its own
+  [integration acceptance](INSTALL.md#runtime-final-acceptance), including
+  installed multi-App/System Module checks and an explicit native macOS handoff.
+  後續 Python Runtime 政策的整合驗收另見上述紀錄，包含安裝式多 App／System Module
+  與明確列出的 macOS 待驗證範圍。
   Linux installed composition, Windows Debug/Release complete multi-App retries,
   and both platforms' Runtime regressions passed. The Windows port-8080 conflict
   was resolved through an authorized preview pause and restoration; new multi-App
@@ -450,6 +466,15 @@ Windows x64／MSVC／Ninja 驗證：
   驗證仍待補，不改寫既有歷史證據。
 - Reproduced Windows Tcl build-root spaces break unquoted upstream rules/mkdir even with relative-path attempts. No upstream patches; a build-location strategy needs separate design. Spaced deployment/output paths are distinct and tested. See [Tcl issues](../../../library/tcl/README.md#待處理事項).
 - Source add_subdirectory remains supported. [Installed SDK](INSTALL.md) provides C++ app composition and optional consumer-built Python bindings; multi-config support remains pending. Platform evidence is scoped separately.
+- The 2026-11-02 WSL `/mnt/d` run exceeded `installed_consumer.cmake`'s default
+  90-second command limit while copying Tcl resources. A manual rerun with the
+  explicit 600-second test limit passed; the default CTest timeout is unchanged.
+  Prefer native filesystem validation or explicitly record raised limits; see
+  [SDK validation](INSTALL.md#static-python-sdk-validation). This is a validation
+  environment limit, not evidence of a framework lifecycle defect.
+  本輪 WSL `/mnt/d` 複製 Tcl 資源超過測試預設 90 秒，明確提高至 600 秒後完整通過。
+  預設 CTest 期限未變；後續宜使用原生檔案系統，或記錄調高的測試期限。
+  這是驗證環境限制，並非框架生命週期錯誤的證據。
 
 - **已重現：Windows Tcl 建置根目錄含空白時，NMAKE 失敗。** 上游 `rules.vc` 的
   inference rules 使用無引號來源／輸出路徑；改用相對路徑後，仍在上游絕對路徑 mkdir
@@ -534,6 +559,13 @@ Common VincMsvcDependencies.cmake re-probes localized showIncludes as UTF-8 at c
 偵測無法確認編碼時明確中止配置並提供 `CMakeFiles/VincShowIncludes/output.log`，
 避免再次生成會默默漏編的設定；Windows MSVC／Ninja 請使用 UTF-8 開發者環境。
 此接線只套用 Windows MSVC／Ninja，其他編譯器與 generator 不變。
+
+The root build wrapper now supplies an isolated UTF-8 console for Windows build
+and install steps, including callers using CP950. Direct CMake callers still own
+their console setup. See [native console validation](../../../tools/README.md#native-console-encoding-follow-up-2026-10-31--原生-console-編碼補驗).
+
+根目錄建置腳本已為 Windows 建置／安裝步驟提供獨立 UTF-8 console，支援從 CP950 呼叫；
+直接使用 CMake 時仍須自行準備終端環境。本輪補驗及前輪覆蓋缺口見上述紀錄。
 
 **Affected existing builds need reconfigure then one clean rebuild.** Prefix correction cannot reconstruct missing object dependencies. After that, incremental builds work; both local external fixtures were rebuilt.
 
@@ -633,3 +665,68 @@ ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件�
 Host/Plugin entry 10 and bootstrap v16 require rebuilding connected SDK consumers, Plugins and Python native adapters with the central/Host. Public pumpOnce syntax/semantics stay unchanged; pumpLoop uses the Host-owned notification receiver plus the existing fallback. ModuleInfo now carries notification diagnostics. See [Pump wakeup](../module_system/PUMP_WAKEUP.md) for ownership, protocol versions, recovery and validation.
 
 本輪 entry 10／bootstrap v16 要求所有相連產物一起重建。pumpOnce 不變，pumpLoop 使用 Host 的通知與備援等待；ModuleInfo 加入通知診斷。完整契約見上述連結。
+
+<a id="system-module-validation"></a>
+
+### System Module integration validation / System Module 接線驗證
+
+`tests/system_apps.py` is the C++-only installed-SDK acceptance path. It builds
+two Apps with `find_package(vinc)`, installs and moves both packages, then checks
+same-name exclusion, independent Shell/Recorder processes, an actual HTTP port
+conflict, automatic recovery after the configured start-limit window, and
+recording/shutdown isolation. Python runs the test harness only; neither App
+enables the Python Module capability. CTest exposes it as `sdk.system_apps` for
+Ninja SDK builds with testing, UI and a Python interpreter available.
+
+`tests/system_apps.py` 是純 C++ 安裝式 SDK 驗收：透過 `find_package(vinc)` 建置兩個
+App，安裝並搬移後測試同名排他、獨立 Shell／Recorder、真實 HTTP port 衝突、限流
+時間窗後自動恢復，以及錄製與關閉隔離。Python 只執行測試腳本，兩個 App 均不啟用
+Python Module。啟用測試與 UI 且有 Python interpreter 的 Ninja SDK 建置會登記
+`sdk.system_apps`。
+
+Windows Release acceptance passed for two installed-and-moved C++ Apps; see the
+[stage 3 evidence and platform limits](../module_system/README.md#system-module-stage3).
+The compatible-Python follow-up and the historical dynamic-CRT limitation are recorded below.
+
+Windows Release 的兩個安裝並搬移 C++ App 已通過驗收；證據與平台限制見上述第三階段
+紀錄。下文分別記錄相容 Python 的補驗，以及先前動態 CRT 建置的 Runtime 限制。
+
+2026-11-01, Windows x64 / MSVC 19.51.36257 Release: an installed SDK built the
+C++ `First` App, installed it with `VincApp_First`, moved the package, and passed
+`apps/vinc/tests/system_services.py`. Official UI/Recorder registration, command
+visibility/protection, crash recovery and whole-framework shutdown passed.
+Full behavior and source Debug/Release evidence belong to the
+[Module System README](../module_system/README.md#system-modules).
+
+2026-11-01，Windows x64／MSVC 19.51.36257 Release：安裝式 SDK 建立 C++ First App，
+以 `VincApp_First` 安裝並搬移後通過 System 服務測試；官方登記、命令顯示／保護、crash
+恢復與框架關閉均通過。完整契約及來源版 Debug／Release 證據見上述文件。
+
+**Earlier blocked validation (environment):** `tests/multi_app.py` built First,
+Second and Third, then stopped at Second's Python Module startup. The local
+CPython 3.13 executable loaded its bundled VCRUNTIME140 14.42.34438.0; that dynamic
+SDK required at least 14.51.36244.0. `python/vinc/_windows_runtime.py` correctly
+raised ImportError before loading native code. This run did not reach the later
+multi-App concurrency and failure-injection checks. Compatible-environment
+acceptance subsequently passed as recorded below. This restriction applies to that
+dynamic-CRT package, not the current static binding. Linux/macOS were not verified
+in that run.
+Evidence: `build/system-stage2-sdk-multi.log` and
+`build/system-stage2-installed-services.log` (local build artifacts).
+
+**先前被擋住的驗證（環境限制）：**多 App 測試建好三個 App 後，在 Second 的 Python Module
+因上述 Runtime 版本不符而中止；guard 正確先回 ImportError，尚未執行後續多 App 並行與
+故障注入案例。相容 Python Runtime 的後續補驗見下文；此限制屬於當時的動態 CRT 套件，
+不代表目前靜態綁定仍有相同限制。當時未放寬 guard 或替換使用者 DLL。
+該次未驗證 Linux／macOS，原始紀錄位於上述本機建置目錄。
+
+**Follow-up (2026-11-01):** Windows MSVC 19.44.35229 Release with isolated
+CPython 3.13.12 / compatible 14.51 Runtime passed `sdk.multi_app` (418.28 s),
+including the later coexistence and failure cases, and `sdk.system_apps`
+(204.14 s). The user's original Python still failed that dynamic Runtime guard;
+this resolved the missing compatible-environment acceptance, not that deployment
+restriction. See the [toolchain report](WINDOWS_TOOLCHAIN.md) for exact scope.
+
+**後續補驗（2026-11-01）：**19.44 Release 配合隔離的相容 Python／Runtime，完整
+`sdk.multi_app` 與 `sdk.system_apps` 通過，補到後續並行與故障案例。原始 Python 安裝當時仍
+被動態 CRT 防護拒絕；解決的是相容環境的驗證缺口，不是放寬部署限制。完整範圍見上述報告。

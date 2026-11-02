@@ -6,6 +6,101 @@ The public entry points are `error.hpp` and `result.hpp`. The unused legacy inte
 
 正式入口為 `error.hpp`／`result.hpp`。ModuleSystem 遷移後已移除無呼叫端的舊整數錯誤表。
 
+<a id="build-toolchain-policy"></a>
+
+## Build toolchain policy / 建置工具鏈規則
+
+Module Python selection uses `cmake/VincPythonSelection.cmake` alongside the
+minimum-version policy. It performs build-only PATH/Custom resolution and shared
+binding/cache checks, without initializing runtime services. Kconfig owns its
+user-facing contract; see [Python selection](../../../tools/configure/README.md#module-python-selection--module-python-選擇).
+
+Module Python 的建置期 PATH／Custom 選擇與共用 binding／cache 檢查由此處 helper 維護，
+不啟動執行期服務；使用者設定與遷移契約統一放在上述 Kconfig 文件。
+
+Native MSVC requires **19.44 or newer**, with no patch pin. The single numeric
+source is `cmake/msvc_minimum.txt`; `VincToolchain.cmake`, the root build wrapper
+and Windows setup read it. Source configuration rejects older enabled C/C++
+compilers before framework targets are built. The installed SDK ships the same
+policy and returns a failed package lookup before importing targets. GCC, Clang
+and clang-cl are not classified as MSVC by this check; acceptance here does not
+establish their platform/feature support. C++23, exact installed SDK compiler/ABI
+matching, cache identity and Python Runtime preflight remain separate contracts.
+
+原生 MSVC 最低為 **19.44**，不鎖定修補版。唯一版本來源為
+`cmake/msvc_minimum.txt`，CMake、根目錄 build 腳本及 Windows setup 共用。
+來源配置會先拒絕過舊的 C／C++ 編譯器；安裝式 SDK 附帶相同規則，查找失敗時不匯入
+targets。GCC、Clang、clang-cl 不套用 MSVC 版本門檻，但不代表已驗證其所有功能。
+C++23、SDK 精確編譯器／ABI 配對、建置目錄相容性及 Python Runtime 防護均維持原契約。
+
+Compiler validation evidence is recorded in the [Windows toolchain report](../sdk/WINDOWS_TOOLCHAIN.md).
+實測環境與限制見 [Windows 工具鏈報告](../sdk/WINDOWS_TOOLCHAIN.md)。
+
+Python build tools and Module bindings require **3.11 or newer within Python 3**,
+without a patch pin. The numeric source is `cmake/python_minimum.txt`.
+`VincPythonRequirements.cmake` supplies optional/required CMake discovery and
+diagnostics; `python_version.py` supplies script checks. Installed SDKs ship the
+same files under `lib/cmake/vinc`, and binding metadata receives the minimum at
+generation time. These are build assets, not a Common runtime dependency.
+Plain SDK lookup/linking still requires no Python. Module bindings keep their
+exact minor/platform/bitness/GIL and MSVC Runtime requirements; a version floor
+does not promise every newer Python version is validated.
+
+Python 建置工具與 Module 綁定統一最低 **3.11，限 Python 3，不鎖 patch**。
+唯一數字來源是 `cmake/python_minimum.txt`，CMake 與腳本共用，SDK 安裝相同規則，
+綁定的版本資訊由建置時生成。這些是建置資源，不讓 Common 的 C++ Runtime 相依 Python。
+單純 SDK 查找／連結仍不需要 Python；Module 的精確 ABI 與 VC++ Runtime 規則不變。
+版本門檻不代表已驗證所有更新版本。詳細結果見
+[Python 3.11 驗證](../module_system/python/PYTHON311_VALIDATION.md)。
+
+<a id="build-runtime-policy"></a>
+
+## Build runtime policy / 建置 Runtime 政策
+
+`cmake/VincRuntime.cmake` is build-only infrastructure, not a runtime OSAL API.
+Component-owned factories declare sources/settings once; `vinc_runtime_variants()`
+calls them for the native configuration and, on MSVC, an excluded-from-all Python
+configuration. Full framework composition enables these declarations with the
+internal directory variable `VINC_DECLARE_PYTHON_RUNTIME`; standalone Common/OSAL
+keeps only its native targets. This is not a user-facing build option. No target
+graph is cloned or reconstructed from generator expressions.
+
+- `vinc_runtime_name()` assigns separate target/object/archive names.
+- `vinc_apply_runtime()` selects native `/MD` (`/MDd` in Debug) or Python `/MT`
+  (`/MTd` in Debug) through target properties, not global flags.
+- `vinc_runtime_link_libraries()` resolves literal dependencies through declared
+  variants. Undeclared static/object dependencies fail on the Python path.
+- `VINC_CRT` compatible-interface checks reject mixed declared CRT dependencies,
+  including indirect ones. They do not inspect arbitrary foreign binaries or
+  prove ABI compatibility; actual image imports need separate validation.
+- Linux/macOS instantiate only the native version. No static standard-library
+  selection or new minimum-OS promise is introduced.
+
+Error catalog generation remains single-owned. Each CRT version compiles that
+same generated source. Header-only catalog providers contribute their direct
+compilation requirements without linking native Common; executable formatters
+must provide the matching runtime variant.
+
+此層只在建置時使用，不加入執行期 OSAL。元件用同一份來源與設定建立不同 CRT
+版本，物件及 archives 分開；未使用的靜態版本不加入預設建置。第三方上游不修改。
+Linux／macOS 暫保留原方式，不把 Windows 實驗當成跨平台驗證。
+
+Windows source and installed-SDK Python bindings select these static archives and
+verify static metadata before import. Native C++ keeps dynamic CRT.
+`VINC_INSTALL_SDK=ON` builds and exports the declared Python archive closure even
+when `VINC_BUILD_PYTHON=OFF`; a downstream App can enable Python without rebuilding
+framework libraries. Ordinary source builds still build these archives only when
+selected by Python or explicit validation. `build.py`/setup are unchanged;
+see the [Python rollout](../module_system/python/README.md#runtime-policy-rollout).
+
+Windows 來源版與 installed SDK 的 Python binding 都使用靜態庫，原生 C++ 維持動態 CRT。
+啟用 SDK 安裝時，即使製作者關閉 Python，也會建置及交付靜態庫，讓下游自行啟用 Python；
+一般來源建置仍按需建置。setup／build 入口不變。
+Windows 的 `common.runtime_policy` 測試實際編譯執行兩種 CRT、拒絕間接混用／缺少
+版本／無效政策，並確認預設建置不產生靜態版本。啟用 `BUILD_TESTING` 後，可明確建置
+`vinc_check_python_runtime`，驗證真正 Module Runtime 的靜態連結、imports 與 bootstrap
+拒絕／catalog 路徑；這不是 Python 或完整服務行為驗收。實測範圍見 Python 文件。
+
 <a id="shared-owner-identities"></a>
 
 ## Shared owner identities / 共享持有者身分
@@ -172,13 +267,18 @@ as UTF-8 and verifies a known Unicode header name before accepting the prefix.
 The deferred update runs in the top-level CMake directory, after compiler-cache
 reloads, so external `add_subdirectory` consumers receive the same correction.
 An unverified encoding fails configuration with a probe log; it is not silently
-treated as a usable dependency prefix. Use a UTF-8 developer console/toolchain.
+treated as a usable dependency prefix. The root build wrapper supplies an isolated
+UTF-8 console on Windows; direct CMake callers must prepare a UTF-8 developer
+console/toolchain themselves. See the [build entry contract](../../../tools/README.md#toolchains-and-safety--工具鏈與保護邊界).
 Other compilers and generators are unchanged. This adds no runtime dependency.
 Existing objects with missing header dependencies require one clean rebuild.
 Reproduction, regression tests and platform limits are maintained in the
 [SDK build notes](../sdk/README.md#msvcninja-增量建置修復2026-10-06).
 
 `cmake/VincMsvcDependencies.cmake` 是 Common 引入的純建置 helper。Windows MSVC／Ninja 下，明確以 UTF-8 探測本地化 `/showIncludes` 並核對已知 Unicode 標頭名，確認後才接受前綴。延後更新在最上層 CMake 目錄、編譯器快取重載後執行，外部 `add_subdirectory` 使用端也適用。無法驗證編碼時，以探測 log 拒絕配置，不默默採用；需 UTF-8 開發環境。其他編譯器／產生器不變，無新增 runtime 相依。既有遺失標頭相依的物件須 clean rebuild 一次；重現、測試與限制見 [SDK 建置紀錄](../sdk/README.md#msvcninja-增量建置修復2026-10-06)。
+
+根目錄建置腳本會在 Windows 提供獨立 UTF-8 console，不更改使用者終端；直接呼叫 CMake
+則仍須自行準備 UTF-8 開發環境，詳見上述建置入口契約。探針的驗證條件未放寬。
 
 - `include/vinc/error_catalog.hpp` defines immutable C++ catalog contracts and
   constexpr validation. Component `error.hpp` headers own enums/traits; their
@@ -743,6 +843,13 @@ existing configuration to Param. Control wire page sizes remain protocol constan
 
 Module Graph 的 `ui_graph_*` 暫存設定由 UI 契約維護；本輪未搬移既有 config 到 Param。
 控制封包分頁大小仍是各元件的協定常數。
+
+System Module restart defaults also live in config.hpp. Their policy and validation
+belong to the [Module System contract](../module_system/README.md#system-modules).
+The fixed attempt-history capacity is a layout setting and requires a rebuild.
+
+System Module 重啟預設亦位於 config.hpp；政策與驗證由上述 Module System 契約維護。
+固定嘗試歷史容量影響布局，修改須重建。
 
 Notification retry/report settings remain compile-time system policy in config.hpp; defaults, meanings and validation belong to [Pump wakeup](../module_system/PUMP_WAKEUP.md).
 

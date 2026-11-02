@@ -106,11 +106,15 @@ add_test(NAME sdk.owned_files COMMAND "${CMAKE_COMMAND}"
     "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/owned-files-test"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/owned_files.cmake")
 set_tests_properties(sdk.owned_files PROPERTIES TIMEOUT 15)
-find_package(Python3 3.9 QUIET COMPONENTS Interpreter)
+include("${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonRequirements.cmake")
+vinc_find_python(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
     add_test(NAME sdk.configuration COMMAND "${Python3_EXECUTABLE}" -B
         "${VINC_REPOSITORY_ROOT}/tools/configure/tests/test_configuration.py")
     set_tests_properties(sdk.configuration PROPERTIES TIMEOUT 60)
+    add_test(NAME sdk.python_selection COMMAND "${Python3_EXECUTABLE}" -B
+        "${VINC_REPOSITORY_ROOT}/tools/configure/tests/test_python_selection.py")
+    set_tests_properties(sdk.python_selection PROPERTIES TIMEOUT 120)
     add_test(NAME sdk.app_selection COMMAND "${Python3_EXECUTABLE}" -B
         "${CMAKE_CURRENT_SOURCE_DIR}/app_selection.py"
         --cmake "${CMAKE_COMMAND}" --compiler "${CMAKE_CXX_COMPILER}"

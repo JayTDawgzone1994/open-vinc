@@ -64,14 +64,30 @@ function(vinc_render_module_catalog output)
         if(MOD_STOP_TIMEOUT_CONFIG)
             set(policy_adjustment "policy.stop_timeout = vinc::config::${MOD_STOP_TIMEOUT_CONFIG};")
         endif()
+        get_target_property(system_name ${TARGET} VINC_SYSTEM_MODULE_NAME)
+        get_target_property(system_toggle ${TARGET} VINC_SYSTEM_MODULE_TOGGLE)
+        set(registration "manager.register_module_type")
+        set(registration_prefix "")
+        set(registration_suffix "")
+        set(system_options "")
+        if(system_name)
+            set(system_options "vinc::detail::SystemModuleOptions system;\n        system.name = \"${system_name}\";")
+            if(system_toggle)
+                string(APPEND system_options "\n        system.enabled = true;")
+            endif()
+            set(registration "vinc::detail::ManagerAccess::register_system_module")
+            set(registration_prefix "manager, ")
+            set(registration_suffix ", std::move(system)")
+        endif()
         set(catalog_entry [=[
     {
         vinc::ModulePolicy policy;
         @policy_adjustment@
-        auto registered = manager.register_module_type({
+        @system_options@
+        auto registered = @registration@(@registration_prefix@{
             "@MOD_MODULE_TYPE_NAME@",
             @plugin_path@,
-            policy});
+            policy}@registration_suffix@);
         if (!registered) {
             return std::unexpected(registered.error());
         }

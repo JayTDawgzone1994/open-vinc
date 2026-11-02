@@ -1,5 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
 project(installed_sdk_consumer LANGUAGES CXX)
+
+# These lookup-only cases simulate compiler metadata, never compile with it.
+# Optional rejection must not import any part of an unusable package.
+if(TEST_POLICY_OLD_MSVC)
+    set(CMAKE_CXX_COMPILER_ID MSVC)
+    set(CMAKE_CXX_COMPILER_VERSION 19.43.99999)
+    find_package(vinc CONFIG QUIET)
+    if(vinc_FOUND OR TARGET vinc::sdk OR TARGET vinc::common OR
+       NOT vinc_NOT_FOUND_MESSAGE MATCHES "requires MSVC 19.44")
+        message(FATAL_ERROR "Old MSVC package lookup did not fail cleanly: ${vinc_NOT_FOUND_MESSAGE}")
+    endif()
+    return()
+endif()
+if(TEST_POLICY_DIFFERENT_COMPILER)
+    set(CMAKE_CXX_COMPILER_ID MSVC)
+    set(CMAKE_CXX_COMPILER_VERSION 99.0)
+endif()
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

@@ -4,3 +4,6 @@ library/sqlite/upstream/* -text
 # Dependency setup must remain runnable after Windows checkouts or WSL copies.
 tools/** text eol=lf
 tools/*.bat text eol=crlf
+build.sh text eol=lf
+build.py text eol=lf
+build.bat text eol=crlf

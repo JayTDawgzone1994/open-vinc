@@ -107,7 +107,7 @@ function(run_central label executable)
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 20 ENCODING UTF-8)
     file(WRITE "${TEST_BINARY_DIR}/${label}.log" "${output}\n${errors}")
     if(NOT result STREQUAL "0" OR NOT output MATCHES "SDK_SCRIPT_READY"
-            OR NOT output MATCHES "Socket Shell listening on 127\\.0\\.0\\.1:[1-9][0-9]*"
+            OR NOT output MATCHES "Socket Shell ready - listening on 127\\.0\\.0\\.1:[1-9][0-9]*"
             OR NOT output MATCHES "EXTERNAL_MODULE_SCHEMA=2")
         message(FATAL_ERROR "${label}: automatic services failed (${result}): ${output}${errors}")
     endif()

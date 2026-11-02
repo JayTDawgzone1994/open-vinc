@@ -1,4 +1,10 @@
 include_guard(GLOBAL)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/VincPythonRequirements.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/VincPythonSelection.cmake")
+else()
+    include("${CMAKE_CURRENT_LIST_DIR}/../../common/cmake/VincPythonSelection.cmake")
+endif()
+vinc_reject_python_override()
 
 # Internal composition entry: capture caller paths now, resolve after all Modules
 # have registered. Public App construction supplies its own official adapters.
@@ -27,7 +33,7 @@ function(vinc_register_app_configuration target)
         endif()
     endforeach()
 
-    find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+    vinc_find_python(Python3 REQUIRED COMPONENTS Interpreter)
     get_filename_component(config "${APP_CONFIG}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     get_filename_component(tool "${APP_TOOL_DIRECTORY}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     set(output "${CMAKE_BINARY_DIR}/vinc-config/${target}")
@@ -111,7 +117,7 @@ function(vinc_resolve_app_configuration app)
         "${FILE}" "${TOOL}/configure.py" "${TOOL}/Kconfig.python")
     execute_process(COMMAND "${INTERPRETER}" -B "${TOOL}/configure.py"
         ${ARGUMENTS} --output "${OUTPUT}"
-        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors)
+        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors ENCODING UTF-8)
     if(NOT result STREQUAL "0")
         message(FATAL_ERROR "App ${app}: ${summary}${errors}\nEditor: ${INTERPRETER} ${TOOL}/configure.py ${ARGUMENTS} --gui")
     endif()
@@ -145,7 +151,7 @@ endfunction()
 # Only application composition needs Python. Plain SDK lookup/linking is inert.
 function(vinc_configure_application_features tool_directory)
     cmake_parse_arguments(PARSE_ARGV 1 FEATURE "INSTALLED;NO_UI;NO_BAG" "UI_AVAILABLE;BAG_AVAILABLE;PYTHON_AVAILABLE" "")
-    find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+    vinc_find_python(Python3 REQUIRED COMPONENTS Interpreter)
     set(config "${CMAKE_SOURCE_DIR}/vinc.conf")
     set(arguments)
     if(DEFINED VINC_CONFIG_FILE)
@@ -191,7 +197,7 @@ function(vinc_configure_application_features tool_directory)
     endforeach()
     execute_process(COMMAND "${Python3_EXECUTABLE}" -B "${tool_directory}/configure.py"
         --config "${config}" --output "${output}" ${arguments}
-        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors)
+        RESULT_VARIABLE result OUTPUT_VARIABLE summary ERROR_VARIABLE errors ENCODING UTF-8)
     if(NOT result STREQUAL "0")
         message(FATAL_ERROR "${summary}${errors}")
     endif()
@@ -199,6 +205,9 @@ function(vinc_configure_application_features tool_directory)
     include("${output}/features.cmake")
     foreach(name UI BAG PYTHON)
         set(VINC_APP_${name} "${VINC_APP_${name}}" PARENT_SCOPE)
+    endforeach()
+    foreach(name SYSTEM CUSTOM EXECUTABLE)
+        set(VINC_PYTHON_${name} "${VINC_PYTHON_${name}}" PARENT_SCOPE)
     endforeach()
     # Glob tracks creation/deletion as well as edits to an optional default file.
     file(GLOB config_presence CONFIGURE_DEPENDS "${config}")

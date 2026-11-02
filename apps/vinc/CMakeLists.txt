@@ -19,7 +19,13 @@ add_custom_command(TARGET shell POST_BUILD
         "$<TARGET_FILE_DIR:shell>/licenses/tomlplusplus/LICENSE"
     VERBATIM)
 target_include_directories(shell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
+target_include_directories(shell PRIVATE "${CMAKE_BINARY_DIR}/vinc-config")
 target_link_libraries(shell PRIVATE vinc::shell vinc::module_runtime)
+# Startup explanations use metadata only, never the UI server implementation.
+if(TARGET vinc_ui_errors)
+    target_link_libraries(shell PRIVATE vinc_ui_errors)
+    target_compile_definitions(shell PRIVATE VINC_STARTUP_UI_ERRORS)
+endif()
 set_target_properties(shell PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${VINC_BUILD_ROOT}"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${VINC_BUILD_ROOT}"
@@ -67,6 +73,7 @@ function(vinc_finalize_module_catalog)
 
 // Generated from the registered process-module targets. Edit the CMake sources instead.
 #include <vinc/module/host/module_manager.hpp>
+#include <vinc/module/detail/manager_access.hpp>
 #include <vinc/config.hpp>
 
 

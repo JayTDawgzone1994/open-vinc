@@ -19,6 +19,14 @@ or service startup during lookup. Lookup compiles/runs a small native ABI probe.
 
 ## Scope / 本輪範圍
 
+Native MSVC consumers must meet the [Common toolchain policy](../common/README.md#build-toolchain-policy)
+(19.44 or newer). This is only the minimum: a prebuilt SDK still requires the exact
+compiler version, build configuration and ABI recorded when it was built.
+
+原生 MSVC 使用者須符合 [Common 工具鏈規則](../common/README.md#build-toolchain-policy)
+（最低 19.44）。最低版本不代表 SDK 可混用版本：預編譯 SDK 仍要求原本的精確編譯器版本、
+建置組態與 ABI。
+
 - Component headers and static libraries, `vinc::sdk`, the compiled error catalog,
   and their necessary link dependencies. Headers under `detail/` retain their
   existing internal contracts; installation does not make them public API.
@@ -41,6 +49,205 @@ or service startup during lookup. Lookup compiles/runs a small native ABI probe.
   catalog 與中央身分。官方 Bag／UI 接線及選用的 Python 綁定會依該訊息清單重新編譯。
 
 ## Build and install / 建置與安裝
+
+<a id="sdk-install-command"></a>
+
+### One-command SDK installation / 一鍵安裝 SDK
+
+After preparing dependencies and pinned submodules, run from the checkout:
+先準備系統／UI 相依與固定版本 submodule，再執行：
+
+```powershell
+py -3 build.py --install-vinc-sdk
+# Equivalent Windows launcher: build.bat --install-vinc-sdk
+```
+
+```sh
+./build.py --install-vinc-sdk
+# Equivalent launcher: sh build.sh --install-vinc-sdk
+```
+
+This mode defaults to Release; ordinary builds still default to Debug. It builds
+this checkout's complete SDK (including UI/Bag resources and Python binding build
+material), not example Apps or prebuilt Python bindings. Dependencies are checked,
+not installed; missing UI npm packages still require `npm ci`. CMake owns all
+install rules, generated messages, assets and license delivery.
+
+此模式預設 Release，一般建置仍預設 Debug。建置完整 SDK，含 UI／Bag 資源及 Python
+綁定建置材料，不建置範例 App、不預先綁定 Python ABI。只檢查相依，不自動安裝工具；
+缺少 UI npm 套件時仍需先執行 `npm ci`。安裝清單、訊息、資源及授權均由 CMake 維護。
+
+| Platform / 平台 | Default dedicated directory / 預設專用目錄 |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\OpenVINC\sdk` |
+| Linux | `$XDG_DATA_HOME/open-vinc/sdk`, otherwise `~/.local/share/open-vinc/sdk` |
+| macOS | `~/Library/Application Support/OpenVINC/sdk` |
+
+`--sdk-root PATH` selects the **exact dedicated installation directory**, not a
+parent for versioned installations. One location holds one SDK. `--config Debug`
+selects Debug instead; `--no-register` leaves CMake registration unchanged.
+`--jobs`, `--build-dir` and non-conflicting `-D` settings remain available. External
+`--source`, partial `--target`, and overrides of the required SDK feature flags
+are rejected. SDK builds use a separate `build/<platform>-<compiler>-sdk-<config>`
+tree. No cache is automatically cleaned or reused across incompatible toolchains.
+New wrapper records also reject mixing ordinary-build and SDK-install purposes
+in one tree; legacy record migration follows the
+[build toolchain contract](../../../tools/README.md#toolchains-and-safety--工具鏈與保護邊界).
+
+`--sdk-root PATH` 是**實際專用安裝目錄**，不是多版本的上層目錄；同一位置只放一份 SDK。
+可選 `--config Debug`、`--no-register`、`--jobs`、`--build-dir` 與不衝突的 `-D`。
+不接受外部來源、部分 target 或覆蓋 SDK 必備功能開關。SDK 與一般 App 分開建置目錄，
+不自動清除 cache、不跨不相容工具鏈沿用。
+新紀錄也會拒絕一般建置與 SDK 安裝共用同一 build 目錄；舊紀錄升級依上述工具鏈契約處理。
+
+#### Update and failure contract / 更新與失敗契約
+
+The installer uses plain text, with no terminal UI dependency. Six numbered stages
+identify destination/tool checks, CMake configure, build, staged verification,
+replacement/final verification, and CMake registration. `--no-register` marks the
+last stage as skipped. CMake output remains streamed; the final summary states the
+configuration, destination, installation/recovery state, registration result and
+this invocation's bounded command-log path. Failures before opening that log say
+no log was created, rather than pointing to an earlier invocation's file.
+
+安裝器維持純文字，不增加終端 UI 相依。依序顯示六個編號階段：目的地／工具檢查、
+CMake 配置、建置、暫存驗證、替換／最終驗證、CMake 登記；`--no-register` 明確標為
+略過登記。CMake 輸出仍即時顯示，最後摘要列出組態、位置、安裝／還原狀態、登記結果及
+本次有容量上限的命令 log 路徑。開啟 log 前就失敗時會顯示本輪尚未建立 log，
+不把前次 log 當成本次結果。只有全部要求步驟成功才顯示 completed；登記失敗仍為失敗，
+但會明確說明新版 SDK 已安裝並提供 `vinc_DIR`。
+
+```text
+[1/6] Check destination and build tools
+[2/6] Configure SDK
+[3/6] Build SDK
+[4/6] Stage and verify SDK
+[5/6] Replace and verify installation
+[6/6] Register SDK with CMake
+
+SDK installation completed
+Location: ...
+Configuration: Release
+SDK status: New SDK installed and verified.
+CMake registration: Updated for this user; existing project caches unchanged.
+Log: .../.vinc-build.log (bounded command output)
+Explicit selection: -Dvinc_DIR=.../lib/cmake/vinc
+```
+
+- An existing installer-owned SDK requires `[y/N]` confirmation before toolchain
+  initialization or building. No, empty input, EOF or cancellation does not change
+  the SDK/registry or create build files. The prompt identifies the current build
+  profile, source checkout and requested configuration; CMake reports the newly
+  selected compiler/profile during configuration.
+- The `.vinc-sdk-install.json` inventory covers files, content hashes and empty
+  directories. Unowned directories, modified/missing/extra contents, links and
+  Windows reparse points are rejected. It is an accidental-data-loss guard, not
+  authentication against a malicious same-user process. Source/build trees and
+  user/filesystem roots cannot be SDK destinations.
+- Build/install into a sibling staging directory first. Compile, link and run a
+  small external SDK probe there; then rename the old SDK aside, move the new SDK
+  into place and repeat the probe at its final location. Ordinary failures and
+  interrupts during replacement attempt to restore the previous installation.
+  Delete the old SDK only after successful final verification. It does not retain
+  a history of successful SDK installs.
+- A sibling `.NAME.install-lock` protects this installer's operations against the
+  same destination. The build lock remains held through installation. These locks
+  do not stop external compilers or direct `cmake --install`; stop consumers before
+  updating. Two directory renames are not an atomic filesystem transaction.
+- A hard kill/power loss can leave `.NAME.sdk-backup` or `.NAME.stage-*`. A retained
+  backup blocks the next update for manual inspection/recovery. Do not delete the
+  only valid SDK; restore the backup to the destination if needed. Failed backup
+  cleanup/rollback is reported with its location, rather than deleting more data.
+- After verification, update only this installer's CMake user-registry entry.
+  Registration failure returns nonzero but preserves the installed SDK and prints
+  its explicit `vinc_DIR`. No machine PATH, system registry or other installer
+  entries are modified. Separate destinations may coexist; the last successful
+  registration becomes this installer's default, including a Debug installation.
+
+- 已有本工具安裝的 SDK 時先詢問 `[y/N]`；否、空輸入、EOF 或取消不變更 SDK／登記，
+  不開始建置。提示舊 profile、本次來源及組態；選定工具鏈會在配置時顯示。
+- 所有權清單包含檔案雜湊與空目錄；未知目錄、增刪／修改內容、連結或 junction 均停止。
+  這是防誤刪措施，不是防禦同權限惡意程序的安全沙箱。
+- 先暫存安裝並驗證，再備份舊目錄、替換及驗證最終位置；一般失敗／中斷嘗試還原。
+  新版成功才清掉舊版，不累積版本歷史。
+- 同目的地安裝互斥，但無法阻止直接 CMake 安裝或其他專案讀取；更新前須停止使用端
+  建置。兩次目錄 rename 不構成完全原子的交易。
+- 強制終止／斷電可能留下暫存或備份；備份存在時拒絕繼續更新，先人工確認及還原。
+  還原或清理受 OS 拒絕時明確回報保留位置。
+- 安裝驗證成功後才更新本工具自己的使用者 CMake 登記；登記失敗仍保留已安裝 SDK，
+  回傳失敗並提供 `vinc_DIR`。不改系統 PATH，不移除其他工具的登記。
+
+#### CMake discovery / CMake 查找
+
+New compatible projects can use `find_package(vinc CONFIG REQUIRED)` without a
+prefix argument. Windows uses HKCU's `Software\Kitware\CMake\Packages\vinc`;
+Linux/macOS use `~/.cmake/packages/vinc`. The owned entry is
+`open-vinc-build-installer`, pointing to `lib/cmake/vinc`, not the build tree.
+Other registry entries have unspecified search order and trigger a warning.
+An explicit `vinc_DIR`, an existing cache, or disabled package-registry lookup
+still controls the consumer. Existing project caches are not rewritten. Debug,
+compiler and ABI mismatches remain errors; no automatic SDK selection or fallback.
+See [CMake's registry contract](https://cmake.org/cmake/help/v3.20/manual/cmake-packages.7.html#package-registry).
+
+相容的新專案可直接 `find_package(vinc CONFIG REQUIRED)`。登記指向安裝目錄的
+`lib/cmake/vinc`，不指向建置目錄。其他登記可能影響搜尋順序，會提示但不擅自刪除；
+使用者明確指定的 `vinc_DIR`、既有 cache 或停用 registry 的設定仍有效。
+不替既有專案換 SDK，不自動挑選另一個 Debug／工具鏈版本，不放寬 ABI 檢查。
+
+#### Installer validation (2026-10-31) / 安裝器驗證
+
+```sh
+python3 -B -m unittest discover -s tools/tests -p test_sdk_install.py -v
+# Windows: replace python3 with py -3.
+```
+
+| Environment / 環境 | Evidence / 驗證 |
+| --- | --- |
+| Windows 11 x64 build 26200; MSVC 19.51.36257; CMake 4.3.2; Ninja 1.13.2; Python 3.13.12 | 18 installer cases: 16 passed, POSIX-only registry and unprivileged symlink cases skipped; Windows junction rejection passed. Clean full Release SDK install, decline/update, staged/final probe and external App with generated messages/Module DLLs passed. A separate space/Chinese-prefix install passed. / 18 項中 16 通過，2 項跳過；junction 防護、完整 Release 安裝、拒絕／接受更新、搬移前後探針、自訂訊息／DLL App，以及空白中文目錄通過。 |
+| WSL Ubuntu 24.04 x86_64; GCC 13.3.0; CMake 3.28.3; Ninja 1.11.1; Python 3.12.3 | 18 installer cases: 17 passed, Windows-only junction case skipped. Clean full Release SDK install, decline/update, staged/final probe and external App with generated messages/Module shared libraries passed. / 18 項中 17 通過，跳過 Windows junction；完整 Release 安裝、拒絕／接受更新、探針與外部訊息／Module App 建置通過。 |
+
+Both platforms additionally passed all 15 ordinary build-wrapper cases, including
+the real CMake fixture. Installer cases include injected build/install/registration
+failures, validation failure rollback, interruption immediately after rename,
+concurrent-installer rejection, unowned/modified-content rejection, and real CMake
+registry lookup using an isolated test package. The actual `vinc` user default was
+not changed. Windows also rejected replacement while a consumer was still using
+the SDK; the original SDK remained intact, and the sequential retry passed.
+
+兩平台另有一般 build wrapper 15 項全部通過，包含真實 CMake fixture。
+安裝測試包含注入建置／安裝／登記失敗、驗證失敗及 rename 後中斷還原、並行拒絕、
+未知／修改檔案拒絕，以及隔離測試套件的真實 CMake registry 查找；未改正式 Vinc 預設。
+Windows 實際遇過使用端仍開啟 SDK 時拒絕替換，舊版完整保留；使用端結束後依序重試通過。
+
+Local logs are under `build/script-validation/{windows,wsl}-sdk-*.log` and
+`{windows,wsl}-build-regression.log` (not tracked). Existing framework compiler
+warnings were not changed. Full runtime suites, native macOS installer execution,
+power-loss recovery and Ubuntu 22.04 deployment were not validated in this round;
+prior platform/runtime evidence is unchanged. The first installer validates a
+small external executable on each install, not the complete framework test suite.
+
+本機 log 留在上述 build 路徑，不提交 Git。既有編譯器警告未調整；本輪沒有重跑完整
+Runtime suites，也未驗證 macOS 原生安裝器、斷電還原或 Ubuntu 22.04 部署，
+不影響既有平台驗證紀錄。每次安裝自動執行的是小型外部探針，不是完整框架測試。
+
+Output follow-up (2026-10-31): 22 installer cases ran on each platform (Windows:
+20 passed/2 platform or permission skips; WSL: 21 passed/1 Windows-only skip).
+All 15 build-wrapper cases passed on both platforms, including real CMake builds.
+Real incremental Release SDK updates verified all six phase headings and final
+summaries on Windows/WSL, using isolated destinations and `--no-register`.
+Injected failures checked accurate stage/log reporting, rollback success versus
+blocked rollback, installed-but-registration-failed, and cleanup failure after
+verification. No native macOS follow-up or complete Runtime rerun was performed.
+Local logs: `build/script-validation/{windows,wsl}-sdk-output-*.log` and
+`{windows,wsl}-build-output-regression.log`.
+
+輸出整理追加驗證：兩平台各執行 22 項安裝器測試，Windows 20 通過／2 跳過，WSL
+21 通過／1 跳過；一般 build wrapper 含真實 CMake 的 15 項均通過。隔離目錄的
+Release 增量更新實測六階段與摘要；注入失敗驗證還原成功／受阻、登記失敗、
+驗證後清理失敗，以及尚未建立 log 的提示。不變更正式 SDK 登記，不宣稱 macOS
+已驗證，也未重跑完整 Runtime suites。
+
+### Direct CMake installation / 直接使用 CMake 安裝
 
 Use a prepared native toolchain and initialized pinned submodules. Windows requires
 the matching MSVC developer environment. Ninja single-config Debug/Release are the
@@ -65,10 +272,12 @@ the C++ toolchain are prepared.
 
 The component name `VincSDK` selects only these install rules. It is not a
 `find_package(... COMPONENTS ...)` selector: package components are not exposed yet.
-No installer, package manager, archive publication or system PATH change is provided.
+Direct CMake installation does not register the package or provide the wrapper's
+ownership/update transaction. No package manager, archive publication or system PATH change is provided.
 
 `VincSDK` 是安裝規則的 component 名稱，不是 `find_package(... COMPONENTS ...)` 的選項；
-尚未提供套件子集選擇。這輪不建立安裝器、套件管理器、發布壓縮檔，也不修改系統 PATH。
+尚未提供套件子集選擇。直接 CMake 安裝不會登記或建立 wrapper 的更新所有權；
+不提供套件管理器、發布壓縮檔，也不修改系統 PATH。
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
@@ -210,9 +419,13 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
 - A compatible Module target is shared. Each App gets a thin UI adapter with its
   own `vinc_data/<INSTANCE_NAME>/ui` default; UI server libraries remain shared.
   The official `webUi`/`bagRecorder` ModuleType names are reserved.
+  Generated catalogs register them as protected System Modules, with fixed `ui`
+  and `recorder` instances. Use their Shell builtins, not direct type launches or
+  `debug stop`; see [System lifecycle](../module_system/README.md#system-modules).
 - Python-enabled Apps share one binding target compiled against all registered
   messages. C++-only Apps do not depend on it. `Python3_EXECUTABLE` selects the
-  configuration interpreter; `Python_EXECUTABLE` selects the binding ABI.
+  configuration interpreter; App Kconfig selects the binding interpreter and runtime
+  default. `-DPython_EXECUTABLE` is rejected. See the [selection contract](../../../tools/configure/README.md#module-python-selection--module-python-選擇).
 - GUI/menu targets are `<App>_vinc_guiconfig` and `<App>_vinc_menuconfig`.
   See [configuration](../../../tools/configure/README.md) for validation and editing.
 - Install one App with `cmake --install build --component VincApp_CameraApp --prefix package`.
@@ -225,7 +438,9 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
   partially updated package. Repair/retry before starting it; hot update is unsupported.
 - Central starts `webUi`/`ui` and `bagRecorder`/`recorder` before Tcl, waiting for Ready
   or bounded failure. Recorder stays idle until commanded. Failure is reported and
-  central continues; explicit stop is not reversed by automatic startup.
+  central continues while System supervision schedules recovery. `ui disable`
+  closes HTTP only and survives process restart; `recorder finish` ends recording.
+  Ordinary lifecycle stop is forbidden; framework shutdown still stops both.
 
 - 設定檔必填、腳本選填，相對路徑以呼叫端 CMakeLists 為準；內嵌腳本仍拒絕 `-S`。
 - 各 App 有獨立執行檔、catalog、身分、腳本與生成標頭，預設輸出目錄也分開。
@@ -240,7 +455,8 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
 - 更新前先停止 App；同一目的地的複製會序列化，但不是整包原子替換。
   I/O 失敗可能留下部分更新，須修復／重試後再啟動，不支援執行中熱更新。
 - 中央在 Tcl 前啟動 UI／Bag 並等待就緒或有界失敗；Bag 待命不錄製。
-  官方 Module 失敗會回報後繼續，使用者明確停止後不自動重新啟動。
+  官方 Module 失敗會回報後繼續，由 System 監督排程恢復。`ui disable` 只關閉 HTTP，
+  程序重啟仍保留此意圖；`recorder finish` 只結束錄製。一般 stop 被拒絕，整體 shutdown 仍停止兩者。
 
 
 Version requests use exact matching. The current package version follows the
@@ -255,8 +471,16 @@ layout settings; editing `config.hpp` is detected on the next package lookup.
 
 ## Matching-build checks / 相容性檢查
 
+SDK application configuration and Python bindings use the same minimum-version
+policy as source builds; see [Common toolchain policy](../common/README.md#build-toolchain-policy).
+The SDK installs that policy with its CMake helpers. Merely finding and linking
+the C++ SDK does not discover or require Python.
+
+SDK 應用設定與 Python 綁定沿用來源建置的最低版本規則，見上述 Common 契約；
+SDK 會隨 CMake helper 交付規則。單純查找及連結 C++ SDK 不會搜尋或要求 Python。
+
 For Python Modules, enable `CONFIG_VINC_APP_PYTHON=y` in the App config file and select
-`Python_EXECUTABLE` when necessary. SDKs include the binding build material even
+System/Custom Python in that same file. SDKs include the binding build material even
 when produced with `VINC_BUILD_PYTHON=OFF`; consumer builds require a compatible
 CPython development environment and compile only the adapter, not framework
 libraries. Enabled Apps deploy their own `python/vinc` package. User Module
@@ -264,10 +488,36 @@ scripts/dependencies remain the application's responsibility under `data/module`
 See [Python SDK](../module_system/python/README.md#installed-sdk-applications--安裝式-sdk-應用)
 for ABI, pinned pybind11, resource ownership and runtime-selection contracts.
 
-Python Module 可在各 App 設定檔啟用，必要時指定 `Python_EXECUTABLE`。即使製作 SDK
+Python Module 可在各 App 設定檔啟用，並以同份 Kconfig 選擇 System／Custom Python。即使製作 SDK
 時關閉 Python，套件仍附帶建置材料；使用端需相容的 CPython 開發環境，只編譯接線，
 不重建核心庫。啟用的 App 各自部署 `python/vinc`；使用者腳本及額外相依仍自行部署
 於 `data/module`。ABI、pybind11、產物所有權及執行期選擇契約由上述 Python 文件維護。
+
+On MSVC, SDK installation builds and ships a separate `/MT` (`/MTd` in Debug)
+archive closure for the binding, including its Common error catalog and fmt.
+This happens even with `VINC_BUILD_PYTHON=OFF` and requires no Python development
+files in the producer. Installed Apps compile their adapter and generated message
+headers with that closure; they do not recompile the framework. Central/C++ Plugins
+remain `/MD` (`/MDd`). The imported `*_python_runtime` targets are internal recipe
+dependencies, not a second public C++ SDK. CRT compatibility checks reject mixing
+the two closures; missing installed archives reject package lookup. Do not override
+the App's global CRT to select Python's private CRT.
+
+MSVC 的 SDK 安裝會另外建置及交付 `/MT`（Debug 為 `/MTd`）庫，含 Common 錯誤表及 fmt。
+即使 `VINC_BUILD_PYTHON=OFF` 也會交付，不要求製作者提供 Python 開發檔。
+下游只編譯 Python 接線與生成訊息；中央及 C++ Plugin 維持 `/MD`／`/MDd`。
+`*_python_runtime` 是內部建置相依，不是第二套公開 C++ SDK；混用 CRT 或套件缺庫會失敗。
+不要修改 App 全域 CRT 來選擇 Python 的私有 CRT。
+
+The binding recipe, runtime policy helper, generated metadata and deployment
+manifest travel with the SDK/App. Linux/macOS retain normal system runtimes.
+This adds producer build/archive storage cost, not extra runtime DLLs in each App.
+Static CRT updates require rebuilding/redeploying the binding; exact SDK compiler,
+configuration and Python ABI requirements are unchanged.
+
+接線 recipe、Runtime 政策 helper、metadata 與部署清單隨 SDK／App 交付。
+Linux／macOS 維持原本系統 Runtime。增加的是製作 SDK 的編譯與 archive 容量，
+不會為 App 增加額外 Runtime DLL；靜態 CRT 更新需重建與部署，原 ABI 配對要求不變。
 
 Lookup rejects cross-compilation, multi-config generators, non-64-bit builds,
 OS/compiler ID/compiler-version/configuration mismatches. A native probe compares
@@ -379,6 +629,140 @@ Platform results are recorded after running the tests; a successful package
 configure alone is not execution evidence. macOS requires native validation.
 
 平台結果須依實際測試記錄；套件配置成功不代表執行已通過。macOS 仍須原生驗證。
+
+For manual `installed_consumer.cmake` runs on slow mounted filesystems,
+`-DSDK_TEST_COMMAND_TIMEOUT=600` raises its per-command limit in seconds; the
+default stays 90. It also reports the process result, including timeout, on failure.
+This does not change production waits or CTest's separate outer timeout. Prefer a
+native filesystem for large SDK resource copies; record any increased test limit
+with the result.
+
+在較慢的掛載檔案系統手動執行 `installed_consumer.cmake` 時，可明確指定
+`-DSDK_TEST_COMMAND_TIMEOUT=600`（秒）；預設仍為 90，失敗會顯示包含逾時在內的執行結果。
+不改正式程式等待或 CTest 外層期限；大型 SDK 資源建議使用原生檔案系統，調高測試期限
+須隨驗證結果記錄。
+
+<a id="static-python-sdk-validation"></a>
+
+### Static Python SDK validation (2026-11-02) / Python 靜態庫交付驗證
+
+Fresh Windows SDK producers use MSVC 19.44.35229, CMake 4.3.2, Ninja 1.13.2 and
+Node 24.19.0, with UI enabled and Apps/examples/tests/Python binding disabled.
+Downstream Python Apps select unmodified official CPython 3.13.12 x64 with its
+original VCRUNTIME 14.42.34438.0. An isolated WinRT 3.2.1 MSVCP 14.29.30157.0 is
+deliberately loaded before Vinc in external-import and Module bootstrap tests;
+no system/interpreter DLL is replaced. `PYTHONMALLOC=debug` and faulthandler are enabled.
+
+Windows SDK 由上述工具鏈全新建置，製作者不啟用 Python 綁定，使用端才選擇 Python。
+測試刻意先載入舊 MSVCP，再使用 Vinc 自訂訊息、Context 服務；不替換系統或 Python DLL。
+
+| Environment / 環境 | Result / 結果 |
+| --- | --- |
+| Windows Release installed Python | Full `installed_python.cmake` fixture passed (500.17 s). / 完整安裝式 Python 驗收通過。 |
+| Windows Debug installed Python | Full `installed_python.cmake` fixture passed with `/MTd`, including old-DLL preloading, relocation, rejection, repair and cleanup. / Debug 完整安裝式 Python 驗收通過。 |
+| Windows Release native C++ | `installed_consumer.cmake` passed: relocation, generated messages, execution, ABI/version/header rejection and incremental header rebuild. / 原生 C++ 安裝回歸通過。 |
+| WSL2 Ubuntu 24.04, GCC/libstdc++ 13.3.0, Release | `installed_consumer.cmake` passed with `SDK_TEST_COMMAND_TIMEOUT=600`; the original 90-second install attempt stopped during Tcl resource copying on `/mnt/d`. / 原生 SDK 安裝、搬移與拒絕測試通過；記錄提高的測試期限，不改 Runtime 等待。 |
+| WSL2 Ubuntu 24.04, GCC/libstdc++ 13.3.0, CPython 3.12.3 | Independently installed Python recipe built a shared extension and passed custom `SdkPacket` creation/serialization/deserialization. No Node/UI App fixture was used. / 安裝式 Python 接線與自訂訊息通過；未跑 Linux UI App 全流程。 |
+
+The Python fixture moves the SDK, builds downstream with Git discovery disabled,
+installs/moves the App, hides the SDK/consumer build paths, and starts from an
+unrelated working directory. A native Module and Python Module exchange custom
+messages and RPC/Param updates, then shut down. Schema addition/removal/failure/
+recovery, Python ABI refusal, corrupted Runtime metadata isolation, missing
+deployment repair and Python-disable cleanup are checked. Installed static/native
+CRT mixing and a missing static archive must fail configuration; no `/MD` fallback
+is permitted. User Module sources and unowned files survive managed cleanup.
+
+測試搬移 SDK 與 App、暫藏 SDK／使用端 build 路徑，從無關工作目錄執行；驗證自訂訊息、
+RPC／Param、退出回收、schema 增刪與失敗復原、ABI／metadata 拒絕、補檔與停用清理。
+混用 CRT 或缺少靜態庫時須配置失敗；使用者檔案與 Module 原始碼須保留。
+
+Artifact inspection verified 20 Python static archives per SDK configuration,
+with no producer source/build path in the exported targets. Their combined size
+is 21.83 MiB in Release and 52.83 MiB in Debug. These archives are SDK build inputs,
+not additional App deployment files. The custom-message fixture's Python extension
+is 2.09 MiB in Release and 11.72 MiB in Debug; these are current artifact sizes,
+not a matched `/MD` size comparison. Its imports contain only Python and reviewed
+Windows system DLLs, while the central App retains dynamic MSVC CRT imports.
+
+產物檢查確認每個 SDK 組態含 20 個 Python 靜態庫，匯出 target 不含製作者路徑。
+上述靜態庫只供 SDK 建置使用，不隨每個 App 額外部署；Python 擴充不依賴動態 MSVC CRT，
+中央仍維持原本的動態 CRT。大小是本輪產物實測，並非與 `/MD` 的同條件差額比較。
+
+Evidence is in ignored `build/runtime-policy/stage3-*.log`,
+`build/runtime-policy/stage3-audit.json` and each
+`sdk-{release,debug}/sdk-python-test/*.log`. Native macOS, full Linux UI/Python App
+integration and repeat Application Verifier qualification are not covered here.
+The earlier [static-CRT experiment](../module_system/python/MT_VALIDATION.md) and
+[source-binding validation](../module_system/python/README.md#runtime-policy-rollout)
+remain separate evidence, not substitutes for this installed-package test.
+
+本輪未驗證 macOS 實機、完整 Linux UI／Python App，也未重跑 Application Verifier。
+先前靜態 CRT 實驗及來源版結果另存，不把它們當成本輪 installed SDK 驗證。
+
+<a id="runtime-final-acceptance"></a>
+
+### Runtime final acceptance (2026-11-02) / Runtime 整合驗收
+
+This acceptance uses the formal root `build.py` entry for fresh Release builds
+with Python, UI, Bag, Apps, examples and tests enabled. Windows uses MSVC
+19.44.35229, CMake 4.3.2, Ninja 1.13.2 and unmodified official CPython 3.13.12 x64.
+WSL2 uses Ubuntu 24.04.5 x86_64, GCC/libstdc++ 13.3.0, CMake 3.28.3, Ninja 1.11.1
+and CPython 3.12.3. Both frontend builds use Node 24.19.0.
+
+本輪由正式根目錄 `build.py` 全新建置 Release，啟用 Python、UI、Bag、Apps、範例與測試。
+Windows 保留官方 Python 原附的 Runtime DLL；Linux 使用一般非 root 帳號與原生檔案系統，
+沿用系統 Runtime，沒有套用 Windows `/MT`。Linux 來源快照核對了本輪 691 個非 Markdown
+第一方檔案，與 Windows 驗收來源一致。
+
+| Environment / 環境 | Result / 結果 |
+| --- | --- |
+| Windows and WSL2 / Windows 與 WSL2 | Fresh formal-entry builds passed. / 正式入口全新完整建置成功。 |
+| Windows Release regression | **120/120** CTests passed, run as two disjoint groups (96 + 24) to serialize UI port use with Linux validation. Includes source Python, OSAL, Bus, Module, RPC, Shell, external SDK consumer, App lifecycle, fault isolation, UI and Bag. / 來源建置的全部 120 項回歸通過，分組只為避免 UI port 干擾。 |
+| Windows build/setup tooling | `python -B -m unittest discover -s tools/tests -v`: 97 passed, 22 skipped (platform-specific or opt-in integration cases), no failures. / 建置與 setup 工具測試 97 項通過、22 項跳過，無失敗。 |
+| Windows installed multi-App | `multi_app.py` passed: per-App Python selection, shared binding, relocation, concurrent distinct Apps, same-name rejection, startup faults, resource repair and managed cleanup. / 多 App 組裝、Python 選取、並行隔離及部署回歸通過。 |
+| Windows installed System Modules | `system_apps.py` passed: real UI bind failure, restart rate limiting, recovery after releasing the port, isolated graphs/recording and orderly shutdown. / UI 真實綁定失敗、限流恢復、錄製與關閉隔離通過。 |
+| WSL2 Release integration | **13/13** selected CTests passed (674.85 s): installed Python, multi-App, System Modules, Python lifecycle/messages/services/Shell/RPC and UI graph/topics/server/Module/Shell. / Linux 本輪整合測試全數通過，不代表重跑所有元件測試。 |
+
+The Linux installed-Python fixture also passed custom-message schema changes,
+invalid-schema recovery, ABI refusal, relocation, deployment repair and
+Python-disable cleanup. It kept the existing per-command test bounds on the
+native filesystem. Windows-only CRT metadata/import checks are covered by the
+Windows stages, not counted as Linux coverage.
+
+Linux 安裝式 Python 另通過自訂訊息 schema 變更、錯誤復原、ABI 拒絕、搬移、部署修復
+與停用清理；原生檔案系統上的重驗沿用既有各指令期限。Windows 專用 CRT metadata／
+匯入檢查由 Windows 階段提供證據，不列為 Linux 已驗項目。
+
+The Windows installed tests use the stage-three SDK producer with Python disabled;
+downstream Apps enable it. Tests exercise HTTP and real subprocesses, not an
+interactive browser or debugger. Elapsed test times include fixture builds and
+other concurrent validation work; they are not comparative build-cost benchmarks.
+The earlier WinRT/OCR and Application Verifier experiments remain separate evidence.
+
+Windows 安裝式測試沿用第三階段「製作者關閉 Python、使用端才啟用」的 SDK。
+本輪驗證 HTTP 與真實子程序，沒有操作互動瀏覽器或 debugger；測試耗時包含建置 fixture
+與同期驗證負載，不用來比較 `/MD`／`/MT` 效能。先前 WinRT／OCR 與 Application Verifier
+實驗另存，不把先前結果描述為本輪重跑。
+
+An initial Linux build succeeded under `/tmp`, but WSL service startup later
+removed that temporary directory. Acceptance was rebuilt under a persistent
+non-root home directory. This was lost test state, not an observed framework
+failure. No production waits or existing test timeouts were relaxed for that retry.
+
+首次 Linux 建置雖成功，但 WSL 服務啟動清除了 `/tmp` 測試目錄，因此改用持久的使用者
+家目錄重新建置與驗收；這是測試狀態遺失，不是已證實的框架故障，也未因此放寬正式等待
+或既有測試期限。
+
+Evidence is under ignored `build/runtime-policy/final-*.log` and
+`final-windows-*.json`. Native macOS acceptance remains assigned to the project
+owner in the [root TODO](../../../TODO.md); existing macOS results retain their
+original scope. Passing this matrix does not promise arbitrary CPython minor ABI,
+third-party native-library or cross-toolchain compatibility.
+
+證據位於上述 Git 忽略的檔案。macOS 由專案擁有者後續實機驗證，清單已寫入根目錄 TODO；
+既有 Mac 結果保留原適用範圍。不因本輪通過就承諾任意 Python minor ABI、第三方原生庫
+或不同工具鏈可以混用。
 
 ### Stage-one results (2026-10-29) / 第一輪實測結果（2026-10-29）
 
