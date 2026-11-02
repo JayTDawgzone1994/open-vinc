@@ -758,14 +758,71 @@ The initial sandboxed native consumer/source multi-App attempts failed with
 `OpenFileLock: Operation not permitted`; native IPC-enabled reruns are recorded
 separately, without weakening framework permissions. Existing fixture timeouts
 were retained. ABI refusal modifies test metadata; missing-development and
-version-floor selection checks use the documented test doubles. This round does
-not establish Debug SDK delivery, Intel Mac, older macOS, other CPython minors,
+version-floor selection checks use the documented test doubles. This round
+does not by itself establish Debug SDK delivery; that coverage was added by the
+[Debug follow-up](#macos-debug-sdk-acceptance). Intel Mac, older macOS, other CPython minors,
 arbitrary third-party extension coexistence, interactive browser/editor behavior
-or benchmark results.
+and benchmark results remain outside these records.
 
 原始沙箱失敗紀錄保留，不算產品通過證據；允許原生 IPC 後的結果另存，未修改正式
 權限或放寬測試期限。這是上述 arm64／Release／CPython 3.12 的功能驗收，其他平台、
 組態、版本及效能不由本輪結果推論。
+
+<a id="macos-debug-sdk-acceptance"></a>
+
+### Native macOS Debug SDK acceptance (2026-11-02) / macOS Debug SDK 驗收
+
+Source: `599e7af11147a0c2e678799b7b31507e1c24d663`, branch
+`codex/macos-debug-acceptance`. Same macOS 26.3.1(a) arm64, Apple Clang 21.0.0 /
+libc++ 21.1.6, SDK 26.5, CMake 4.4.4, Ninja 1.13.2 and GIL-enabled CPython
+3.12.14 environment as the Release record above; this round uses **Debug**
+framework libraries, Plugins, Apps and Python bindings, not a Py_DEBUG interpreter.
+No production code, test implementation or fixture deadline changed.
+
+The Python-enabled full Debug build and all 126 suites have passing evidence
+across the initial run and its one rerun; the sleep-overlapped initial failure
+and exact counts are owned by the
+[Python Debug record](../module_system/python/README.md#macos-full-debug-validation).
+The separate clean producer below disables Python, Apps, examples and tests,
+enables SDK/UI, and builds with `CMAKE_BUILD_TYPE=Debug`. Benchmarks are disabled.
+
+| Clean producer / downstream check | Result |
+| --- | --- |
+| Producer configure / complete build | Passed, 2.33 s / 43.76 s. |
+| `installed_consumer.cmake` | Passed, 9.45 s: native SDK relocation, execution, ABI/version/header rejection and rebuild. |
+| `installed_python.cmake` | Passed, 112.95 s: downstream-only binding, Custom venv default, custom Bus/RPC/Param, schema changes, relocation, wrong ABI/missing Python isolation, repair and cleanup. |
+| `installed_application.cmake` | Passed, 81.50 s: one executable per App, real self-host Modules, Bus/Bag/UI, moved package and generation/rejection checks. |
+| Installed `multi_app.py` | Passed, 129.61 s: complete multi-App fixture with a Chinese/space-path venv. |
+| Source `multi_app.py --source` | Passed, 175.59 s: same fixture through source integration. |
+| Deployment Python probes | **6/6 passed**, 19.29 s total: source/installed Apps each use a different deployment PATH venv, reject missing Python and accept explicit overrides. |
+
+Debug 完整建置／CTest 與乾淨 SDK-only producer 分開驗證。上表所有交付流程通過，
+包含中文／空白 venv、搬移與暫藏 SDK／build 後執行，以及 Python／原生 Module 混合
+通訊、故障隔離、補檔及停用清理。沿用既有 fixture 的完整斷言，沒有為通過而修改期限。
+
+**Audit:** the clean producer has 92 compile commands, no Python adapter build
+and no MSVC Python CRT variants. Its C++ commands contain `-g` without `NDEBUG`.
+Both the full-build and clean-SDK downstream Debug extensions import only system
+libc++/libSystem, with no `LC_RPATH`. All 24 installed CMake package files are free
+of checkout/build path references. Source/configuration hashes remained unchanged;
+temporarily hidden directories were restored and no task-path child processes
+remained. Temporary sleep-prevention assertions were released after testing.
+
+Evidence is under ignored `build/macos-debug-acceptance-20261102/`:
+`run_sdk_debug.py` records the exact producer/fixture commands and existing
+deadlines; `acceptance-results.json` records all eight successful stages;
+`probe_runtime_selection.py`, `runtime-selection-results.json`, fixture logs,
+`runtime-dependencies.log` and `validation.json` preserve deployment, dependency,
+source and environment evidence. Reproduce the existing installed fixtures with
+`CONFIG=Debug` and source/installed `multi_app.py` with `--config Debug`; on this
+Mac, tests ran under temporary `caffeinate -i -s` protection after the first full
+CTest run encountered idle sleep. No persistent power setting was changed.
+
+This closes the full macOS Debug Python/App/SDK functional-coverage gap for this
+arm64/CPython 3.12 environment. It does not establish Intel Mac, older macOS,
+other Python minors, arbitrary third-party extension coexistence, interactive
+GUI/curses/browser acceptance or performance. No benchmarks were run.
+本輪已補齊此環境的完整 Debug 功能驗收；不把結果推論到其他平台、版本或效能。
 
 <a id="runtime-final-acceptance"></a>
 
@@ -776,7 +833,10 @@ the Python-enabled Release producer and installed SDK/App tests on macOS arm64.
 Exact results and the Python services test-path correction are maintained in the
 [Mac validation record](../module_system/python/README.md#macos-snapshot-repair-validation).
 The separate Python-OFF producer has now passed the
-[clean macOS SDK acceptance](#macos-clean-sdk-acceptance) below.
+[clean macOS SDK acceptance](#macos-clean-sdk-acceptance) above.
+The subsequent [Debug SDK acceptance](#macos-debug-sdk-acceptance) also passed;
+the [full Debug CTest record](../module_system/python/README.md#macos-full-debug-validation)
+preserves the sleep-related initial failure and unchanged rerun.
 The Windows/WSL matrix below remains its original evidence, not a rerun of the
 mutex repair on those platforms.
 
