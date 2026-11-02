@@ -2,34 +2,18 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
-## App 組裝統一：macOS 原生驗證
+## App 組裝：範例測試部署資源缺漏
 
-- [ ] 使用同一 topic 內容驗證內建 App 與來源／安裝式 SDK 共用 `vinc_add_app()`。
-  涵蓋各 App 產物目錄、完整 SDK UI 能力、Module 選擇／清理、自訂訊息增量建置、
-  內嵌腳本、搬移部署、Python 及 System Module 生命週期；記錄工具鏈與組態。
+- [ ] 補齊 `examples.user_module` 暫存部署的 Plugin／UI 資源，並重跑測試。
 
-2026-11-02 實作與 Windows Release／WSL Ubuntu 24.04 來源驗證已完成；Windows
-另通過來源 SDK、安裝式 Python SDK 與多 App 驗收。契約與完整範圍維護於
-[App README](apps/vinc/README.md#app-composition-unification--app-組裝統一)。
-本輪未重跑 Debug 或 WSL installed SDK 全套，macOS 需另行原生驗證，不以其他平台結果替代。
+2026-11-02：`627c409` 的 macOS Debug／Release 原始 CTest 各 **125/126**；
+唯一失敗為此範例 fixture。外部副本補齊資源後兩組通過，但修正尚未套用。
+問題與後續方向由 [範例 README](examples/userExampleModule/README.md#macos-deployment-fixture-gap) 維護。
 
-## Python 建置整理：後續變更的 macOS 原生驗證
-
-- [ ] 補驗 Python Publisher 身分回歸：`module.python_services` 的同號／異號、錯誤身分、
-  callback 故障隔離與收尾。Windows／WSL 六個情境已通過；見
-  [Python 測試修正紀錄](src/vinc/module_system/python/README.md#publisher-identity-regression)。
-
-- [ ] 補驗統一的建置 ABI 探測：`sdk.python_selection`、來源／installed SDK Python binding，
-  包含逾時、無效輸出、多 App／venv、cache 保護、patch 更新與 `_build.py` 資料一致性。
-  Windows／WSL 已測範圍及契約見 [Python 紀錄](src/vinc/module_system/python/README.md#build-abi-probe)。
-
-- [ ] 補驗 System Python 搜尋一致性：`osal.path`、`sdk.python_selection`、
-  `module.python_shell`，涵蓋不可執行檔、失效連結、空 PATH、明確相對目錄、venv
-  與選定後失敗不得回退。參考 [本輪紀錄](src/vinc/module_system/python/README.md#system-python-path-consistency)。
-
-先前單一執行檔、Kconfig 選擇與 Runtime／SDK 的 Mac 驗收已完成，見
-[原生驗證紀錄](src/vinc/module_system/python/README.md#macos-snapshot-repair-validation)。
-上列僅追蹤本地後續搜尋規則、ABI 探測與測試修正，不重新開啟已完成的舊驗收。
+原列 App 組裝、Python Publisher 身分、ABI 探測與 System Python 搜尋的
+macOS 功能驗證已完成；來源／installed SDK 及乾淨 SDK 下游矩陣皆有通過證據。
+環境、限制及原始失敗與外部對照的區分見
+[macOS 驗證報告](src/vinc/sdk/MACOS_VALIDATION.md)。不將原始全套改記為全綠。
 
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 
