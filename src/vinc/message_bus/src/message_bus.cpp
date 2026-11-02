@@ -70,7 +70,7 @@ Result<std::vector<NotificationTarget>> decode_notification_targets(control::Rea
 
 void install_notification_targets(NotificationRoutes& routes, const std::vector<NotificationTarget>& targets,
                                   const std::shared_ptr<NotificationTotals>& totals) {
-    auto previous = routes.destinations.load();
+    auto previous = routes.snapshot();
     auto next = std::make_shared<NotificationDestinations>();
     next->reserve(targets.size());
     const auto now = std::chrono::steady_clock::now();
@@ -90,7 +90,7 @@ void install_notification_targets(NotificationRoutes& routes, const std::vector<
         }
         next->push_back(std::move(destination));
     }
-    routes.destinations.store(std::move(next));
+    routes.replace(std::move(next));
     // Cover a publication racing route installation, including reused targets.
     routes.notify();
 }
@@ -1188,7 +1188,7 @@ std::vector<std::shared_ptr<const detail::NotificationDestinations>> notificatio
     std::vector<std::shared_ptr<const detail::NotificationDestinations>> snapshots;
     std::lock_guard lock(transport.mutex);
     for (const auto& [_, routes] : transport.notification_routes) {
-        auto current = routes->destinations.load();
+        auto current = routes->snapshot();
         if (current) {
             snapshots.push_back(std::move(current));
         }

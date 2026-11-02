@@ -223,6 +223,13 @@ or mixed CRT dependencies fail; there is no dynamic fallback.
 Debug 為 `/MTd`；中央與 C++ Plugin 保持 `/MD`。Linux／macOS 不變。
 installed SDK 即使製作者關閉 Python，也會交付靜態相依庫；缺檔或混用 CRT 明確失敗，不退回 `/MD`。
 
+**macOS decision (2026-11-02):** retain the system dynamic C++ runtime. The audited
+extension uses system libc++, with no evidence of the Windows-style private
+runtime conflict. The decision, rationale and compatibility limits are owned by
+the [Common runtime policy](../../common/README.md#macos-system-runtime-decision).
+**macOS 已確認維持現狀：** 使用系統動態 C++ Runtime，不因 Windows 的舊 DLL
+衝突改為靜態；原因與尚待驗證的相容性界線統一記錄於上述 Common 政策。
+
 - Static builds verify actual imports after linking. Only the selected CPython
   DLL and reviewed Windows API DLLs are allowed; CRT imports (including UCRT and
   sidecars) or another native DLL fail generation and require review.
@@ -657,8 +664,129 @@ multi-App and System Module acceptance is maintained in the
 the [root TODO](../../../../TODO.md) tracks the owner's native macOS validation.
 
 以下保留各階段的實測範圍；後續正式建置入口、多 App 與 System Module 整合結果統一見
-[SDK 驗收紀錄](../../sdk/INSTALL.md#runtime-final-acceptance)，macOS 實機驗證由擁有者
-後續執行，記於根目錄 TODO。
+[SDK 驗收紀錄](../../sdk/INSTALL.md#runtime-final-acceptance)，macOS 實機驗收進度見根目錄 TODO。
+下方保留初次阻塞紀錄與通知快照修正後的 Mac 實測。
+
+<a id="macos-runtime-validation-2026-11-02"></a>
+
+#### Native macOS validation (2026-11-02) / macOS 原生驗證
+
+以下先保留初次編譯阻塞的歷史證據；通知快照修正後的結果見
+[後續功能驗證](#macos-snapshot-repair-validation)。初次失敗不代表目前仍無法建置。
+
+Source: `50a88325245a02ce93d33f985e763284ed3f56bc`. macOS 26.3.1(a), OS build
+25D771280a, arm64; Apple Clang 21.0.0 (clang-2100.1.1.101), Apple libc++ 21.1.6,
+SDK 26.5, CMake 4.4.4, Ninja 1.13.2, Node 24.22.0/npm 11.19.1. Tests selected the
+existing Codex-bundled, GIL-enabled arm64 CPython 3.12.14 through System/PATH;
+this is not a claim that the host's `/usr/bin/python3` 3.9.6 meets the 3.11 floor.
+No system interpreter was installed or replaced.
+
+使用全新 `build/macos-validation-20261102/source-release`，從正式 `build.py` 配置
+Release，明確啟用 Python／UI／Bag／App／範例／測試與 `VINC_INSTALL_SDK=ON`。
+Kconfig System 正確選到上述 3.12.14，Python／Development.Module 與 pybind11 配置成功。
+但完整建置因 [Message Bus 通知快照編譯問題](../../message_bus/README.md#macos-notification-snapshot-blocker)
+失敗；不能宣稱 Python 擴充、中央 App 或 SDK Runtime 整合已通過。
+
+| Check / 檢查 | Result / 結果 |
+| --- | --- |
+| Build graph / 建置圖 | 293 compile-command entries contained no Windows `/MT`, `/MTd`, `/MD` or `/MDd` flags; no `_python_runtime` targets were declared. This checks configuration, not a completed image's dependencies. / 未混入 Windows CRT 旗標或額外靜態版本；不是已連結產物的動態相依稽核。 |
+| Independent native CTests / 獨立原生測試 | **41/41** passed: Common, OSAL (including `osal.notification` and `osal.notification_native`), Concurrency, Storage, OutputHub and Control. Targets were built separately after the full build failed. / 完整建置失敗後，另行建置並執行上述可獨立的測試。 |
+| Kconfig/SDK selection / 設定選擇 | **6/6** passed: `sdk.configuration`, `sdk.python_selection`, `sdk.app_selection`, `sdk.owned_files`, `sdk.license_inventory`, `sdk.package_inventory`. App selection uses real tiny Plugins without a complete Runtime. / 小型 Plugin 驗證不等於多 App 執行驗收。 |
+| Build/setup/SDK tooling / 工具測試 | 117 cases: **94 passed, 23 skipped**, no failures. A separately enabled real CMake build-entry integration case also passed, covering clean/incremental build, paths with spaces and incompatible-cache rejection. / 另補跑真實建置入口測試一項通過，跳過案例未當作通過。 |
+| Frontend / 前端 | Lockfile dependencies installed; `npm run typecheck` passed. No interactive browser or complete App/UI runtime validation. / 型別檢查通過，未宣稱瀏覽器或完整 App 執行通過。 |
+
+**初次嘗試時仍待完成（後續結果見下節）：** 來源 Python import／生命週期／訊息／Bus／RPC／Param、
+單一 App／Host 入口、SDK 製作者關閉 Python 後由下游啟用、安裝搬移、
+多 App 執行與失敗隔離、部署補檔／停用清理，以及擴充的 `otool` 相依／載入路徑稽核。
+因此根目錄 TODO 的 Mac 驗收項目保留未完成。此輪不測 Windows 專用 CRT DLL／WinRT
+案例，也不宣稱 Debug、Intel Mac 或其他 Python minor 已通過。
+
+Reproduction uses the existing tools on PATH, with the selected Python directory
+before the old system interpreter and `build/tools/bin` providing CMake/Ninja:
+
+```sh
+python3 -B build.py --config Release --build-dir build/macos-validation-20261102/source-release --jobs 4 \
+  -DVINC_CONFIG_FILE=/absolute/path/to/python-system.conf \
+  -DPython3_EXECUTABLE=/absolute/path/to/python3 \
+  -DVINC_INSTALL_SDK=ON -DVINC_TEST_SDK_PYTHON_EXECUTABLE=/absolute/path/to/python3 \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+```
+
+`python-system.conf` sets `CONFIG_VINC_APP_UI=y`, `CONFIG_VINC_APP_BAG=y`,
+`CONFIG_VINC_APP_PYTHON=y` and `CONFIG_VINC_PYTHON_SYSTEM=y`. It lives in the ignored
+validation directory; no application config or production code was changed.
+Evidence is under `build/macos-validation-20261102/`: `source-release-build.log`,
+`native-ctest.log`, `configuration-ctest.log`, `app-selection-ctest.log`,
+`tools-tests.log`, `build-entry-integration.log`, `frontend-typecheck.log` and
+`validation.json`. The 47 CTests are disjoint subsets of the configured 125 tests;
+the unbuilt remainder was not executed and is not counted as passing.
+
+<a id="macos-snapshot-repair-validation"></a>
+
+##### Follow-up after the snapshot repair / 通知快照修正後的功能驗證
+
+Same environment and base commit as above, plus the uncommitted
+`codex/notification-snapshot-mutex` changes. The platform-independent repair and
+snapshot contracts are owned by the [Message Bus record](../../message_bus/README.md#macos-notification-snapshot-blocker).
+The previously configured Python-enabled Release tree now builds completely,
+including the native extension, App, Plugins and SDK header checks. The
+`message_bus.cleanup` fixture also needed its direct `<thread>` include for
+`std::this_thread::sleep_for`; production notification failure handling is unchanged.
+
+| Functional check / 功能檢查 | Result / 結果 |
+| --- | --- |
+| Release full CTest run | **125 passed, 1 failed out of 126**; the sole failure was the Python services temporary-path fixture described below. No skipped tests. / 初次完整執行保留唯一 fixture 失敗，不描述成一次全綠。 |
+| Final Release rerun, original environment | **3/3 passed**: `module.python_services`, `message_bus.cleanup`, `message_bus.notification_snapshots`. The rebuilt services fixture passed without overriding `TMPDIR`. Together with the unaffected full-run results, all **126 distinct Release suites have passing evidence**. / 修正後回到原本環境重驗通過，合併未受影響的完整回歸，126 項皆有通過證據。 |
+| Debug related regression | **8/8 passed**: six Bus suites, Module instance and Context. / 非完整 Debug 矩陣。 |
+| Release SDK/App coverage | `sdk.system_apps`, `sdk.multi_app`, `sdk.installed_python`, `sdk.installed_consumer`, `sdk.installed_application` and `sdk.external_consumer` passed, as did all `app.*` tests. Covers source/installed entry, real subprocesses, relocation, inventories, Python/native operation, schema rebuild, ABI refusal and deployment cleanup. / 不包含 Python-OFF SDK producer。 |
+| Release service coverage | OSAL **24/24**, Bus, Module/Python, Control, Storage, Concurrency, Param, Log, RPC, Shell, UI and Bag suites passed within the matrix above. / 不代表互動瀏覽器、其他架構或效能驗證。 |
+
+**Runtime audit:** the 294 compile-command entries contain no Windows CRT flags
+or separate `_python_runtime` variants. `otool -L` reports only system libc++ and
+libSystem for `_native.cpython-312-darwin.so`; it has no `LC_RPATH`. Central `Vinc`
+does not link a Python dylib. The built extension records deployment minimum 26.0;
+this run does not establish support for an older macOS release.
+
+**Validation boundary:** Debug built selected targets and passed eight Bus/Module
+CTests; it did not validate the full Python/App/SDK matrix. The Release SDK producer
+in this run has Python enabled. The separate producer-Python-OFF/downstream-ON
+acceptance subsequently passed in the
+[clean macOS SDK round](../../sdk/INSTALL.md#macos-clean-sdk-acceptance).
+Other CPython minor versions, Intel Mac and Windows/Linux reruns of this snapshot
+revision remain outside this evidence. Benchmarks were explicitly excluded
+by the user; no latency or throughput comparison is claimed.
+
+Evidence is under `build/macos-snapshot-mutex-20261102/`: build/CTest logs,
+JUnit XML, dependency/load-command audits and `validation.json` with changed-source
+SHA-256 hashes. Installed fixture details remain beneath the Release build's
+`system-apps-test`, `multi-app-test`, `sdk-python-test` and other SDK test directories.
+
+The first full Release run found a separate fixture issue in
+`tests/services_tests.cpp`: macOS's temporary path traverses `/var` → `/private/var`,
+so Log correctly rejected a symlink ancestor before Python service checks began.
+The unchanged binary passed with `TMPDIR=/private/tmp`, confirming the path issue.
+The fixture now canonicalizes the existing temporary root, matching the existing
+Log test fixture. Production Log path validation and Python Runtime behavior were
+not relaxed. The original failure and diagnostic rerun are retained in the logs.
+The final original-environment run is `final-ctest.log` / `final-ctest.xml`;
+`final-fixture-build.log` records the rebuild. No test timeout was relaxed.
+
+**Clean SDK follow-up (2026-11-02):** a fresh Release producer with Python, Apps,
+examples and tests disabled passed native SDK delivery, downstream Python/custom
+messages, installed single-executable App and source/installed multi-App fixtures.
+Commands, environment, runtime audit and validation limits are maintained in the
+[SDK acceptance record](../../sdk/INSTALL.md#macos-clean-sdk-acceptance).
+後續已補齊 Python-OFF producer、下游才啟用 Python 的交付流程；本段先前的
+Python-enabled 結果仍保留原範圍，不把兩輪描述成同一次全套測試。
+
+#### Historical rollout validation / 歷史導入驗證
+
+The following stage records retain their original scope; references to pending
+macOS validation describe those earlier runs. The native follow-up and remaining
+Mac acceptance work are recorded above.
+
+下列保留各導入階段當時的範圍；其中「macOS 待驗證」是歷史狀態，後續原生結果與
+尚未完成的 Mac 驗收項目以上節為準。
 
 Validation commands (MSVC developer environment, existing configured build with
 `BUILD_TESTING=ON`):

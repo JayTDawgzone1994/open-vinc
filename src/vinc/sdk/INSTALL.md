@@ -700,9 +700,85 @@ remain separate evidence, not substitutes for this installed-package test.
 本輪未驗證 macOS 實機、完整 Linux UI／Python App，也未重跑 Application Verifier。
 先前靜態 CRT 實驗及來源版結果另存，不把它們當成本輪 installed SDK 驗證。
 
+<a id="macos-clean-sdk-acceptance"></a>
+
+### Clean macOS SDK acceptance (2026-11-02) / macOS 乾淨 SDK 交付驗收
+
+Source: `50a88325245a02ce93d33f985e763284ed3f56bc` plus the uncommitted
+`codex/notification-snapshot-mutex` repair. No production implementation changed
+in this acceptance round. Environment: macOS 26.3.1(a), build 25D771280a, arm64;
+Apple Clang 21.0.0 (`clang-2100.1.1.101`), Apple libc++ 21.1.6, SDK 26.5,
+CMake 4.4.4, Ninja 1.13.2, GIL-enabled CPython 3.12.14, Release.
+
+A fresh producer used `VINC_INSTALL_SDK=ON`, `VINC_BUILD_UI=ON`,
+`VINC_BUILD_PYTHON=OFF`, `VINC_BUILD_APPS=OFF`, `VINC_BUILD_EXAMPLES=OFF`
+and `BUILD_TESTING=OFF`. Configuration and the complete build passed. Its 92
+compile commands contain no Python adapter sources or `_python_runtime`
+variants. The downstream Apps build their own Python extension using a venv
+whose path contains Chinese characters and a space.
+
+使用全新 SDK-only producer，關閉 Python binding、App、examples 與測試，只在下游
+才啟用 Python；不是沿用先前 Python-enabled producer 的產物。上述完整建置通過，
+使用端以中文／空白路徑的 CPython venv 驗證。
+
+| Check / 檢查 | Result / 結果 |
+| --- | --- |
+| `installed_consumer.cmake` | Passed: moved SDK, generated messages, native execution, ABI/version/header refusal and incremental rebuild. / 原生 C++ SDK 交付通過。 |
+| `installed_python.cmake` | Passed (157.13 s): Custom Kconfig default without `--python`, moved SDK/App, hidden SDK/consumer build, unrelated cwd, custom Bus/RPC/Param, distinct central/native/Python PIDs, schema add/edit/remove/failure/recovery, ABI rejection, missing override, resource repair and Python-disable cleanup. / Python-OFF 製作者、下游啟用 Python 的完整流程通過。 |
+| `installed_application.cmake` | Passed (90.00 s): single process executable inventory, self-host Modules, moved deployment, custom Bus/Bag/UI, embedded/plain startup, schema regeneration and rejection checks. / 單一執行檔交付通過；SDK 清單 1233 檔、App 清單 873 檔，各只有一個程序執行檔。 |
+| Installed `multi_app.py` | Passed (142.16 s): three Apps, System/Custom sharing one venv, real Host/Python execution, concurrent isolation, relocation, official Module failure handling, bounded stalled-loader test, repair and selection cleanup. / 安裝式多 App 完整流程通過。 |
+| Source `multi_app.py --source` | Passed (203.75 s): the same complete multi-App fixture through source integration, using the same Chinese/space-path venv. / 來源版多 App 同一套完整流程通過。 |
+| Deployment interpreter probes | **6/6 passed:** source and installed Third Apps each use a different deployment venv from PATH, reject an empty Python PATH, and accept explicit `--python` despite that empty PATH. / 兩種來源各三項通過，證明 System 未記住建置時直譯器。 |
+
+The extra probes install Third into a fresh directory, hide its consumer build,
+and, for the installed case, also hide the SDK and producer build. They run from
+an unrelated cwd and verify actual `sys.executable`, native `SELF_HOST_OK`, Python
+message access and complete Module shutdown. Hidden directories are restored in
+`finally`. The missing-Python case must report failure while central still completes
+normal shutdown; the installed-Python fixture separately verifies a native peer
+remains commandable after missing-Python and wrong-ABI failures.
+
+補充探測移開 consumer build；安裝式案例另移開 SDK 與 producer build，直接核對
+新部署 venv 的 `sys.executable`。正向案例驗證 Python 訊息存取與原生 self-host，
+缺 Python 案例驗證錯誤與正常收尾。原生 peer 在 Python 啟動失敗後仍可接受命令的
+證據由上表 `installed_python.cmake` 提供。
+
+**Runtime audit:** downstream `_native.cpython-312-darwin.so` imports only
+`/usr/lib/libc++.1.dylib` and `/usr/lib/libSystem.B.dylib`, with no `LC_RPATH`.
+The 24 installed CMake package files contain no checkout/build path reference.
+The extension's deployment minimum is 26.0. The
+[confirmed macOS runtime policy](../common/README.md#macos-system-runtime-decision)
+is unchanged.
+
+**Evidence and limits:** ignored `build/macos-sdk-acceptance-20261102/` contains
+`run_acceptance.py`, exact commands/timings in `acceptance-results.json`, fixture
+logs, `probe_runtime_selection.py`, `runtime-selection-results.json`, runtime
+audits and `validation.json` with 694 source/configuration hashes.
+The initial sandboxed native consumer/source multi-App attempts failed with
+`OpenFileLock: Operation not permitted`; native IPC-enabled reruns are recorded
+separately, without weakening framework permissions. Existing fixture timeouts
+were retained. ABI refusal modifies test metadata; missing-development and
+version-floor selection checks use the documented test doubles. This round does
+not establish Debug SDK delivery, Intel Mac, older macOS, other CPython minors,
+arbitrary third-party extension coexistence, interactive browser/editor behavior
+or benchmark results.
+
+原始沙箱失敗紀錄保留，不算產品通過證據；允許原生 IPC 後的結果另存，未修改正式
+權限或放寬測試期限。這是上述 arm64／Release／CPython 3.12 的功能驗收，其他平台、
+組態、版本及效能不由本輪結果推論。
+
 <a id="runtime-final-acceptance"></a>
 
 ### Runtime final acceptance (2026-11-02) / Runtime 整合驗收
+
+**Native macOS follow-up:** the notification snapshot repair subsequently enabled
+the Python-enabled Release producer and installed SDK/App tests on macOS arm64.
+Exact results and the Python services test-path correction are maintained in the
+[Mac validation record](../module_system/python/README.md#macos-snapshot-repair-validation).
+The separate Python-OFF producer has now passed the
+[clean macOS SDK acceptance](#macos-clean-sdk-acceptance) below.
+The Windows/WSL matrix below remains its original evidence, not a rerun of the
+mutex repair on those platforms.
 
 This acceptance uses the formal root `build.py` entry for fresh Release builds
 with Python, UI, Bag, Apps, examples and tests enabled. Windows uses MSVC
