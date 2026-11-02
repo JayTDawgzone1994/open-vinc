@@ -28,36 +28,25 @@ this does not promise cross-minor binary ABI.
 CPython 3.11 最低版本的環境、測試結果與限制見
 [相容性驗證紀錄](PYTHON311_VALIDATION.md)；最低版本由共用工具鏈規則維護，不承諾跨 minor 二進位相容。
 
-For the new multi-App constructor, put `CONFIG_VINC_APP_PYTHON=y` in that App's
-`VINC_BUILD_CONFIG` file. Compatible enabled Apps share one `vinc_python_native`
-target and the common message list; disabled Apps have no build dependency on it.
-All enabled Apps use the same CPython ABI. The legacy source switches below still
-apply to the built-in shell, not per-App selection. Enabled Apps deploy their own resources in stage 3; current validation is recorded
-in the Multi-App plan, separately from the historical evidence below.
+Set `CONFIG_VINC_APP_PYTHON=y` in the App's `VINC_BUILD_CONFIG` file.
+The bundled App uses `apps/vinc/vinc.conf`. All source/installed Apps share the same
+binding recipe; compatible enabled Apps reuse one binding, while disabled Apps
+have no dependency on it. The Kconfig tool interpreter (`Python3_EXECUTABLE`) is
+independent of the Module interpreter selected in Kconfig.
 
-新多 App 介面在各自 `VINC_BUILD_CONFIG` 檔啟用 Python；相容 App 共用同一個
-`vinc_python_native` target／訊息清單，未啟用 App 不依賴它。全建置使用同一 CPython ABI。
-下方舊來源開關仍用於內建 shell，不能取代各 App 設定。第三階段已接上各 App 資源部署；
-本次驗證見多 App 計畫，下方歷史紀錄不代替本輪驗證。
-
-Source application builds may select bindings with `CONFIG_VINC_APP_PYTHON=y`
-in `vinc.conf`. Legacy `VINC_BUILD_PYTHON` remains a compatibility input and must
-not contradict the file. Installed SDK applications use the same binding recipe.
-The Kconfig interpreter (`Python3_EXECUTABLE`) is independent of this extension's
-ABI interpreter selected by Kconfig; see [configuration](../../../../tools/configure/README.md#module-python-selection--module-python-選擇).
-
-來源版應用可用 `vinc.conf` 選擇 Python；舊開關保留但不能與檔案衝突。
-安裝式應用共用同一份綁定建置流程。設定工具直譯器與此處原生綁定使用的 Python ABI 分開選擇。
+內建／外部／安裝式 App 使用同一流程，於各自設定檔啟用 Python。啟用的 App 必須使用
+相同 Python ABI；建置設定工具與執行 Module 的直譯器分開選擇。
+詳見 [設定契約](../../../../tools/configure/README.md#module-python-selection--module-python-選擇)。
 
 ```sh
-# First set CONFIG_VINC_APP_PYTHON=y and System/Custom in src/vinc.conf.
+# Enable Python in apps/vinc/vinc.conf, then build the bundled App.
 cmake -S src -B build/my-build
-cmake --build build/my-build
+cmake --build build/my-build --target Vinc
 ```
 
-Use the chosen compiler/configuration. VINC_BUILD_PYTHON defaults OFF so C++ needs no Python development files. Enabled builds require CPython 3.11+/Development.Module (Python 3 only), a dependency floor rather than verified coverage of every version. Only 64-bit GIL-enabled CPython; no free-threading/subinterpreters/PyPy/Python 2.
+Use the chosen compiler/configuration. CONFIG_VINC_APP_PYTHON defaults to n so C++ needs no Python development files. Enabled builds require CPython 3.11+/Development.Module (Python 3 only), a dependency floor rather than verified coverage of every version. Only 64-bit GIL-enabled CPython; no free-threading/subinterpreters/PyPy/Python 2.
 
-沿用所選建置目錄的編譯器與組態。`VINC_BUILD_PYTHON` 預設 OFF，讓只使用 C++ 的建置不要求 Python 開發檔。
+沿用所選建置目錄的編譯器與組態。`CONFIG_VINC_APP_PYTHON` 預設 `n`，讓只使用 C++ 的建置不要求 Python 開發檔。
 開啟後需要 CPython 3.11 以上及其 Development.Module 檔案（限 Python 3）；這是相依最低要求，不代表所有版本已通過驗證。
 第一版限定 64-bit、含 GIL 的 CPython；不支援 free-threaded Python、subinterpreter 或 PyPy。
 Python 2 不支援。
@@ -109,7 +98,122 @@ User code lives in data/module, distinct from vinc_data persistence. Editing exi
 `Vinc --python /absolute/path/to/python` 可指定 Python 或 venv，CLI 亦可接受相對路徑並在中央啟動時轉成絕對路徑。
 省略時使用 Kconfig 的預設：Custom 使用明確設定的絕對路徑，System 在啟動 Module 當下
 依部署環境 PATH 順序尋找 Windows `python.exe` 或 POSIX `python3`，不偷偷換另一個環境。
-公開 `-DPython_EXECUTABLE` 已移除；設定方法、舊 cache 遷移與多 App 限制見上述設定工具契約。
+`Python_EXECUTABLE` 不再作為 VINC 的公開選擇入口，但不禁止其他 CMake 元件使用；
+設定方法、舊 cache 遷移與多 App 限制見上述設定工具契約。
+
+<a id="build-abi-probe"></a>
+
+### Build ABI probe consolidation (2026-11-02) / 建置 ABI 探測統一
+
+Selection and binding creation now share the validated result from Common's
+[build-only Python probe](../../common/README.md#build-toolchain-policy).
+The duplicated newline-based binding probe was removed. JSON fields/types and
+failure diagnostics are checked at selection; each enabled App and each new
+configure still probes independently. Binding metadata uses that result after
+checking FindPython's interpreter identity and major/minor. Patch servicing,
+venv identity, Kconfig selection, cache rejection, development-file discovery,
+`/MT` policy and runtime bootstrap checks keep their existing contracts.
+No new persistent probe cache, runtime service or public setting was added.
+
+選擇階段與 binding 共用 Common 驗證後的資料，移除 binding 原有的換行格式重複探測。
+各啟用 App、每次 configure 仍獨立探測，不新增持久快取。FindPython 仍找開發檔，
+核對身分與 major/minor 後用統一資料生成 `_build.py`。同 ABI 的 patch 更新、venv
+身分、Kconfig、cache 拒絕、`/MT` 及執行期 bootstrap 契約不變，沒有新增公開設定或服務。
+
+Focused tests exercise real CMake helpers with interpreter-startup fault injection:
+malformed/missing/wrong-type fields, unsupported ABI, nonzero exit, the real
+10-second timeout, fresh per-App/reconfigure results, one VINC probe before
+binding creation, discovery mismatch and patch updates. Existing PATH, Unicode
+venv, foreign FindPython and missing-development diagnostics remain covered.
+The missing-development test injects FindPython failure; it does not uninstall
+system packages. Local logs: `build/python-abi-probe/` (not versioned).
+
+針對性測試使用真正 CMake helper，於 Python 啟動時注入格式錯誤、缺欄位、型別錯誤、
+不支援 ABI、失敗退出與實際 10 秒逾時，並驗證每個 App／configure 資料重新取得、
+binding 不重跑探測、discovery 衝突及 patch 更新。既有 PATH、中文 venv、其他使用端
+FindPython 與缺開發檔診斷亦保留；缺開發檔採故障注入，沒有移除系統套件。
+
+| Environment / 環境 | Validation / 驗證 |
+| --- | --- |
+| Windows x64, MSVC 19.44.35229, official CPython 3.13.12, CMake 4.3.2, Release | Selection tests: 24 cases, 23 passed and 1 POSIX-only skip. Final App build and related CTests **10/10** passed. / 最終 App 建置及選擇、設定、CRT、Python 生命週期／服務／訊息／RPC 回歸通過。 |
+| WSL2 Ubuntu 24.04 x86-64, GCC/libstdc++ 13.3.0, CPython 3.12.3, CMake 3.28.3, Release | Selection tests **24/24**, final App build and related CTests **7/7** passed. / 選擇與 Linux Python 回歸全部通過。 |
+| Windows installed SDK, same toolchain / 同工具鏈 | Full fixture passed relocation, custom-message Bus/RPC/Param, schema incremental changes, ABI/metadata isolation, repair and disable cleanup. After the final patch-version comparison adjustment, reinstalled helpers matched source, downstream rebuild/import and Bus/RPC/Param/lifecycle passed, and `_build.py` matched the actual interpreter. / 全套案例通過；最終 patch 比對修正再交付並驗證下游建置、通訊、收尾與 metadata 一致性。 |
+
+The initial bare `python` test invocation selected local MSYS2 Python 3.14 and
+failed two existing venv fixtures before the intended Windows environment was
+selected. Official CPython results above supersede that attempt; MSYS2/MinGW is
+not qualified for the MSVC binding. This round did not repeat Debug, native macOS,
+WSL installed SDK or OCR. The real old-MSVCP preload test passed within the Windows
+suite; the optional WinRT import-order case was skipped without its wheel directory.
+
+首輪裸 `python` 指令選到本機 MSYS2 3.14，兩個既有 venv 測試失敗；切回官方 CPython
+後結果如上，不宣稱 MSYS2／MinGW 可用於 MSVC binding。本輪未重跑 Debug、macOS
+原生、WSL installed SDK 或 OCR。Windows 的真實舊 MSVCP 預載測試通過；選用的 WinRT
+載入順序案例未設定 wheel 目錄而略過。
+
+This completes the duplicate-probe item from the 2026-11-02 review. Earlier fixes
+remain documented in [CMake consumer coexistence](../../../../tools/configure/README.md#cmake-consumer-coexistence-correction--cmake-使用端共存修正),
+[PATH selection](#system-python-path-consistency),
+[OSAL loader handling](../../osal/README.md#windows-loader-error-dialogs--windows-載入器錯誤對話框)
+and [Runtime build cleanup](#runtime-build-cleanup); remaining native macOS checks
+stay in the root TODO.
+
+本輪完成 Python 周邊 review 的重複探測項目；先前修正與歷史結果由上述各元件紀錄維護，
+根目錄 TODO 保留尚待 macOS 原生驗證的事項。
+
+<a id="system-python-path-consistency"></a>
+
+### System Python PATH consistency / System Python 搜尋一致性
+
+Module System owns ordered PATH lookup (`python.exe` on Windows, `python3` on
+Linux/macOS). OSAL owns only the generic
+[`is_executable_candidate()` query](../../osal/README.md#headers-and-implementation--標頭與實作位置).
+Skip non-candidates; preserve unexpected query failures as ModuleSystem/Spawn with
+the OSAL cause. After selecting a path, launch/bootstrap/ABI failures fail that
+Module without selecting another interpreter or stopping central.
+Custom and `--python` are explicit selections and never fall back to PATH.
+
+Empty PATH entries are ignored. Explicit relative entries use central's current
+working directory and are made absolute before spawning in the Module directory.
+Symlinks are not canonicalized, preserving venv identity. No Python process is
+started merely to search PATH; the existing bootstrap performs compatibility checks.
+Build-time CMake uses the same candidate policy, independently in its own environment;
+see the [configuration contract](../../../../tools/configure/README.md#module-python-selection--module-python-選擇).
+
+Module System 負責依 PATH 選擇名稱，OSAL 只查檔案與原生權限。空 PATH 項目不代表
+目前目錄；明確的相對目錄則以中央 cwd 解析，再使用絕對路徑啟動。保留 venv 連結路徑，
+不為搜尋額外啟動 Python。選定後的載入、版本、ABI 錯誤只讓該 Module 失敗，
+不偷偷找下一套；Custom／`--python` 也不回退。
+
+Validation (2026-11-02): the new real-App WSL regression failed before the fix
+with `Permission denied` when the first PATH candidate had no execute permission.
+It reached central shutdown normally. After correction:
+
+- Windows x64, MSVC 19.44.35229, Release, CPython 3.13.12, CMake 4.3.2:
+  full source build and **12/12** related CTests passed. `module.python_shell`
+  additionally passed **three consecutive runs**. Selection tests: **18 cases**,
+  one POSIX-permission case skipped, no failures.
+- WSL Ubuntu 24.04 x86_64, GCC/libstdc++ 13.3, Release, CPython 3.12.3,
+  CMake 3.28.3: full source build and **10/10** related CTests passed;
+  selection tests **18/18** passed.
+- Cases cover OSAL queries, real Module startup/shutdown, failed candidates,
+  directory/broken-link/non-executable candidates, empty/relative PATH, Unicode
+  venv identity, explicit selections, ABI rejection, continued central script
+  execution, Python services/messages/RPC and Windows Runtime guards.
+
+The first Windows malformed-image test waited inside native launch; a separate
+non-VINC probe reproduced it. That PATH-search pass used test-only suppression.
+The subsequent [OSAL fix](../../osal/README.md#windows-loader-error-dialogs--windows-載入器錯誤對話框)
+adds thread-scoped launch handling; the Shell test now explicitly inherits process
+error mode 0 and relies on production OSAL rather than test-side suppression.
+Local logs are under `build/python-path-review/` (not tracked).
+Native macOS, Debug, installed SDK end-to-end and OCR were not rerun this round.
+
+這次已補真正 App 的修正前／後對照，不只測抽出的搜尋函式。Windows 12/12、WSL 10/10
+相關 CTest 通過；Windows Shell 額外連續通過三次。測試中的損壞 EXE 會受原生錯誤
+對話框模式影響，該輪曾由測試程序抑制。後續 OSAL 已加入原生啟動範圍的處理，
+測試現在改以模式 0 驗證正式接線；新驗證與原生限制見上方 OSAL 連結。
+macOS、Debug、安裝式 SDK 全套與 OCR 未於本輪重跑，不以上述結果替代。
 
 ### Installed SDK applications / 安裝式 SDK 應用
 
@@ -210,6 +314,7 @@ full Python service regression is claimed by this integration test.
 亦不以這項整合測試宣稱完整 Python 服務回歸或 PyPy／free-threaded 支援。
 
 <a id="windows-msvc-runtime-載入前檢查"></a>
+<a id="windows-msvc-runtime-preflight"></a>
 
 ### Windows MSVC Runtime preflight / Windows MSVC Runtime 載入前檢查
 
@@ -247,14 +352,63 @@ installed SDK 即使製作者關閉 Python，也會交付靜態相依庫；缺�
 靜態路徑不檢查、不預載 MSVC DLL，不替換 Python／WinRT 的舊檔。Python minor ABI
 仍必須符合；不增加跨 extension 的 C++ ABI 承諾。靜態 CRT 安全修正須重建及重新部署。
 
+<a id="runtime-build-cleanup"></a>
+
+#### Runtime build cleanup (2026-11-02) / Runtime 建置整理
+
+The MSVC recipe no longer contains the unreachable dynamic Redist discovery
+branch. Static metadata still tracks its generator, loader and `crtversion.h`;
+the header supplies informational toolset data, not a dynamic DLL version floor.
+The legacy dynamic metadata tool, loader and tests are retained unchanged.
+The root and tools guides now distinguish current static behavior from historical
+dynamic deployment requirements. Repeated ABI probing was handled separately in
+the [build ABI probe consolidation](#build-abi-probe).
+
+已移除 MSVC recipe 不可達的動態 Redist 搜尋分支。靜態 metadata 保留生成器、loader
+及 `crtversion.h` 相依；Header 提供工具鏈診斷資料，不作為動態 DLL 版本門檻。
+舊動態 metadata 工具、loader 與測試維持原樣。根目錄與工具指引已區分現行靜態行為
+與歷史動態部署要求；重複 ABI 探測已於後續完成，見
+[建置 ABI 探測統一](#build-abi-probe)，兩輪驗證範圍分別記錄。
+
+Validation / 驗證：
+
+| Environment / 環境 | Evidence / 結果 |
+| --- | --- |
+| Windows x64, MSVC 19.44.35229, CPython 3.13.12, Release | Source build and related CTests **8/8** passed: CRT policy, Shell/bootstrap, lifecycle, messages, metadata, loader, services and RPC. / 來源建置與相關回歸通過。 |
+| Same Windows build / 同上 | Touching the metadata generator and loader rebuilt matching format-3 metadata; deleting the manifest repaired it. Filename/SHA-256 matched the actual image, and focused tests passed **3/3** afterward. Ninja link inputs retain both files and `crtversion.h`, without Redist DLL inputs. / 增量及缺檔補回通過，靜態 metadata 相依保留。 |
+| Windows installed SDK, same compiler/Python, Release / 同工具鏈 | `installed_python.cmake` passed: relocated SDK/App, downstream custom Bus/RPC/Param messages, schema edits/recovery, ABI and metadata failure isolation, resource repair and Python-disable cleanup. The installed recipe matches the source file. / 安裝式 SDK 下游建置、搬移部署、增量、故障隔離及清理全數通過，交付的 recipe 與來源一致。 |
+| WSL2 Ubuntu 24.04, GCC/libstdc++ 13.3.0, CPython 3.12.3, Release | Source build and Python Shell/lifecycle/messages/services/RPC CTests **5/5** passed. / Linux 來源建置與五項 Python 回歸通過。 |
+
+Metadata unit tests passed **7/7**. Loader tests passed **20**, with **1** WinRT
+import-order case skipped because its isolated wheel directory was not configured.
+The separate real old-MSVCP preload case ran successfully. This round did not
+repeat OCR, Debug, native macOS or the WSL installed-SDK suite. Local logs are in
+`build/python-runtime-cleanup/` (not versioned).
+
+Metadata 單元測試 7/7；loader 測試 20 項通過、1 項 WinRT 載入順序因未設定隔離 wheel
+目錄而略過，獨立的真實舊 MSVCP 預載案例有執行並通過。本輪未重跑 OCR、Debug、macOS
+原生或 WSL installed SDK 全套。紀錄位於上述本機 build 目錄，不納入 Git。
+
+Ribosome deliberately generates messages on every build, so an otherwise
+unchanged build may relink the extension and refresh metadata. This existing
+policy was preserved; timestamp stability is not an acceptance criterion here.
+
+Ribosome 現有契約為每次 build 都生成訊息，因此未改來源也可能重新連結擴充、更新
+metadata。本輪保留該政策，不以時間戳不變作為驗收條件。
+
 #### Retained dynamic-mode guard / 保留的動態模式防護
 
 The following describes the retained format-2 guard and historical deployment
 policy. Newly built MSVC source/installed bindings select static mode above;
-their mode is generated by CMake, not a runtime user override.
+their mode is generated by CMake, not a runtime user override. The current CMake
+recipe does not locate Redist packages or track their DLLs. Dynamic generation
+remains available in the internal metadata tool and covered by its tests; this
+does not offer a supported CMake switch back to dynamic bindings.
 
 以下為保留的 format-2 動態防護及歷史部署契約；新建置的 MSVC 來源／安裝式綁定
-使用上方靜態模式，由 CMake 決定，不提供使用者於執行期切換。
+使用上方靜態模式，由 CMake 決定，不提供使用者於執行期切換。現行 CMake recipe
+不搜尋 Redist 或追蹤其 DLL；內部 metadata 工具的動態生成與相關測試仍保留，
+但不代表提供切回動態 binding 的 CMake 選項。
 
 import vinc checks required runtimes through Python/Windows APIs before _native. Bootstrap imports Vinc before user code; external Python should import before WinRT/other native packages. This creates neither a Session nor worker.
 
@@ -296,7 +450,9 @@ import Vinc。這不建立框架 session，也不新增背景執行緒。
 
 Preflight is compatibility defense, not a sandbox. Direct link-time imports do not cover all later dependencies, concurrent native loader races, or later forced full-path loads. Import before starting threads. Maintain system/third-party deployment normally; native crashes still require a native stack to identify the function.
 
-#### Deployment baseline selection / 部署基準選取
+<a id="deployment-baseline-selection--部署基準選取"></a>
+
+#### Historical dynamic deployment baseline / 歷史動態部署基準
 
 The compiler's `VC/Tools/MSVC/<toolset>` determines the **same VC installation's**
 `Redist/MSVC` directory. Select its newest numeric package directory with the same
@@ -313,7 +469,7 @@ For example, the 14.44.35112 directory contains 14.44.35211 DLLs.
   System32, unrelated VS installation, arbitrary version override or download is
   used to supply a build baseline. A custom extracted toolchain needs its official
   Redist files in the same VC layout.
-- CMake records the selected directory and tracks its DLL files as link inputs.
+- The former dynamic CMake recipe recorded the selected directory and tracked its DLL files as link inputs.
   Reconfigure after changing Redist selection. A changed selection discovered
   during metadata generation fails rather than silently using a new package.
 - Metadata contains per-DLL versions, toolset/configuration, informational header
@@ -330,7 +486,8 @@ For example, the 14.44.35112 directory contains 14.44.35211 DLLs.
 架構選 Release CRT 或 Debug 非散布 CRT，逐檔驗證架構與版本，不載入這些檔案。
 套件缺失／不明確、缺 DLL、版本無法讀取、架構錯誤或家族過舊均使建置失敗；不從 PATH、
 System32 或其他 VS 安裝補猜，也不下載／自動安裝。自行解壓工具鏈須保留官方 Redist 布局。
-CMake 追蹤 DLL 檔案變更；改選 Redist 後須重新配置，生成時發現選取已改變會明確失敗。
+先前的動態 CMake recipe 追蹤 DLL 檔案變更；當時改選 Redist 後須重新配置。
+保留的動態 metadata 生成器若發現選取已改變，仍會明確失敗。
 Metadata 只保留逐檔版本、工具鏈／組態、供診斷的 Header 版本及 VC 相對來源，不洩漏本機
 絕對路徑。來源建置與 installed SDK 使用同一生成器，部署須同步更新整套 Python binding。
 這不是所有舊 DLL 的最低 ABI 推導；新版部署套件也可能提高門檻，不承諾舊 Python CRT
@@ -367,7 +524,8 @@ Metadata 只保留逐檔版本、工具鏈／組態、供診斷的 Header 版本
 - 本機原始 CPython 3.13.12 自帶 VCRUNTIME140 14.42.34438，實測被新工具鏈的 Release 基準
   14.51.36244 明確拒絕。成功路徑使用 `build/runtime-investigation/python` 的隔離 CPython
   3.13.12 副本，搭配 VS 提供的 14.51.36247 Release Runtime；正式 Python／WinRT 安裝未修改。
-  本機 Debug／Release 建置快取的 Python_EXECUTABLE 已改指此隔離副本。
+  當時本機 Debug／Release 建置快取的 Python_EXECUTABLE 指向此隔離副本；目前選擇入口
+  已改為 App Kconfig，不應依這份歷史紀錄設定 CMake 變數。
 - `module.python_runtime` 的真實舊 DLL／WinRT 案例需要測試環境變數
   `VINC_TEST_OLD_MSVC_RUNTIME`（舊 DLL 完整路徑）與 `VINC_TEST_WINRT_DIR`（解壓套件根目錄）。
   未提供時會明確 skip，不自動下載或安裝第三方套件。一般 CTest 不依賴 WinRT。
@@ -636,6 +794,15 @@ Linux／macOS 未實機驗證。
 
 ## Outstanding issues / 待處理事項
 
+Current pending validation is tracked in the [root TODO](../../../../TODO.md).
+The records below preserve completed rollout stages and historical diagnosis;
+they are not an uncompleted implementation checklist. Current Windows bindings
+use static CRT; the retained dynamic-mode guard does not impose its DLL version
+floor on static bindings. See [the current policy](#windows-msvc-runtime-preflight).
+
+目前待驗證項目見根目錄 TODO。下方保留已完成的導入階段與歷史診斷，不代表這些實作
+仍未完成；現行 Windows binding 使用靜態 CRT，保留的動態防護門檻不套用於靜態綁定。
+
 <a id="runtime-policy-rollout"></a>
 
 ### Runtime policy rollout / Runtime 政策導入
@@ -768,7 +935,8 @@ The dynamic 19.44 deployment baseline still rejects Python's 14.42.34438 VCRUNTI
 passing limited probes with older files is not a compatibility guarantee.
 
 [Windows 工具鏈評估](../../sdk/WINDOWS_TOOLCHAIN.md) 區分來源建置、Python ABI 與 Runtime
-部署問題。其 Header 門檻及繞過防護實驗屬歷史紀錄；目前使用上述部署基準。
+部署問題。其 Header 門檻及繞過防護實驗屬歷史紀錄；保留的動態防護使用上述部署基準，
+不是目前 Windows 靜態 binding 的 DLL 門檻。
 動態 19.44 基準仍拒絕 Python 的 14.42.34438 VCRUNTIME，有限探針通過不等於相容性保證。
 
 The exact native crash site from the external 2026-10-14 v0.1.1/MSVC 19.44/WinRT-first old-MSVCP report remains unknown without stack/dump; the UNC report was inaccessible. External tests showed new-first coexistence/OCR; isolated official wheels locally verify preflight rejection and reverse-order coexistence. [Microsoft compatibility](https://learn.microsoft.com/en-us/cpp/porting/binary-compat-2015-2017) requires Runtime at least as new as toolchain; [STL 17.10 notes](https://github.com/microsoft/STL/wiki/VS-2022-Changelog#vs-2022-1710) document mutex null dereference from violating it. pybind11 mutex initialization is a concrete candidate, not a confirmed function diagnosis. Rejecting unsupported Runtime does not require proving the precise site. No CRT switch/compatibility macros/DLL replacements were introduced.
@@ -784,13 +952,36 @@ The exact native crash site from the external 2026-10-14 v0.1.1/MSVC 19.44/WinRT
   std::mutex，因此屬具體候選原因，仍須原生堆疊確認。當時已加入上述載入前拒絕與預載，
   不需要先證實是哪個 C++ 函式才能拒絕不支援的 Runtime。沒有 CRT 切換、相容巨集或第三方 DLL 替換。
 
-Confirmed test defect from 2026-10-12: services_module asserts Publisher ID != Module MID. These are separate namespaces whose values may coincide; passing current configuration does not validate inequality. Later examples use publisher_id labels and avoid the assumption; the original test still needs identity-based verification, not cross-kind numeric comparison.
+<a id="publisher-identity-regression"></a>
 
-- 2026-10-12 範例 review 確認：`tests/services_module.py` 的 received_message 使用
-  `publisher_instance() != self.get_mid()` 作斷言。Publisher ID 與 Module MID 是不同識別空間，
-  數值可能恰好相同，不能以不相等當正確性條件。目前測試配置通過不代表此假設有效；
-  建議後續改為驗證 Publisher 身分與已知發布者對應，不比較跨種類數值。
-  本輪修正示範的 `publisher_id` 顯示名稱，新範例測試不採此假設；既有測試留待修正。
+Resolved test defect (2026-11-02): `tests/services_module.py` formerly asserted
+Publisher ID != Module MID, although these are separate namespaces. On Windows,
+the unmodified assertion was reproduced failing with reply Publisher ID 2 and
+receiving Python MID 2. Production identity allocation and Runtime are unchanged.
+
+`module.python_services` now obtains the expected reply Publisher ID from paged
+Bus diagnostics through the native fixture's test-only command hook. It checks
+topic, publisher name and Publisher ID, including copied messages and `get_last()`.
+The six scenarios cover coincident IDs, distinct IDs, intentionally wrong expected
+identity, and the existing Param/Bus/reentrant-pump callback failures. The equal-ID
+scenario runs first and explicitly verifies equality, so fixture drift cannot
+silently remove this regression coverage. Wrong identity must fail the Python
+Module while the native peer remains Running; shutdown and reference release are
+also checked.
+
+Validation: Release `module.python_services` passed all six scenarios on Windows
+x64 / MSVC 19.44.35229 / CPython 3.13.12 and WSL Ubuntu 24.04 x86_64 /
+GCC 13.3 / CPython 3.12.3, with `PYTHONMALLOC=debug` and `PYTHONFAULTHANDLER=1`.
+This change has not been rerun on macOS. Reproduce with
+`ctest --test-dir <build> -V -R "^module[.]python_services$"`.
+
+- 已修正（2026-11-02）：舊測試錯把 Publisher ID 與 Module MID 當成必須不同的數值。
+  Windows 實際製造兩者皆為 2 時，確認舊斷言會誤判；正式身分配置與 Runtime 未更動。
+  現在透過測試原生 Module 的命令 hook，從 Bus 分頁診斷取得預期 Publisher ID，
+  再驗證收到的 topic、發布者名稱、ID，以及 copy／get_last 的身分保留。
+  六個案例涵蓋同號、異號、故意錯誤的預期身分及既有三種 callback 故障。
+  同號案例明確檢查測試前提；錯誤身分仍會使 Python Module 失敗，原生 Module 保持存活。
+  上述 Windows／WSL Release 環境皆通過，包含正常收尾與參考釋放；本輪未重跑 macOS。
 
 <a id="python-rpc2026-10-14"></a>
 

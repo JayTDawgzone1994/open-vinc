@@ -91,7 +91,7 @@ Types such as `TextRenderer` and `Subscription` retain their responsibility-base
 
 The central operator interface is **Shell**, located in `src/vinc/shell/`. Its internal framework class is `vinc::Shell`, with lifecycle managed by the central process. It is not a user-facing API for starting and stopping framework services.
 
-Supporting types remain in `vinc::shell`. Names such as `SocketShell` and `CommandRouter` retain their specific responsibilities. The central program defaults to `Vinc.exe`/`Vinc`. New source/installed Apps use `vinc_add_app`: the target names the executable and `INSTANCE_NAME` selects the central identity. The legacy source shell may still use `vinc_configure_app` to change its filename without changing `VINC_NAME`. See the [Shell README](src/vinc/shell/README.md) for entry points and build integration.
+Supporting types remain in `vinc::shell`. Names such as `SocketShell` and `CommandRouter` retain their specific responsibilities. The central program defaults to `Vinc.exe`/`Vinc`. New source/installed Apps use `vinc_add_app`: the target names the executable and `INSTANCE_NAME` selects the central identity. The bundled App uses this same constructor. See the [Shell README](src/vinc/shell/README.md) for entry points and build integration.
 
 ## Context and pump Naming Status
 
@@ -128,10 +128,10 @@ Only user-confirmed names are recorded here as decisions. Clearly mark proposals
 
 ## Vinc Identity
 
-`VINC_NAME` is the local central-process name specified at build time. It identifies exclusive startup of the same name and ownership of shared-resource records. It is distinct from Module names, MID, and the reserved VID. See [Module System INSTANCE.md](src/vinc/module_system/INSTANCE.md) for scope and lifecycle.
+`INSTANCE_NAME` is the per-App central-process name specified through `vinc_add_app()`. It identifies exclusive startup of the same name and ownership of shared-resource records. It is distinct from Module names, MID, and the reserved VID. See [Module System INSTANCE.md](src/vinc/module_system/INSTANCE.md) for scope and lifecycle.
 
 Source and installed C++ applications select that same identity with `vinc_add_app(INSTANCE_NAME ...)`,
-independently of the SDK producer's `VINC_NAME`. The function's target argument names the
+independently of the SDK producer. The function's target argument names the
 executable, not the central identity. See [installed SDK composition](src/vinc/sdk/INSTALL.md).
 
 ## Message Publication Times

@@ -61,10 +61,12 @@ cmake -S src -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/debug
 ```
 
-Use VINC_BUILD_UI=OFF to omit the capability for library-only builds; the new App composer requires UI. With UI enabled, source builds prepare its assets/libraries even when VINC_BUILD_APPS=OFF so external Apps can use them. With UI disabled, Node/npm and the UI native dependencies are not required. C++23/Tcl/Plugin ABI contracts still apply.
+The full source build and official SDK always include UI capability, including
+libraries and frontend assets. `VINC_BUILD_APPS=OFF` omits the bundled App, not UI
+build dependencies. Individual installed component consumers do not start UI.
 
-純函式庫建置可指定 `-DVINC_BUILD_UI=OFF`，不需 Node／npm 或 UI 原生相依；新 App 建構器則要求 UI 能力。
-UI=ON 時即使 `VINC_BUILD_APPS=OFF` 仍會準備 UI 資源與函式庫，讓外部 App 組裝使用。仍需符合主專案 C++23、Tcl 與 Plugin ABI 契約。
+完整來源建置與官方 SDK 固定包含 UI 函式庫及前端資源；`VINC_BUILD_APPS=OFF` 不會省略
+UI 建置相依。單獨連結元件不會啟動 UI。
 
 Central starts the official UI before the startup script. A bind/load failure is
 reported without terminating central. Query the default instance in Shell or Tcl:
@@ -123,7 +125,7 @@ System Module 的真實 port 衝突、自動恢復及平台驗證範圍，見上
 ## Deployment / 部署
 
 ```text
-<build>/vinc_data/<VINC_NAME>/ui/
+<App directory>/vinc_data/<INSTANCE_NAME>/ui/
 ├── app/                    # Vite 生成的工作區與 third-party.txt
 └── plugins/
     ├── vinc.example/       # 官方範例，建置管理

@@ -121,9 +121,9 @@ Each record includes Vinc name/startup identity, Module name/MID/PID, central co
 
 ## Files and capacity / 檔案與容量
 
-Default: `<Vinc executable directory>/vinc_data/<VINC_NAME>/logs/YYYY-MM-DD/vinc-00000000000000000001.log`. Central startup initializes storage; Module authors manage neither spdlog nor files.
+Default: `<Vinc executable directory>/vinc_data/<INSTANCE_NAME>/logs/YYYY-MM-DD/vinc-00000000000000000001.log`. Central startup initializes storage; Module authors manage neither spdlog nor files.
 
-預設路徑：`<Vinc 執行檔目錄>/vinc_data/<VINC_NAME>/logs/YYYY-MM-DD/vinc-00000000000000000001.log`。
+預設路徑：`<Vinc 執行檔目錄>/vinc_data/<INSTANCE_NAME>/logs/YYYY-MM-DD/vinc-00000000000000000001.log`。
 由中央啟動自動初始化；Module 使用者不操作 spdlog 或檔案。
 
 | Setting | Default | Meaning |

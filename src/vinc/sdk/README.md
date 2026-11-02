@@ -51,9 +51,9 @@ Module authors can begin with runnable [C++/Python examples](../../../examples/u
 一般 Module 作者可先看 [userExampleModule C++／Python 對照](../../../examples/userExampleModule/README.md)，
 包含可執行的 Shell 操作與 API 閱讀索引。
 
-Below is the C++ SDK. Optional system-Python bindings live in Module System behind VINC_BUILD_PYTHON, without linking Python into central/general C++ consumers. See [Python](../module_system/python/README.md) for Context services, containers, and ABI.
+Below is the C++ SDK. Optional system-Python bindings live in Module System and are selected by App Kconfig's CONFIG_VINC_APP_PYTHON, without linking Python into central/general C++ consumers. See [Python](../module_system/python/README.md) for Context services, containers, and ABI.
 
-以下是 C++ SDK。可選的系統 Python 綁定位於 Module System，建置開關為 `VINC_BUILD_PYTHON`；
+以下是 C++ SDK。可選的系統 Python 綁定位於 Module System，由 App Kconfig 的 `CONFIG_VINC_APP_PYTHON` 選擇；
 不會讓一般 C++ 使用端或中央連入 Python。Context 的 Bus／Param／Log、訊息容器與 ABI 限制見
 [Python SDK](../module_system/python/README.md)。
 
@@ -65,7 +65,6 @@ Below is the C++ SDK. Optional system-Python bindings live in Module System behi
 # 使用原始碼套件；請先初始化 library/ 下 Tcl 與 toml++ submodule。
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(VINC_BUILD_APPS OFF CACHE BOOL "" FORCE)
-set(VINC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(path/to/open-vinc/src open-vinc)
 
 add_executable(my_app main.cpp)
@@ -212,15 +211,15 @@ Logs: build/cmake-api-*-tests.log. That change originally used entry 6/bootstrap
 本機紀錄位於 build/cmake-api-*-tests.log；當時使用 entry 6／bootstrap v11，目前標記、相容性與
 重建要求見 [Module System](../module_system/README.md#source-擁有實例命名與公開-cmake-接線2026-10-12)。
 
-SDK supplies neither main nor message generation by itself; include/link starts no services. Central-owned main with embedded startup is available through vinc_configure_app, documented in [application setup](../../../apps/vinc/README.md#打包應用程式的啟動腳本). Central initializes Tcl/Socket automatically, unlike child Modules. APPS=OFF above is SDK-only; retain ON for central. Shell exposes only errors/SocketShellOptions, not internal Shell/SocketShell/ScriptService/TclRuntime/init APIs. CLI selects listener settings; see [Shell](../shell/README.md). Build-time vinc_deploy_tcl follows the actual target directory or an explicit destination; see [Tcl](../../../library/tcl/README.md). User/built-in messages share vinc::messages and explicit generated includes; Ribosome development API is not SDK. Source add_subdirectory remains supported. The opt-in installed C++ SDK now provides find_package(vinc CONFIG REQUIRED); vinc_add_app assembles installed C++ applications. See [installed SDK](INSTALL.md).
+SDK supplies neither main nor message generation by itself; include/link starts no services. Central-owned main with embedded startup is available through vinc_add_app, documented in [application setup](../../../apps/vinc/README.md#打包應用程式的啟動腳本). Central initializes Tcl/Socket automatically, unlike child Modules. APPS=OFF above is SDK-only; declare your App with vinc_add_app. Shell exposes only errors/SocketShellOptions, not internal Shell/SocketShell/ScriptService/TclRuntime/init APIs. CLI selects listener settings; see [Shell](../shell/README.md). Build-time vinc_deploy_tcl follows the actual target directory or an explicit destination; see [Tcl](../../../library/tcl/README.md). User/built-in messages share vinc::messages and explicit generated includes; Ribosome development API is not SDK. Source add_subdirectory remains supported. The opt-in installed C++ SDK now provides find_package(vinc CONFIG REQUIRED); vinc_add_app assembles installed C++ applications. See [installed SDK](INSTALL.md).
 
 `vinc::sdk` 本身不提供 main、不生成使用者訊息；include 與連結不會啟動服務。
-需要直接開啟即可執行固定部署腳本的應用，可使用 `vinc_configure_app(NAME ... STARTUP_SCRIPT ...)`，
+需要直接開啟即可執行固定部署腳本的應用，可使用 `vinc_add_app(App INSTANCE_NAME ... VINC_BUILD_CONFIG ... STARTUP_SCRIPT ...)`，
 由中央提供 main 並嵌入腳本；建置順序、名稱與部署契約見
 [中央應用設定](../../../apps/vinc/README.md#打包應用程式的啟動腳本)。
 中央 `Vinc` 啟動時自動初始化 Tcl 並開啟 Socket Shell，兩者都是預設功能，
 使用者不負責呼叫初始化或服務啟停函式；Module 子程序也不建立中央 Shell。
-上例關閉 `VINC_BUILD_APPS` 是只建置 SDK 消費端；需要中央執行檔時保留該選項為 ON。
+上例關閉 `VINC_BUILD_APPS` 是只建置 SDK 消費端；需要中央執行檔時呼叫 `vinc_add_app()`。
 SDK 對 Shell 只提供錯誤分類與 `SocketShellOptions` 設定資料；
 `Shell`、`SocketShell`、`ScriptService`、`TclRuntime` 和初始化函式均屬框架內部接線。
 使用者透過中央 CLI 調整 IP、port 與 timeout，詳見 [Shell README](../shell/README.md)。
@@ -607,9 +606,9 @@ build/msvc-deps-*-common.log，
 
 ## Central identity and private Host locks / 中央名稱與 Host 私有鎖
 
-VINC_NAME selects central identity; conflicting names fail Manager::create. Private ContextLockAccess gets Host leases and is absent from umbrella/public methods. Host owns Guards/lifetime, not a second Plugin lock service. Current entry 8/v13 requires matched rebuilds; old Param/Log-stage entry 5/v10 is historical. See [Instance](../module_system/INSTANCE.md).
+INSTANCE_NAME selects central identity; conflicting names fail Manager::create. Private ContextLockAccess gets Host leases and is absent from umbrella/public methods. Host owns Guards/lifetime, not a second Plugin lock service. Current entry 8/v13 requires matched rebuilds; old Param/Log-stage entry 5/v10 is historical. See [Instance](../module_system/INSTANCE.md).
 
-中央建置可設定 `VINC_NAME`；同名占用會由 Manager::create 回報錯誤。
+App 建構器指定 `INSTANCE_NAME`；同名占用會由 Manager::create 回報錯誤。
 框架私有 `ContextLockAccess` 經 Host 取得 lease，未加入 SDK 總標頭或公開 Context 方法。
 Concurrency Guard 的操作／析構留在 Host；Plugin 不因此擁有另一份框架鎖管理服務。
 目前 Plugin entry 8／bootstrap v13 需完整重新建置；先前 Param／Log 階段的 entry 5／v10 為歷史值。

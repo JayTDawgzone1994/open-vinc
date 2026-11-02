@@ -6,6 +6,14 @@ minimum of 19.44. This minimum does not add ABI guarantees or relax Runtime load
 日期：2026-11-01。以下歷史實驗先於已核准的原生 MSVC 19.44 最低門檻；此門檻**不代表
 新增 ABI 保證或放寬 Runtime 防護**。
 
+The Python DLL-floor experiments below used dynamic CRT. Current Windows Python
+bindings use static CRT; consult the [current policy](../module_system/python/README.md#windows-msvc-runtime-preflight)
+for deployment behavior. The native MSVC minimum and installed-SDK ABI matching
+remain separate requirements.
+
+下方 Python DLL 門檻實驗使用當時的動態 CRT；目前 Windows Python binding 使用靜態 CRT，
+部署行為以現行政策為準。原生 MSVC 最低版本與 installed SDK ABI 比對仍是獨立要求。
+
 ## Scope and environment / 範圍與環境
 
 The evaluated source is the working tree based on `fd01072`, including the

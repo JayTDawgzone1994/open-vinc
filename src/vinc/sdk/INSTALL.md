@@ -258,7 +258,7 @@ initial package profiles; use a different prefix for each configuration/toolchai
 
 ```sh
 npm ci --prefix src/vinc/ui/web
-cmake -S src -B build/sdk-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DVINC_INSTALL_SDK=ON -DVINC_BUILD_APPS=OFF -DVINC_BUILD_EXAMPLES=OFF -DVINC_BUILD_UI=ON -DVINC_BUILD_PYTHON=OFF -DBUILD_TESTING=OFF
+cmake -S src -B build/sdk-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DVINC_INSTALL_SDK=ON -DVINC_BUILD_APPS=OFF -DBUILD_TESTING=OFF
 cmake --build build/sdk-release
 cmake --install build/sdk-release --component VincSDK --prefix /absolute/path/to/vinc-sdk-release
 ```
@@ -425,7 +425,8 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
 - Python-enabled Apps share one binding target compiled against all registered
   messages. C++-only Apps do not depend on it. `Python3_EXECUTABLE` selects the
   configuration interpreter; App Kconfig selects the binding interpreter and runtime
-  default. `-DPython_EXECUTABLE` is rejected. See the [selection contract](../../../tools/configure/README.md#module-python-selection--module-python-選擇).
+  default. `Python_EXECUTABLE` may belong to other CMake consumers; it does not
+  override VINC's Kconfig selection. See the [selection contract](../../../tools/configure/README.md#module-python-selection--module-python-選擇).
 - GUI/menu targets are `<App>_vinc_guiconfig` and `<App>_vinc_menuconfig`.
   See [configuration](../../../tools/configure/README.md) for validation and editing.
 - Install one App with `cmake --install build --component VincApp_CameraApp --prefix package`.
@@ -449,7 +450,7 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
 - 共用 Module target 與 Python 綁定；UI 僅按 App 重編薄接線，底下函式庫共用。
   `webUi`／`bagRecorder` 保留給官方 Module。
 - GUI／menu 各自保存指定檔案。原始碼使用新入口時先關閉舊 `VINC_BUILD_APPS`／範例，
-  再自行宣告 App；舊 `vinc_configure_app()` 暫時仍可設定內建 shell。
+  再自行宣告 App；所有 App 共用 `vinc_add_app()`。
 - 個別安裝使用 `--component VincApp_<App>`，各 App 放在 `<prefix>/<App>/`。
   所有權標記拒絕其他 App 覆蓋；清單僅刪除未被修改的舊管理檔案，保留使用者資料。
 - 更新前先停止 App；同一目的地的複製會序列化，但不是整包原子替換。
@@ -481,7 +482,7 @@ SDK 會隨 CMake helper 交付規則。單純查找及連結 C++ SDK 不會搜�
 
 For Python Modules, enable `CONFIG_VINC_APP_PYTHON=y` in the App config file and select
 System/Custom Python in that same file. SDKs include the binding build material even
-when produced with `VINC_BUILD_PYTHON=OFF`; consumer builds require a compatible
+when the producer builds no Python binding; consumer builds require a compatible
 CPython development environment and compile only the adapter, not framework
 libraries. Enabled Apps deploy their own `python/vinc` package. User Module
 scripts/dependencies remain the application's responsibility under `data/module`.
@@ -495,7 +496,7 @@ Python Module 可在各 App 設定檔啟用，並以同份 Kconfig 選擇 System
 
 On MSVC, SDK installation builds and ships a separate `/MT` (`/MTd` in Debug)
 archive closure for the binding, including its Common error catalog and fmt.
-This happens even with `VINC_BUILD_PYTHON=OFF` and requires no Python development
+This happens even when the producer builds no Python binding and requires no Python development
 files in the producer. Installed Apps compile their adapter and generated message
 headers with that closure; they do not recompile the framework. Central/C++ Plugins
 remain `/MD` (`/MDd`). The imported `*_python_runtime` targets are internal recipe
@@ -504,7 +505,7 @@ the two closures; missing installed archives reject package lookup. Do not overr
 the App's global CRT to select Python's private CRT.
 
 MSVC 的 SDK 安裝會另外建置及交付 `/MT`（Debug 為 `/MTd`）庫，含 Common 錯誤表及 fmt。
-即使 `VINC_BUILD_PYTHON=OFF` 也會交付，不要求製作者提供 Python 開發檔。
+即使製作者未建置 Python binding 也會交付，不要求製作者提供 Python 開發檔。
 下游只編譯 Python 接線與生成訊息；中央及 C++ Plugin 維持 `/MD`／`/MDd`。
 `*_python_runtime` 是內部建置相依，不是第二套公開 C++ SDK；混用 CRT 或套件缺庫會失敗。
 不要修改 App 全域 CRT 來選擇 Python 的私有 CRT。
@@ -567,6 +568,10 @@ Python typed bindings use that same consumer message list. No dynamic message in
 應用必須由框架入口組裝，不支援自訂 main。安裝式 App 同時連結預編譯 Module Runtime 與
 中央服務；套件不包含獨立 Host 執行檔。
 Python 綁定使用同一組應用訊息清單，不新增動態訊息直譯器。
+
+The bundled source App now uses this same constructor. Current migration and
+validation evidence is maintained in the [App composition report](../../../apps/vinc/README.md#app-composition-unification--app-組裝統一).
+內建 App 已統一組裝，最新遷移與驗證結果見上述主紀錄；下方保留各階段的歷史證據。
 
 ## Validation / 驗證
 
