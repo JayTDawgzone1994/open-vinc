@@ -575,6 +575,15 @@ validation evidence is maintained in the [App composition report](../../../apps/
 
 ## Validation / 驗證
 
+Latest macOS follow-up at `627c409`: Debug/Release source and clean installed-SDK
+acceptance passed within the [recorded scope](MACOS_VALIDATION.md). Original full
+CTest is **125/126** per configuration; the example fixture's deployment omission
+is still unresolved in the repository. External corrected-deployment evidence is
+reported separately, not counted as an original-suite pass.
+
+最新 macOS 補驗見上方報告；兩組乾淨 SDK 下游矩陣通過，但原始全套各保留一項
+範例 fixture 失敗。下方歷史結果保留其原始版本與環境範圍。
+
 The native-only `sdk.installed_application` fixture inventories both the moved SDK
 and the build/install App trees. It rejects retired Host binaries, test Hosts,
 generated Host-path headers and unexpected native images, and writes sorted

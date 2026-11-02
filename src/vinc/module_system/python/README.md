@@ -155,11 +155,11 @@ This completes the duplicate-probe item from the 2026-11-02 review. Earlier fixe
 remain documented in [CMake consumer coexistence](../../../../tools/configure/README.md#cmake-consumer-coexistence-correction--cmake-使用端共存修正),
 [PATH selection](#system-python-path-consistency),
 [OSAL loader handling](../../osal/README.md#windows-loader-error-dialogs--windows-載入器錯誤對話框)
-and [Runtime build cleanup](#runtime-build-cleanup); remaining native macOS checks
-stay in the root TODO.
+and [Runtime build cleanup](#runtime-build-cleanup). The subsequent native macOS
+checks are recorded in the [validation report](../../sdk/MACOS_VALIDATION.md).
 
 本輪完成 Python 周邊 review 的重複探測項目；先前修正與歷史結果由上述各元件紀錄維護，
-根目錄 TODO 保留尚待 macOS 原生驗證的事項。
+後續 macOS 原生結果見上述報告；根目錄 TODO 保留尚未修正的範例 fixture。
 
 <a id="system-python-path-consistency"></a>
 
@@ -797,6 +797,20 @@ Log、callback traceback／原因鏈及其他 Module 存活。
 不同建置組態的 Shell 測試須依序執行：它們使用相同 VINC_NAME，並行啟動會被單一實例鎖拒絕。
 Linux／macOS 未實機驗證。
 
+## Native macOS build-cleanup follow-up / macOS 建置整理補驗（2026-11-02）
+
+The `627c409` follow-up passed the Publisher identity scenarios, shared ABI probe,
+System PATH selection and source/installed Python SDK acceptance in Debug and
+Release on macOS arm64/CPython 3.12.14. It supersedes the pending-macOS status of
+those changes above. The original full CTest remains **125/126** in each configuration
+because an example deployment fixture is incomplete; only its external comparison
+has passed. See the [macOS report](../../sdk/MACOS_VALIDATION.md) for the complete
+scope, clean Python-disabled producer matrix and unresolved fixture.
+
+本輪補齊上述 Python 身分／ABI／PATH 變更的 macOS 原生證據，兩種組態均通過。
+原始全套仍有範例 fixture 漏檔失敗；外部補齊資源後通過不等於已修正 repository。
+原始數字、乾淨 SDK 與限制統一維護於上方報告；其他平台歷史紀錄不變。
+
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
@@ -1156,7 +1170,8 @@ also checked.
 Validation: Release `module.python_services` passed all six scenarios on Windows
 x64 / MSVC 19.44.35229 / CPython 3.13.12 and WSL Ubuntu 24.04 x86_64 /
 GCC 13.3 / CPython 3.12.3, with `PYTHONMALLOC=debug` and `PYTHONFAULTHANDLER=1`.
-This change has not been rerun on macOS. Reproduce with
+Native macOS Debug/Release subsequently passed these six scenarios; see the
+[validation report](../../sdk/MACOS_VALIDATION.md). Reproduce with
 `ctest --test-dir <build> -V -R "^module[.]python_services$"`.
 
 - 已修正（2026-11-02）：舊測試錯把 Publisher ID 與 Module MID 當成必須不同的數值。
@@ -1165,7 +1180,8 @@ This change has not been rerun on macOS. Reproduce with
   再驗證收到的 topic、發布者名稱、ID，以及 copy／get_last 的身分保留。
   六個案例涵蓋同號、異號、故意錯誤的預期身分及既有三種 callback 故障。
   同號案例明確檢查測試前提；錯誤身分仍會使 Python Module 失敗，原生 Module 保持存活。
-  上述 Windows／WSL Release 環境皆通過，包含正常收尾與參考釋放；本輪未重跑 macOS。
+  上述 Windows／WSL Release 環境皆通過，包含正常收尾與參考釋放；
+  後續 macOS Debug／Release 亦通過六情境，範圍見上方報告。
 
 <a id="python-rpc2026-10-14"></a>
 

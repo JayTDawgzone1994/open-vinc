@@ -316,3 +316,20 @@ Recorded 2026-10-12 Windows x64/MSVC/official CPython 3.13.12: both central/exam
 擴充建置成功。兩種組態各通過 6/6 項重點 CTest（本範例、四個 Python 測試、Ribosome schema）。
 Release 的 `user_examples_python` 部署 target 亦執行成功；Debug 同步複製相同範例檔案。
 本輪未重跑全專案測試；Linux／macOS 未實機驗證。
+
+<a id="macos-deployment-fixture-gap"></a>
+
+## Outstanding issue / 待處理：smoke fixture 部署資源（2026-11-02）
+
+Confirmed at `627c409`: `tests/smoke.py` copies the App, root DLLs, Tcl and Python,
+but omits `modules/` and the official UI assets. The unified relative Plugin catalog
+therefore cannot load native Modules in that temporary deployment. Native macOS
+Debug/Release `examples.user_module` both fail; complete external deployments of
+the same binaries pass. See the [validation report](../../src/vinc/sdk/MACOS_VALIDATION.md)
+for evidence. This is not a committed test fix or Windows/Linux validation.
+
+已確認：測試部署漏複製相對 catalog 所需的 `modules/` 及官方 UI 資源，導致
+`ModuleSystem/LoadPlugin → OSAL/OpenLibrary` 失敗；兩種 Mac 組態皆重現。
+外部副本補複製 `modules/` 與 `vinc_data/open-vinc/ui/` 後，原範例斷言與收尾通過。
+建議補齊 fixture 部署，再於三平台驗證；目前建議 patch 僅存外部，尚未套用。
+詳細結果統一維護於上方報告，本項不授權更動正式 Runtime 或部署契約。

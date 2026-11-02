@@ -340,6 +340,17 @@ WSL 的 Python 選擇只改測試副本；儲存庫預設仍為關閉。
 本輪未重跑 Debug、macOS 原生或 WSL installed SDK 全套；不可由上述結果推稱已通過。
 本機原始紀錄：`build/app-composition-review/`（不納入 Git）。
 
+### Native macOS follow-up / macOS 原生補驗（2026-11-02）
+
+At `627c409`, Debug/Release builds, source/installed multi-App composition and clean
+SDK downstream acceptance passed on macOS arm64. Original CTest passed **125/126**
+in each configuration: the example fixture omitted deployed Plugin/UI resources.
+The external complete-deployment comparison passed; the fixture remains unfixed.
+See the [macOS report](../../src/vinc/sdk/MACOS_VALIDATION.md) for methods and limits.
+
+macOS 原生補驗已有結果，取代上方該輪未測的狀態；原始全套各有一項 fixture 失敗，
+不宣稱 126/126。完整證據與未套用修正的對照見上方報告，歷史 Windows／WSL 結果保留。
+
 ## Resolved follow-up / 已解決後續事項
 
 <a id="外部-module-註冊晚於中央-catalog-收集"></a>
