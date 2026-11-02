@@ -49,7 +49,7 @@ function(add_module TARGET)
 endfunction()
 
 # Catalog rendering is separate from registration so each App can supply its set.
-# The legacy source App still passes all registered targets until composition migrates.
+# Production catalogs use deployed paths; isolated tests can use build-tree paths.
 function(vinc_render_module_catalog output)
     cmake_parse_arguments(CATALOG "DEPLOYED" "" "" ${ARGN})
     set(catalog "")

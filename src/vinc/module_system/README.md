@@ -255,7 +255,7 @@ BaseModule 由子程序內的框架工廠建立，中央透過程序與控制通
 
 ## MID range (2026-10-08) / MID 數值範圍（2026-10-08）
 
-mid.hpp retains MID = uint64_t. invalid_mid/max_mid/valid_mid() allow Module IDs 1 through 2^63−2; 0 is invalid and 2^63−1 is reserved for the central shared-lock owner. Common owner_id.hpp supplies boundaries to Module System/Concurrency. The central process allocator increases monotonically from 1, reports MidExhausted without wrap/reuse, and shares detail/mid_allocator.hpp with boundary tests. Central/Host shared-lock delivery, death recovery, and stop cancellation are connected; see [Param](../param/README.md) and [INSTANCE.md](INSTANCE.md) for VINC_NAME, cleanup, and private Context integration. module.mid tests concurrent final allocations, reserved values, and an unchanged exhausted counter.
+mid.hpp retains MID = uint64_t. invalid_mid/max_mid/valid_mid() allow Module IDs 1 through 2^63−2; 0 is invalid and 2^63−1 is reserved for the central shared-lock owner. Common owner_id.hpp supplies boundaries to Module System/Concurrency. The central process allocator increases monotonically from 1, reports MidExhausted without wrap/reuse, and shares detail/mid_allocator.hpp with boundary tests. Central/Host shared-lock delivery, death recovery, and stop cancellation are connected; see [Param](../param/README.md) and [INSTANCE.md](INSTANCE.md) for INSTANCE_NAME, cleanup, and private Context integration. module.mid tests concurrent final allocations, reserved values, and an unchanged exhausted counter.
 
 `mid.hpp` 保留 `MID = uint64_t`，以 `invalid_mid`／`max_mid`／`valid_mid()` 定義
 合法 Module 身分為 1～2^63−2；0 無效，2^63−1 保留給中央的共享鎖所有者。
@@ -263,7 +263,7 @@ mid.hpp retains MID = uint64_t. invalid_mid/max_mid/valid_mid() allow Module IDs
 中央的程序級發配器從 1 單調增加，最後合法值發出後回報 `MidExhausted`，不回繞、
 不重用已退出 Module 的 MID；`detail/mid_allocator.hpp` 是 Manager 與邊界測試共用的實作。
 中央／Host 已接上共享鎖交付、死亡接管與停止取消；Param 接線見 [Param README](../param/README.md)。
-本次 VINC_NAME、資源清理與私有 Context 接線契約見 [INSTANCE.md](INSTANCE.md)。
+本次 INSTANCE_NAME、資源清理與私有 Context 接線契約見 [INSTANCE.md](INSTANCE.md)。
 相關新測試為 `module.mid`，涵蓋並行最後編號、保留值與耗盡時 counter 不變。
 
 <a id="context-與執行模式"></a>

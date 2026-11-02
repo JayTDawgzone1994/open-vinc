@@ -50,6 +50,22 @@ POSIX 寫出 UTF-8 bytes 並重試被訊號中斷的寫入。呼叫端持有文�
 
 ## Headers and implementation / 標頭與實作位置
 
+`path.hpp` also provides `is_executable_candidate(path) -> Result<bool>`.
+It checks a regular file, following symlinks without changing the supplied path.
+Missing paths, directories, inaccessible paths and broken/cyclic symlinks are
+non-candidates. POSIX additionally checks `access(X_OK)` using real user/group
+credentials. Windows checks regular-file status only; this does not validate PE
+images, launch ACLs, ABI or dependent DLLs. Empty/NUL-containing paths are invalid;
+other filesystem failures retain native diagnostics under `CheckExecutable`.
+The query neither searches PATH nor executes anything. It is not a security check
+or a promise that a later spawn will succeed; launch failures remain authoritative.
+
+`is_executable_candidate()` 只檢查通用的檔案候選條件，不含 Python 名稱、版本、PATH
+搜尋或重試政策。POSIX 使用實際使用者／群組身分檢查執行權限；Windows 不模擬完整
+載入器或 ACL 判斷。符號連結只用於查詢，不改寫呼叫端的 venv 路徑。
+檢查與啟動間檔案／權限仍可能改變，必須處理真正的 spawn 錯誤。
+本輪搜尋整合與驗證集中於 [Python Module](../module_system/python/README.md#system-python-path-consistency)。
+
 The generic cross-process [Notification](NOTIFICATION.md) API is available through `<vinc/osal/notification.hpp>`. Windows and POSIX backends are implemented; validation and platform limits are recorded below. Bus/Context integration is implemented outside OSAL; its separate contracts and validation are in [Pump wakeup](../module_system/PUMP_WAKEUP.md).
 
 通用跨程序[通知原語](NOTIFICATION.md)已實作 Windows 與 POSIX 後端，平台驗證與限制見下方紀錄；Bus／Context 接線已於 OSAL 之外實作，契約及驗證另見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
@@ -257,6 +273,15 @@ Successful spawn means a managed child exists, not that Module initialization co
 `spawn()` 成功表示子程序已建立並納入管理，不表示模組初始化完成。
 原生啟動失敗以錯誤回報；POSIX 若以新程序退出碼呈現後續啟動失敗，則保留
 該退出碼，不把 127 一律解讀成某一種錯誤。
+
+Windows launch temporarily adds `SEM_FAILCRITICALERRORS` to the calling thread's
+error mode around `CreateProcessW()`, restoring its previous value on return.
+OSAL does not call process-wide `SetErrorMode()` or change child WER policy.
+The validated behavior and native limitations are recorded under
+[loader error dialogs](#windows-loader-error-dialogs--windows-載入器錯誤對話框).
+
+Windows 在原生啟動範圍暫時抑制呼叫執行緒的 critical-error 對話框，再恢復原值。
+OSAL 不主動改程序全域模式或子程序 WER 政策；這不構成原生啟動時間上限。
 
 <a id="所有權與回收"></a>
 
@@ -591,6 +616,64 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
 <a id="待處理事項"></a>
 
 ## Outstanding issues and resolved findings / 待處理事項與已解決發現
+
+### Windows loader error dialogs / Windows 載入器錯誤對話框
+
+**Implemented 2026-11-02.** A malformed EXE previously blocked both OSAL
+`spawn_with_output()` and a separate non-VINC Python probe. A thread-scoped
+native experiment returned error 216 without changing the final process mode
+or the child inheritance result. Windows `launch_process()` now owns a local
+`LaunchErrorMode` guard: preserve existing thread flags, add only
+`SEM_FAILCRITICALERRORS`, and restore the saved mode on both success and failure.
+Failure to establish the guard returns `Spawn` with its Win32 diagnostic before
+creating a child. The CreateProcess failure is captured before guard cleanup.
+Restoring the previously accepted mode is best-effort cleanup; it must not throw,
+terminate the caller, replace the launch error, or abandon an already-owned child.
+Native failure of restoration was not injected. No new thread, allocation,
+public option, error number, or POSIX behavior was introduced by the guard.
+
+**已實作（2026-11-02）：** Windows 損壞 EXE 原先會在 OSAL 與不含 VINC 的探針中等待。
+先以原生執行緒範圍探針確認可立即回報錯誤 216，再接入 `launch_process()`。
+guard 只增加 critical-error 抑制旗標，保留既有 WER 等設定；建立 guard 失敗時，
+在建立子程序之前回報 Spawn／Win32 錯誤。啟動結果先保存，再以原值進行 best-effort
+還原；不因清理而終止中央、覆蓋啟動錯誤或遺失已建立程序。未注入原生還原失敗。
+Python Shell 故障測試現在刻意讓中央繼承模式 0，不再以測試端抑制對話框掩蓋問題。
+
+**Native boundary:** a concurrent probe observed transient process-wide error-mode
+changes during successful `CreateProcessW()`. A standalone Win32/C++ control
+reproduced this **with and without** thread suppression and without linking VINC;
+the final process mode was restored in both cases. Therefore tests check the
+process mode at API boundaries and the other thread's own mode throughout, not
+an unsupported promise that Windows never changes its internal process mode.
+Children retain the parent process mode, with no inherited launching-thread
+override. This is not a guarantee against concurrent external `SetErrorMode()`
+calls, later child loader/crash dialogs, or all possible native launch stalls.
+
+**原生邊界：** 成功建立程序期間，全域模式可能短暫變動；純 Win32 對照在沒有 VINC、
+有／無 thread guard 時均可重現，呼叫後恢復。這不是本次 guard 引入的全域修改。
+驗證保證限於呼叫前後模式、另一執行緒自己的模式，以及子程序繼承結果；不宣稱 Windows
+內部永不修改全域狀態，也不協調外部並行 SetErrorMode。後續子程序載入／崩潰行為與
+原生啟動無硬期限的契約維持原樣。
+
+Validation uses `osal.process_error_mode`: malformed/missing EXEs, direct/captured
+launch, nonzero pre-existing modes, another thread, inherited child modes,
+repeated failed admission and successful retry with one process record.
+The final test passed five standalone runs; an isolated copy disabling only the
+guard reproduced a five-second timeout. Local experiment and regression logs:
+`build/spawn-error-mode-review/` (not tracked).
+
+驗收涵蓋壞映像／缺檔、直接／擷取輸出啟動、非零既有模式、並行觀察、子程序繼承、
+重複失敗及單一名額成功重試。最後測試獨立連跑五次通過，隔離停用 guard 的負向對照
+再次等到五秒逾時。三平台其他既有驗證紀錄維持其原範圍。
+
+| Environment / 環境 | Final verification / 最終驗證 |
+| --- | --- |
+| Windows 11 x64, MSVC 19.44.35229, Release, CPython 3.13.12 | Source build passed; OSAL, Python Module, RPC and App entry CTests **28/28**, 42.76 s. New loader test also passed five standalone runs. |
+| WSL2 Ubuntu 24.04 x86_64, GCC/libstdc++ 13.3.0, Release, CPython 3.12.3 | Source build passed; corresponding CTests **30/30**, 16.72 s. Windows-only tests are excluded; POSIX behavior is unchanged. |
+| macOS / other configurations | Not rerun for this Windows backend fix; existing evidence remains valid for its recorded scope. |
+
+Windows 與 WSL 本輪實際建置及回歸均通過。沒有重跑 macOS 或 Debug，未以 Linux
+測試代替 Windows 原生驗證，也未撤銷先前其他平台的驗證結果。
 
 - **Standalone MSVC encoding warnings (2026-11-02, confirmed):** An isolated
   OSAL/Common Release build with MSVC 19.44 and code page 950 succeeds, but

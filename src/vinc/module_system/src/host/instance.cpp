@@ -14,7 +14,7 @@ namespace {
 using module_system::ErrorCode;
 using module_system::ErrorOperation;
 namespace fs = std::filesystem;
-// Journal v1 encoding limits, also validated by the CMake VINC_NAME option.
+// Journal v1 encoding limits, also validated by vinc_add_app(INSTANCE_NAME).
 constexpr std::size_t maximum_instance_name_bytes = 48;
 constexpr std::size_t epoch_digits = 12;
 constexpr std::size_t sequence_digits = 11;

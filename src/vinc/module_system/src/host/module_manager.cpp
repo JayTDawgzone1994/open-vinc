@@ -7,7 +7,6 @@
 #include <vinc/rpc/detail/manager.hpp>
 #include <vinc/module/detail/instance.hpp>
 #include <vinc/module/detail/lock_registry.hpp>
-#include <vinc/module/detail/instance_name.hpp>
 #include <vinc/module/detail/manager_access.hpp>
 // Central module supervisor: allocate MIDs, approve names, launch through OSAL, wait for Ready,
 // route requests, and stop/reap each generation before retiring its Message Bus resources.
@@ -1610,7 +1609,7 @@ ModuleManager::ModuleManager(std::unique_ptr<Impl> implementation) noexcept
 }
 
 Result<std::unique_ptr<ModuleManager>> ModuleManager::create(message_bus::Limits limits, std::filesystem::path host_executable) {
-    return detail::ManagerAccess::create(std::string(detail::instance_name), limits, std::move(host_executable));
+    return detail::ManagerAccess::create(std::string("open-vinc"), limits, std::move(host_executable));
 }
 
 Result<std::unique_ptr<ModuleManager>> detail::ManagerAccess::create(std::string name, message_bus::Limits limits, std::filesystem::path host_executable) {

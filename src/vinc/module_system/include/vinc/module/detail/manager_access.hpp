@@ -6,7 +6,7 @@
 #include <vinc/module/detail/system_module.hpp>
 
 namespace vinc::detail {
-// Framework composition/testing only. Public create uses the build's VINC_NAME.
+// Framework composition/testing only. The convenience create overload uses the fixed open-vinc identity.
 struct ManagerAccess {
     static Result<void> register_system_module(ModuleManager&, ModuleType, SystemModuleOptions);
     static Result<MID> start_system_module(ModuleManager&, const std::string& type,

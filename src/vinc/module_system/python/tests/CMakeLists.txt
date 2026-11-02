@@ -3,7 +3,7 @@ add_executable(module_python_tests python_tests.cpp)
 target_link_libraries(module_python_tests PRIVATE vinc_test_manager)
 add_dependencies(module_python_tests vinc_python_native)
 add_test(NAME module.python COMMAND module_python_tests "${Python_EXECUTABLE}"
-    "${VINC_BUILD_ROOT}/python/$<CONFIG>/vinc/bootstrap.py" "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+    "${python_package}/bootstrap.py" "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 set_tests_properties(module.python PROPERTIES TIMEOUT 90)
 
 # Compile the storage fixtures only in test builds. Source-local include paths
@@ -25,7 +25,7 @@ target_sources(vinc_python_native PRIVATE message_bindings.cpp)
 add_dependencies(vinc_python_native python_message_fixture_generation)
 target_compile_definitions(vinc_python_native PRIVATE VINC_PYTHON_TEST_MESSAGES=1)
 add_test(NAME module.python_messages COMMAND "${Python_EXECUTABLE}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/message_tests.py" "${VINC_BUILD_ROOT}/python/$<CONFIG>")
+    "${CMAKE_CURRENT_SOURCE_DIR}/message_tests.py" "${python_package}/..")
 set_tests_properties(module.python_messages PROPERTIES TIMEOUT 30)
 
 if(MSVC)
@@ -33,7 +33,7 @@ if(MSVC)
         "${CMAKE_CURRENT_SOURCE_DIR}/runtime_metadata_tests.py")
     set_tests_properties(module.python_runtime_metadata PROPERTIES TIMEOUT 30)
     add_test(NAME module.python_runtime COMMAND "${Python_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/runtime_tests.py" "${VINC_BUILD_ROOT}/python/$<CONFIG>")
+        "${CMAKE_CURRENT_SOURCE_DIR}/runtime_tests.py" "${python_package}/..")
     set_tests_properties(module.python_runtime PROPERTIES TIMEOUT 120)
 endif()
 
@@ -43,6 +43,9 @@ add_executable(module_python_services_tests services_tests.cpp)
 target_link_libraries(module_python_services_tests PRIVATE vinc_test_manager)
 add_dependencies(module_python_services_tests module_python_peer vinc_python_native)
 add_test(NAME module.python_services COMMAND module_python_services_tests "${Python_EXECUTABLE}"
-    "${VINC_BUILD_ROOT}/python/$<CONFIG>/vinc/bootstrap.py"
+    "${python_package}/bootstrap.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/services_module.py" "$<TARGET_FILE:module_python_peer>")
 set_tests_properties(module.python_services PROPERTIES TIMEOUT 90)
+
+# RPC owns its Python behavioral test; attach it only after the shared binding exists.
+include("${VINC_REPOSITORY_ROOT}/src/vinc/rpc/tests/Python.cmake")

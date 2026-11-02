@@ -40,9 +40,9 @@ Python 互動命令捕捉預期的 SDK／輸入例外；未處理的 callback �
 
 ## Build and deploy / 建置與部署
 
-In a configured build with EXAMPLES/PYTHON enabled:
+Select userExampleModule/userManualModule and enable Python in App Kconfig:
 
-現有建置開啟 `VINC_BUILD_EXAMPLES` 與 `VINC_BUILD_PYTHON` 後：
+在 App Kconfig 選入 userExampleModule／userManualModule，並在 App Kconfig 設定 `CONFIG_VINC_APP_PYTHON=y` 後：
 
 ```sh
 cmake --build build/windows-msvc-debug --target user_examples_python
@@ -59,7 +59,7 @@ data/module/userManualPython/userManualPython.py
 
 **Rerunning the deployment target overwrites those two Python examples.** Ordinary shell builds do not. Preserve edits under different type/directory/filenames; discovery runs only on central startup. Each Python example has one entry file without extra import-path configuration.
 
-**再次執行此部署 target 會覆寫這兩個 Python 範例檔案。** 一般 `shell` 建置不覆寫它們。
+**再次執行此部署 target 會覆寫這兩個 Python 範例檔案。** 一般 `Vinc` 建置不覆寫它們。
 若要保留自己的修改，另取 ModuleType／目錄／檔名；中央啟動時才掃描一次。
 Python 主範例全部在單一入口檔，不需要另外配置 import 路徑。
 
@@ -68,8 +68,8 @@ New-build configuration in an appropriate compiler environment:
 新建置目錄的設定範例（在適用的編譯器環境執行）：
 
 ```sh
-# Enable CONFIG_VINC_APP_PYTHON=y and choose System/Custom in src/vinc.conf first.
-cmake -S src -B build/my-build -DVINC_BUILD_EXAMPLES=ON
+# Enable CONFIG_VINC_APP_PYTHON=y and choose System/Custom in apps/vinc/vinc.conf first.
+cmake -S src -B build/my-build
 cmake --build build/my-build --target user_examples_python
 ```
 
@@ -80,7 +80,7 @@ Python ABI 必須符合建置使用的 CPython；Windows MSVC 使用官方 Windo
 下例使用通用佔位路徑，請換成自己的建置目錄與相容 CPython 執行檔：
 
 ```powershell
-.\build\windows-msvc-debug\Vinc.exe --python C:/path/to/python.exe
+.\build\windows-msvc-debug\apps\vinc\Vinc\Debug\Vinc.exe --python C:/path/to/python.exe
 ```
 
 C++-only use needs no Python. Building shell registers userExampleModule/userManualModule as Plugin libraries launched in separate Hosts, not executables. Added .msg types still require regeneration/rebuild; no dynamic schemas.

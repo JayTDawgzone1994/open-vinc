@@ -150,12 +150,12 @@ Central reads the following after startup and before Modules/deployment scripts:
 中央 Vinc 啟動後，在啟動 Module／部署腳本前讀取：
 
 ```text
-<Vinc executable directory>/vinc_data/<VINC_NAME>/params.toml
+<Vinc executable directory>/vinc_data/<INSTANCE_NAME>/params.toml
 ```
 
-Paths are executable-relative, not cwd, with one directory per VINC_NAME. First writable startup creates an empty file; build generates none. Custom composition uses private ManagerAccess::configure_params before Module startup/registration.
+Paths are executable-relative, not cwd, with one directory per INSTANCE_NAME. First writable startup creates an empty file; build generates none. Custom composition uses private ManagerAccess::configure_params before Module startup/registration.
 
-路徑相對執行檔位置，不依啟動時 current directory。不同 VINC_NAME 使用不同目錄。
+路徑相對執行檔位置，不依啟動時 current directory。不同 INSTANCE_NAME 使用不同目錄。
 正常可寫環境首次執行即建立空檔，不由 build 產生。框架自訂組裝使用私有
 `ManagerAccess::configure_params` 接入根目錄；它必須在 Module 啟動與參數登記前呼叫。
 

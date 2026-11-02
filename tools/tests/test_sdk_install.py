@@ -47,7 +47,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn("-sdk-release", directory.name)
         for options in (["--sdk-root", str(self.root)], ["--no-register"],
                         ["--install-vinc-sdk", "--target", "one"],
-                        ["--install-vinc-sdk", "-DVINC_BUILD_UI=OFF"],
+                        ["--install-vinc-sdk", "-DVINC_BUILD_APPS=ON"],
                         ["--install-vinc-sdk", "-DCMAKE_INSTALL_PREFIX=somewhere"]):
             with self.subTest(options=options), mock.patch("sys.stderr", io.StringIO()):
                 with self.assertRaises(SystemExit):

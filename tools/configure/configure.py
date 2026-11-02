@@ -63,8 +63,7 @@ class ApplicationConfig(kconfiglib.Kconfig):
     def __init__(self, capabilities, modules=None):
         self.schema_directory = None
         schema = TOOL_DIR / "Kconfig"
-        self.module_composition = modules is not None
-        if self.module_composition:
+        if modules is not None:
             # Keep the generated schema alive throughout an upstream editor session.
             # It contains only validated identifiers, never user-supplied Kconfig code.
             self.schema_directory = tempfile.TemporaryDirectory(prefix="vinc-kconfig-")
@@ -72,7 +71,6 @@ class ApplicationConfig(kconfiglib.Kconfig):
             schema.write_text(module_schema(modules), encoding="utf-8")
         super().__init__(str(schema), warn_to_stderr=False)
         self.capabilities = capabilities
-        self.legacy_values = {}
 
     def load_config(self, filename=None, replace=True, verbose=None):
         path = Path(filename or kconfiglib.standard_config_filename())
@@ -89,12 +87,9 @@ class ApplicationConfig(kconfiglib.Kconfig):
         return super().load_config(str(path), replace=replace)
 
     def validate(self):
-        for name, value in self.legacy_values.items():
-            if self.syms[name].str_value != value:
-                raise OSError(f"CONFIG_{name} conflicts with legacy CMake option ({value}); remove the legacy input")
         for feature, available in self.capabilities.items():
             name = f"VINC_APP_{feature}"
-            if self.module_composition and feature in ("UI", "BAG"):
+            if feature in ("UI", "BAG"):
                 if not available:
                     raise OSError(f"Official {feature} is required but unavailable in this SDK/build")
                 continue
@@ -212,14 +207,13 @@ def main():
     for feature in ("UI", "PYTHON", "BAG"):
         parser.add_argument(f"--{feature.lower()}-available", choices=("y", "n"),
                             default="y" if capabilities[feature] else "n")
-    parser.add_argument("--legacy", action="append", default=[], metavar="OPTION=y|n")
     parser.add_argument("--set", action="append", default=[], metavar="OPTION=VALUE")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--gui", action="store_true")
     mode.add_argument("--menu", action="store_true")
     mode.add_argument("--save", action="store_true", help="Explicitly save effective choices")
     args = parser.parse_args()
-    if args.preflight and (args.modules or args.gui or args.menu or args.save or args.set or args.legacy):
+    if args.preflight and (args.modules or args.gui or args.menu or args.save or args.set):
         parser.error("--preflight is a read-only feature pass without a Module manifest")
     args.config = args.config.resolve()
     if args.output and args.config == (args.output / ".config").resolve():
@@ -245,20 +239,8 @@ def main():
         "PYTHON": args.python_available == "y",
         "BAG": args.bag_available == "y",
     }, modules)
-    requested = {}
     if args.config.exists():
-        requested = assignments(args.config, config.syms)
         config.load_config(str(args.config))
-    legacy_values = {}
-    for entry in args.legacy:
-        name, value = parse_assignment(entry, config)
-        if name in legacy_values and legacy_values[name] != value:
-            raise ValueError(f"CONFIG_{name}: conflicting legacy CMake options")
-        legacy_values[name] = value
-        if name in requested and requested[name] != value:
-            raise ValueError(f"{args.config}: CONFIG_{name} conflicts with legacy CMake option ({value})")
-        config.syms[name].set_value(value)
-    config.legacy_values = legacy_values
     explicit_values = {}
     for entry in args.set:
         name, value = parse_assignment(entry, config)

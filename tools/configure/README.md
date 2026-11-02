@@ -1,12 +1,9 @@
 # Application configuration / 應用功能設定
 
-Public source/installed `vinc_add_app()` now uses the per-App selection path below.
-It requires `VINC_BUILD_CONFIG`; it does not implicitly read the project's
-`vinc.conf` or global `VINC_CONFIG_FILE`. The legacy source shell retains the older
-single-App path during the [multi-App migration](../../apps/vinc/MULTI_APP.md).
+All source and installed Apps use `vinc_add_app()` and an explicit `VINC_BUILD_CONFIG`.
+The bundled App uses `apps/vinc/vinc.conf`; no global CMake feature/identity override is read.
 
-來源／安裝式公開 `vinc_add_app()` 已接入下方各 App 選擇流程，必須提供 `VINC_BUILD_CONFIG`，
-不隱式讀取專案 `vinc.conf` 或全域 `VINC_CONFIG_FILE`。遷移期間只有舊來源 shell 保留舊流程。
+內建、來源整合與安裝式 App 統一使用下方流程；Kconfig 管組成，建構器明確指定身份與設定檔。
 
 ## Module Python selection / Module Python 選擇
 
@@ -21,11 +18,23 @@ CONFIG_VINC_PYTHON_EXECUTABLE="D:/Python313/python.exe"
 ```
 
 For System, use `CONFIG_VINC_PYTHON_SYSTEM=y` instead of Custom/path. The first
-`python.exe` (Windows) or `python3` (Linux/macOS) in the current PATH is selected,
+eligible `python.exe` (Windows) or `python3` (Linux/macOS) in the current PATH is selected,
 including an activated venv. No registry search or fallback to another version
 is made. Custom requires an absolute executable path; Kconfig strings escape
 backslashes as `\\` and quotes as `\"`. Editors accept a not-yet-installed path;
 configuration checks the actual CPython, version, ABI and development files.
+
+Both searches skip missing/non-file candidates and POSIX files without execute
+permission. Empty PATH entries are ignored; explicit relative entries are resolved
+against that process's current working directory. Venv symlink spelling is retained.
+Once selected, a launch/probe/version/ABI failure is reported without trying another
+candidate. CMake uses local CMP0109 NEW and disables bundle/root-path redirection
+for this host-interpreter search; it does not change the parent's search settings.
+See [runtime and validation](../../src/vinc/module_system/python/README.md#system-python-path-consistency).
+
+建置與執行都跳過不存在、非一般檔案及 POSIX 無執行權限的候選；忽略 PATH 空項目，
+明確的相對目錄依各自程序工作目錄解析。選定後若啟動／版本／ABI 失敗，不繼續搜尋。
+此處統一的是選擇規則，並不要求建置機與部署機的 PATH 或實際路徑相同。
 
 The App embeds only Custom's path. System resolves the deployment PATH, not a
 saved build-machine location. `--python PATH` overrides either mode for that
@@ -39,10 +48,14 @@ Venv symlinks are not collapsed to their base executable. Reconfiguration reject
 changes to the selected interpreter or ABI without deleting anything. A serviced
 patch version with the same path and ABI is allowed.
 
-`-DPython_EXECUTABLE` is removed and rejected, even if its value happens to match.
-After moving the selection into Kconfig, remove that old cache entry explicitly
-with `cmake -U Python_EXECUTABLE ...`; an actual environment change still needs a
-new build directory. `Python3_EXECUTABLE` and the Python running `build.py` select
+`Python_EXECUTABLE` is not a VINC selection input. `build.py` forwards it like any
+other permitted `-D` definition; VINC neither rejects nor deletes it. Other CMake
+consumers may use it. VINC passes its Kconfig selection to FindPython locally;
+CMake decides whether an unused command-line definition warrants a warning.
+Only VINC's own identity/ABI record guards reconfiguration. A legacy VINC-generated
+Python package without that record requires another build directory: shared
+FindPython cache entries cannot establish which interpreter built it. No files
+are automatically cleaned. `Python3_EXECUTABLE` and the Python running `build.py` select
 configuration/build tools only. Old setup `module_python` records are ignored;
 setup no longer saves one. There is no automatic interpreter installation.
 
@@ -51,8 +64,11 @@ Kconfig 是 Module Python 唯一的公開建置設定來源；內建 Vinc 與多
 Custom 僅接受絕對路徑，建置時檢查 CPython／ABI／開發檔；App 也以該路徑為執行預設。
 System 在部署環境重新依 PATH 尋找；`--python` 可覆寫本次執行，未更動設定檔。
 執行環境不合只拒絕該 Python Module，不關閉中央。多 App 必須選到同一直譯器；
-切換環境／ABI 需另一個 build 目錄，不自動清除。原 `-DPython_EXECUTABLE` 已移除，
-舊 cache 須明確用 `-U Python_EXECUTABLE` 移除；設定工具的 `Python3_EXECUTABLE` 保留。
+切換環境／ABI 需另一個 build 目錄，不自動清除。`Python_EXECUTABLE` 不再選擇 VINC 的
+Module Python；`build.py` 如一般 `-D` 原樣轉交，不拒絕、不刪除，其他 CMake 元件可以使用。
+VINC 僅在函式內將 Kconfig 選擇交給 FindPython。未使用參數是否警告由 CMake 判斷，不保證必有警告。
+快取保護依 VINC 自己的身份／ABI 紀錄；若舊目錄已有 VINC Python 生成套件卻沒有該紀錄，
+要求另用建置目錄，不以通用 FindPython 快取猜測原環境。設定工具的 `Python3_EXECUTABLE` 保留。
 setup 的舊 `module_python` 不再生效，也不再保存這項預設。
 
 Generated strings use literal CMake arguments and escaped UTF-8 C++ bytes; paths
@@ -67,6 +83,33 @@ in executable paths before they reach the build graph.
 執行檔路徑不得包含控制字元或 `$<`，避免被後續建置生成器解讀。
 
 ### Selection validation (2026-11-02) / 選擇接線驗證
+
+#### CMake consumer coexistence correction / CMake 使用端共存修正
+
+The blanket `Python_EXECUTABLE` rejection and the inference of VINC ownership
+from FindPython's private cache were removed. On Windows x64, MSVC 19.44,
+CPython 3.13.12, CMake 4.3.2 and Release, the source build passed with a nonexistent
+external `-DPython_EXECUTABLE` while Kconfig selected the actual binding interpreter.
+Selected Python/configuration CTest: **8/8**. Selection/cache tests: **13/13** on
+Windows and **13/13** on WSL Ubuntu 24.04, CPython 3.12.3/CMake 3.28.3. Windows
+build/setup/profile tests: **117**, with 22 platform skips and no failures.
+
+The Windows installed-SDK fixture now finds a separate venv before `find_package(vinc)`;
+the caller's variable and interpreter target remain unchanged, while VINC builds
+with its Kconfig interpreter. Relocation, custom-message Bus/RPC/Param, incremental
+schema changes, ABI failure isolation, deployment repair and disable cleanup passed.
+Legacy generated packages without VINC identity records are tested as explicit
+new-build-directory failures. No native macOS, Debug, or full WSL SDK rerun is claimed
+for this correction. Local logs are under ignored `build/python-input-review/`.
+
+已移除全面拒絕與共用 FindPython 快取的歸屬誤判。Windows Release 來源建置帶入不存在的
+外部 `Python_EXECUTABLE` 仍成功，實際 binding 依 Kconfig 選擇；相關 CTest 8/8 通過。
+Windows／WSL 選擇與快取測試各 13/13；Windows 工具測試 117 項、22 項平台跳過，無失敗。
+安裝式 SDK 已實測另一個 venv 先執行 FindPython，保留對方變數與 interpreter target，
+並通過搬移、自訂訊息通訊、增量更新、ABI 隔離、補檔與停用清理。舊 VINC 生成套件缺少
+身份紀錄時明確要求新目錄。本次未重跑 macOS、Debug 或 WSL 完整 SDK 驗收。
+
+#### Initial Kconfig rollout / 初次 Kconfig 接線
 
 Windows x64 uses MSVC 19.44 (toolset 14.44.35207), CMake 4.3.2, Ninja 1.13.2,
 official GIL-enabled CPython 3.13.12 and Release. WSL Ubuntu 24.04 x86-64 uses
@@ -213,7 +256,8 @@ selection, isolated saving, automatic regeneration and failure/recovery for
 missing/unknown inputs. These are build-graph tests, not production multi-App tests.
 Editor save/load hooks and the arguments shared by editor targets were tested;
 interactive GUI/menu sessions, native macOS and full multi-App runtime are not
-validated in this stage. Existing Unicode redirected-output concerns below remain.
+validated in this stage. The Unicode redirected-output concern recorded then was
+subsequently resolved; see [the correction below](#redirected-unicode-diagnostics--unicode-重導診斷).
 
 Existing App regression also passed on Windows: `sdk.configuration`,
 `sdk.app_selection`, `module.shell` and `app.entry` were **4/4 in both Debug and
@@ -234,94 +278,51 @@ ctest --test-dir <configured-build> -C <Debug-or-Release> \
 第一階段已通過 Windows Debug／Release 與 WSL Release 的實際小型 Plugin 建置驗證；
 兩平台設定解析各 14 項通過。涵蓋未選不建置、共用不重建、晚登記、target 後續設定、
 catalog 範圍、個別保存、重新配置及錯誤恢復。驗證範圍是建置圖與設定，不是完整多 App
-執行；未重測互動 GUI／menu、macOS，也未解決下方既有 Unicode 診斷輸出問題。
+執行；當時未重測互動 GUI／menu、macOS。當時保留的 Unicode 診斷輸出問題已於後續
+修正，見下方「Unicode 重導診斷」。
 既有 App 相關 CTest 在 Windows Debug／Release 各 **4/4** 通過；Release 安裝式應用
 回歸 **1/1** 通過，涵蓋安裝、搬移、訊息重建與舊單 App 功能清理。本輪未重跑全框架測試。
 
-## Existing single-App path / 既有單 App 路徑
+## Unified App configuration / 統一 App 設定
 
-Kconfig owns feature defaults and choices. CMake owns targets, actual SDK
-capabilities, toolchains and build profiles. This tool selects application
-composition; it does not promise complete library/dependency removal from the SDK.
-Core services and `vinc/config.hpp` are unchanged. Included UI/Bag Modules now
-start before startup Tcl; Bag remains idle until a recording command.
-Bag Recorder remains **enabled by default**.
+All Apps use the Module composition schema. UI and Recorder are mandatory System
+Modules, not Kconfig switches. The bundled App uses `apps/vinc/vinc.conf`; external
+Apps supply `VINC_BUILD_CONFIG` explicitly. All example Modules remain selected
+in the bundled default; user Modules default off.
 
-Kconfig 維護功能預設與選擇，CMake 管理 targets、SDK 實際能力、工具鏈與建置組態。
-這是應用組裝設定，不承諾從 SDK 徹底移除未使用函式庫／相依。
-核心服務及 `vinc/config.hpp` 未搬移。包含的 UI／Bag 會在啟動 Tcl 前自動啟動；
-Bag 收到錄製命令前保持待命，Bag Recorder **預設包含**。
-
-| Symbol / 選項 | Default / 預設 | Effect / 效果 |
-| --- | --- | --- |
-| `CONFIG_VINC_APP_UI` | `y` | Include official webUi / 包含官方 UI |
-| `CONFIG_VINC_APP_BAG` | `y` | Include bagRecorder / 包含錄製模組 |
-| `CONFIG_VINC_APP_PYTHON` | `n` | Build/deploy application bindings / 建置部署 Python 綁定 |
-
-Source and installed applications build their own Python bindings when selected,
-using a matching CPython interpreter/development environment. Installed SDKs carry
-the binding sources and pinned pybind11 even when the producer disables Python.
-See the [Python SDK contract](../../src/vinc/module_system/python/README.md).
-A prebuilt SDK
-without UI rejects UI selection; it cannot grow missing libraries at configure time.
-
-原始碼與安裝式應用均可建立自己的 Python 綁定，需要匹配的 CPython 與開發檔。
-SDK 即使未啟用 Python 建置，也交付綁定來源與固定 pybind11；完整契約見上方連結。
-未包含 UI 的 SDK 拒絕開啟 UI，
-不能在配置時憑空補出未交付的函式庫。
+所有 App 共用 Module 組裝 schema；UI／Recorder 固定包含。內建設定檔位置如上，
+外部 App 明確提供設定檔。設定工具不配置或編譯專案。
 
 ## Text, CLI and editors / 文字、命令列與編輯器
 
-By default, CMake reads `vinc.conf` in the outermost application's source root.
-Use `-DVINC_CONFIG_FILE=/absolute/path/to/file.conf` for another file. Relative
-paths resolve against that outer root. An explicitly named missing file fails.
-A missing default file uses defaults without creating it. Configuration/build
-never rewrites the user file. The full effective `.config` and `features.cmake`
-are build-only outputs under `<outer-build>/vinc-config/`.
+Each App explicitly supplies `VINC_BUILD_CONFIG`, relative to its calling CMakeLists.
+The bundled App uses `apps/vinc/vinc.conf`. A named missing file fails; configure/build
+never edits the source config. Generated output is `<build>/vinc-config/<App>/`.
 
-CMake 預設讀取最外層應用來源目錄的 `vinc.conf`。可用 `VINC_CONFIG_FILE` 改指定；
-相對路徑以最外層來源目錄解析。明確指定卻缺檔會報錯，預設檔不存在則使用預設值，
-不自動建立。configure／build 不修改使用者設定。完整有效設定與 CMake 接線檔只寫入
-最外層 build 的 `vinc-config/`。
-
-```ini
-CONFIG_VINC_APP_UI=y
-CONFIG_VINC_APP_BAG=y
-# CONFIG_VINC_APP_PYTHON is not set
-```
-
-Run these from your application directory, substituting the tool's absolute path:
-
-從應用專案目錄執行，將工具路徑替換為實際絕對路徑：
+各 App 明確提供設定檔，路徑相對於呼叫端 CMakeLists；缺檔即報錯，不自動建立或覆寫。
+內建 App 的 GUI/menu targets 是 `Vinc_vinc_guiconfig`／`Vinc_vinc_menuconfig`：
 
 ```sh
-python /path/to/open-vinc/tools/configure/configure.py
-python /path/to/open-vinc/tools/configure/configure.py --gui
-python /path/to/open-vinc/tools/configure/configure.py --menu
-python /path/to/open-vinc/tools/configure/configure.py --save --set VINC_APP_UI=n
+cmake --build build/debug --target Vinc_vinc_guiconfig
+cmake --build build/debug --target Vinc_vinc_menuconfig
 ```
 
-Use `--config /path/to/vinc.conf` to select a file. Plain invocation validates and
-prints the effective choices. Only `--save` or the editor's explicit Save writes
-the user file; omitted choices follow this framework version's defaults. Editors
-save full choices and retain upstream `.old` backup behavior. GUI Save As/Open
-use the same validation hooks. Files contain boolean choices and the quoted Python path;
-unknown names, invalid values, duplicates, incompatible legacy choices,
-and unavailable capabilities fail rather than silently normalize.
+For standalone editing after configuration, use its generated Module manifest:
+配置後也可直接使用產生的 Module 清單編輯；只在 Save 時更新設定檔：
 
-使用 `--config` 選檔；無其他模式時僅驗證並列出結果。只有 `--save` 或編輯器明確保存
-才寫入使用者檔案。未指定項目跟隨該框架版本預設；編輯器保存完整選擇並保留上游 `.old`
-備份行為。另存／開檔共用驗證。設定包含布林選擇與引號包住的 Python 路徑；未知名稱、非法值、重複項目、
-舊選項衝突與不可用能力都會報錯，不默默忽略。
+```sh
+python tools/configure/configure.py --config apps/vinc/vinc.conf --modules build/debug/vinc-config/Vinc/modules.json --gui
+python tools/configure/configure.py --config apps/vinc/vinc.conf --modules build/debug/vinc-config/Vinc/modules.json --save --set VINC_APP_PYTHON=y
+```
 
-After successful CMake configuration, `vinc_guiconfig` and `vinc_menuconfig` are
-convenience targets. The standalone commands above remain usable when CMake has
-failed. No command installs dependencies, configures a build or starts compilation
-on the user's behalf. Missing Tk/curses affects only the requested editor.
+Without `--modules`, standalone editing exposes Python choices only; it cannot
+infer registered CMake ModuleTypes. Text editing remains available before the first
+configure. Unknown names, invalid values, duplicate entries and unavailable capabilities
+fail explicitly. Tk/curses is needed only for its respective editor. No editor installs
+packages or starts a configure/build.
 
-CMake 配置成功後可用 `vinc_guiconfig`／`vinc_menuconfig` targets；配置失敗時仍可獨立
-執行工具修正設定。工具不自動安裝相依、不替使用者配置或編譯專案。
-缺少 Tk／curses 只影響要求的編輯介面。
+未提供 `--modules` 時只提供 Python 選擇，不猜測 CMake 登記的 ModuleType；首次配置前可
+直接編輯文字檔。未知名稱、非法值、重複項目及能力缺失都明確報錯；不自行安裝或建置。
 
 ## Build integration / 建置整合
 
@@ -338,18 +339,43 @@ SDK-only source builds with `VINC_BUILD_APPS=OFF` retain their existing build op
 單純 find_package／連結不執行工具、不要求 Python。
 `VINC_BUILD_APPS=OFF` 的 SDK-only 來源建置保留原有建置開關。
 
-The legacy source path's `VINC_BUILD_BAG`, `VINC_BUILD_PYTHON`, and
-`VINC_BUILD_UI=OFF` feed the same resolver; a contradictory explicit file value
-fails. `VINC_BUILD_UI=ON` describes source SDK capability and does not force UI
-into the app. Legacy cache values from older builds are still explicit inputs;
-remove them (e.g. `cmake -U VINC_BUILD_PYTHON ...`) when migrating to file ownership.
-There is no hidden last-writer-wins order. The new per-App constructor instead
-requires an explicit file and does not accept the old installed `NO_UI`/`NO_BAG` API.
+Removed CMake feature inputs: `VINC_BUILD_PYTHON`, `VINC_BUILD_BAG`, `VINC_BUILD_UI`,
+`VINC_BUILD_EXAMPLES`, `VINC_NAME`, `VINC_CONFIG_FILE`. They are not read/rejected/deleted;
+CMake owns unused-input warnings. App identity and file locations are explicit
+`vinc_add_app()` arguments. Compiler, configuration, tests and SDK installation
+remain CMake concerns. Official SDK production always includes UI capability.
 
-舊入口透過同一解析器轉接；與檔案明確值相反即報錯。`VINC_BUILD_UI=ON` 表示 SDK
-可建置 UI，不強迫應用包含它。舊 build cache 也屬明確輸入，改由檔案管理時應先清除
-相關舊值，例如 `-U VINC_BUILD_PYTHON`。不採隱含覆蓋順序。新各 App 建構器則要求明確
-設定檔，不接受舊安裝式 `NO_UI`／`NO_BAG` API。
+上述舊變數不再控制 VINC；不為它們增加拒絕或相容轉接。身份與設定檔位置由 App 建構器
+明確指定，Module／Python 選擇屬 Kconfig。工具鏈、測試、SDK 安裝保留 CMake 入口。
+下方為遷移前各階段的歷史驗證，不代表舊入口仍受支援。
+
+The completed App unification and current platform validation are maintained in
+[the App report](../../apps/vinc/README.md#app-composition-unification--app-組裝統一).
+組裝統一與最新平台驗證集中於上述文件；以下早期紀錄不代表舊入口仍受支援。
+
+### Legacy Python/Bag switch removal (2026-11-02) / 舊開關移除驗證
+
+Windows x64 Release (MSVC 19.44/toolset 14.44.35207, CPython 3.13.12,
+CMake 4.3.2) built the source App with both obsolete switches OFF and Kconfig
+features ON; selected Python/RPC/Bag/configuration CTest passed **10/10**.
+The inverse full-source configuration (old switches ON, Kconfig OFF) produced
+neither a Python binding nor a Recorder Module target. Configuration tests passed
+**21/21** on Windows and **21/21** on WSL Ubuntu 24.04/CPython 3.12.3/CMake 3.28.3.
+Windows build/setup/install tests: **118**, 22 platform skips, no failures.
+
+The SDK-only producer ignored old Python ON/Bag OFF inputs, built successfully,
+and retained its Python-capable archives/material. The installed Python fixture
+passed relocation, custom Bus/RPC/Param, schema updates, failure isolation, repair
+and disable cleanup. CMake itself reported the old variables as unused. Logs are
+under ignored `build/kconfig-legacy-review/`. No macOS, Debug, or full WSL SDK
+rerun is claimed for this removal. App composition unification was implemented
+afterward; its separate validation is recorded in the
+[App report](../../apps/vinc/README.md#app-composition-unification--app-組裝統一).
+
+Windows 來源建置與相關 CTest 10/10 通過；完整配置另驗證舊值 ON／Kconfig OFF 不會建立
+Python binding 或 Recorder Module。Windows／WSL 設定測試各 21/21，Windows 工具測試
+118 項、22 項平台跳過，無失敗。純 SDK 與 installed Python App 驗收通過，涵蓋搬移、
+自訂訊息通訊、增量更新、失敗隔離、補檔與停用清理。未重跑 macOS、Debug 或 WSL 完整 SDK。
 
 Installed SDKs ship this directory at `share/vinc/configuration`, with pinned
 Kconfiglib and `capabilities.json`. Use its `configure.py` directly; no pip/network
@@ -397,14 +423,16 @@ The additional Windows source-Python enable/build/deploy/disable cycle passed;
 disabled package files were removed and a user-created file was preserved.
 The import check was blocked by the existing
 runtime guard: this machine's CPython bundles VCRUNTIME140 14.42.34438.0, while
-the MSVC 19.51-built extension requires at least 14.51.36244.0. This is not a
-successful Python runtime check. The Python installation was not changed; use a
-compatible deployment as described in the [Python SDK guide](../../src/vinc/module_system/python/README.md).
+the MSVC 19.51-built extension required at least 14.51.36244.0. This was not a
+successful Python runtime check. The Python installation was not changed. This
+historical result concerns the former dynamic-CRT binding, not the current static
+Windows extension; see the [current Runtime policy](../../src/vinc/module_system/python/README.md#windows-msvc-runtime-preflight).
 
 補充的 Windows 原始碼版 Python 開啟、建置、部署、關閉循環通過，套件產物移除且
 使用者新增檔案保留。匯入測試被既有載入檢查擋下：本機 CPython 自帶
 VCRUNTIME140 14.42.34438.0，低於此次綁定要求的 14.51.36244.0。
-這不算 Python 執行驗證通過；未更動系統 Python，後續需依 Python SDK 指南準備相容環境。
+這不算當時的 Python 執行驗證通過；未更動系統 Python。此為舊動態 CRT 綁定的歷史
+結果，不是目前 Windows 靜態擴充的限制；現行政策見上述連結。
 
 Subsequent installed-Python SDK work validated successful imports and Module flows
 using the existing isolated Windows Python, plus Ubuntu's system Python. See the

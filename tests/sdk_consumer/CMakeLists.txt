@@ -5,8 +5,7 @@ if(NOT VINC_SOURCE_DIR)
     message(FATAL_ERROR "Set VINC_SOURCE_DIR to the Open-VINC repository root")
 endif()
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(VINC_BUILD_APPS ON CACHE BOOL "" FORCE)
-set(VINC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(VINC_BUILD_APPS OFF CACHE BOOL "" FORCE)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -20,9 +19,16 @@ foreach(forbidden vinc_module_host vinc_module_entry vinc_test_host vinc_test_ma
         message(FATAL_ERROR "Production source composition leaked Host/test target: ${forbidden}")
     endif()
 endforeach()
-if(VINC_TEST_EMBEDDED_STARTUP)
-    vinc_configure_app(NAME EmbeddedApp STARTUP_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/startup.tcl")
+set(app_config "${CMAKE_CURRENT_BINARY_DIR}/application.conf")
+if(NOT EXISTS "${app_config}")
+    file(WRITE "${app_config}" "CONFIG_VINC_MODULE_ExternalModule=y\n")
 endif()
+set(startup)
+if(VINC_TEST_EMBEDDED_STARTUP)
+    list(APPEND startup STARTUP_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/startup.tcl")
+endif()
+vinc_add_app(ExternalApp INSTANCE_NAME external-sdk-test
+    VINC_BUILD_CONFIG "${app_config}" ${startup})
 
 # Keep mutable schemas in the test build directory. Reconfiguration must not
 # overwrite edits made by the incremental regression driver.
@@ -73,16 +79,16 @@ add_dependencies(external_consumer external_message_probe)
 # Change the central executable's output AFTER the framework has registered its
 # deployment target. Both default copy targets resolve to the same directory.
 set(central_directory "${CMAKE_CURRENT_BINARY_DIR}/central bin")
-set_target_properties(shell external_consumer PROPERTIES
+set_target_properties(ExternalApp external_consumer PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${central_directory}"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${central_directory}"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${central_directory}")
 vinc_deploy_tcl(external_consumer)
 # Explicit destinations remain available to framework packaging code.
-vinc_deploy_tcl(shell "${CMAKE_CURRENT_BINARY_DIR}/explicit resources")
+vinc_deploy_tcl(ExternalApp "${CMAKE_CURRENT_BINARY_DIR}/explicit resources")
 add_dependencies(external_consumer external_module)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/executables.cmake" CONTENT
-    "set(central [==[$<TARGET_FILE:shell>]==])\nset(consumer [==[$<TARGET_FILE:external_consumer>]==])\nset(module [==[$<TARGET_FILE:external_module>]==])\nset(incremental_probe [==[$<TARGET_FILE:sdk_incremental_probe>]==])\nset(message_probe [==[$<TARGET_FILE:external_message_probe>]==])\n")
+    "set(central [==[$<TARGET_FILE:ExternalApp>]==])\nset(consumer [==[$<TARGET_FILE:external_consumer>]==])\nset(module [==[$<TARGET_FILE:external_module>]==])\nset(incremental_probe [==[$<TARGET_FILE:sdk_incremental_probe>]==])\nset(message_probe [==[$<TARGET_FILE:external_message_probe>]==])\n")
 
 # A child runtime must not acquire the central manager or output service through its target.
 get_target_property(runtime_links vinc_module LINK_LIBRARIES)

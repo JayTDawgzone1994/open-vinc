@@ -48,7 +48,18 @@ Result<std::filesystem::path> system_python() {
         if (!part.empty()) {
             std::error_code error;
             auto candidate = std::filesystem::absolute(std::filesystem::path(part) / filename, error);
-            if (!error && std::filesystem::is_regular_file(candidate, error) && !error) {
+            if (error) {
+                return std::unexpected(Error{ErrorCode::PythonUnavailable, ErrorOperation::Spawn,
+                    osal::native_error(error)});
+            }
+
+            auto eligible = osal::is_executable_candidate(candidate);
+            if (!eligible) {
+                return std::unexpected(wrap_error(ErrorCode::PythonUnavailable,
+                    ErrorOperation::Spawn, eligible.error()));
+            }
+
+            if (*eligible) {
                 return candidate;
             }
         }

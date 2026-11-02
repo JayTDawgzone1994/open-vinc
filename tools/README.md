@@ -473,13 +473,18 @@ Other Linux environments can check/use compatible tools; there is no guessed ins
 recipe. An incompatible **existing** Visual Studio installation is diagnosed with the
 recommended MSVC version; update its C++ workload in the Visual Studio Installer and
 rerun setup. No supported Python minor version implies a universal `.pyd`: rebuild
-bindings for that minor. The Windows native Runtime guard remains enforced; installing
-a global VC++ Redistributable does not replace a Python/package-private old DLL.
+bindings for that minor. Current Windows bindings use static CRT and validate
+metadata/image consistency rather than loaded MSVC DLL versions. Static CRT fixes
+require rebuilding/redeploying the binding. Python and other packages retain their
+own Runtime requirements; installing a global Redistributable does not replace
+their private DLLs. See the [Python Runtime policy](../src/vinc/module_system/python/README.md#windows-msvc-runtime-載入前檢查),
+including the separately retained legacy dynamic-mode guard.
 
 其他 Linux 可檢查並使用合格環境，沒有配方時不猜安裝方式。**既有** Visual Studio 過舊時，
 會提示建議的 MSVC 版本；請在 Visual Studio Installer 更新 C++ 工作負載後重跑。
-Python minor 改變仍須重建綁定；全域 VC++ Runtime 安裝不會取代 Python／套件私帶的舊 DLL，
-既有 Runtime 防護不會放寬。
+Python minor 改變仍須重建綁定。目前 Windows 靜態綁定驗證 metadata／映像一致性，
+不以已載入 MSVC DLL 的版本為門檻；靜態 CRT 修正需重建及重新部署。Python／其他套件
+仍有自己的 Runtime 相依，全域安裝不會取代其私帶 DLL。現行政策與保留的舊動態防護見上方連結。
 
 ### Remembering selections / 記住本機工具選擇
 
@@ -506,7 +511,8 @@ installed before a later failure are not uninstalled.
   executable paths, no embedded arguments). Keep Node/npm from the same installation.
 - Setup's checked Python becomes the default build/Kconfig-tool interpreter only.
   App Kconfig owns Module Python; old `module_python` profile fields are ignored.
-  Setup no longer records a Module interpreter. `-DPython_EXECUTABLE` is rejected.
+  Setup no longer records a Module interpreter. `Python_EXECUTABLE` does not select
+  VINC's interpreter; ordinary `-D` forwarding and other CMake consumers remain allowed.
 - Missing saved tools fail with a repair hint; no silent fallback. Explicit overrides
   do not rewrite the record. Rerun setup to refresh it, or remove just this platform's
   record to restore discovery. Version text is diagnostic, not an exact patch lock.
@@ -522,7 +528,8 @@ Windows 入口與 setup 偵測會在自己的程序環境關閉 Python 啟動器
 避免 build／check 意外安裝 Runtime。
 明確環境／`-D` 設定優先，一次覆寫不改紀錄。setup 檢查過的 Python 預設共用於
 build 與 Kconfig 工具；Module Python 改由 App Kconfig 選擇，舊 `module_python` 紀錄忽略，
-setup 不再寫入這個欄位。`-DPython_EXECUTABLE` 已移除，功能開關不受 setup 更動。
+setup 不再寫入這個欄位。`Python_EXECUTABLE` 不再控制 VINC 的直譯器，但仍可經一般 `-D`
+轉交 CMake 給其他元件使用；功能開關不受 setup 更動。
 工具消失就失敗，不改找另一套；可重跑 setup 更新，或刪除本平台紀錄恢復自動偵測。
 既有建置目錄的編譯器與實際使用過的 Python ABI 不相容時要求另選目錄，不自動清除。
 外部 `--source` 專案與直接 CMake 不套用本 checkout 的紀錄。

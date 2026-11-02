@@ -2,45 +2,34 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
-## App／Kconfig：統一 App 組裝路徑與其餘重複設定入口
+## App 組裝統一：macOS 原生驗證
 
-- [ ] Review 並統一 App 組裝路徑，清理其餘重複設定入口。
+- [ ] 使用同一 topic 內容驗證內建 App 與來源／安裝式 SDK 共用 `vinc_add_app()`。
+  涵蓋各 App 產物目錄、完整 SDK UI 能力、Module 選擇／清理、自訂訊息增量建置、
+  內嵌腳本、搬移部署、Python 及 System Module 生命週期；記錄工具鏈與組態。
 
-**狀態（2026-11-02）：App 組裝統一仍只有設計討論，尚未授權實作。**
-現有根目錄來源建置仍走舊單 App 路徑，公開 `vinc_add_app()` 則使用各 App 的 Kconfig；
-兩者尚未完全統一。本輪另已授權並接上 Kconfig 的 Python 建置／執行選擇、
-移除公開 `-DPython_EXECUTABLE`，不代表本項 App 組裝統一已完成。
-Python 契約與實測結果統一維護於 [設定工具](tools/configure/README.md#module-python-selection--module-python-選擇)。
+2026-11-02 實作與 Windows Release／WSL Ubuntu 24.04 來源驗證已完成；Windows
+另通過來源 SDK、安裝式 Python SDK 與多 App 驗收。契約與完整範圍維護於
+[App README](apps/vinc/README.md#app-composition-unification--app-組裝統一)。
+本輪未重跑 Debug 或 WSL installed SDK 全套，macOS 需另行原生驗證，不以其他平台結果替代。
 
-已確認的使用需求：
+## Python 建置整理：後續變更的 macOS 原生驗證
 
-- Kconfig 管理 Module Python 的選擇：預設系統 Python，可選自訂 Python 執行檔。
-- 第一版自訂路徑只接受絕對路徑；保留 `--python PATH` 作為本次執行的覆寫。
-- 不將 Python 最低版本視為跨 minor ABI 相容保證；既有 ABI 檢查仍須保留。
+- [ ] 補驗 Python Publisher 身分回歸：`module.python_services` 的同號／異號、錯誤身分、
+  callback 故障隔離與收尾。Windows／WSL 六個情境已通過；見
+  [Python 測試修正紀錄](src/vinc/module_system/python/README.md#publisher-identity-regression)。
 
-建議處理順序與待 review 範圍（尚未核准實作細節）：
+- [ ] 補驗統一的建置 ABI 探測：`sdk.python_selection`、來源／installed SDK Python binding，
+  包含逾時、無效輸出、多 App／venv、cache 保護、patch 更新與 `_build.py` 資料一致性。
+  Windows／WSL 已測範圍及契約見 [Python 紀錄](src/vinc/module_system/python/README.md#build-abi-probe)。
 
-1. 讓內建 Vinc App 與使用者 App 共用 `vinc_add_app()` 組裝路徑，盤點舊 catalog、
-   官方 System Module、啟動腳本、部署及測試接線，保留既有行為。
-2. 對真正控制同一項 App 功能的重複入口，只保留 Kconfig。候選包括
-   `VINC_BUILD_PYTHON` 的 App 開關與舊 `VINC_BUILD_BAG` 轉接。
-   提案是拒絕舊入口並提示遷移，而非默默忽略或保留覆寫規則；
-   確切移除清單與舊 cache 處理須在開工前確認。
+- [ ] 補驗 System Python 搜尋一致性：`osal.path`、`sdk.python_selection`、
+  `module.python_shell`，涵蓋不可執行檔、失效連結、空 PATH、明確相對目錄、venv
+  與選定後失敗不得回退。參考 [本輪紀錄](src/vinc/module_system/python/README.md#system-python-path-consistency)。
 
-不能直接按名稱刪除所有 CMake 參數：`VINC_BUILD_UI` 同時涉及 SDK 能力與舊 App 選擇，
-須先拆清責任；`VINC_NAME` 與新 `INSTANCE_NAME` 的遷移亦須盤點。
-編譯器、Debug／Release、測試、benchmark、SDK 製作／安裝，以及執行設定工具的 Python，
-與 App 功能選擇不同；其入口保留或調整應個別決定。CMake 內部變數不等於公開設定入口。
-同一 build 目前共用一份 Python binding，不能因新增各 App 設定而默默混用不同 ABI。
-
-驗收應涵蓋來源／installed SDK、多 App 一致性、PATH 與自訂路徑、`--python` 覆寫、
-缺少工具／開發檔、ABI 不符、舊參數與快取診斷、部署搬移、設定增量更新及正常退出。
-同步修正 `tools/configure/Kconfig` 中 UI／Bag「不自動啟動」的過時說明；目前它們已是
-自動啟動的 System Module，Recorder 未收到命令前待命。
-
-目前接線與契約見 [設定工具](tools/configure/README.md)、
-[App 組裝](apps/vinc/MULTI_APP.md)、[SDK](src/vinc/sdk/INSTALL.md) 及
-[Python Module](src/vinc/module_system/python/README.md)。實作前仍須確認完整範圍並取得開工授權。
+先前單一執行檔、Kconfig 選擇與 Runtime／SDK 的 Mac 驗收已完成，見
+[原生驗證紀錄](src/vinc/module_system/python/README.md#macos-snapshot-repair-validation)。
+上列僅追蹤本地後續搜尋規則、ABI 探測與測試修正，不重新開啟已完成的舊驗收。
 
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 

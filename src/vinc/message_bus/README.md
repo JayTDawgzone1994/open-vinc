@@ -857,7 +857,7 @@ and after healthy-route reuse. Pauses have deadlines; CTest supplies an outer
 failure/retry/recovery checks. No production test hook or new worker is introduced.
 
 新增契約測試以受控通知暫停和並行替換驗證生命週期，沒有用效能數字判斷通過。
-Windows／Linux 本次修正尚未原生重跑；本輪依使用者決定不執行 benchmark。
+當時尚未在 Windows／Linux 重跑；後續整合驗證見下方。本輪依使用者決定不執行 benchmark。
 
 Native macOS arm64 with the toolchain above: the full Python-enabled Release
 build passed after this repair. Debug built the selected test targets and passed
@@ -878,3 +878,17 @@ Repair evidence: `build/macos-snapshot-mutex-20261102/`, including
 `release-build-complete.log`, `snapshot-ctest-final.log`, `debug-build.log`,
 `debug-ctest.log` and `debug-ctest.xml`. Source is the commit above plus this
 topic's notification snapshot repair and test changes; it is not the unmodified commit.
+
+### Windows and WSL integration follow-up (2026-11-02) / Windows 與 WSL 整合補驗
+
+After integrating develop `599e7af` with the App/Python build cleanup, complete
+Release builds succeeded on Windows x64 (MSVC 19.44.35229, CPython 3.13.12) and
+WSL Ubuntu 24.04 x86_64 (GCC/libstdc++ 13.3, CPython 3.12.3). Both passed all six
+Bus component CTests plus `message_bus.shell`, including notification snapshots
+and post-commit failure/recovery. This is correctness/regression evidence, not a
+benchmark, full-suite result or a new macOS validation.
+
+合併上述 develop 與 App／Python 建置整理後，Windows／WSL Release 完整建置成功，
+兩平台各六個 Bus 元件測試及 Shell 通訊測試皆通過，包含快照與通知失敗／恢復。
+未重跑 benchmark、全框架測試或 macOS；既有 Mac 證據保留原範圍。
+本機紀錄：`build/python-publisher-identity/publish-windows.log`、`publish-wsl.log`，不納入 Git。

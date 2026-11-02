@@ -94,7 +94,8 @@ add_test(NAME sdk.external_consumer COMMAND "${CMAKE_COMMAND}"
     "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
     "-DCONFIG=$<CONFIG>"
     -P "${VINC_REPOSITORY_ROOT}/tests/sdk_consumer/verify.cmake")
-set_tests_properties(sdk.external_consumer PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
+# Full UI composition and repeated schema/script rebuilds are part of this suite.
+set_tests_properties(sdk.external_consumer PROPERTIES TIMEOUT 900 RUN_SERIAL TRUE)
 
 add_test(NAME sdk.license_inventory COMMAND "${CMAKE_COMMAND}"
     "-DVINC_SOURCE_DIR=${VINC_REPOSITORY_ROOT}"

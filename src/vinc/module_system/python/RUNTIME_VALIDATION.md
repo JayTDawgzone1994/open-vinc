@@ -6,6 +6,15 @@ not a change to supported Runtime floors or a claim of universal compatibility.
 2026-11-02 於 Windows 11 x64（26200）驗證。這是診斷紀錄，不修改 Runtime 門檻，
 也不代表所有 Python／原生套件組合均受支援。
 
+This report preserves the former dynamic-CRT diagnosis and deployment-floor
+correction. The subsequent Windows static-CRT rollout is documented in the
+[current Runtime policy](README.md#windows-msvc-runtime-preflight) and
+[integration results](../../sdk/INSTALL.md#runtime-final-acceptance).
+Do not apply the dynamic DLL rejection results here to the current static binding.
+
+此報告保留舊動態 CRT 診斷與門檻來源修正。後續 Windows 靜態 CRT 導入及整合驗證
+見上述文件；本報告的動態 DLL 拒絕結果，不是現行靜態 binding 的限制。
+
 ## Scope and input integrity / 範圍與輸入完整性
 
 - Fresh official NuGet `python` packages: **3.13.12** and **3.14.10**. Both

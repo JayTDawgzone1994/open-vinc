@@ -235,12 +235,8 @@ vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupRep
     if (!directory) {
         return failed("Application", "unable to locate runtime resources", directory.error());
     }
-#ifdef VINC_COMPOSED_APP
     auto owner = vinc::detail::ManagerAccess::create(std::string(vinc::app::instance_name), {},
         *native_executable);
-#else
-    auto owner = vinc::ModuleManager::create({}, *native_executable);
-#endif
     if (!owner) {
         return failed("Module Manager", "unable to initialize process supervision", owner.error());
     }
@@ -270,11 +266,7 @@ vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupRep
     }
     auto& shell = **shell_owner;
     report.entries.push_back({"Shell", "command and script services initialized", {}});
-#ifdef VINC_COMPOSED_APP
     auto registered = vinc::register_built_modules(manager, *directory);
-#else
-    auto registered = vinc::register_built_modules(manager);
-#endif
     if (!registered) {
         return failed("Module Catalog", "unable to register ModuleTypes", registered.error());
     }

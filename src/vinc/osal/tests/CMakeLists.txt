@@ -13,6 +13,15 @@ add_test(NAME osal.operation_error COMMAND osal_operation_error_tests)
 set_tests_properties(osal.operation_error PROPERTIES TIMEOUT 30)
 
 if(WIN32)
+    # No inherited dialog suppression: exercise the production launch scope.
+    add_executable(osal_process_error_mode_tests process_error_mode_tests.cpp)
+    target_link_libraries(osal_process_error_mode_tests PRIVATE vinc::osal Threads::Threads)
+    if(MSVC)
+        target_compile_options(osal_process_error_mode_tests PRIVATE /W4 /utf-8)
+    endif()
+    add_test(NAME osal.process_error_mode COMMAND osal_process_error_mode_tests)
+    set_tests_properties(osal.process_error_mode PROPERTIES TIMEOUT 20)
+
     # Link-time replacement exercises the real Pipe creation/rollback path.
     add_executable(osal_pipe_random_failure_tests pipe_random_failure_tests.cpp)
     target_link_libraries(osal_pipe_random_failure_tests PRIVATE vinc::osal)

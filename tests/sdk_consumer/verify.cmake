@@ -6,6 +6,7 @@ if(NOT IS_ABSOLUTE "${TEST_BINARY_DIR}" OR NOT IS_ABSOLUTE "${VINC_SOURCE_DIR}")
     message(FATAL_ERROR "SDK fixture requires absolute source and build directories")
 endif()
 file(MAKE_DIRECTORY "${TEST_BINARY_DIR}")
+file(WRITE "${TEST_BINARY_DIR}/application.conf" "CONFIG_VINC_MODULE_ExternalModule=y\n")
 # Reset only the fixture-owned inputs, so a previous interrupted run is repeatable.
 file(MAKE_DIRECTORY "${TEST_BINARY_DIR}/message-inputs/common" "${TEST_BINARY_DIR}/message-inputs/camera")
 file(WRITE "${TEST_BINARY_DIR}/message-inputs/common/ExternalLeaf.msg" "uint32_t revision = 1;\nuint32_t value;\n")
@@ -24,9 +25,11 @@ run_checked(configure "${CMAKE_COMMAND}"
     -S "${VINC_SOURCE_DIR}/tests/sdk_consumer" -B "${TEST_BINARY_DIR}"
     -G "${GENERATOR}" "-DVINC_SOURCE_DIR=${VINC_SOURCE_DIR}"
     "-DCMAKE_CXX_COMPILER=${COMPILER}" "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}"
-    "-DCMAKE_BUILD_TYPE=${CONFIG}" -DVINC_TEST_DUPLICATE_MODULE=OFF -DVINC_TEST_EMBEDDED_STARTUP=OFF)
+    "-DCMAKE_BUILD_TYPE=${CONFIG}" -DVINC_TEST_DUPLICATE_MODULE=OFF -DVINC_TEST_EMBEDDED_STARTUP=OFF
+    -DVINC_BUILD_UI=OFF -DVINC_BUILD_EXAMPLES=OFF -DVINC_NAME=IgnoredLegacyName
+    -DVINC_CONFIG_FILE=absent-obsolete.conf)
 run_checked(build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
-    --target external_consumer shell --parallel 4)
+    --target external_consumer ExternalApp --parallel 4)
 include("${TEST_BINARY_DIR}/executables.cmake")
 run_checked(consumer "${consumer}" "${module}" "${central}")
 run_checked(messages_initial "${message_probe}" 1 0)
@@ -37,7 +40,7 @@ file(WRITE "${TEST_BINARY_DIR}/message-inputs/common/ExternalLeaf.msg"
     "uint32_t revision = 2;\nuint32_t value;\n")
 file(WRITE "${TEST_BINARY_DIR}/message-inputs/camera/ExternalExtra.msg" "ExternalFrame frame;\n")
 run_checked(messages_added_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}"
-    --config "${CONFIG}" --target external_consumer shell --parallel 4)
+    --config "${CONFIG}" --target external_consumer ExternalApp --parallel 4)
 run_checked(messages_added "${message_probe}" 2 1)
 file(REMOVE "${TEST_BINARY_DIR}/message-inputs/camera/ExternalExtra.msg")
 run_checked(messages_removed_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}"
@@ -56,7 +59,7 @@ endif()
 file(WRITE "${TEST_BINARY_DIR}/message-inputs/common/ExternalLeaf.msg"
     "uint32_t revision = 2;\nuint32_t value;\n")
 run_checked(messages_recovery_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}"
-    --config "${CONFIG}" --target external_consumer shell --parallel 4)
+    --config "${CONFIG}" --target external_consumer ExternalApp --parallel 4)
 run_checked(messages_recovered "${message_probe}" 2 0)
 
 # Change only a header owned by this fixture, never a repository source. The
@@ -99,7 +102,7 @@ check_licenses("${module}")
 
 # No application calls initialize_tcl or activates SocketShell. The real Vinc
 # entry performs both before interpreting the user's startup script.
-set(script "${TEST_BINARY_DIR}/startup.tcl")
+set(script "${TEST_BINARY_DIR}/runtime-startup.tcl")
 file(WRITE "${script}" "puts SDK_SCRIPT_READY\nExternalModule\nexternalNode schema\nexit\n")
 function(run_central label executable)
     execute_process(COMMAND "${executable}" --shell-port 0 -S "${script}"
@@ -117,7 +120,7 @@ run_central(central "${central}")
 # Copy only shipped artifacts, then run from a different working directory.
 set(relocated "${TEST_BINARY_DIR}/relocated space")
 file(MAKE_DIRECTORY "${relocated}")
-file(COPY "${central}" "${central_directory}/lib" "${central_directory}/licenses" DESTINATION "${relocated}")
+file(COPY "${central}" "${central_directory}/lib" "${central_directory}/licenses" "${central_directory}/modules" "${central_directory}/vinc_data" DESTINATION "${relocated}")
 get_filename_component(central_name "${central}" NAME)
 check_licenses("${relocated}/${central_name}")
 run_central(relocated "${relocated}/${central_name}")
@@ -131,7 +134,7 @@ if(missing STREQUAL "0" OR NOT "${output}${errors}" MATCHES "Missing Tcl runtime
     message(FATAL_ERROR "Missing Tcl resources produced the wrong result: ${missing}: ${output}${errors}")
 endif()
 run_checked(restore "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
-    --target shell external_consumer --parallel 4)
+    --target ExternalApp external_consumer --parallel 4)
 check_resources("${central_directory}")
 run_central(restored "${central}")
 
@@ -169,7 +172,7 @@ exit
 run_checked(embedded_configure "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
     -B "${TEST_BINARY_DIR}" -DVINC_TEST_EMBEDDED_STARTUP=ON)
 run_checked(embedded_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
-    --target shell --parallel 4)
+    --target ExternalApp --parallel 4)
 include("${TEST_BINARY_DIR}/executables.cmake")
 get_filename_component(embedded_directory "${central}" DIRECTORY)
 file(WRITE "${embedded_directory}/companion.tcl" "puts companion-loaded\nreturn\nerror unreachable\n")
@@ -195,7 +198,7 @@ endif()
 
 set(embedded_relocated "${TEST_BINARY_DIR}/embedded relocated")
 file(MAKE_DIRECTORY "${embedded_relocated}")
-file(COPY "${central}" "${embedded_directory}/lib" "${embedded_directory}/licenses" "${embedded_directory}/companion.tcl"
+file(COPY "${central}" "${embedded_directory}/lib" "${embedded_directory}/licenses" "${embedded_directory}/modules" "${embedded_directory}/vinc_data" "${embedded_directory}/companion.tcl"
     DESTINATION "${embedded_relocated}")
 get_filename_component(embedded_name "${central}" NAME)
 run_embedded(embedded_relocated "${embedded_relocated}/${embedded_name}" "companion-loaded")
@@ -203,37 +206,33 @@ run_embedded(embedded_relocated "${embedded_relocated}/${embedded_name}" "compan
 # An input-only edit must update the executable without an explicit configure.
 file(WRITE "${embedded_input}" "puts embedded-revision-2\nexit\n")
 run_checked(embedded_incremental_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
-    --target shell --parallel 4)
+    --target ExternalApp --parallel 4)
 run_embedded(embedded_updated "${central}" "embedded-revision-2")
 string(ASCII 255 invalid_utf8)
 file(WRITE "${embedded_input}" "${invalid_utf8}")
-execute_process(COMMAND "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}" --target shell
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}" --target ExternalApp
     RESULT_VARIABLE invalid_script OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 60)
 if(invalid_script STREQUAL "0" OR NOT "${output}${errors}" MATCHES "valid UTF-8")
     message(FATAL_ERROR "Invalid startup encoding was not rejected: ${output}${errors}")
 endif()
 file(WRITE "${embedded_input}" "exit\n")
 run_checked(embedded_recovery_build "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --config "${CONFIG}"
-    --target shell --parallel 4)
+    --target ExternalApp --parallel 4)
 run_checked(embedded_restore_configuration "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
     -B "${TEST_BINARY_DIR}" -DVINC_TEST_EMBEDDED_STARTUP=OFF)
 
-# Explicit configuration lives in this fixture's build tree, never the shared
-# repository source. Module removal and restoration must survive normal builds.
+# Selection changes remove only managed artifacts; runtime/user files survive.
 set(features "${TEST_BINARY_DIR}/application.conf")
-file(WRITE "${features}" "# CONFIG_VINC_APP_UI is not set\n# CONFIG_VINC_APP_BAG is not set\n")
-run_checked(features_configure "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
-    -B "${TEST_BINARY_DIR}" "-DVINC_CONFIG_FILE=${features}")
-run_checked(features_off "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --target shell --parallel 4)
-file(READ "${TEST_BINARY_DIR}/.vinc-owned-files" owned)
-if(owned MATCHES "bag_recorder|module_ui|/ui/app/")
-    message(FATAL_ERROR "Disabled source application feature still owned/deployed")
+file(WRITE "${central_directory}/user.txt" "preserve me")
+file(WRITE "${features}" "# CONFIG_VINC_MODULE_ExternalModule is not set\n")
+run_checked(selection_off "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --target ExternalApp --parallel 4)
+file(READ "${central_directory}/.vinc-owned-files" owned)
+if(owned MATCHES "modules/ExternalModule/")
+    message(FATAL_ERROR "Unselected Module remains deployed")
 endif()
-file(WRITE "${features}" "CONFIG_VINC_APP_BAG=y\nCONFIG_VINC_APP_UI=y\n")
-run_checked(features_on "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --target shell --parallel 4)
-file(READ "${TEST_BINARY_DIR}/.vinc-owned-files" owned)
-if(NOT owned MATCHES "bag_recorder" OR NOT owned MATCHES "module_ui")
-    message(FATAL_ERROR "Source application feature restoration failed")
+if(NOT EXISTS "${central_directory}/user.txt" OR NOT owned MATCHES "modules/webUi/")
+    message(FATAL_ERROR "Selection cleanup removed user data or a System Module")
 endif()
-run_checked(features_restore_legacy "${CMAKE_COMMAND}" -S "${VINC_SOURCE_DIR}/tests/sdk_consumer"
-    -B "${TEST_BINARY_DIR}" -U VINC_CONFIG_FILE)
+file(WRITE "${features}" "CONFIG_VINC_MODULE_ExternalModule=y\n")
+run_checked(selection_on "${CMAKE_COMMAND}" --build "${TEST_BINARY_DIR}" --target ExternalApp --parallel 4)
+run_central(selection_restored "${central}")

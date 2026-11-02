@@ -18,6 +18,28 @@ user-facing contract; see [Python selection](../../../tools/configure/README.md#
 Module Python 的建置期 PATH／Custom 選擇與共用 binding／cache 檢查由此處 helper 維護，
 不啟動執行期服務；使用者設定與遷移契約統一放在上述 Kconfig 文件。
 
+`vinc_probe_module_python()` is an internal build helper in that same file. Each
+enabled App probes its selected interpreter on every configure, with a 10-second
+limit for this subprocess. JSON fields and types are validated before applying
+the CPython/version/64-bit/GIL policy. Failures identify the App, executable and
+reason. The resulting version, pointer size and platform travel with the selected
+path to the binding recipe; they are not a persistent probe cache or public input.
+
+Binding creation still uses FindPython for `Development.Module`. It checks the
+discovered interpreter identity and major/minor against the selection, allowing
+same-ABI patch servicing, and writes `_build.py` from the selection's data. The
+recipe does not run a second VINC ABI probe. FindPython's own discovery and
+failure-diagnostic calls remain separate; the probe timeout does not bound all
+CMake configuration work. Runtime bootstrap validation remains independent.
+See [Python probe validation](../module_system/python/README.md#build-abi-probe).
+
+同檔內部 helper `vinc_probe_module_python()` 在每次 configure 為各啟用 App 探測所選
+直譯器，該子程序上限 10 秒；先驗證 JSON 欄位／型別，再套用版本、CPython、64 位元與
+GIL 規則。失敗列出 App、路徑與原因。結果隨所選路徑傳給 binding，不新增持久探測快取
+或公開輸入。FindPython 仍負責開發檔，binding 核對其直譯器身分及 major/minor，允許
+同 ABI 的 patch 更新，再用統一資料生成 `_build.py`；不再執行第二份 VINC ABI 探測。
+10 秒只限制自寫探測，不是整個 CMake 配置期限；FindPython 與執行期 bootstrap 檢查保留。
+
 Native MSVC requires **19.44 or newer**, with no patch pin. The single numeric
 source is `cmake/msvc_minimum.txt`; `VincToolchain.cmake`, the root build wrapper
 and Windows setup read it. Source configuration rejects older enabled C/C++
@@ -89,7 +111,7 @@ Windows 的驗證結果不代表其他平台已通過驗證。
 Windows source and installed-SDK Python bindings select these static archives and
 verify static metadata before import. Native C++ keeps dynamic CRT.
 `VINC_INSTALL_SDK=ON` builds and exports the declared Python archive closure even
-when `VINC_BUILD_PYTHON=OFF`; a downstream App can enable Python without rebuilding
+when the producer builds no Python binding; a downstream App can enable Python without rebuilding
 framework libraries. Ordinary source builds still build these archives only when
 selected by Python or explicit validation. `build.py`/setup are unchanged;
 see the [Python rollout](../module_system/python/README.md#runtime-policy-rollout).
