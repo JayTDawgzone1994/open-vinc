@@ -16,17 +16,43 @@ LoadedPlugin::~LoadedPlugin() {
     if (entry_) {
         entry_->clear();
     }
-    // Library static destructors run after clear and therefore use fatal fallback.
-    // Host service table remains alive, but no Plugin work may survive this point.
+    // Static destructors use fatal fallback but retain Host resource coordination.
+    // Its process-lifetime owner/code remain alive through the native unload.
+    // All application work must have stopped before this point.
 }
 
 Result<LoadedPlugin> LoadedPlugin::load(const std::filesystem::path& path,
-                                      const std::string& type, const RuntimeServices& services) {
+                                      const std::string& type, const RuntimeServices& services,
+                                      std::optional<osal::DynamicLibrary>& rejected_library) {
+    if (rejected_library) {
+        return std::unexpected(Error{ErrorCode::ServiceFailed, ErrorOperation::InitializePlugin});
+    }
+
+    auto coordination = osal::detail::resource_coordination();
+    if (!coordination) {
+        return std::unexpected(wrap_error(ErrorCode::ServiceFailed, ErrorOperation::InitializePlugin,
+                                          coordination.error()));
+    }
+
     auto library = osal::DynamicLibrary::open(path);
     if (!library) {
         return std::unexpected(wrap_error(ErrorCode::PluginLoadFailed, ErrorOperation::LoadPlugin,
                                           library.error()));
     }
+
+    // Native loading can execute constructors before validation/injection. If
+    // rejected, retain the mapping until Host _Exit rather than unloading code
+    // which may already own unknown threads. The caller reports before exiting.
+    struct RejectionGuard {
+        osal::DynamicLibrary& library;
+        std::optional<osal::DynamicLibrary>& rejected;
+        bool accepted = false;
+        ~RejectionGuard() {
+            if (!accepted) {
+                rejected.emplace(std::move(library));
+            }
+        }
+    } rejection{*library, rejected_library};
 
     auto symbol = library->function(plugin_entry_symbol);
     if (!symbol) {
@@ -46,12 +72,13 @@ Result<LoadedPlugin> LoadedPlugin::load(const std::filesystem::path& path,
         return std::unexpected(Error{ErrorCode::InvalidPlugin, ErrorOperation::LoadPlugin});
     }
 
-    auto initialized = entry->initialize(services);
+    auto initialized = entry->initialize(services, *coordination);
     if (!initialized) {
         return std::unexpected(wrap_error(ErrorCode::ServiceFailed, ErrorOperation::InitializePlugin,
                                           initialized.error()));
     }
 
+    rejection.accepted = true;
     return LoadedPlugin(std::move(*library), entry);
 }
 

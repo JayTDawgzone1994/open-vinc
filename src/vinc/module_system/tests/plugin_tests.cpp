@@ -1,6 +1,7 @@
 #include "../../../../tests/support/manager.hpp"
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/module/detail/plugin.hpp>
+#include <vinc/module/detail/module_runtime.hpp>
 #include <vinc/osal/dynamic_library.hpp>
 #include <vinc/osal/path.hpp>
 #include <fstream>
@@ -45,7 +46,8 @@ void test_library(const std::filesystem::path& path) {
 }
 
 void expect_failure(const std::filesystem::path& path, module_system::ErrorCode code,
-                    std::string type = "pluginFixture") {
+                    std::string type = "pluginFixture", bool require_safe_exit = false,
+                    std::optional<ErrorRecord> expected_cause = {}) {
     auto manager = take(vinc::test::create_manager());
     ModulePolicy policy;
     policy.startup_timeout = startup_timeout;
@@ -60,6 +62,18 @@ void expect_failure(const std::filesystem::path& path, module_system::ErrorCode 
         const auto& snapshot = *inspected;
         if (snapshot.last_exit) {
             check(snapshot.last_failure && snapshot.last_failure->error.is(code), "failure category retained");
+            if (require_safe_exit) {
+                check(snapshot.last_exit->kind == osal::ExitKind::Code &&
+                      snapshot.last_exit->value == detail::module_application_failure_exit,
+                      "rejected Plugin was not unloaded or destructed before Host exit");
+            }
+            if (expected_cause) {
+                bool found = false;
+                for (const auto& cause : snapshot.last_failure->error.causes()) {
+                    found = found || cause == *expected_cause;
+                }
+                check(found, "coordinator initialization cause survives Module failure reporting");
+            }
             return;
         }
         check(control::Clock::now() < deadline, "failed Host is reaped");
@@ -70,17 +84,21 @@ void expect_failure(const std::filesystem::path& path, module_system::ErrorCode 
 
 int main(int argc, char** argv) {
     try {
-        check(argc == 8, "seven plugin fixture paths required");
+        check(argc == 9, "eight plugin fixture paths required");
         const auto valid = std::filesystem::absolute(argv[1]);
         test_library(valid);
         expect_failure(valid.parent_path() / "missing-plugin.dll", module_system::ErrorCode::PluginLoadFailed);
         expect_failure(std::filesystem::absolute(argv[2]), module_system::ErrorCode::InvalidPlugin);
         expect_failure(std::filesystem::absolute(argv[3]), module_system::ErrorCode::IncompatiblePlugin);
         expect_failure(std::filesystem::absolute(argv[4]), module_system::ErrorCode::HookFailed);
-        expect_failure(std::filesystem::absolute(argv[5]), module_system::ErrorCode::ServiceFailed);
+        expect_failure(std::filesystem::absolute(argv[5]), module_system::ErrorCode::ServiceFailed,
+                       "pluginFixture", true);
         expect_failure(std::filesystem::absolute(argv[6]), module_system::ErrorCode::StartupTimeout);
         expect_failure(valid, module_system::ErrorCode::InvalidPlugin, "wrongType");
         expect_failure(std::filesystem::absolute(argv[7]), module_system::ErrorCode::HookException);
+        expect_failure(std::filesystem::absolute(argv[8]), module_system::ErrorCode::ServiceFailed,
+                       "pluginFixture", true,
+                       Error{osal::ErrorCode::CoordinatorInUse, osal::ErrorOperation::BindCoordinator}.record());
 
         auto missing_host = take(vinc::test::create_manager({}, valid.parent_path() / "missing-host.exe"));
         check(bool(missing_host->register_module_type({"pluginFixture", valid})),

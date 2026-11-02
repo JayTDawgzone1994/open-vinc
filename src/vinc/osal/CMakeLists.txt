@@ -33,8 +33,9 @@ function(_vinc_build_osal variant)
         CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
     add_library(${vinc_osal} STATIC src/process.cpp src/pipe.cpp src/process_pipe.cpp src/process_pipe_native.cpp
         src/socket_address.cpp src/socket.cpp src/socket_poller.cpp src/shared_memory.cpp src/shared_atomic.cpp src/terminal.cpp src/random.cpp
-        src/file_lock.cpp src/path.cpp src/dynamic_library.cpp src/notification.cpp)
+        src/file_lock.cpp src/path.cpp src/dynamic_library.cpp src/notification.cpp src/resource_coordinator.cpp)
     vinc_apply_runtime(${vinc_osal} ${variant})
+    set_target_properties(${vinc_osal} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     target_compile_features(${vinc_osal} PUBLIC cxx_std_23)
     target_include_directories(${vinc_osal} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

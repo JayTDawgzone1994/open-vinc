@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 // macOS socket readiness backend using kqueue read/write filters and a user-event wakeup.
 // The common poller owns registration lifetime and translates readiness for callers.
 
@@ -24,7 +25,12 @@ NativeSocketPoller::NativeSocketPoller(std::unique_ptr<NativeSocketPollerImpl> i
 NativeSocketPoller::~NativeSocketPoller() = default;
 
 vinc::Result<std::unique_ptr<NativeSocketPoller>>
-NativeSocketPoller::create(std::size_t maximum, vinc::Deadline, std::stop_token) {
+NativeSocketPoller::create(std::size_t maximum, vinc::Deadline deadline, std::stop_token stop) {
+    auto resources = acquire_resources(ErrorOperation::InitializeService, deadline, stop);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     static_assert(sizeof(std::uintptr_t) >= sizeof(std::uint64_t), "macOS backend requires 64-bit pointers");
     auto impl = std::make_unique<NativeSocketPollerImpl>();
     impl->events.resize(maximum + 1);

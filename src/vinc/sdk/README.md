@@ -303,6 +303,15 @@ component/
 - Context/pump is implemented through BaseModule and context.hpp; lifecycle belongs to Module documentation.
 - RuntimeServices is internal, not in vinc.hpp; common_error only adds public classification. Host/Plugin lifetime belongs to their contracts; add_module builds a Plugin, not an executable.
 
+Stage 1 of the [FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md) adds separate
+Host/Plugin coordination wiring and Plugin entry **11**. `vinc::module` explicitly
+depends on OSAL; its component install rules carry the new header/archive and the
+existing Plugin helper carries the new entry. Static linking and ABI/CRT requirements
+remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance)
+owns current source/moved-SDK results and the outstanding native macOS checks.
+第一階段已接上 entry 11 與共用協調器，一般 Module 作者無須管理鎖；
+來源與乾淨安裝式 SDK 的本輪驗收結果、環境及 Mac 待驗範圍統一見第四階段紀錄。
+
 - 正式程式的標頭留在元件的 include，實作留在 src。測試 helper 不成為 SDK 的一部分。
 - detail 可被編譯器看見，不代表外部 API 承諾；元件之間只依賴 README 指定的接線契約。
 - CMake target 傳遞標頭／連結需求，不加入其他元件的 src include 路徑。
@@ -322,6 +331,8 @@ component/
 ## Designated integration seams / 元件接線契約
 
 - Runtime creates/receives/closes Bus clients through detail/runtime.hpp.
+- Module Plugin initialization uses OSAL `detail/resource_coordinator.hpp` solely
+  to borrow Host resource coordination; the [FD plan](../osal/FD_SPAWN_PLAN.md) owns lifetime restrictions.
 - Manager submits requests/confirms exit/waits for reclamation through detail/bus_manager.hpp.
 - Bus binds fixed storage through message/detail/framework_access.hpp.
 - RingBuffer and native/state headers belong to owning implementations/tests, not general cross-component APIs.
@@ -606,12 +617,12 @@ build/msvc-deps-*-common.log，
 
 ## Central identity and private Host locks / 中央名稱與 Host 私有鎖
 
-INSTANCE_NAME selects central identity; conflicting names fail Manager::create. Private ContextLockAccess gets Host leases and is absent from umbrella/public methods. Host owns Guards/lifetime, not a second Plugin lock service. Current entry 8/v13 requires matched rebuilds; old Param/Log-stage entry 5/v10 is historical. See [Instance](../module_system/INSTANCE.md).
+INSTANCE_NAME selects central identity; conflicting names fail Manager::create. Private ContextLockAccess gets Host leases and is absent from umbrella/public methods. Host owns Guards/lifetime, not a second Plugin lock service. Current versions follow [Module System](../module_system/README.md); matched rebuilds are required; old Param/Log-stage entry 5/v10 is historical. See [Instance](../module_system/INSTANCE.md).
 
 App 建構器指定 `INSTANCE_NAME`；同名占用會由 Manager::create 回報錯誤。
 框架私有 `ContextLockAccess` 經 Host 取得 lease，未加入 SDK 總標頭或公開 Context 方法。
 Concurrency Guard 的操作／析構留在 Host；Plugin 不因此擁有另一份框架鎖管理服務。
-目前 Plugin entry 8／bootstrap v13 需完整重新建置；先前 Param／Log 階段的 entry 5／v10 為歷史值。
+目前版本依 [Module System](../module_system/README.md)，需完整重新建置；先前 Param／Log 階段的 entry 5／v10 為歷史值。
 名稱、依賴及清理契約見 [Module System INSTANCE.md](../module_system/INSTANCE.md)。
 
 <a id="param-接線2026-10-08"></a>
@@ -630,22 +641,22 @@ ModuleParams 控制接線，中央擁有 ParamManager 與 TOML。
 
 ## Log API（2026-10-08） / Log 介面（2026-10-08）
 
-Umbrella includes Log/context.log and fmt, not spdlog headers/definitions. Plugins gain no Log Host/Manager/Control ownership. The original Log stage used entry 5/v10; current matched ABI is entry 8/v13. See [Log](../log/README.md).
+Umbrella includes Log/context.log and fmt, not spdlog headers/definitions. Plugins gain no Log Host/Manager/Control ownership. The original Log stage used entry 5/v10; current versions follow [Module System](../module_system/README.md). See [Log](../log/README.md).
 
 vinc/vinc.hpp 包含 Log；Module 透過繼承的 context.log 使用。SDK target 帶入 fmt，
 不洩漏 spdlog headers／definitions；Plugin 不取得 Log Host／Manager 或 control service。
-Log 初次接線時為 entry 5／v10，目前為 entry 8／bootstrap v13，須匹配重建。見 [Log](../log/README.md)。
+Log 初次接線時為 entry 5／v10，目前版本依 [Module System](../module_system/README.md)，須匹配重建。見 [Log](../log/README.md)。
 
 <a id="雙時間與-utc2026-10-13"></a>
 
 ## Dual time and UTC (2026-10-13) / 雙時間與 UTC（2026-10-13）
 
-Umbrella time.hpp exposes unix_nanoseconds/format_utc; see [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13). BaseMessage dual-time changes require rebuilding central/Host/Plugin/SDK/Python together. Current entry 8/bootstrap 13; payload/hash unchanged.
+Umbrella time.hpp exposes unix_nanoseconds/format_utc; see [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13). BaseMessage dual-time changes require rebuilding central/Host/Plugin/SDK/Python together. Current versions follow [Module System](../module_system/README.md); payload/hash unchanged.
 
 `<vinc/vinc.hpp>` 已包含 `<vinc/time.hpp>`，可使用 `vinc::unix_nanoseconds()` 與
 `vinc::format_utc(uint64_t)`；API 契約見 [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13)。
 BaseMessage 的 Unix／單調發布時間變更需中央、Host、Plugin／SDK 使用端與 Python 擴充一起重建。
-目前 Plugin entry 8／bootstrap v13；payload 映像与訊息 schema hash 不變。
+目前版本依 [Module System](../module_system/README.md)；payload 映像与訊息 schema hash 不變。
 
 <a id="rpc-sdk2026-10-14"></a>
 
@@ -661,9 +672,9 @@ ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件�
 
 ### Notification integration rebuild / 通知整合重建
 
-Host/Plugin entry 10 and bootstrap v16 require rebuilding connected SDK consumers, Plugins and Python native adapters with the central/Host. Public pumpOnce syntax/semantics stay unchanged; pumpLoop uses the Host-owned notification receiver plus the existing fallback. ModuleInfo now carries notification diagnostics. See [Pump wakeup](../module_system/PUMP_WAKEUP.md) for ownership, protocol versions, recovery and validation.
+The notification stage introduced Host/Plugin entry 10/bootstrap v16; current versions follow [Module System](../module_system/README.md). Changes require rebuilding connected SDK consumers, Plugins and Python native adapters with the central/Host. Public pumpOnce syntax/semantics stay unchanged; pumpLoop uses the Host-owned notification receiver plus the existing fallback. ModuleInfo now carries notification diagnostics. See [Pump wakeup](../module_system/PUMP_WAKEUP.md) for ownership, protocol versions, recovery and validation.
 
-本輪 entry 10／bootstrap v16 要求所有相連產物一起重建。pumpOnce 不變，pumpLoop 使用 Host 的通知與備援等待；ModuleInfo 加入通知診斷。完整契約見上述連結。
+通知接入當時為 entry 10／bootstrap v16，目前版本依 Module System；所有相連產物須一起重建。pumpOnce 不變，pumpLoop 使用 Host 的通知與備援等待；ModuleInfo 加入通知診斷。完整契約見上述連結。
 
 <a id="system-module-validation"></a>
 

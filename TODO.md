@@ -28,16 +28,45 @@ macOS 功能驗證已完成；來源／installed SDK 及乾淨 SDK 下游矩陣�
 
 ## OSAL：POSIX fd 建立與 spawn 的並行競爭窗口
 
-- [ ] 修復標準串流關閉時，內部 fd 建立／搬移與 spawn 繼承取樣之間的競爭。
+- [x] 完成第四階段 Windows／WSL Debug、Release 來源與安裝式 SDK 整合驗收。
+- [ ] 補驗第二階段 POSIX FD／spawn 修復的 macOS 原生行為，以及 macOS 第四階段跨元件／SDK 驗收。
 
-**狀態（2026-10-05）：使用者決定暫緩處理。** 已確認程式交錯路徑，尚未以受控排程
-重現或修復；既有 fd 搬移及 Windows 測試不能證明此窗口已排除。
+**第四階段結果（2026-11-03）：** Windows Debug／Release 各 122 項、WSL 各 130 項
+均有通過證據；Debug 的 App fixture 參數遺漏已修正並定點重驗，詳見
+[驗收紀錄](src/vinc/osal/FD_SPAWN_PLAN.md#stage-4-acceptance)。沒有遺留本輪測試子程序。
+macOS 仍須對同一 topic branch／commit 補驗來源 App／Host／Plugin、共用協調器、
+乾淨 installed SDK 與搬移 App、自訂訊息通訊、舊 Plugin entry 拒絕、啟動失敗隔離、
+重複啟停及回收。先前 Mac 基線與其他功能的 SDK 驗收不能代替本次 FD 修復驗收；
+Mac 完成前不將第四階段標記為三平台完成。
+
+**狀態（2026-11-02）：第二階段修復已實作並通過 Windows／WSL 驗證；macOS 新驗收待補。**
+Linux Debug／Release 的受控誤繼承、來源失效／重用與 Pipe EOF 延後案例均已通過修復後驗證。
+Windows HANDLE 路徑維持並通過回歸；不同機制的結果不能代替 macOS 原生驗證。
 2026-10-27 已修正 `osal.descriptor` 對繼承 fd 編號的測試假設，並完成 Ubuntu 24.04／WSL 2
 驗證；該修正未改動正式 OSAL 實作，不代表本項並行競爭已解決。
-共用 mutex＋標準串流快照仍為未核准提案，鎖成本及宿主／第三方責任邊界尚待決策。
-後續須在 Linux、macOS 分別建置並執行受控競爭與回收測試；Windows 僅作回歸驗證。
-詳細問題、提案、待決策與驗證需求統一維護於
-[OSAL README 待處理事項](src/vinc/osal/README.md#待處理事項)。恢復工作須另行確認範圍及取得開工授權。
+修訂設計已確認：資源建立同步、標準串流副本，以及同 Host／Plugin 的 OSAL 共用協調器。
+使用者已接受初始化與第三方操作邊界；最多三個副本是固定串流數量，不是可調參數。
+證據與後續驗收方向見 [跨平台 FD 驗證報告](src/vinc/osal/FD_RACE_VALIDATION.md)。
+已確認契約、驗收要求與四階段進度統一維護於
+[FD／spawn 修訂計畫](src/vinc/osal/FD_SPAWN_PLAN.md)。共用協調器、Host／Plugin
+接線與原生 FD／spawn 已接通；第三階段 Mac 退出觀察及第四階段 Mac 原生驗收仍待執行。
+新增協調測試的原生 macOS 執行待補，不撤銷既有 Mac 基線證據。
+
+## OSAL：macOS 標準串流與退出觀察
+
+**狀態（2026-11-02）：使用者決定本輪先跳過，保留待辦。** 延後第二階段修復的
+macOS 原生驗收與第三階段退出觀察調查；不代表問題已解決，也不撤銷既有 Mac 重現證據。
+恢復時使用同一 topic branch／commit 驗證 Debug／Release，記錄工具鏈與測試結果。
+
+- [ ] 原生驗證第二階段 owned-stdio 修復是否排除 macOS Inherit＋CLOEXEC 串流消失。
+  Mac Debug／Release 各 69/144 組重現；Linux 對應矩陣各 144/144 通過。
+- [ ] 追查 macOS 子程序已為 zombie，`wait_until()` 仍逾時、`try_wait()` 才取得退出結果。
+  Mac 未修改 OSAL 的正常啟停控制組已重現；Windows／Linux 本輪各組態 3,000 次未重現。
+  尚未確認根因，不先用延長逾時或輪詢掩蓋。
+
+這兩項與 FD 競爭分開追蹤；Mac 為使用者提供的原生證據，本機不重複宣稱已執行 Mac 測試。
+詳細證據與原始碼位置見 [OSAL 驗證報告](src/vinc/osal/FD_RACE_VALIDATION.md)；
+macOS **退出觀察**根因調查及修復驗收為[修訂計畫](src/vinc/osal/FD_SPAWN_PLAN.md)第三階段。
 
 ## Socket Shell：背景輸出期間的遠端輸入列重繪
 

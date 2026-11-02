@@ -70,11 +70,12 @@ The generic cross-process [Notification](NOTIFICATION.md) API is available throu
 
 通用跨程序[通知原語](NOTIFICATION.md)已實作 Windows 與 POSIX 後端，平台驗證與限制見下方紀錄；Bus／Context 接線已於 OSAL 之外實作，契約及驗證另見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
 
-Public headers remain `<vinc/osal/...>`. Native/state/platform headers are under `include/vinc/osal/detail/`; shared and platform `.cpp` files stay in `src/`. Detail is for this component and designated tests. Directory cleanup does not change platform behavior; the error contract follows.
+Public headers remain `<vinc/osal/...>`. Native/state/platform headers are under `include/vinc/osal/detail/`; shared and platform `.cpp` files stay in `src/`. Detail is for this component and designated tests, with `detail/resource_coordinator.hpp` additionally designated for Host/Plugin integration. Its ownership, waiting and initialization contracts are in the [FD/spawn plan](FD_SPAWN_PLAN.md#resource-coordinator); [stage 2](FD_SPAWN_PLAN.md#stage-2-implementation) wires POSIX producers/spawn and records validation. Directory cleanup does not change platform behavior; the error contract follows.
 
 公開標頭維持 `<vinc/osal/...>`。native、state 與平台內部標頭統一放在 `include/vinc/osal/detail/`；
 `src/` 保留共用及各平台的 .cpp。detail 僅供本元件實作與指定測試使用，
-元件目錄整理不改變平台行為契約；本輪錯誤型別遷移見下節。
+`detail/resource_coordinator.hpp` 另指定給 Host／Plugin 接線使用；所有權、等待與初始化契約，
+以及第二階段 POSIX FD／spawn 接線與驗證見上述計畫。元件目錄整理不改變平台行為契約；本輪錯誤型別遷移見下節。
 
 <a id="統一錯誤介面"></a>
 
@@ -90,13 +91,13 @@ OSAL 使用 `vinc::Result<T>`／`vinc::Error`，不提供獨立 Result 或 Error
 舊的錯誤轉接標頭已由本元件 enum 定義取代。Deadline 是本地等待的截止時間，不是日期時間，
 也不直接序列化為跨程序協定欄位；原有等待、取消與逾時行為保持不變。
 
-`Error` stores `domain`, `code`, `operation`, and native source/value. Use domain-aware comparisons such as `error.is(osal::ErrorCode::Timeout)`; OSAL owns its text tables. `vinc::error_to_string(error)` formats diagnostics and does not print misleading native success text when no native value exists. Unknown codes/operations remain numeric. There are 23 error codes and 54 nonzero operations with stable explicit assignments; domain is part of identity. These are incompatible with old implicit enum ordinals, and C++ Error layout is not a cross-version wire format. Existing timeout, cancellation, lifecycle, classification, and exception boundaries remain.
+`Error` stores `domain`, `code`, `operation`, and native source/value. Use domain-aware comparisons such as `error.is(osal::ErrorCode::Timeout)`; OSAL owns its text tables. `vinc::error_to_string(error)` formats diagnostics and does not print misleading native success text when no native value exists. Unknown codes/operations remain numeric. There are 26 error codes and 59 nonzero operations with stable explicit assignments; domain is part of identity. These are incompatible with old implicit enum ordinals, and C++ Error layout is not a cross-version wire format. Existing timeout, cancellation, lifecycle, classification, and exception boundaries remain.
 
 `Error` 的 `domain`、`code`、`operation`、`native` 保存分類、失敗操作與原生來源／數值。
 使用 `error.is(osal::ErrorCode::Timeout)` 等具 domain 的比較，文字表由 OSAL 自行維護。
 `vinc::error_to_string(error)` 統一產生診斷文字；原生錯誤沒有值時，不輸出「成功」之類
 容易誤導的 OS 訊息。未知錯誤／操作保留數值，程式判斷仍使用具型別的錯誤碼。
-目前有 23 個錯誤碼與 54 個非零操作碼；既有明確指定的編號保持不變，domain 為完整身分的一部分。
+目前有 26 個錯誤碼與 59 個非零操作碼；既有明確指定的編號保持不變，domain 為完整身分的一部分。
 它們不相容於更早期 enum 的隱含序號；C++ Error 布局仍不是跨版本傳輸協定。
 現有逾時、取消、生命週期、平台錯誤分類與例外邊界保持原樣。
 
@@ -536,7 +537,7 @@ Windows 另測試退出碼 259；POSIX 檢查子程序已被回收。
 | [Linux](../../../README.md#linux-validation) | Ubuntu 24.04 / WSL 2 standalone OSAL Debug; descriptor/Process/SharedMemory/FileLock **4/4**, descriptor repeat **20/20**, five negative controls / 獨立 OSAL Debug、四套通過、重跑與負向對照通過 |
 | [macOS](../../../README.md#macos-validation) | Full Debug build; initial full-project validation and follow-up OSAL/OutputHub **24/24** / 完整 Debug 建置、初次全專案驗證與後續 **24/24** |
 
-The linked reports own environment versions, source revisions, logs, and coverage limits. The dated records below preserve individual changes' validation history; they do not replace this current summary. Real native failure injection and the deferred creation/spawn race remain separate concerns.
+The linked reports own environment versions, source revisions, logs, and coverage limits. The dated records below preserve individual changes' validation history; they do not replace this current summary. The [FD/spawn repair plan](FD_SPAWN_PLAN.md#stage-2-implementation) owns the latest repair evidence and remaining native macOS acceptance; real native failure injection remains a separate concern.
 
 環境版本、原始碼版本、log 與覆蓋限制以連結的報告為準。以下日期紀錄保留各次修改的歷史驗證，不代表目前平台總狀態；真實原生故障注入與暫緩的建立／spawn 競爭問題仍分別追蹤。
 
@@ -694,7 +695,10 @@ Windows 與 WSL 本輪實際建置及回歸均通過。沒有重跑 macOS 或 De
 
 - **FileLock ownership after native unlock failure (2026-10-05):** FileLockGuard::unlock retains the Guard/local occupied flag on backend failure, proving only retained cleanup responsibility, not continued native ownership. [UnlockFileEx](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-unlockfileex), [Linux flock](https://man7.org/linux/man-pages/man2/flock.2.html), and [macOS flock](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html) do not guarantee unchanged ownership for every failure. Retryable Guard state alone does not establish safe payload access. No failure-after-release case has been reproduced and no revised policy is approved. The user deferred implementation; [root TODO](../../../TODO.md) tracks it. Since 2026-10-08 Concurrency no longer uses FileLock, but this OSAL gap remains. Decide known/unknown ownership, cleanup, retry, and fault policy before changes; the superseded Concurrency refactor did not fix FileLock.
 - **POSIX internal-fd/stdio isolation:** Linux/macOS monitors, POSIX FileLock/SharedMemory originally could retain fd 0/1/2 after the host closed stdio. Spawn Inherit preserves these via adddup2(fd, fd), which on Linux clears CLOEXEC ([glibc](https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/spawni.c)); CLOEXEC alone was insufficient. A child could write internal resources or retain a FileLock open description after owner death. The implemented descriptor helper relocates these resources and Linux pidfd before delivery/registration; failure preserves native errors and closes fds. Name rollback removes only new undistributed resources, not opened ones. POSIX osal.descriptor covers closed stdio, mapping/locking, child Null streams, exhausted-fd rollback/retry, and no child-extended ownership. For current validation, see the descriptor fixture findings above for Ubuntu 24.04 / WSL 2 and the [existing macOS report](../../../README.md#macos-validation). Relocation addresses retained occupancy, not the separate concurrent window below.
-- **Deferred POSIX concurrent creation/spawn:** relocation is not one native operation. Another thread can spawn after open/pipe/socket receives a low fd but before relocation, causing accidental inheritance or invalid-source launch failure. Pipe/Socket and newly covered resources all remain exposed. Interleavings are identified in code but not reproduced with controlled scheduling or fixed; the user deferred changes and [TODO](../../../TODO.md) retains tracking. Resuming requires scope confirmation/authorization. **Unapproved proposal:** one private process-local mutex around fd creation, relocation, and rollback; under the same mutex spawn duplicates inherited streams outside Pipe bootstrap fd ranges and records missing streams as /dev/null, then releases the lock before spawn, using RAII copies. This must cover Pipe, Socket/accept, FileLock, SharedMemory, monitors, and pidfd, not just relocation. Decisions include lock contention and up to three temporary fds per spawn, and whether protection covers only directly managed OSAL resources. Third-party open/close/dup2 and libc resolver-created sockets are uncoordinated. Filling missing parent stdio with /dev/null during single-thread startup is another unapproved alternative because it mutates host state. Future Linux/macOS tests must pause after low-fd acquisition, interleave spawn, check Inherit/Null/Capture, exhaustion/rollback, lock order/deadlock. Linux VM/WSL2 and Mac/macOS CI can run separately; Windows regressions cannot replace POSIX race tests. There is no measured fix result.
+- **POSIX concurrent creation/spawn, stage 2 implemented (2026-11-02):** directly managed FD acquisition now shares coordination with owned stdio snapshots. Windows Debug/Release Common/OSAL passed 31/31 each; Linux passed 42/42 each, plus controlled races and 3,000 ordinary spawns per configuration. See the [baseline](FD_RACE_VALIDATION.md) and [current contracts, detailed evidence and limitations](FD_SPAWN_PLAN.md#stage-2-implementation). At most three stdio copies is a fixed stream-count bound, not a configuration or total FD budget. New native macOS acceptance remains pending.
+- **macOS stdio and exit observation, acceptance still open (2026-11-02):** supplied native evidence separately reproduces missing CLOEXEC stdio (69/144 cases per configuration) and normal-child exit observation timeouts even after the child became a zombie. Stage 2 replaces same-fd dup2 with owned stdio copies, but its Mac behavior needs native verification. Exit-observation root cause remains unconfirmed and belongs to stage 3. See [baseline findings](FD_RACE_VALIDATION.md) and [repair progress](FD_SPAWN_PLAN.md). / CLOEXEC 修復已接通但 Mac 原生驗證待補；退出觀察仍待第三階段調查，不以其他平台通過結案。
+- **Cross-component and SDK acceptance (2026-11-03):** source App/Host/Plugin and moved-SDK results are recorded in [stage 4](FD_SPAWN_PLAN.md#stage-4-acceptance). The moved consumer now verifies three independently linked images sharing one coordinator. Native macOS must repeat the new acceptance on the same topic revision. / 跨元件與 SDK 驗收結果集中於第四階段紀錄；Mac 須補驗新修復，不能沿用舊基線當作通過。
+- **ProcessService final cleanup observation (2026-11-02):** one initial Linux stress sample saw an immediate FD-set mismatch without retained FD identities; its exact cause is unconfirmed. A test-only delayed observer tail reproduced temporary epoll/eventfd retention and subsequent cleanup, consistent with the existing detached-worker contract. `shutdown_until()` is not a join/unload barrier. The final stress checks record both immediate and bounded eventual cleanup; no production delay or lifecycle change was introduced. Details and the unresolved original-sample limitation are in the [stage 2 evidence](FD_SPAWN_PLAN.md#stage-2-implementation). / 若未來需要「返回即已釋放執行緒所有引用」的保證，須另行 review，不能將目前 API 當作該屏障。
 - **Windows Pipe random diagnostics, resolved:** NativePipe::create_pair previously discarded BCrypt NTSTATUS. It now shares random_bytes and wraps CreatePipe ← RandomBytes with native data. Windows osal.pipe_random_failure replaces the provider at link time and exercises real PipeService creation, repeated errors, admission recovery, and later success. No production test hook or real BCrypt fault injection was added.
 
 - **FileLock 原生解鎖失敗後的持鎖狀態（2026-10-05 Concurrency 重審）：**
@@ -726,26 +730,13 @@ Windows 與 WSL 本輪實際建置及回歸均通過。沒有重跑 macOS 或 De
   子程序標準串流改接空裝置、fd 額滿時回滾及同名重試、持鎖者直接退出後子程序不延長占用。
   **目前驗證：** Ubuntu 24.04／WSL 2 的 descriptor 與相關原生測試已通過，詳見上方 fixture 修正紀錄；macOS 既有建置與測試結果見[已驗證環境](../../../README.md#macos-validation)。
   此修正處理資源建立完成後的持續占用，並行建立／spawn 的窗口另見下項。
-- **POSIX 關閉標準串流時的並行建立／spawn（2026-10-05 新發現）：**
-  搬移 fd 不是單一原生操作。另一執行緒可能在 open／pipe／socket 等取得低編號 fd 後、
-  搬移之前，進入 `src/posix/process.cpp` 的標準串流檢查及 spawn。
-  既有 Pipe／Socket 和本輪補齊的資源均不能僅靠事後搬移宣稱完全排除此窗口。
-  **影響：** 子程序可能誤繼承內部資源，或在 fd 搬移／關閉後因來源失效而啟動失敗。
-  **狀態（2026-10-05）：使用者決定暫緩處理。** 程式交錯路徑確認，尚未用受控排程重現或修復；
-  未擴大修改同步邊界。根目錄 [TODO](../../../TODO.md) 保留追蹤入口；恢復工作須重新確認範圍並取得開工授權。
-  **未核准提案：** OSAL 私有程序內 mutex 保護原生 fd 建立、搬離 0／1／2 及失敗清理的完整區間；
-  spawn 在同一把鎖內複製需繼承的標準串流，副本避開 Pipe bootstrap 目標編號區間，
-  不存在的串流記錄為子程序接 `/dev/null`。快照完成後釋放鎖，再執行 spawn；副本由 RAII 回收。
-  需涵蓋 Pipe、Socket／accept、FileLock、SharedMemory、各監看器及 pidfd，不能只鎖搬移 helper。
-  **待決策：** 是否接受建立／accept 與快照的鎖競爭，以及每次 spawn 最多三個暫存 fd 的成本；
-  是否將保證限定於 OSAL 直接管理的資源。宿主／第三方的 open、close、dup2 不受私有鎖協調，
-  libc resolver 也可能自行建立 socket，不能宣稱所有 OSAL 呼叫涉及的間接 fd 都已受保護。
-  宿主於單執行緒啟動階段將缺少的標準串流接到 `/dev/null` 並維持有效，是另一個待討論方向；
-  此舉會改變父程序狀態，尚未核准由 OSAL 或 Vinc 入口自動執行。
-  **恢復後驗證：** Linux、macOS 各自建置／執行，刻意停在取得低編號 fd、尚未搬移的位置，
-  驗證與 spawn 的交錯、Inherit／Null／Capture 行為、fd 額滿及失敗回收、鎖順序與無死鎖。
-  Linux 可使用 VM／WSL2，macOS 使用 Mac 或 macOS CI runner；不要求同時執行。
-  Windows 僅能驗證共用程式回歸，不能取代 POSIX 競爭測試；目前尚無該修復的實測結果。
+- **POSIX 關閉標準串流時的並行建立／spawn：**
+  macOS 原生證據與 Linux／WSL 受控排程已重現誤繼承、來源 FD 失效／重用及 Pipe EOF 延後；
+  Windows HANDLE 對照未重現相同問題。詳見[修復前驗證報告](FD_RACE_VALIDATION.md)。
+  **狀態（2026-11-02）：前兩階段協調器、Host／Plugin 接線及 POSIX FD／spawn 修復已完成 Windows／WSL 驗證；新 macOS 原生驗收待補。**
+  資源建立同步、最多三個標準串流副本、Host／Plugin 共用協調器、初始化限制及第三方邊界，
+  統一維護於[修訂契約與四階段開工步驟](FD_SPAWN_PLAN.md)。三個是固定串流數量，
+  不是 spawn 總 FD 額度，也不放入 config。macOS 退出觀察根因仍須獨立調查。
 - **Windows Pipe 遺失亂數失敗的原生診斷（2026-10-05 重審）：**
   `src/windows/pipe.cpp::NativePipe::create_pair()` 原先直接呼叫 `BCryptGenRandom`，
   失敗僅回傳 `SystemError / CreatePipe`，沒有保留回傳的 NTSTATUS；

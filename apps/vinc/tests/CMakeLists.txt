@@ -76,7 +76,8 @@ add_app_host_test(debug module_debug_tests "$<TARGET_FILE:module_process_helper>
 add_app_host_test(plugin module_plugin_tests "$<TARGET_FILE:plugin_valid>"
     "$<TARGET_FILE:plugin_no_entry>" "$<TARGET_FILE:plugin_bad_version>"
     "$<TARGET_FILE:plugin_null_factory>" "$<TARGET_FILE:plugin_reject>"
-    "$<TARGET_FILE:plugin_stall>" "$<TARGET_FILE:plugin_throw_constructor>")
+    "$<TARGET_FILE:plugin_stall>" "$<TARGET_FILE:plugin_throw_constructor>"
+    "$<TARGET_FILE:plugin_late_coordinator>")
 add_app_host_test(message_bus message_bus_module_tests "$<TARGET_FILE:message_bus_module_helper>")
 add_app_host_test(param param_process_tests "$<TARGET_FILE:param_module_helper>")
 add_app_host_test(log log_process_tests "$<TARGET_FILE:log_module_helper>")

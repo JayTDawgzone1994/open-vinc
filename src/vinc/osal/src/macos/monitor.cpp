@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 // macOS process wakeup backend: kqueue NOTE_EXIT plus a user event for service work.
 // Exit notifications do not reap children; the common observer still calls waitpid.
 
@@ -34,6 +35,11 @@ NativeMonitor::NativeMonitor(std::unique_ptr<MonitorImpl> impl) : impl_(std::mov
 NativeMonitor::~NativeMonitor() = default;
 
 vinc::Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
+    auto resources = acquire_resources(ErrorOperation::InitializeService);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     auto impl = std::make_unique<MonitorImpl>();
     impl->queue = kqueue();
     if (impl->queue < 0) {

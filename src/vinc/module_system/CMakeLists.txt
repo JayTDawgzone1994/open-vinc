@@ -17,7 +17,7 @@ function(_vinc_build_module variant)
     vinc_apply_runtime(${vinc_module} ${variant})
 
     target_include_directories(${vinc_module} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    vinc_runtime_link_libraries(${vinc_module} ${variant} PUBLIC vinc::message_bus_client vinc::param vinc::log vinc::rpc)
+    vinc_runtime_link_libraries(${vinc_module} ${variant} PUBLIC vinc::message_bus_client vinc::param vinc::log vinc::rpc vinc::osal)
 
     add_library(${vinc_module_runtime} STATIC src/runtime/module_runtime.cpp src/runtime/native_source.cpp src/runtime/plugin_loader.cpp src/runtime/module_locks.cpp src/runtime/module_queries.cpp src/runtime/module_params.cpp)
     vinc_apply_runtime(${vinc_module_runtime} ${variant})

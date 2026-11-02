@@ -199,8 +199,8 @@ calls and short per-destination locks; this is not a wait-free or constant-cost 
 目標；純 get_last 不加入路由。路由及 callback 安裝後補送提示；進行中快照保住 sender 生命週期。
 每次發布成本仍隨目標 Module 數量增加，包含 OS 呼叫與短期鎖，不宣稱 wait-free 或固定成本廣播。
 
-Bus control is v3, Module bootstrap v16, Plugin entry 10, Module query v2, notification report v1,
-and graph HTTP v2. Rebuild central, Hosts, Plugins, SDK consumers and Python native adapters together.
+This notification stage introduced Bus control v3, Module bootstrap v16, Plugin entry 10, Module query v2, notification report v1,
+and graph HTTP v2. Current Plugin/bootstrap versions follow [Module System](README.md). Rebuild central, Hosts, Plugins, SDK consumers and Python native adapters together.
 Old formats are rejected. RingBuffer/message layouts and public Python pump syntax are unchanged.
 
 上述協定／入口已更新；所有相連產物須重建，舊格式明確拒絕。RingBuffer／訊息布局及 Python

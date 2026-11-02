@@ -632,12 +632,24 @@ rebuild and change the executable's output, including localized MSVC builds.
 The fixture deliberately calls internal Tcl initialization only to validate the
 archive/resource closure; this is not a recommended user startup API.
 
+The moved consumer also rebuilds the maintained OSAL coordination fixture against
+installed targets only: one executable and two independently linked libraries.
+It checks shared ownership/exclusion, deadlines, cancellation, invalid/late binding
+and unloading while the owner remains alive. Test sources are copied into the
+consumer workspace; they are not installed as SDK APIs or linked from producer outputs.
+Current FD/spawn repair acceptance and platform limitations are recorded in the
+[stage 4 evidence](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance).
+
 `sdk.installed_consumer` 會安裝、搬移 SDK、獨立建置外部專案，執行安裝版 Ribosome、
 存取生成訊息、初始化 Tcl，並以明確 Host 路徑建立／關閉 Manager 服務及比對授權檔。
 負向測試涵蓋版本／組態不符、Windows CRT／Linux libstdc++ ABI 不符、config 標頭遭修改、
 錯誤安裝組態，以及禁止覆蓋不同 profile；修改使用者標頭後也須實際重編並改變程式輸出，
 包含本地化 MSVC 的增量相依追蹤。
 測試直接呼叫 Tcl 內部初始化僅為驗證庫與資源是否完整，不是使用者啟動框架的建議 API。
+
+搬移後的使用端另以安裝式 target 重建既有 OSAL 協調測試：一個執行檔與兩個獨立連結庫，
+驗證共用互斥、期限／取消、錯誤／過晚綁定與 owner 存活期間的卸載。
+測試來源複製到使用端工作目錄，不作為 SDK API 交付，也不連結製作者的產物。
 
 Platform results are recorded after running the tests; a successful package
 configure alone is not execution evidence. macOS requires native validation.

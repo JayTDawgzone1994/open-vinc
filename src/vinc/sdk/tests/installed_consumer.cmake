@@ -41,6 +41,13 @@ set(moved "${WORK}/moved SDK")
 run_checked("${CMAKE_COMMAND}" --install "${SDK_BUILD}" --component VincSDK --prefix "${original}")
 file(RENAME "${original}" "${moved}")
 file(COPY "${FIXTURE}/" DESTINATION "${WORK}/source")
+# Reuse the maintained cross-image fixture, but compile it exclusively against
+# the moved package. No producer include/library paths reach these targets.
+set(coordination_tests "${CMAKE_CURRENT_LIST_DIR}/../../osal/tests")
+file(COPY "${coordination_tests}/coordinator_tests.cpp"
+    "${coordination_tests}/coordinator_plugin.cpp"
+    "${coordination_tests}/coordinator_fixture.hpp"
+    DESTINATION "${WORK}/source/coordinator")
 if(WIN32)
     set(executable_suffix .exe)
 else()

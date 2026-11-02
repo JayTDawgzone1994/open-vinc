@@ -5,6 +5,9 @@
 #include <vinc/time.hpp>
 #include <vinc/osal/detail/socket_native.hpp>
 #include <algorithm>
+#if !defined(_WIN32)
+#include <vinc/osal/detail/posix/resource_guard.hpp>
+#endif
 
 namespace vinc::osal {
 namespace {
@@ -281,6 +284,12 @@ vinc::Result<Socket> Socket::open(AddressFamily family, SocketType type) {
         return std::unexpected(detail::operation_error(ErrorOperation::CreateSocket, runtime.error()));
     }
 
+#if !defined(_WIN32)
+    auto resources = detail::acquire_resources(ErrorOperation::CreateSocket);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+#endif
     auto state = std::make_shared<detail::SocketState>();
     state->runtime = std::move(*runtime);
     state->family = family;
@@ -362,6 +371,10 @@ vinc::Result<void> Socket::listen(int backlog) {
 }
 
 vinc::Result<Socket> Socket::try_accept() {
+    return accept_impl(true, Deadline::max(), {});
+}
+
+vinc::Result<Socket> Socket::accept_impl(bool try_only, Deadline deadline, std::stop_token stop) {
     auto check = valid(state_, vinc::osal::ErrorOperation::AcceptSocket);
     if (!check) {
         return std::unexpected(check.error());
@@ -372,6 +385,25 @@ vinc::Result<Socket> Socket::try_accept() {
             vinc::Error{vinc::osal::ErrorCode::InvalidArgument, vinc::osal::ErrorOperation::AcceptSocket});
     }
 
+#if !defined(_WIN32)
+    // Try once even at an expired deadline, like the native readiness path.
+    // When busy, wait here instead of spinning on an already-readable listener.
+    auto resources = [&]() -> Result<detail::ResourceGuard> {
+        auto immediate = detail::try_acquire_resources(ErrorOperation::AcceptSocket);
+        if (!immediate && !try_only && immediate.error().is(ErrorCode::WouldBlock)) {
+            return detail::acquire_resources(ErrorOperation::AcceptSocket, deadline, stop);
+        }
+
+        return immediate;
+    }();
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+#else
+    (void)try_only;
+    (void)deadline;
+    (void)stop;
+#endif
     auto child = std::make_shared<detail::SocketState>(); // no fallible allocation after accept
     child->runtime = state_->runtime;
     child->family = state_->family;
@@ -599,7 +631,7 @@ vinc::Result<DatagramResult> Socket::try_receive_from(std::span<std::byte> buffe
 
 vinc::Result<Socket> Socket::accept_until(vinc::Deadline deadline, std::stop_token token) {
     return perform_until(*this, SocketEvents::Readable, deadline, token, ErrorOperation::AcceptSocket, [&] {
-        return try_accept();
+        return accept_impl(false, deadline, token);
     });
 }
 
