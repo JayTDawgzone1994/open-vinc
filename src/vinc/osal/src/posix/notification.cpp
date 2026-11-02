@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 #include <vinc/osal/detail/notification_state.hpp>
 #include <vinc/osal/detail/native_error.hpp>
 #include <vinc/osal/detail/posix/descriptor.hpp>
@@ -59,6 +60,11 @@ struct Fd {
 };
 
 Result<Fd> open_directory(bool create, ErrorOperation operation) {
+    auto resources = acquire_resources(operation);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     // A stable per-effective-user namespace, independent of HOME/TMPDIR and
     // framework instances. Only this leaf is created; never follow a leaf link.
     const auto path = "/tmp/ov-osal-notify-" + std::to_string(::geteuid());
@@ -100,6 +106,11 @@ Result<struct stat> inspect_name(int directory, const std::string& name, ErrorOp
 
 Result<Fd> open_endpoint(int directory, const std::string& name, int access,
                          const struct stat& identity, ErrorOperation operation) {
+    auto resources = acquire_resources(operation);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     Fd endpoint(::openat(directory, name.c_str(), access | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW));
     if (endpoint.value < 0) {
         return std::unexpected(error(operation));

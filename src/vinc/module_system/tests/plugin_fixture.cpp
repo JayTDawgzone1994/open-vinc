@@ -5,9 +5,26 @@
 #include <fstream>
 #include <stdexcept>
 #include <thread>
+#include <cstdlib>
 
 namespace {
 constexpr auto loader_stall = std::chrono::seconds(60);
+#if defined(VINC_PLUGIN_REJECT) || defined(VINC_PLUGIN_LATE_COORDINATOR)
+constexpr int unsafe_unload_exit = 99;
+struct RejectedUnloadProbe {
+    ~RejectedUnloadProbe() {
+        std::_Exit(unsafe_unload_exit);
+    }
+} rejected_unload_probe;
+#endif
+#ifdef VINC_PLUGIN_LATE_COORDINATOR
+// Simulate pre-initialization use of the acquisition seam shared by native FD
+// producers. The loader must reject replacing an already selected owner.
+const auto premature_operation = [] {
+    auto guard = vinc::osal::detail::ResourceGuard::try_acquire();
+    return bool(guard);
+}();
+#endif
 #ifdef VINC_PLUGIN_STALL
 // Runs before injection. Central startup supervision must remain effective.
 const auto stalled = [] {
@@ -61,12 +78,13 @@ extern "C" VINC_PLUGIN_EXPORT const vinc::detail::PluginEntry* vinc_module_plugi
         vinc::detail::plugin_entry_version,
 #endif
         sizeof(vinc::detail::PluginEntry), "pluginFixture",
-        [](const vinc::detail::RuntimeServices& services) noexcept -> vinc::Result<void> {
+        [](const vinc::detail::RuntimeServices& services,
+           const vinc::osal::detail::ResourceCoordination& coordination) noexcept -> vinc::Result<void> {
 #ifdef VINC_PLUGIN_REJECT
             return std::unexpected(vinc::make_error(vinc::common::ErrorCode::InvalidRuntimeServices,
                                                     vinc::common::ErrorOperation::BindRuntimeServices));
 #else
-            return vinc::detail::bind_runtime_services(services);
+            return vinc::detail::initialize_plugin(services, coordination);
 #endif
         },
         []() -> vinc::Result<vinc::detail::ModuleObject*> {

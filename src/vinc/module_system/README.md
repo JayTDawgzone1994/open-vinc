@@ -6,11 +6,26 @@ Host notification ownership, Bus routes, notification-driven pumpLoop, bounded r
 Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
 preparation failure rejects only the affected Module; later notification failures retain the
 10 ms fallback. See the [pump wakeup contract](PUMP_WAKEUP.md) for policies and validation.
-Current bootstrap is **v16**, Plugin entry **10**, and Module query **v2**; rebuild connected artifacts.
+Current bootstrap is **v16**, Plugin entry **11**, and Module query **v2**; rebuild connected artifacts.
 
 已接通通知資源、Bus 路由、pumpLoop 喚醒、故障恢復與診斷；pumpOnce 行為不變。
 準備失敗只拒絕該 Module 啟動，運行中的通知故障保留 10 ms 補查。契約及驗證見上述連結。
-目前 bootstrap v16、Plugin entry 10、Module query v2，所有接線產物須一起重建。
+目前 bootstrap v16、Plugin entry 11、Module query v2，所有接線產物須一起重建。
+
+**Stages 1–2 implemented:** the [OSAL FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md)
+records Host/Plugin coordination ownership, entry 11 initialization, rejection without
+unsafe unload, POSIX FD acquisition/spawn wiring, and Windows/WSL evidence.
+RuntimeServices remains fatal-only. New native macOS acceptance and the separate
+macOS exit-observation investigation remain pending.
+
+Source App/Host/Plugin and moved-SDK integration results are maintained in the
+[stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance), including
+the App test fixture correction and the separate macOS acceptance checklist.
+
+**前兩階段已實作：** Host／Plugin 共用協調接線、entry 11、失敗退出及 POSIX FD／spawn
+修復已接通；完整契約與 Windows／WSL 結果見上述計畫。新增 macOS 原生驗收及退出觀察調查仍待完成。
+第四階段另記來源 App／Host／Plugin、搬移 SDK 與測試接線修正結果；不以其他平台
+通過代替 Mac 原生驗收。
 
 Each Module instance runs in an independent OS process. The central process manages its lifecycle through OSAL Process; both sides use the same vinc::control component over an OSAL local stream Socket. Authors inherit BaseModule without implementing sockets, packets, or heartbeat.
 
@@ -1336,12 +1351,12 @@ Windows x64／MSVC 19.51（toolset 14.51.36231，compiler 19.51.36257）、Windo
 既有 Module 啟停／重啟、雙向 heartbeat、fatal report 與有界監督、Bus 發布／訂閱／
 退出回收、Shell／Tcl／Socket Shell、獨立 SDK consumer 皆經正式 Host／Plugin 路徑驗證。
 
-Initial Debug 54/55 exposed a shell.console fixture hardcoding .exe; changing it to .dll yielded full success. Fault writer stays in a dedicated test Host while Module is a Plugin; production Host has no fault checkpoint. Historical bootstrap v4 was rejected in favor of library-path v5 at this stage; current versions are entry 10/bootstrap v16.
+Initial Debug 54/55 exposed a shell.console fixture hardcoding .exe; changing it to .dll yielded full success. Fault writer stays in a dedicated test Host while Module is a Plugin; production Host has no fault checkpoint. Historical bootstrap v4 was rejected in favor of library-path v5 at this stage; current versions are listed at the top of this page.
 
 Debug 首輪為 54/55，shell.console 的既有 fixture 寫死 .exe 路徑，改為 .dll 後全套通過。
 故障注入 fixture 將 report writer 留在專用 Host，Module 本體另編為 Plugin；未把故障
 checkpoint 加入正式 Host。Bootstrap v4 不提供相容模式，正式接線使用新增庫路徑的 v5。
-這是該輪歷史版本；目前為 entry 10／bootstrap v16。
+這是該輪歷史版本；目前版本見本頁開頭。
 
 Ninja link closures confirm Module/SDK Plugins exclude vinc_control, Module Runtime, Manager, and Shell, while retaining control_protocol, Bus client, and utilities. dumpbin confirms Bus example exports only vinc_module_plugin. Later native build and Module execution evidence is recorded in the [platform reports](../../../README.md#validation-and-limits), with revision-specific coverage.
 
@@ -1493,13 +1508,13 @@ lock_protocol、原有故障／退出測試及外部 SDK；詳細紀錄見 [INST
 
 ## Context Log and central persistence (2026-10-08) / Context Log 與中央保存（2026-10-08）
 
-context.log uses Host-owned adapter/separate Log Session; Plugin links API/fmt only. Central Manager owns collector/writer; framework entry sets the storage path. Normal shutdown drains OutputHub, then stops Log, then releases Control Service. Log setup failure is diagnostic, not a Module startup/stop failure; fatal remains separate. This historical Context change used entry 5/bootstrap v10; current is entry 10/v16, requiring complete connected rebuilds. [Log](../log/README.md) owns API/backpressure/fence/capacity.
+context.log uses Host-owned adapter/separate Log Session; Plugin links API/fmt only. Central Manager owns collector/writer; framework entry sets the storage path. Normal shutdown drains OutputHub, then stops Log, then releases Control Service. Log setup failure is diagnostic, not a Module startup/stop failure; fatal remains separate. This historical Context change used entry 5/bootstrap v10; current versions are listed at the top of this page, requiring complete connected rebuilds. [Log](../log/README.md) owns API/backpressure/fence/capacity.
 
 Context 增加 context.log；Host 持有 adapter 與獨立 Log Session，Plugin 僅連入 API／fmt。
 中央 Manager 擁有 collector／writer；Framework entry 自動設定保存路徑。
 正常停止先排空 OutputHub，再停止 Log，最後釋放 Control Service。
 Log 建立失敗可診斷，不當作 Module 啟停失敗；fatal report 仍獨立。
-該次 Context 布局更新為 Plugin entry version 5／bootstrap v10（目前為 entry 10／v16），需完整重新建置相連程式。
+該次 Context 布局更新為 Plugin entry version 5／bootstrap v10（目前版本見本頁開頭），需完整重新建置相連程式。
 API、backpressure、fence 與容量見 [Log](../log/README.md)。
 
 <a id="recorder-接線2026-10-12"></a>
@@ -1523,7 +1538,7 @@ STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設�
 - Before approval get_module_name is a possibly empty source proposal; only after on_name/central approval is it official. MID allocation and Context availability are unchanged.
 - Python source receives no central default name. Default on_name requires --name; custom hooks may return source-defined names. Central does not execute Python to discover names beforehand.
 - Restart reruns identical source/arguments and compares the approved old name. Renaming fails; reserved-command/name conflicts are checked on submission without advance knowledge of source defaults.
-- That migration used entry 6/bootstrap v11; current is entry 10/v16. Historical version numbers below describe their own stage. Connected C++ programs/Python extensions must rebuild together.
+- That migration used entry 6/bootstrap v11; current versions are listed at the top of this page. Historical version numbers below describe their own stage. Connected C++ programs/Python extensions must rebuild together.
 - [SDK functions](../sdk/README.md#公開-cmake-functions) document configuration/generation order and usage.
 
 - `add_module()` 取代 `vinc_add_process_module()`，不接受 MODULE_BASE_NAME。
@@ -1537,7 +1552,7 @@ STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設�
   自訂 hook 仍可直接回傳 source 定義的名稱。中央不執行 Python 來預先取得名稱。
 - 重啟重新執行相同 source／啟動參數，由中央比對上次核准名稱；改名仍拒絕。
   保留命令與名稱的衝突在 Module 提交名稱時拒絕，無需預先知道 source 的預設名稱。
-- 該次 Plugin entry **6**、bootstrap **v11**（目前 entry 10／v16） 移除原有名稱傳遞，舊 Plugin／Host 明確拒絕。
+- 該次 Plugin entry **6**、bootstrap **v11**（目前版本見本頁開頭） 移除原有名稱傳遞，舊 Plugin／Host 明確拒絕。
   下方或前文歷史驗證中的版本號是當時版本；所有相連 C++ 程式與 Python 擴充須重新建置。
 - 完整 functions 使用方式與配置／生成時序見 [SDK README](../sdk/README.md#公開-cmake-functions)。
 
@@ -1545,9 +1560,9 @@ STOP_TIMEOUT_CONFIG 只調整該 ModuleType policy，不改其他 Module 預設�
 
 ## Dual-time metadata ABI (2026-10-13) / 雙時間 metadata ABI（2026-10-13）
 
-BaseMessage gained monotonic publication time while timestamp became Unix time. That migration used entry 7/bootstrap v12; current is entry 10/v16. Rebuild central/Host/Plugin/Python together; old entries reject. General control/lifecycle remained unchanged. See [Bus metadata](../message_bus/README.md#雙時間發布-metadata2026-10-13) for fields/failures.
+BaseMessage gained monotonic publication time while timestamp became Unix time. That migration used entry 7/bootstrap v12; current versions are listed at the top of this page. Rebuild central/Host/Plugin/Python together; old entries reject. General control/lifecycle remained unchanged. See [Bus metadata](../message_bus/README.md#雙時間發布-metadata2026-10-13) for fields/failures.
 
-BaseMessage 新增單調發布時間，原 timestamp 改為 Unix 時間；當時 Plugin entry 更新至 **7**、bootstrap marker 至 **v12**（目前 entry 10／v16）。中央、Host、Plugin 與 Python 擴充須一起重建；舊入口拒絕。
+BaseMessage 新增單調發布時間，原 timestamp 改為 Unix 時間；當時 Plugin entry 更新至 **7**、bootstrap marker 至 **v12**（目前版本見本頁開頭）。中央、Host、Plugin 與 Python 擴充須一起重建；舊入口拒絕。
 一般控制協定與生命周期不變，欄位及失敗契約見 [Message Bus](../message_bus/README.md#雙時間發布-metadata2026-10-13)。
 
 <a id="rpc-接線2026-10-14"></a>
@@ -1560,7 +1575,7 @@ Context 新增 register_rpc、call_rpc、rpc_stats；完整 typed API、容量�
 契約見 [RPC README](../rpc/README.md)。RPC 控制事件在 pump 固定批次派送，新增 callback
 不在同一輪無限追送；heartbeat 仍由獨立 watchdog 維護。逃出 callback 的例外鎖定 Module 故障。
 
-Central owns one RpcManager worker; Host owns unique RPC integration; Plugin keeps only Context facade/application closures. Normal stop seals new work; confirmed OS exit precedes dead-party slot recovery. A full central inbox retains the current control frame for retry rather than dropping transfer completion/release. This layout uses current entry 10/bootstrap v16; rebuild Host/Plugin/SDK together.
+Central owns one RpcManager worker; Host owns unique RPC integration; Plugin keeps only Context facade/application closures. Normal stop seals new work; confirmed OS exit precedes dead-party slot recovery. A full central inbox retains the current control frame for retry rather than dropping transfer completion/release. Current entry/bootstrap versions are listed at the top of this page; rebuild Host/Plugin/SDK together.
 
 中央持有一個 RpcManager worker，ModuleHost 持有唯一 RPC Host 接線；Plugin 只保留 Context
 facade 與應用 closures。正常停止封住新工作，確認 OS 退出才回收死亡方共享槽位。
@@ -1608,9 +1623,9 @@ Host 只允許一筆查詢，沿用 watchdog 接收；Busy、Timeout、Cancelled
 各頁獨立取樣，不保證全域原子性；呼叫端跨頁共用期限。Context 的 Bus 查詢會包回 ModuleSystem 錯誤。
 
 ContextRuntime's virtual interface changed: rebuild all connected C++ components,
-SDK consumers and Python native extensions. Plugin entry version is 10 and bootstrap
-version is v16, explicitly rejecting old combinations. No ABI compatibility promise
+SDK consumers and Python native extensions. That change introduced Plugin entry 10/bootstrap v16. Current versions are listed
+at the top of this page; old combinations are explicitly rejected. No ABI compatibility promise
 has been added.
 
 ContextRuntime 虛擬介面改變，中央、Host、Plugin、SDK consumer 與 Python 原生擴充均須重建。
-Plugin entry 10／bootstrap v16 明確拒絕舊組合，未新增 ABI 相容保證。
+該次更新使用 Plugin entry 10／bootstrap v16；目前版本見本頁開頭，未新增 ABI 相容保證。

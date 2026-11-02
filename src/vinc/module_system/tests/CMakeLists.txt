@@ -180,7 +180,7 @@ add_test(NAME module.runtime_services
 set_tests_properties(module.runtime_services PROPERTIES TIMEOUT 120)
 
 # Production loader fault cases run in disposable Host processes.
-foreach(mode IN ITEMS valid no_entry bad_version null_factory reject stall throw_constructor)
+foreach(mode IN ITEMS valid no_entry bad_version null_factory reject stall throw_constructor late_coordinator)
     vinc_add_module_plugin(plugin_${mode} plugin_fixture.cpp)
     if(NOT mode STREQUAL "valid")
         string(TOUPPER "${mode}" mode_definition)
@@ -189,12 +189,16 @@ foreach(mode IN ITEMS valid no_entry bad_version null_factory reject stall throw
 endforeach()
 add_executable(module_plugin_tests plugin_tests.cpp)
 add_dependencies(module_integration_tests plugin_stall)
-target_link_libraries(module_plugin_tests PRIVATE vinc_test_manager)
-add_dependencies(module_plugin_tests plugin_valid plugin_no_entry plugin_bad_version plugin_null_factory plugin_reject plugin_stall plugin_throw_constructor)
+target_link_libraries(module_plugin_tests PRIVATE vinc_test_manager vinc::module)
+add_dependencies(module_plugin_tests plugin_valid plugin_no_entry plugin_bad_version plugin_null_factory plugin_reject plugin_stall plugin_throw_constructor plugin_late_coordinator)
 add_test(NAME module.plugin COMMAND module_plugin_tests
     "$<TARGET_FILE:plugin_valid>" "$<TARGET_FILE:plugin_no_entry>" "$<TARGET_FILE:plugin_bad_version>"
-    "$<TARGET_FILE:plugin_null_factory>" "$<TARGET_FILE:plugin_reject>" "$<TARGET_FILE:plugin_stall>" "$<TARGET_FILE:plugin_throw_constructor>")
+    "$<TARGET_FILE:plugin_null_factory>" "$<TARGET_FILE:plugin_reject>" "$<TARGET_FILE:plugin_stall>" "$<TARGET_FILE:plugin_throw_constructor>" "$<TARGET_FILE:plugin_late_coordinator>")
 set_tests_properties(module.plugin PROPERTIES TIMEOUT 90)
+add_executable(module_plugin_initialize_tests plugin_initialize_tests.cpp)
+target_link_libraries(module_plugin_initialize_tests PRIVATE vinc::module)
+add_test(NAME module.plugin_initialize COMMAND module_plugin_initialize_tests)
+set_tests_properties(module.plugin_initialize PROPERTIES TIMEOUT 15)
 add_executable(module_debug_tests debug_tests.cpp)
 target_link_libraries(module_debug_tests PRIVATE vinc_test_manager vinc::shell)
 add_dependencies(module_debug_tests module_process_helper)

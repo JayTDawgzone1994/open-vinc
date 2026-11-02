@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 // Linux readiness and wakeup backend for the single Pipe I/O worker.
 // epoll events trigger another nonblocking transfer attempt; they are not byte counts.
 
@@ -14,6 +15,11 @@ constexpr int max_events_per_wait = 32;
 }
 
 vinc::Result<std::unique_ptr<PipeMonitor>> PipeMonitor::create() {
+    auto resources = acquire_resources(ErrorOperation::InitializeService);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     auto impl = std::make_unique<PipeMonitorImpl>();
     impl->queue = epoll_create1(EPOLL_CLOEXEC);
     if (impl->queue < 0) {

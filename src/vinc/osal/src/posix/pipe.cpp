@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 // POSIX Pipe backend using nonblocking descriptors and readiness notification.
 // Only the dedicated Pipe worker performs I/O; process-global signal handlers stay unchanged.
 
@@ -58,6 +59,7 @@ struct Fd {
 };
 
 vinc::Result<std::array<Fd, 2>> make_pipe() {
+    // create_pair owns coordination through flag setup and publication.
     int descriptors[2];
 #if defined(VINC_OSAL_MACOS)
     if (::pipe(descriptors) < 0) {
@@ -130,6 +132,11 @@ NativePipe::NativePipe(std::unique_ptr<NativePipeImpl> impl) : impl_(std::move(i
 NativePipe::~NativePipe() = default;
 
 vinc::Result<NativePipePair> NativePipe::create_pair(bool blocking_writer) {
+    auto resources = acquire_resources(ErrorOperation::CreatePipe);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     auto ends = make_pipe();
     if (!ends) {
         return std::unexpected(ends.error());

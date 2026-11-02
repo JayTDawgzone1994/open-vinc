@@ -11,6 +11,7 @@ namespace vinc {
 int run_module_process(const std::vector<std::string>& arguments);
 
 namespace detail {
+inline constexpr int module_application_failure_exit = 70;
 // Inspect argv[1] only. Claim the reserved family so malformed/old versions reach
 // bootstrap rejection instead of accidentally initializing another central.
 bool is_module_launch(std::string_view first_argument) noexcept;

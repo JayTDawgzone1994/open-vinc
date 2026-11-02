@@ -4,6 +4,7 @@
 #include <vinc/module/detail/module_object.hpp>
 #include <vinc/osal/path.hpp>
 #include <optional>
+#include <cstdlib>
 
 namespace vinc {
 bool detail::is_module_launch(std::string_view first_argument) noexcept {
@@ -13,6 +14,7 @@ bool detail::is_module_launch(std::string_view first_argument) noexcept {
 namespace {
 class NativeSource final : public detail::ModuleSource {
     std::optional<detail::LoadedPlugin> plugin_;
+    std::optional<osal::DynamicLibrary> rejected_library_;
 public:
     Result<void> prepare(const std::vector<std::string>& args,
                          const detail::RuntimeServices& services) override {
@@ -22,7 +24,8 @@ public:
                 module_system::ErrorOperation::LoadPlugin, path.error()));
         }
 
-        auto loaded = detail::LoadedPlugin::load(*path, args[detail::bootstrap::module_type], services);
+        auto loaded = detail::LoadedPlugin::load(*path, args[detail::bootstrap::module_type], services,
+                                                rejected_library_);
         if (!loaded) {
             return std::unexpected(loaded.error());
         }
@@ -36,6 +39,12 @@ public:
     }
 
     void clear() noexcept override {
+        if (rejected_library_) {
+            // run_module_runtime has attempted its bounded failure report and
+            // stopped Host workers. Rejected constructors are not trusted to be
+            // quiescent: no unload, static destructors or atexit callbacks here.
+            std::_Exit(detail::module_application_failure_exit);
+        }
         plugin_.reset();
     }
 };

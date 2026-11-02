@@ -44,13 +44,13 @@ int main() {
 
     // These existing OSAL identifiers are contiguous; check coverage without assuming
     // future catalogs in other domains also use contiguous values.
-    for (std::int32_t code = 1; code <= static_cast<std::int32_t>(osal::ErrorCode::InvalidEncoding); ++code) {
+    for (std::int32_t code = 1; code <= static_cast<std::int32_t>(osal::ErrorCode::CoordinatorAlreadyBound); ++code) {
         const auto formatted = error_to_string(Error::from_raw(ErrorDomain::Osal, code, 0));
         if (formatted.find("Unknown error") != std::string::npos) {
             return 1;
         }
     }
-    for (std::int32_t operation = 1; operation <= static_cast<std::int32_t>(osal::ErrorOperation::CloseLibrary);
+    for (std::int32_t operation = 1; operation <= static_cast<std::int32_t>(osal::ErrorOperation::AcquireResources);
          ++operation) {
         const auto formatted = error_to_string(Error::from_raw(ErrorDomain::Osal, 1, operation));
         const auto marker = "[operation=" + std::to_string(operation) + "]";

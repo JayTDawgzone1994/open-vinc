@@ -28,7 +28,10 @@ enum class ErrorCode : std::int32_t {
     MessageTooLarge = 20,
     NetworkUnreachable = 21,
     AlreadyExists = 22,
-    InvalidEncoding = 23
+    InvalidEncoding = 23,
+    IncompatibleCoordinator = 24,
+    CoordinatorInUse = 25,
+    CoordinatorAlreadyBound = 26
 };
 
 enum class ErrorOperation : std::int32_t {
@@ -89,7 +92,9 @@ enum class ErrorOperation : std::int32_t {
     UnlinkNotification = 54,
     ExecutablePath = 55,
     WriteTerminal = 56,
-    CheckExecutable = 57
+    CheckExecutable = 57,
+    BindCoordinator = 58,
+    AcquireResources = 59
 };
 }
 

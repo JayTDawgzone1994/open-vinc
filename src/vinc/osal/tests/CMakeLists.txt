@@ -1,6 +1,23 @@
 # Use helper executables to test native process, Pipe and shared-memory lifetimes.
 # CTest timeouts bound fault scenarios that would otherwise leave a hanging test run.
 
+# Real separate images: hidden OSAL symbols must never interpose another copy.
+foreach(image IN ITEMS a b)
+    add_library(osal_coordinator_${image} MODULE coordinator_plugin.cpp)
+    target_link_libraries(osal_coordinator_${image} PRIVATE vinc::osal)
+    set_target_properties(osal_coordinator_${image} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+endforeach()
+add_executable(osal_coordinator_tests coordinator_tests.cpp)
+target_link_libraries(osal_coordinator_tests PRIVATE vinc::osal Threads::Threads)
+add_dependencies(osal_coordinator_tests osal_coordinator_a osal_coordinator_b)
+add_test(NAME osal.coordinator COMMAND osal_coordinator_tests)
+foreach(mode IN ITEMS shared late)
+    add_test(NAME osal.coordinator_${mode} COMMAND osal_coordinator_tests
+        "$<TARGET_FILE:osal_coordinator_a>" "$<TARGET_FILE:osal_coordinator_b>" ${mode})
+endforeach()
+set_tests_properties(osal.coordinator osal.coordinator_shared osal.coordinator_late PROPERTIES TIMEOUT 20)
+
 # Link only the public OSAL target: common headers and formatter must propagate transitively.
 add_executable(osal_process_fault_tests process_fault_tests.cpp)
 target_link_libraries(osal_process_fault_tests PRIVATE vinc::osal)
@@ -28,6 +45,13 @@ if(WIN32)
     add_test(NAME osal.pipe_random_failure COMMAND osal_pipe_random_failure_tests)
     set_tests_properties(osal.pipe_random_failure PROPERTIES TIMEOUT 15)
 else()
+    add_executable(osal_fd_spawn_tests fd_spawn_tests.cpp)
+    target_link_libraries(osal_fd_spawn_tests PRIVATE vinc::osal Threads::Threads)
+    target_compile_options(osal_fd_spawn_tests PRIVATE -Wall -Wextra -Wpedantic)
+    foreach(case IN ITEMS matrix reuse exhaustion producers contention bindings late spawn-failure)
+        add_test(NAME osal.fd_spawn.${case} COMMAND osal_fd_spawn_tests ${case})
+        set_tests_properties(osal.fd_spawn.${case} PROPERTIES TIMEOUT 40)
+    endforeach()
     add_executable(osal_descriptor_tests descriptor_tests.cpp)
     target_link_libraries(osal_descriptor_tests PRIVATE vinc::osal)
     add_test(NAME osal.descriptor COMMAND osal_descriptor_tests)

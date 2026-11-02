@@ -142,6 +142,7 @@ public:
     vinc::Result<void> leave_multicast(IPv6Address group, std::uint32_t interface_index);
 
 private:
+    vinc::Result<Socket> accept_impl(bool try_only, vinc::Deadline, std::stop_token);
     friend class SocketPoller;
     explicit Socket(std::shared_ptr<detail::SocketState>);
     vinc::Result<void> set_option_value(detail::SocketOptionKey, int);

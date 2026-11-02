@@ -63,3 +63,23 @@ add_dependencies(consumer tcl_resources)
 enable_testing()
 add_test(NAME consumer COMMAND consumer)
 set_tests_properties(consumer PROPERTIES TIMEOUT 20)
+
+# Test the installed designated integration seam with independent static OSAL
+# copies. Hidden symbols keep a library's default owner local until explicit bind.
+find_package(Threads REQUIRED)
+foreach(image IN ITEMS a b)
+    add_library(coordinator_${image} MODULE coordinator/coordinator_plugin.cpp)
+    target_link_libraries(coordinator_${image} PRIVATE vinc::osal)
+    set_target_properties(coordinator_${image} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+endforeach()
+add_executable(coordinator_tests coordinator/coordinator_tests.cpp)
+target_link_libraries(coordinator_tests PRIVATE vinc::osal Threads::Threads)
+add_dependencies(coordinator_tests coordinator_a coordinator_b)
+add_test(NAME coordinator.standalone COMMAND coordinator_tests)
+foreach(mode IN ITEMS shared late)
+    add_test(NAME coordinator.${mode} COMMAND coordinator_tests
+        "$<TARGET_FILE:coordinator_a>" "$<TARGET_FILE:coordinator_b>" ${mode})
+endforeach()
+set_tests_properties(coordinator.standalone coordinator.shared coordinator.late
+    PROPERTIES TIMEOUT 20)

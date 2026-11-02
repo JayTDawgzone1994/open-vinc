@@ -61,6 +61,11 @@ namespace、ancillary data／fd 傳遞、原生 handle 匯入／匯出及 TLS �
 不改成等待資料；目前無法進行時回報 WouldBlock。一般收發借用 `std::span`，
 返回後 OSAL 不再保留 buffer，也不留下原生 overlapped I/O。
 
+POSIX 的 `try_accept()` 遇到資源建立協調器忙碌時也回報 WouldBlock，不等待取得鎖。
+`accept_until()` 在同一期限／取消契約內等待協調器，避免 listener 已可讀時反覆忙重試；
+`SocketPoller::create()` 的協調等待同樣受 setup deadline／token 限制。一般收發不取得此鎖。
+Windows 的 HANDLE 路徑不增加這層鎖；完整邊界見 [FD／spawn 契約](FD_SPAWN_PLAN.md#stage-2-implementation)。
+
 `*_until()` 在 WouldBlock 後等待就緒，再嘗試相同操作；需要等待才建立暫時 Poller。
 它們沒有背景工作或內部傳送佇列，但建立暫時 Poller 會配置資源。大量連線或頻繁收發
 應重用一個 `SocketPoller`，搭配 `try_*`，避免逐次建立等待資源。
