@@ -31,7 +31,9 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
          const std::filesystem::path& script, const std::filesystem::path& plugin, std::string mode) {
     auto manager = take(test::create_manager());
     auto output = take(manager->output_hub().subscribe());
-    const auto root = std::filesystem::temp_directory_path() / test::instance_name();
+    // macOS temp paths can contain symlink ancestors, which Log rejects.
+    // Resolve the existing temp root before appending this fixture's directory.
+    const auto root = std::filesystem::canonical(std::filesystem::temp_directory_path()) / test::instance_name();
     take(detail::ManagerAccess::configure_params(*manager, root));
     take(detail::ManagerAccess::configure_log(*manager, root));
     ModuleType native{"nativePeer", plugin, {}};

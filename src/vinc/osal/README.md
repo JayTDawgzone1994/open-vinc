@@ -802,7 +802,19 @@ preserve inherited descriptors; no fd-3-is-free assumption is introduced.
 驗證含真正的子程序、並行發送、無限等待取消、滿載合併、接收程序死亡與原生失敗回收。
 Windows 的 handle 計數先於 ProcessService 啟動，避免非同步回收干擾基準；
 POSIX 故障案例在隔離子程序執行，保留繼承 FD，不假設 fd 3 必須空閒。
-新增通知功能的 macOS 驗證待執行，沒有撤銷其他元件已有的 macOS 驗證結果。
+上述為 2026-10-28 的歷史範圍，macOS 後續結果見下方。
+
+**macOS follow-up (2026-11-02):** macOS 26.3.1(a) arm64, Apple Clang 21.0.0,
+Apple libc++ 21.1.6, SDK 26.5, Release: all **24/24 OSAL CTests passed**, including
+`osal.notification` and `osal.notification_native`. This covers receiver handoff,
+FIFO cancellation/coalescing, SIGPIPE policy, native failures and resource cleanup.
+No OSAL implementation was changed in this follow-up. Exact source, environment
+and logs are in the [Mac validation record](../module_system/python/README.md#macos-snapshot-repair-validation).
+The subsequent Bus/pump integration is described by [Pump wakeup](../module_system/PUMP_WAKEUP.md);
+the historical OSAL-only paragraphs above do not describe its current wiring.
+
+本次補齊 macOS Release 的 24 項 OSAL 功能驗證，包含兩項通知測試；沒有修改 OSAL
+實作或量測效能。上方「待驗證／尚未接線」是當時紀錄，後續整合及本次原生證據以上述連結為準。
 
 Reproduce after building the matching targets / 建置後執行：
 

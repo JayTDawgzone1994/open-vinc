@@ -108,7 +108,7 @@ kernel/resource failure. Neither backend promises wait-free execution of OS call
 | --- | --- | --- |
 | Windows | Named auto-reset Event; `SetEvent` / `WaitForSingleObject`. Private current-user DACL; non-inheritable handles. | `Local\ov_notify_<name>`, current Windows session. OS removes it after the last handle closes. |
 | Linux | FIFO with independent nonblocking read and keepalive-write descriptors; `poll` / bounded read. Thread-local SIGPIPE masking/draining preserves the previous mask, disposition, and existing pending signal. | `/tmp/ov-osal-notify-<effective-uid>/<name>`; owner unlinks. |
-| macOS | Same FIFO/readiness approach; per-descriptor `F_SETNOSIGPIPE`, without a process-global handler. | Same effective-user namespace; owner unlinks. Native validation of this new primitive is pending. |
+| macOS | Same FIFO/readiness approach; per-descriptor `F_SETNOSIGPIPE`, without a process-global handler. | Same effective-user namespace; owner unlinks. Native Release validation passed on 2026-11-02; see the OSAL validation record below. |
 
 POSIX creates the directory with mode `0700` and FIFO with `0600` (subject to the
 caller's umask). It rejects symlinks, foreign ownership and group/other access,
@@ -167,21 +167,22 @@ not require fd 3 to be unused. CTest bounds each executable to 45 seconds.
 FD fixture 不假設 fd 3 空閒，不會更動啟動測試者的限制或訊號設定。
 
 See the current run results in the [OSAL README](README.md#notification-validation).
-The new macOS notification backend has not been built/run on macOS in this round.
-This does not invalidate prior macOS validation of other OSAL facilities.
+The 2026-10-28 round did not run macOS. The 2026-11-02 native macOS Release
+follow-up passed both notification suites and the OSAL regression set; environment,
+source and evidence are maintained in that OSAL README record.
 
 ## Follow-up / 待辦
 
-- Run both new tests and OSAL regression tests on native macOS, especially FIFO
-  `F_SETNOSIGPIPE`, cancellation, resource exhaustion and namespace cleanup.
+- Native macOS Release notification/OSAL verification was completed on 2026-11-02.
+  Other architectures and older macOS releases remain outside that evidence.
 - OS-native failures such as Windows kernel allocation exhaustion and cancellation
   wake syscall failure have not been injected. Do not describe coverage as exhaustive.
 - Name cleanup is best effort during rollback; filesystem failures can leave a
   newly created FIFO. Owners must diagnose failed cleanup, not blindly reuse names.
-- Bus/ModuleHost/Context integration is a separate phase in the
-  [pump wakeup design](../module_system/PUMP_WAKEUP.md). No pump latency improvement
-  has been measured or claimed for this OSAL-only change.
+- Bus/ModuleHost/Context integration is implemented and maintained in the
+  [pump wakeup design](../module_system/PUMP_WAKEUP.md). Its functional and performance
+  evidence is separate from this primitive's tests.
 
-待補 macOS 新通知功能的原生驗證。未逐一注入 Windows 核心資源不足或取消喚醒 syscall
+macOS Release 原生驗證已補齊，範圍見 OSAL README。未逐一注入 Windows 核心資源不足或取消喚醒 syscall
 失敗，不宣稱完整故障覆蓋。檔案系統失敗可能讓回滾留下 FIFO，擁有者不可盲目重用名稱。
-Bus、ModuleHost 與 Context 尚未接線，這輪沒有宣稱已消除 pump 延遲。
+Bus、ModuleHost 與 Context 後續接線與驗證由 pump 文件維護；原語測試不證明 pump 延遲改善。
