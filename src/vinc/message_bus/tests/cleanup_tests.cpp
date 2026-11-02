@@ -13,6 +13,8 @@
 #include <limits>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
+#include <thread>
 
 namespace {
 using namespace vinc;
@@ -160,6 +162,51 @@ control::Bytes subscription(std::uint64_t id, const detail::Descriptor* source =
     }
 
     return body;
+}
+
+void test_notification_install_catchup() {
+    Connection connection;
+    const auto source = descriptor();
+    auto ring = take(detail::RingBuffer::create(source));
+    auto counter = take(detail::NamedCounter::create(source.counter));
+    const auto name = detail::shared_name('n');
+    auto receiver = take(osal::NotificationReceiver::create(name));
+    struct Cleanup {
+        const std::string& name;
+        ~Cleanup() {
+            (void)osal::NotificationReceiver::unlink_name(name);
+        }
+    } cleanup{name};
+    auto pending = std::async(std::launch::async, [&] {
+        return connection.client->advertise<Frame>("snapshot-catchup");
+    });
+    connection.reply(take(connection.central->receive_until(deadline())), advertisement(source));
+    auto publisher = take(pending.get());
+    auto local = make_message<Frame>();
+    local->data().sequence = 42;
+    ok(publisher.push(*local));
+    check(detail::shared_load(ring->header().head) == 1, "publication precedes route installation");
+
+    auto install = [&](bool enabled) {
+        control::Frame frame{control::Kind::Event, detail::message_bus_domain, detail::NotificationRoutesChanged};
+        control::put_u64(frame.payload, source.id);
+        control::put_u32(frame.payload, enabled ? 1 : 0);
+        if (enabled) {
+            control::put_u64(frame.payload, 2);
+            ok(control::put_string(frame.payload, name));
+        }
+        ok(detail::RuntimeAccess::receive(*connection.client, std::move(frame)));
+    };
+    install(true);
+    ok(receiver.wait_until(deadline()));
+    // Reusing a healthy sender must still catch up without a later publication.
+    install(true);
+    ok(receiver.wait_until(deadline()));
+    install(false);
+    ok(publisher.push(*local));
+    auto empty = receiver.wait_until(std::chrono::steady_clock::now());
+    check(!empty && empty.error().is(osal::ErrorCode::Timeout), "removed route must receive no new notification");
+    publisher.close();
 }
 
 void test_publication_notification_failure() {
@@ -846,6 +893,9 @@ Result<std::uint64_t> publication_timestamp() noexcept {
 }
 
 Result<void> notification_notify(osal::NotificationSender& sender, std::uint64_t owner) {
+    if (before_notification) {
+        before_notification();
+    }
     ++notification_calls;
     if (failed_notification_owner.load() == owner) {
         return std::unexpected(Error{osal::ErrorCode::SystemError, osal::ErrorOperation::Notify});
@@ -866,9 +916,16 @@ void pending_remaining(std::size_t count) noexcept {
 }
 }
 
-int main() {
+int main(int argc, char** argv) {
     const char* phase = "startup";
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "notification-snapshots") {
+            phase = "notification snapshot contracts";
+            vinc::message_bus::detail::testing::run_notification_snapshot_tests();
+            test_notification_install_catchup();
+            std::cout << "PASS: notification snapshot contracts\n";
+            return 0;
+        }
         phase = "test_publication_notification_failure()";
         test_publication_notification_failure();
         phase = "test_publication_times()";

@@ -82,9 +82,9 @@ Required semantics:
 
 必要語意：多通知者、單等待者；先到的通知可保留；允許合併與多餘喚醒；先消耗通知再檢查工作；通知不等待接收端處理；儲存與清理有界；避免共享旗標持有者死亡造成永久漏喚醒；資源生命週期必須明確。
 
-OSAL implements Windows named auto-reset Events and Linux/macOS named FIFOs with nonblocking writes and readiness waits. They supply the same hint semantics, not identical token counts. Native validation for this new primitive is currently Windows and WSL Linux; macOS is pending. Backend details and remaining limitations are owned by the OSAL document.
+OSAL implements Windows named auto-reset Events and Linux/macOS named FIFOs with nonblocking writes and readiness waits. They supply the same hint semantics, not identical token counts. The initial validation covered Windows and WSL Linux; native macOS Release verification was added on 2026-11-02. Backend details and remaining limitations are owned by the OSAL document.
 
-已實作 Windows 命名 auto-reset Event 與 Linux/macOS 非阻塞 FIFO；新通知功能目前驗證 Windows 與 WSL Linux，macOS 待驗。後端細節與限制以 OSAL 文件為準。
+已實作 Windows 命名 auto-reset Event 與 Linux/macOS 非阻塞 FIFO；初次驗證 Windows 與 WSL Linux，2026-11-02 補齊 macOS Release 原語驗證。後端細節與限制以 OSAL 文件為準。
 
 References: [Windows Events](https://learn.microsoft.com/en-us/windows/win32/sync/event-objects), [Linux Pipe/FIFO](https://man7.org/linux/man-pages/man7/pipe.7.html), [Apple mkfifo](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/mkfifo.2.html). These describe OS facilities; Open-VINC implementation evidence is recorded separately in the OSAL document.
 
@@ -243,14 +243,19 @@ Python、RPC、Param 及生命週期回歸證據。原語的等待前通知與�
 
 ### Outstanding validation / 待補驗證
 
-Native macOS validation of **this new notification integration** remains pending;
-earlier macOS component reports remain valid for their recorded scope. Native Linux
+Native macOS functional validation was added on 2026-11-02 after the
+[portable notification snapshot repair](../message_bus/README.md#macos-notification-snapshot-blocker).
+That record owns the mutex/lifetime contracts and snapshot tests; the
+[Mac integration record](python/README.md#macos-snapshot-repair-validation) owns
+the tested environment, Release scope and limited Debug coverage. Earlier
+platform reports remain valid only for their recorded revisions. Native Linux
 latency, pure idle CPU, very high-rate/topology-churn stress and maximum fan-out
 resource limits have not been established by these tests. Retaining the fallback
 means idle wake frequency is not promised to decrease. A native signal success is
 only a hint acceptance, never proof of callback progress or durable delivery.
 
-本輪新增通知整合尚待 macOS 實機驗證，既有 macOS 元件報告不受影響。原生 Linux 延遲、
+2026-11-02 已補通知快照修正及 macOS 功能驗證，範圍與限制見上述紀錄；不視為 Windows／Linux
+已重跑這份 mutex 實作。本次依使用者決定不跑 benchmark。原生 Linux 延遲、
 純閒置 CPU、高頻拓樸變動壓力與最大扇出資源極限仍待量測；保留補查不承諾降低閒置喚醒頻率。
 通知成功不等於 callback 已執行或資料可靠交付。
 

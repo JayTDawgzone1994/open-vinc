@@ -4,7 +4,6 @@
 #include <vinc/message_bus/error.hpp>
 #include <vinc/osal/notification.hpp>
 #include <vinc/time.hpp>
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -176,11 +175,29 @@ using NotificationDestinations = std::vector<std::shared_ptr<NotificationDestina
 
 // Publication holds a snapshot, so retiring a route cannot close an in-flight
 // sender. Only topology updates allocate; the normal signalling path does not.
-struct NotificationRoutes {
-    std::atomic<std::shared_ptr<const NotificationDestinations>> destinations;
+class NotificationRoutes {
+    // TODO: Switch back to std::atomic<std::shared_ptr<T>> once our supported libc++ versions implement it.
+    // Dear C++20, our C++23 project is still waiting for you. :')
+    mutable std::mutex snapshot_mutex_;
+    std::shared_ptr<const NotificationDestinations> destinations_;
+
+public:
+    std::shared_ptr<const NotificationDestinations> snapshot() const {
+        std::lock_guard lock(snapshot_mutex_);
+        return destinations_;
+    }
+
+    void replace(std::shared_ptr<const NotificationDestinations> next) {
+        {
+            std::lock_guard lock(snapshot_mutex_);
+            destinations_.swap(next);
+        }
+        // Release retired senders outside the snapshot lock: destruction can
+        // close native handles and acquire the diagnostics lock.
+    }
 
     void notify() const {
-        auto current = destinations.load();
+        auto current = snapshot();
         if (!current || current->empty()) {
             return;
         }

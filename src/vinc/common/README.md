@@ -105,7 +105,8 @@ must provide the matching runtime variant.
 
 此層只在建置時使用，不加入執行期 OSAL。元件用同一份來源與設定建立不同 CRT
 版本，物件及 archives 分開；未使用的靜態版本不加入預設建置。第三方上游不修改。
-Linux／macOS 暫保留原方式，不把 Windows 實驗當成跨平台驗證。
+Linux 保留原方式；macOS 維持系統動態 Runtime 的確認決策見下節。
+Windows 的驗證結果不代表其他平台已通過驗證。
 
 Windows source and installed-SDK Python bindings select these static archives and
 verify static metadata before import. Native C++ keeps dynamic CRT.
@@ -122,6 +123,45 @@ Windows 的 `common.runtime_policy` 測試實際編譯執行兩種 CRT、拒絕�
 版本／無效政策，並確認預設建置不產生靜態版本。啟用 `BUILD_TESTING` 後，可明確建置
 `vinc_check_python_runtime`，驗證真正 Module Runtime 的靜態連結、imports 與 bootstrap
 拒絕／catalog 路徑；這不是 Python 或完整服務行為驗收。實測範圍見 Python 文件。
+
+<a id="macos-system-runtime-decision"></a>
+
+### macOS system runtime decision / macOS 系統 Runtime 決策（2026-11-02）
+
+**Confirmed:** retain macOS's system dynamic C++ runtime for native programs,
+Plugins and the Python extension. Do not bundle a private libc++ or add static
+C++ runtime variants to address the Windows Python runtime conflict. This records
+the existing implementation; it does not change Linux policy. Static linking of
+VINC's own framework archives is separate from static linking of the C++ runtime.
+
+The Windows Python `/MT` policy addresses older MSVC runtime DLLs loaded by
+Python or another native package. The audited macOS extension instead imports
+`/usr/lib/libc++.1.dylib` and `/usr/lib/libSystem.B.dylib`, with no `LC_RPATH`;
+it does not select a private libc++ from the Python installation. That evidence
+does not establish the same conflict on macOS. Bundling another C++ runtime would
+add version, ABI and deployment maintenance without a demonstrated need.
+[Apple's C++ support documentation](https://developer.apple.com/xcode/cpp/)
+describes the OS-provided libc++ and OS requirements of library features.
+
+**已確認：** macOS 的原生程式、Plugin 與 Python 擴充維持系統動態 C++ Runtime，
+不為了 Windows 的 Python Runtime 衝突另帶私有 libc++ 或新增靜態 C++ Runtime 版本。
+這是確認現有實作，未改變 Linux 政策；VINC 自身框架庫的靜態連結與 C++ Runtime
+的靜態連結是兩件事。
+
+Windows 改用 `/MT` 是為了隔離 Python／其他原生套件先載入舊 MSVC Runtime DLL
+的問題。Mac 產物的相依稽核顯示使用上述系統函式庫，沒有 `LC_RPATH`，不從 Python
+安裝目錄選取私有 libc++。目前沒有同類衝突的證據，因此不增加自帶 Runtime 的
+版本、ABI 與部署維護成本。
+
+**Validation limits / 驗證界線：** this is not a guarantee for arbitrary Python
+distributions or third-party extensions. Older macOS releases and third-party
+package coexistence remain to be validated; the audited build declares macOS
+26.0 as its deployment minimum. Python ABI matching and the existing prohibition
+on arbitrary C++ object exchange across unrelated extensions still apply.
+See the [Python validation record](../module_system/python/README.md#macos-snapshot-repair-validation)
+and [extension ownership contract](../module_system/python/README.md#windows-msvc-runtime-載入前檢查).
+較舊 macOS 與第三方套件共存仍待驗證；本次產物最低部署版本為 26.0，不能宣稱
+已支援更舊系統或所有 Python 發行版。既有 Python ABI 與跨擴充物件所有權契約不變。
 
 <a id="shared-owner-identities"></a>
 

@@ -151,11 +151,38 @@ ctest --test-dir <build> --output-on-failure -R '^sdk\.(configuration|python_sel
 Installed runtime checks are `sdk.installed_python` and `sdk.multi_app` in an SDK
 producer configured with `BUILD_TESTING=ON` and the test-only
 `VINC_TEST_SDK_PYTHON_EXECUTABLE`. That variable selects the fixtures' Kconfig
-content; it is not an App setting. No native macOS, Debug rerun or manual
-GUI/curses visual acceptance is claimed here; macOS handoff is in root TODO.
+content; it is not an App setting. The Windows/WSL round above did not include
+native macOS, Debug reruns or manual GUI/curses visual acceptance. The subsequent
+macOS results are recorded below.
 
 安裝式測試的直譯器參數只用來產生測試 Kconfig，不是新的 App 設定入口。
-本輪不宣稱 macOS、Debug 重測或人工 GUI／curses 畫面驗收；macOS 已列入根目錄 TODO。
+上述 Windows／WSL 輪次未包含 macOS、Debug 重測或人工 GUI／curses 畫面驗收；
+後續 Mac 結果如下。
+
+### Native macOS selection acceptance (2026-11-02) / macOS 選擇驗收
+
+macOS arm64/Release, Apple Clang 21.0.0 and CPython 3.12.14:
+`sdk.configuration`, `sdk.python_selection` and `sdk.app_selection` passed
+**3/3**, including **20** parser/editor-save cases and **9** real CMake selection
+cases. These cover System/Custom selection, missing interpreters, obsolete CMake
+input rejection, conflicting real venvs and cached interpreter/ABI changes.
+The version-floor and missing-development diagnostics retain the test doubles
+described above; they do not claim actual old-interpreter execution.
+
+Both source and installed `multi_app.py` passed with System/Custom sharing one
+venv under a Chinese/space-containing path. Additional deployed-App probes passed
+**6/6**: each integration mode uses a different deployment PATH venv, rejects a
+PATH without Python, and succeeds with an explicit `--python` override. The clean
+Python-OFF SDK's downstream fixture also passed Custom's runtime default, wrong-ABI
+and missing-override isolation, custom messages and deployment cleanup. Exact
+environment, commands and limits are owned by the
+[SDK acceptance record](../../src/vinc/sdk/INSTALL.md#macos-clean-sdk-acceptance).
+
+設定相關 CTest **3/3**、來源／安裝式多 App 與部署直譯器探測 **6/6** 通過，
+已補齊根目錄 TODO 的 Mac Python 選擇驗收。System 使用部署當下的 PATH，
+Custom 使用設定的絕對路徑；兩種組裝均驗證中文／空白路徑的 venv。
+紀錄在 `build/macos-sdk-acceptance-20261102/selection.log`、`selection.xml`
+及上方 SDK 驗收所列證據。未宣稱 Debug、其他 Python minor 或人工 GUI／curses 驗收。
 
 <a id="stage-1-module-selection"></a>
 

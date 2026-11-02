@@ -1,13 +1,21 @@
 # Single executable application plan / 單一執行檔應用計畫
 
-Updated: 2026-10-30. **Implementation and Windows/WSL validation are complete;
-step 4 remains open only for native macOS validation.**
+2026-11-02 macOS follow-up: native Release App/Host and installed SDK/App
+functional results are now recorded in the
+[Mac validation record](../../src/vinc/module_system/python/README.md#macos-snapshot-repair-validation).
+The separate clean SDK-only/Python-disabled producer matrix has also passed;
+see [clean SDK acceptance](../../src/vinc/sdk/INSTALL.md#macos-clean-sdk-acceptance).
+Together these close the native macOS Release handoff. Historical results below
+retain their original platform/configuration scope.
+
+Updated: 2026-11-02. **Implementation and the recorded Windows/WSL/macOS
+functional acceptance are complete.**
 This document owns the entry contract and composition plan. The confirmed decisions
 below supersede conflicting descriptions of supported entry ownership. The current
 implementation includes role dispatch and removal of standalone production Host wiring.
 Follow [AGENTS.md](../../AGENTS.md) for subsequent implementation authorization and scope.
 
-更新日期：2026-10-30。**實作與 Windows／WSL 驗證已完成；第四步只剩 macOS 原生驗證。** 本文件維護入口契約與
+更新日期：2026-11-02。**實作與所列 Windows／WSL／macOS 功能驗收已完成；Mac 為 arm64 Release，非完整 Debug 矩陣。** 本文件維護入口契約與
 組裝計畫；下列最新決策優先於舊文件中衝突的入口支援描述。目前已實作角色分流並移除
 正式獨立 Host 接線；後續實作授權與範圍依 AGENTS.md。
 
@@ -20,8 +28,8 @@ Follow [AGENTS.md](../../AGENTS.md) for subsequent implementation authorization 
 - **Confirmed entry ownership:** the framework supplies the sole production App
   entry. User-provided/replacement central or Host mains are unsupported. Manager
   creation and launch-path wiring are framework responsibilities, not a user API choice.
-- **Implementation plan:** all implementation and local validation are complete;
-  step 4 awaits native macOS evidence. The former pending
+- **Implementation plan:** implementation and step 4's recorded platform acceptance
+  are complete, including native macOS Release. The former pending
   custom-main/Manager policy is resolved by the entry ownership contract.
 - **Current implementation:** App dispatches Host launches and supplies its own
   executable path to Manager. Production Host targets and SDK export/copy references
@@ -31,7 +39,7 @@ Follow [AGENTS.md](../../AGENTS.md) for subsequent implementation authorization 
 - **已確認縮限：** 不做舊部署遷移或相容層，以乾淨建置與全新部署目錄驗收。
 - **已確認入口所有權：** 正式 App 的唯一入口由框架提供，不支援使用者自訂／替換中央或
   Host main。Manager 建立與啟動路徑接線由框架負責，不是使用者的 API 選項。
-- **實作計畫：** 實作與本機驗證已完成，第四步待 macOS 原生證據；自訂 main／Manager 政策已由入口契約解決。
+- **實作計畫：** 實作與第四步所列平台驗收已完成，包含 macOS 原生 Release；自訂 main／Manager 政策已由入口契約解決。
 - **目前實作：** App 分流 Host 啟動並交付自身路徑給 Manager；正式 Host target 與 SDK
   匯出／複製引用已移除。隔離測試 Host 不安裝，驗證結果見下方。
 
@@ -186,11 +194,12 @@ This coupling does not establish a general requirement to keep every stage build
   artifact-inventory validation under [SDK](../../src/vinc/sdk/INSTALL.md), including
   SDK-only builds without tests or a producer App. Fix deployment gaps found there;
   no standalone Host binary or test fixture may be packaged.
-- [ ] **4. Regression and documentation / 回歸與文件:** run the matrix below;
+- [x] **4. Regression and documentation / 回歸與文件:** run the matrix below;
   update App, Module System, SDK, Instance and debugger documentation, including
   referring summaries/naming as necessary. Keep historical platform evidence.
-  Implementation, documentation and Windows/WSL checks are complete; native macOS
-  remains pending. 實作、文件及 Windows／WSL 檢查完成，尚待 macOS 原生驗證。
+  Implementation, documentation and the recorded Windows/WSL/macOS checks are
+  complete. Mac combines the prior Release regression with the clean SDK follow-up;
+  no full Mac Debug matrix is claimed. 實作、文件與所列驗收完成；Mac 未宣稱完整 Debug 矩陣。
 
 ## Acceptance matrix / 驗收項目
 
@@ -201,7 +210,7 @@ This coupling does not establish a general requirement to keep every stage build
 | Lifecycle / 生命週期 | Normal completion, crash, heartbeat failure, stop/restart, fatal reports and debug gate. 正常完成、崩潰、heartbeat 失效、啟停重啟、fatal 回報與除錯 gate。 |
 | Services / 服務 | Bus, RPC, Param, Log, and enabled Python/native mixed execution. 服務回歸及啟用 Python 時的混合運作。 |
 | Deployment / 部署 | Configured App names, spaces/non-ASCII paths, unrelated cwd, moved SDK/app, build/install outputs without standalone Host. 自訂檔名、空白與非 ASCII 路徑、不同 cwd、搬移 SDK／App，build／install 無正式 Host 檔案。 |
-| Platforms / 平台 | Windows Debug/Release and WSL Ubuntu 24.04; obtain native macOS evidence for the new path separately. Windows 雙組態與 WSL；macOS 新入口另取得原生證據。 |
+| Platforms / 平台 | Windows Debug/Release, WSL Ubuntu 24.04 and native macOS arm64 Release have the scoped evidence recorded here. Windows 雙組態、WSL 與 macOS arm64 Release 的分輪證據見本文與 SDK 驗收。 |
 
 ## Step 1 results (2026-10-30) / 第一步結果
 
@@ -449,7 +458,17 @@ Log、schema 增量生成、錯誤 Python ABI 隔離、資源修復及關閉功�
 仍由所選系統直譯器執行，App 不內嵌 Python；Windows 使用原有相容 CRT 的隔離 CPython，
 沒有修改系統 Python 安裝。
 
-### Remaining native macOS handoff / macOS 原生待驗證
+<a id="remaining-native-macos-handoff--macos-原生待驗證"></a>
+
+### Native macOS handoff / macOS 原生驗收交接
+
+**Completed on 2026-11-02 within the recorded Release scope:** the prior
+[Mac regression](../../src/vinc/module_system/python/README.md#macos-snapshot-repair-validation)
+and subsequent [clean SDK delivery](../../src/vinc/sdk/INSTALL.md#macos-clean-sdk-acceptance)
+cover this handoff. The following instructions preserve the original Windows
+workstation handoff; its pending/no-runner statements describe that historical round.
+下方保留當時 Windows 工作站的交接內容；Mac 已依上述兩輪證據完成 Release 驗收，
+不把當時的「無 runner／待驗證」當作目前狀態。
 
 This Windows workstation provides WSL, not a native macOS runner. Preserve the
 historical macOS reports; they do not validate this new entry path. On the same

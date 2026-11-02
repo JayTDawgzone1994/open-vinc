@@ -13,7 +13,7 @@
 [App README](apps/vinc/README.md#app-composition-unification--app-組裝統一)。
 本輪未重跑 Debug 或 WSL installed SDK 全套，macOS 需另行原生驗證，不以其他平台結果替代。
 
-## App／SDK：單一執行檔的 macOS 原生驗證
+## Python 建置整理：後續變更的 macOS 原生驗證
 
 - [ ] 補驗 Python Publisher 身分回歸：`module.python_services` 的同號／異號、錯誤身分、
   callback 故障隔離與收尾。Windows／WSL 六個情境已通過；見
@@ -27,41 +27,9 @@
   `module.python_shell`，涵蓋不可執行檔、失效連結、空 PATH、明確相對目錄、venv
   與選定後失敗不得回退。參考 [本輪紀錄](src/vinc/module_system/python/README.md#system-python-path-consistency)。
 
-- [ ] 補驗 Kconfig Module Python 選擇：System 的部署 PATH／venv、Custom 絕對路徑、
-  `--python` 覆寫、來源與 installed SDK、多 App 一致性、缺少 Python／ABI 不符的 Module
-  失敗隔離，以及切換環境的快取拒絕。使用同一 topic 內容執行 `sdk.configuration`、
-  `sdk.python_selection`、Python Module 與安裝式／多 App 測試；Windows／WSL 證據不代替
-  macOS。契約與本輪結果見 [設定工具](tools/configure/README.md#module-python-selection--module-python-選擇)。
-
-- [ ] 在 macOS 使用同一份來源版本，驗證中央與原生 Module Host 共用 App 執行檔的完整流程。
-
-**狀態（2026-10-31）：實作與 Windows Debug／Release、WSL Ubuntu 24.04 驗證已完成；
-本次改動仍缺 macOS 原生證據。** 既有 Mac 驗證紀錄保留，但不能代替這次新入口的驗證。
-需涵蓋角色分流、錯誤啟動／token 拒絕、生命週期與故障隔離、debug gate、服務回歸，
-以及乾淨 SDK 安裝、搬移部署、產物清單與 Python／C++ 混合執行；記錄 OS、CPU 架構、
-工具鏈、組態及實際結果。詳細契約、測試指令與既有結果統一維護於
-[單一執行檔計畫：macOS 交接](apps/vinc/SINGLE_EXECUTABLE.md#remaining-native-macos-handoff--macos-原生待驗證)。
-
-## Python／SDK：Runtime 建置政策的 macOS 原生驗證
-
-- [ ] 由專案擁有者在 macOS 驗證本輪 Runtime 政策與 installed SDK 改動。
-
-**狀態（2026-11-02）：Windows 來源版與 installed SDK 的靜態 CRT 接線已實作並驗證；
-macOS 本輪尚未驗證，使用者安排後續驗收。** macOS 保留系統 Runtime，不套用 Windows
-`/MT`，也不要求重現 Windows DLL 情境。此項與上方單一執行檔驗證分開追蹤。
-
-驗收範圍：
-
-- 來源版 Python 綁定與原生 C++ 回歸，確認 CMake 政策未引入 Windows 專用旗標或庫。
-- SDK 製作者關閉 Python，安裝及搬移 SDK 後，使用端再啟用 Python、加入自訂訊息。
-- 搬移 App 並避開來源／建置路徑，驗證 Python 與 C++ Module 的 Bus／RPC／Param、
-  正常退出，以及 ABI 拒絕、生成檔更新、部署補檔與停用清理。
-- 檢查擴充的動態相依與載入路徑；記錄同一 topic commit、macOS 版本、CPU 架構、
-  編譯器／標準庫、Python、CMake、組態與實際測試結果，不推論未測架構亦通過。
-
-契約與結果統一維護於 [Python Runtime 政策](src/vinc/module_system/python/README.md#runtime-policy-rollout)
-及 [SDK 整合驗收紀錄](src/vinc/sdk/INSTALL.md#runtime-final-acceptance)。既有 macOS
-測試結果仍有效於其原範圍，但不能代替本輪建置與交付變更的驗證。
+先前單一執行檔、Kconfig 選擇與 Runtime／SDK 的 Mac 驗收已完成，見
+[原生驗證紀錄](src/vinc/module_system/python/README.md#macos-snapshot-repair-validation)。
+上列僅追蹤本地後續搜尋規則、ABI 探測與測試修正，不重新開啟已完成的舊驗收。
 
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 
