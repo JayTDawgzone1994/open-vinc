@@ -7,9 +7,10 @@ which advances wire/Plugin versions and has its own acceptance stages.
 ## Status / 狀態
 
 Stages 1–4 are implemented and validated on Windows/WSL, including clean installed-SDK
-acceptance. Native macOS acceptance remains pending.
-第一至四階段已實作並通過 Windows／WSL 驗收，包含乾淨 installed SDK 整合；
-Mac 原生驗收待補。四階段均已取得使用者開工授權。
+acceptance. Subsequent native Mac source and Debug/Release clean-SDK acceptance,
+including the later restart-hint ABI, are recorded in the [Mac report](../sdk/MACOS_PARAM_VALIDATION.md).
+第一至四階段已實作並通過 Windows／WSL 驗收；後續 Mac 來源及兩組乾淨 SDK 已完成，
+包含後來的重啟標記 ABI，範圍見上述報告。四階段均已取得使用者開工授權。
 
 The confirmed behavior is now maintained in the [Param README](README.md).
 This file records scope, decisions and completion evidence; it does not maintain a
@@ -48,7 +49,7 @@ UI/Bus/Log setting wiring, and global App startup reordering. These remain separ
 | 1. Permissions and identity / 權限與身分 | Limited/Public、中央授權、Session/MID 檢查、協定相容性 | [Stage 1](README.md#param-redesign-stage-one): Windows／WSL 通過 |
 | 2. Current reads / 啟動讀取 | C++ read_current、Host 並行使用權、Python binding；快取語意不變 | [Stage 2](README.md#param-redesign-stage-two): Windows／WSL 通過 |
 | 3. Startup and persistence / 啟動與保存 | C++／Python 範例、固定 default／args／live／saved 分離、修正流程、佇列滿測試 | [Stage 3](README.md#param-redesign-stage-three): Windows／WSL 通過 |
-| 4. SDK integration / SDK 整合 | 乾淨 SDK、搬移後 C++／Python 消費端、文件收斂與 Mac 清單 | [Stage 4](README.md#param-redesign-stage-four): Windows／WSL 各三套通過；Mac 待驗 |
+| 4. SDK integration / SDK 整合 | 乾淨 SDK、搬移後 C++／Python 消費端、文件收斂與 Mac 清單 | [Stage 4](README.md#param-redesign-stage-four): Windows／WSL 各三套通過；後續 [Mac Debug／Release 各三套通過](../sdk/MACOS_PARAM_VALIDATION.md) |
 
 Stage boundaries are work/validation boundaries, not a requirement that every intermediate
 commit be independently deliverable. Stages 2–3 did not add another wire/Plugin layout change;
@@ -56,10 +57,12 @@ central persistence/queue algorithms were retained and tested rather than rewrit
 階段是工作／驗收邊界，不要求每個中間 commit 可獨立交付。第二至三階段沒有再改
 wire／Plugin 布局；中央保存與佇列演算法保留，以行為測試確認契約。
 
-## Remaining acceptance / 剩餘驗收
+## Acceptance follow-up / 後續驗收
 
-Native macOS must validate the same topic commit. Follow the source, example and clean SDK
-checklist in the [stage 4 record](README.md#param-redesign-stage-four), also indexed by
-[root TODO](../../../TODO.md). Existing Mac baselines are retained but do not certify this change.
-Mac 必須對同一 topic commit 做原生驗收；步驟與紀錄統一維護於上述連結，根目錄 TODO
-保留入口。既有 Mac 基線不撤銷，也不拿來代替本次重設計驗收。
+The original Mac checklist was completed by source regression and fresh Debug/Release installed
+SDK acceptance. The [Mac report](../sdk/MACOS_PARAM_VALIDATION.md) owns scope and evidence.
+Earlier platform baselines remain valid for their recorded revisions; this does not claim another
+full-project run or authorize the excluded system-setting migration.
+
+原 Mac 清單已有來源回歸及兩組乾淨 SDK 證據，方法與限制統一由上述報告維護。
+根目錄 TODO 不再保留此已完成項目；未擴張為本輪重跑全套或系統設定搬移的授權。

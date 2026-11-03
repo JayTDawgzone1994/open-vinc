@@ -217,6 +217,10 @@ macOS、Debug、安裝式 SDK 全套與 OCR 未於本輪重跑，不以上述結
 
 ### Installed SDK applications / 安裝式 SDK 應用
 
+最新 Param／重啟標記的 [macOS Debug／Release 乾淨 SDK 驗收](../../sdk/MACOS_PARAM_VALIDATION.md)
+已完成，包含未建置 binding 的 producer、搬移後 Python binding、Param current reads／權限／標記、
+Shell 提醒與錯誤 Python 隔離；兩種組態仍使用系統 C++ runtime。
+
 An installed SDK always carries `share/vinc/python`: adapter sources/internal
 headers, Python package, build helper and pinned pybind11 headers/CMake tools.
 The producer need not build bindings or have Python development files. These

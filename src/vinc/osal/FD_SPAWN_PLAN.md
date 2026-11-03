@@ -196,18 +196,18 @@ not be independently releasable; do not label partial integration as the complet
 - [x] Stage 1: coordinator and Host/Plugin integration implemented; Windows/WSL evidence below.
 - [x] Stage 2: POSIX acquisition/spawn implementation and Windows/WSL/macOS FD validation; independent Mac exit-observation failures remain recorded.
 - [x] Stage 3: macOS exit-repair checks and the two integration-test follow-ups completed. Native exit checks passed 6,624/6,624; original full integration is Debug 151/153 and Release 152/153. The Plugin test repair now has controlled ordering/cleanup coverage and native Mac validation; the subsequent Debug/Release full suites each pass 153/154. The example fixture was then repaired and passed focused Mac Debug/Release CTest (1/1 each); the full suite was not rerun after that final script-only change. See the [Mac report](MACOS_EXIT_VALIDATION.md) and [Module investigation](../module_system/MACOS_PLUGIN_CLASSIFICATION.md). Historical failures remain recorded; Windows/Linux validation remains separate.
-- [ ] Stage 4: final three-platform repair acceptance. Earlier source/SDK runs are recorded, but Windows/Linux must rerun the subsequent exit repair, and the retained Mac integration failures need resolution.
+- [ ] Stage 4: final three-platform repair acceptance. Windows/Linux must rerun the subsequent exit repair and revised Plugin/example tests. The Mac integration-test gaps were resolved in separate follow-ups; original full-suite failures remain historical evidence, not open Mac defects. See the [current acceptance status](MACOS_EXIT_VALIDATION.md#current-acceptance-status).
 - [x] Stage 4 Windows/WSL: Debug/Release source and installed-SDK acceptance recorded below.
 - [x] Stage 4 macOS: native `a19c0d4` Debug/Release integration passed; see the separate exit-stress failures in the Mac report.
 
-**Owner deferral (2026-11-02):** Skip native macOS work for now: both the new
+**Historical owner deferral (2026-11-02; superseded by the Mac authorization below):** Skip native macOS work for that round: both the new
 stage 2 repair acceptance and stage 3 exit-observation investigation remain open
 in the [root TODO](../../../TODO.md#osal-macos-標準串流與退出觀察). Existing Mac
 baseline evidence remains valid; this is not a resolution or a passing acceptance.
 Resume Debug/Release verification on the same topic branch and commit as the
 other platforms. The deferral itself did not authorize stage 4.
 
-**使用者決定暫緩（2026-11-02）：** 本輪跳過 Mac 原生工作，第二階段修復驗收及
+**歷史暫緩決定（2026-11-02；已由下方後續授權取代）：** 當輪跳過 Mac 原生工作，第二階段修復驗收及
 第三階段退出觀察調查保留待辦；既有 Mac 重現證據仍有效，不標記完成。
 
 **Stage 4 authorized on 2026-11-03:** run Windows/WSL Debug and Release source

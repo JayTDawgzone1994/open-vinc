@@ -2,18 +2,6 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
-## Param 重設計與重啟標記：macOS 乾淨 SDK 驗收
-
-- [ ] 使用整合後同一 commit，製作新版 Plugin entry 13／Param wire v3 的乾淨 SDK producer，重跑 installed consumer／application／python 三套驗收。
-
-發布前整合 develop `f16da98` 後，Mac Debug／Release 已重建全部來源 targets，
-包含 Param 三套、Plugin／Python、Shell 與新版範例的來源回歸各 **96/96** 通過。
-來源檢查不取代乾淨 installed SDK 驗收；先前 SDK 基線早於此 ABI 變更。
-本次來源結果見 [發布前驗證](src/vinc/osal/MACOS_EXIT_VALIDATION.md#publication-validation)，
-乾淨 SDK 步驟及既有 Windows／WSL 證據見
-[Param restart hints](src/vinc/param/README.md#restart-hints-stage-three)與
-[Param 第四階段紀錄](src/vinc/param/README.md#param-redesign-stage-four)。
-
 <a id="osalposix-fd-建立與-spawn-的並行競爭窗口"></a>
 <a id="osal-macos-標準串流與退出觀察"></a>
 <a id="osal-macos-退出事件後的回收進度"></a>

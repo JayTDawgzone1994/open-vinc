@@ -539,7 +539,7 @@ Windows 另測試退出碼 259；POSIX 檢查子程序已被回收。
 | [Linux](../../../README.md#linux-validation) | Ubuntu 24.04 / WSL 2 standalone OSAL Debug; descriptor/Process/SharedMemory/FileLock **4/4**, descriptor repeat **20/20**, five negative controls / 獨立 OSAL Debug、四套通過、重跑與負向對照通過 |
 | [macOS](../../../README.md#macos-validation) | Full Debug build; initial full-project validation and follow-up OSAL/OutputHub **24/24** / 完整 Debug 建置、初次全專案驗證與後續 **24/24** |
 
-The linked reports own environment versions, source revisions, logs, and coverage limits. The dated records below preserve individual changes' validation history; they do not replace this current summary. The [FD/spawn repair plan](FD_SPAWN_PLAN.md#stage-2-implementation) owns the latest repair evidence and remaining native macOS acceptance; real native failure injection remains a separate concern.
+The linked reports own environment versions, source revisions, logs, and coverage limits. The dated records below preserve individual changes' validation history; they do not replace this current summary. The [FD/spawn repair plan](FD_SPAWN_PLAN.md#stage-2-implementation) indexes the repair evidence and remaining Windows/Linux acceptance of the subsequent exit repair; completed Mac checks and historical failures are separated in the [Mac report](MACOS_EXIT_VALIDATION.md#current-acceptance-status). Real native failure injection remains a separate concern.
 
 環境版本、原始碼版本、log 與覆蓋限制以連結的報告為準。以下日期紀錄保留各次修改的歷史驗證，不代表目前平台總狀態；真實原生故障注入與暫緩的建立／spawn 競爭問題仍分別追蹤。
 

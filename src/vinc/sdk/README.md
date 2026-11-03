@@ -2,6 +2,10 @@
 
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
+新版 Param／重啟標記的 [macOS 乾淨 SDK 驗收](MACOS_PARAM_VALIDATION.md) 已於
+`9f0ec0b` 完成：全新 Debug／Release producer 及 installed consumer／application／python
+各 3/3 通過。來源、舊版 SDK 和原始整合失敗保留各自紀錄，不混成一次完整驗收。
+
 The [2026-11-03 Mac exit-repair report](../osal/MACOS_EXIT_VALIDATION.md) records
 Debug/Release App, Python and SDK verification, including the separate clean
 producer handoff and retained original integration failures. It does not establish

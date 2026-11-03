@@ -10,11 +10,10 @@
 唯一失敗為 `examples.user_module` 的暫存部署漏複製資源。
 同一份執行檔在外部副本補齊資源後，Debug／Release 的範例皆通過；
 此對照不能計成原始 CTest 的 126/126；該測試版本尚未套用 repository 修正。
-後續 Param 第三階段已補齊正式 fixture，Windows／WSL 通過；新版 Mac 回歸仍待執行，
-見 [Param 驗收清單](../param/README.md#param-redesign-stage-four)。本報告原始結果不變。
-後續 RegisterOptions／重啟標記（Plugin entry 13、Param wire v3）須另跑
-[新版來源、八次生命週期範例與乾淨 SDK 清單](../param/README.md#restart-hints-stage-three)，
-目前 Mac 待驗；下表不是新版標記的驗收證據。
+後續正式 fixture 與新版 Param／重啟標記（Plugin entry 13、Param wire v3）已有 Mac
+[來源回歸](../osal/MACOS_EXIT_VALIDATION.md#publication-validation)及
+[Debug／Release 乾淨 SDK 驗收](MACOS_PARAM_VALIDATION.md)。
+本報告保留舊版本原始結果；下表不改記為新版標記或後續修復的驗收證據。
 
 | 驗證 | Debug | Release |
 | --- | --- | --- |

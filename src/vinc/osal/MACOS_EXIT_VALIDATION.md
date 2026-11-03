@@ -263,7 +263,8 @@ ctest --test-dir <build> --output-on-failure --output-junit <result.xml> --paral
 環境同本文所列 macOS arm64／Apple Clang 21／CPython 3.12.14，既有編譯警告仍保留。
 
 這是整合後來源回歸，沒有重跑全部 CTest、6,624 案原生批次或乾淨 installed SDK。
-新版 Param 的乾淨 SDK consumer／application／python 矩陣仍待另輪驗證；
+該輪尚未執行的新版 Param 乾淨 SDK consumer／application／python 矩陣，已由
+[後續獨立 Debug／Release 驗收](../sdk/MACOS_PARAM_VALIDATION.md)補齊；此處不增記為當輪執行。
 Windows／Linux 仍須驗證本 PR 的退出修復與測試修訂，沒有 benchmark。
 原始輸出、命令、JUnit 與來源 hash 保存於 Git 外
 `/private/tmp/open-vinc-publication-20261103`；封存包位於
