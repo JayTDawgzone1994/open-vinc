@@ -2,6 +2,7 @@
 #include "message_examples.hpp"
 
 #include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <iostream>
 #include <optional>
@@ -11,6 +12,12 @@ using Message = vinc::UserExampleFrame;
 constexpr std::uint32_t example_slots = 8;
 constexpr std::uint64_t message_limit_bytes = 64 * 1024;
 constexpr double initial_gain = 1.0;
+constexpr double minimum_gain = 0.0;
+constexpr double maximum_gain = 10.0;
+
+bool valid_gain(double value) {
+    return std::isfinite(value) && value >= minimum_gain && value <= maximum_gain;
+}
 
 // Application diagnostics deliberately use raw stderr if the structured log failed.
 void report(const vinc::Error& error) {
@@ -49,18 +56,25 @@ public:
             args.erase(args.begin());
         }
 
-        if (!args.empty()) {
-            if (args.size() != 2 || args[0] != "--topic") {
-                return std::unexpected(vinc::Error{vinc::module_system::ErrorCode::InvalidArgument,
-                                                   vinc::module_system::ErrorOperation::StartHook});
-            }
-
-            topic_ = args[1];
+        std::optional<double> startup_gain;
+        auto parsed = parse_start_args(args, startup_gain);
+        if (!parsed) {
+            return parsed;
         }
 
         auto params = register_parameters();
         if (!params) {
             return start_failure(params.error());
+        }
+
+        auto configured = initialize_gain(startup_gain);
+        if (!configured) {
+            return start_failure(configured.error());
+        }
+
+        auto label = initialize_label();
+        if (!label) {
+            return start_failure(label.error());
         }
 
         auto publisher = open_publisher();
@@ -108,6 +122,7 @@ public:
 private:
     std::string topic_ = "userExample/frames";
     double gain_ = initial_gain;
+    std::string startup_label_;
     std::optional<vinc::message_bus::Publisher<Message>> publisher_;
     std::optional<vinc::message_bus::Subscriber<Message>> subscriber_;
     std::optional<vinc::message_bus::Subscriber<Message>> latest_;
@@ -118,14 +133,92 @@ private:
                                                vinc::module_system::ErrorOperation::StartHook, cause));
     }
 
+    vinc::Result<void> parse_start_args(const std::vector<std::string>& args,
+                                       std::optional<double>& startup_gain) {
+        bool has_topic = false;
+        for (std::size_t index = 0; index < args.size(); index += 2) {
+            if (index + 1 == args.size()) {
+                return invalid_command();
+            }
+
+            if (args[index] == "--topic" && !has_topic) {
+                topic_ = args[index + 1];
+                has_topic = true;
+            } else if (args[index] == "--gain" && !startup_gain) {
+                auto value = vinc::param::parse_value(vinc::param::Type::Double, args[index + 1]);
+                if (!value) {
+                    return std::unexpected(value.error());
+                }
+
+                const auto gain = std::get<double>(*value);
+                if (!valid_gain(gain)) {
+                    return invalid_command();
+                }
+
+                startup_gain = gain;
+            } else {
+                return invalid_command();
+            }
+        }
+        return {};
+    }
+
+    vinc::Result<void> apply_gain(double value) {
+        if (!valid_gain(value)) {
+            // Business validation belongs to the Module, not Param's type checker.
+            // This ordinary write may overwrite a concurrent edit; it never saves.
+            std::cerr << "CORRECT " << get_module_name() << " gain=" << value
+                      << " outside finite [0, 10]; restoring " << initial_gain << '\n';
+            auto corrected = context.param.set<double>("gain", initial_gain);
+            if (!corrected) {
+                return corrected; // Keep the last effective value if correction fails.
+            }
+
+            value = initial_gain;
+        }
+        gain_ = value;
+        return {};
+    }
+
+    vinc::Result<void> initialize_gain(std::optional<double> startup_gain) {
+        auto current = context.param.read_current("gain");
+        if (!current) {
+            return std::unexpected(current.error());
+        }
+
+        auto value = current->get<double>();
+        if (!value) {
+            return std::unexpected(value.error());
+        }
+
+        if (startup_gain) {
+            auto changed = context.param.set<double>("gain", *startup_gain);
+            if (!changed) {
+                return changed;
+            }
+
+            *value = *startup_gain;
+        }
+        auto applied = apply_gain(*value);
+        if (!applied) {
+            return applied;
+        }
+
+        // Initialize resources only after validation. No pump or implicit save is needed.
+        std::cout << "INITIAL " << get_module_name() << " gain=" << gain_
+                  << " default=" << std::get<double>(current->default_value) << '\n';
+        return {};
+    }
+
     vinc::Result<void> register_parameters() {
-        auto gain = context.param.register_param<double>("gain", initial_gain, vinc::param::Permission::Open);
+        auto gain = context.param.register_param<double>("gain", initial_gain, {.permission = vinc::param::Permission::Public});
         if (!gain) {
             return gain;
         }
 
-        // Omitted permission means only the central framework can modify it.
-        auto label = context.param.register_param<std::string>("label", "example");
+        // Limited parameters accept writes from this Module and central only.
+        auto label = context.param.register_param<std::string>(
+            "label", "example", {.restart_hint = vinc::param::RestartHint::Module});
         if (!label) {
             return label;
         }
@@ -142,11 +235,17 @@ private:
 
         return context.param.on_change([this](const vinc::param::ParamMap& values) {
             // The reference is valid only during this callback. Copy values to retain them.
+            // label may change in this snapshot, but startup_label_ is applied only at startup.
             auto found = values.find(get_module_name() + ".gain");
             if (found != values.end()) {
                 auto gain = found->second.get<double>();
                 if (gain) {
-                    gain_ = *gain;
+                    auto applied = apply_gain(*gain);
+                    if (!applied) {
+                        report(applied.error());
+                        return;
+                    }
+
                     std::cout << "PARAM " << get_module_name() << " gain=" << gain_
                               << " version=" << found->second.version << '\n';
                 } else {
@@ -159,6 +258,23 @@ private:
                 std::cout << "WATCH peer.gain missing\n";
             }
         });
+    }
+
+    // The hint does not enforce application timing; this Module chooses to read
+    // label once. A restart re-reads central state without implicitly saving it.
+    vinc::Result<void> initialize_label() {
+        auto current = context.param.read_current("label");
+        if (!current) {
+            return std::unexpected(current.error());
+        }
+
+        auto label = current->get<std::string>();
+        if (!label) {
+            return std::unexpected(label.error());
+        }
+
+        startup_label_ = std::move(*label);
+        return {};
     }
 
     vinc::Result<void> open_publisher() {
@@ -294,7 +410,8 @@ private:
 
         if (command == "status") {
             std::cout << "STATUS " << get_module_name() << " mid=" << get_mid()
-                      << " living=" << context.living() << " gain=" << gain_ << '\n';
+                      << " living=" << context.living() << " gain=" << gain_
+                      << " startup_label=" << startup_label_ << '\n';
             if (publisher_) {
                 auto stats = publisher_->stats();
                 std::cout << "PUB published=" << stats.published << " slots=" << stats.effective_slots

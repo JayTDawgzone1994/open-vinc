@@ -2,11 +2,12 @@
 
 App dispatches both roles and launches itself; standalone Host export/copy wiring
 is removed. Clean SDK-only and relocated C++ App validation passed on Windows/WSL;
-the final Windows/WSL integration regressions also passed. Native macOS remains
-tracked in the
-[single executable application plan](../../../apps/vinc/SINGLE_EXECUTABLE.md).
+the final Windows/WSL integration regressions also passed. The subsequent native
+macOS baseline is recorded in [MACOS_VALIDATION.md](MACOS_VALIDATION.md).
+The newer Param restart hints have their own [acceptance and Mac checklist](../param/README.md#restart-hints-stage-three).
 App 已自行分流／啟動自己，獨立 Host 匯出與複製接線已移除；乾淨 SDK-only 與搬移 C++ App
-及最終整合回歸已通過 Windows／WSL 驗證，剩餘 macOS 原生範圍見上述計畫。
+及最終整合回歸已通過 Windows／WSL 驗證，後續 Mac 原生基線見上述報告。
+本次較新的 Param 變更另依其驗收紀錄／Mac 清單驗證，不能套用舊基線直接認證。
 
 This package reuses prebuilt framework libraries through
 `find_package(vinc CONFIG REQUIRED)`. Source `add_subdirectory()` remains supported.
@@ -1001,13 +1002,13 @@ Recorder 寫入該型別，UI 經本機 session 驗證後由 HTTP 回傳解碼�
 部署檔名衝突會在寫入目的地前拒絕。
 
 Evidence is under ignored `build/sdk-stage2-*.log`. The tests exercise HTTP, not
-an interactive browser session. Native macOS validation of this packaging path
-and `osal::executable_path()` remains pending; earlier macOS framework evidence is
-unchanged. At this historical stage, low-level Manager source defaults and installed
+an interactive browser session. At that stage, native macOS validation of this packaging
+path and `osal::executable_path()` was pending; subsequent evidence is in
+[MACOS_VALIDATION.md](MACOS_VALIDATION.md). At this historical stage, low-level Manager source defaults and installed
 Python were still limited; the current composition section and Python README describe
 their subsequent updates. SDK artifacts were not published as a Release in this stage.
 
 本機證據為 Git 忽略的 `build/sdk-stage2-*.log`。UI 本輪驗證 HTTP，未操作互動瀏覽器。
-本次套件及 `osal::executable_path()` 的 macOS 原生驗證待補，不撤銷先前框架的 macOS 證據。
+該歷史輪次的套件及 `osal::executable_path()` 尚待 Mac 原生驗證；後續證據見上述 Mac 報告。
 該歷史輪次仍有底層 Manager source 預設與安裝式 Python 的限制；後續更新見目前組裝段落
 及 Python README。本輪次沒有發布 SDK Release 產物。

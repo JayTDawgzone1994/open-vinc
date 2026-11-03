@@ -9,6 +9,12 @@ if {[catch {
         after 20
     }
     native status
+    param get native.fixed
+    param get py.gain
+    param list
+    # Same-value commits still report declared metadata, without restarting peers.
+    param set native.fixed 7
+    param set py.gain 8
     puts "INSTALLED_PYTHON_OK"
 } diagnostic]} {
     puts "INSTALLED_PYTHON_FAILED: $diagnostic"

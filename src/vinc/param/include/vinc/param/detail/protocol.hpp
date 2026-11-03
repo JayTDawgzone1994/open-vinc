@@ -4,9 +4,10 @@
 
 namespace vinc::param::detail {
 inline constexpr std::uint16_t domain = 4;
-inline constexpr std::uint32_t version = 1;
-// Largest request: version, name length, value type/length, permission and two bounded strings.
-inline constexpr std::size_t request_max_bytes = 5 * 4 + config::param_name_bytes + config::param_string_bytes;
+// Version 3 adds restart hints to registrations and shared snapshots.
+inline constexpr std::uint32_t version = 3;
+// Largest request: version, name length, value type/length, permission, restart hint and two bounded strings.
+inline constexpr std::size_t request_max_bytes = 6 * 4 + config::param_name_bytes + config::param_string_bytes;
 
 enum Operation : std::uint16_t {
     Attach = 0x0101,

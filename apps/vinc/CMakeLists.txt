@@ -54,7 +54,8 @@ if(VINC_APP_PYTHON)
             add_test(NAME examples.user_module COMMAND "${python_example_executable}"
                 "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/tests/smoke.py"
                 "$<TARGET_FILE:Vinc>" "${VINC_REPOSITORY_ROOT}/examples/userExampleModule")
-            set_tests_properties(examples.user_module PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
+            # The fixture restarts the central to verify saved/live Param separation.
+            set_tests_properties(examples.user_module PROPERTIES TIMEOUT 240 RUN_SERIAL TRUE)
         endif()
     endif()
     if(BUILD_TESTING)

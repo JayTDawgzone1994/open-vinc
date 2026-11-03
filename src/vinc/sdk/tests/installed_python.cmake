@@ -78,9 +78,24 @@ function(verify_app root revision extra)
             OR NOT output MATCHES "INSTALLED_PYTHON_OK"
             OR NOT output MATCHES "NATIVE_ALIVE"
             OR NOT output MATCHES "NATIVE_SELF_HOST_OK"
+            OR NOT output MATCHES "NATIVE_PARAM_CURRENT_OK"
+            OR NOT output MATCHES "PYTHON_PARAM_CURRENT_OK"
+            OR NOT output MATCHES "NATIVE_PARAM_RESTART_OK"
+            OR NOT output MATCHES "PYTHON_PARAM_RESTART_OK"
             OR NOT output MATCHES "All module processes exited")
         message(FATAL_ERROR "Installed Python flow failed: ${output}\n${errors}")
     endif()
+    foreach(expected
+            "[restart: Module 'native']"
+            "[restart: App]"
+            "Restart hint: Module 'native' must be restarted to apply this parameter."
+            "Restart hint: App must be restarted to apply this parameter."
+            "Use 'param save' before restarting the App to keep this change.")
+        string(FIND "${output}" "${expected}" position)
+        if(position EQUAL -1)
+            message(FATAL_ERROR "Installed Shell omitted '${expected}': ${output}\n${errors}")
+        endif()
+    endforeach()
     string(REGEX MATCHALL "PID=[0-9]+" pids "${output}")
     list(REMOVE_DUPLICATES pids)
     list(LENGTH pids process_count)

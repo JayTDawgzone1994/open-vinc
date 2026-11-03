@@ -115,7 +115,7 @@ Result<control::Bytes> ModuleParams::request(std::uint16_t operation, control::B
 }
 
 Result<void> ModuleParams::register_value(std::string name, param::Value defaults,
-                                          param::Permission permission) {
+                                          param::RegisterOptions options) {
     control::Bytes payload;
     control::put_u32(payload, param::detail::version);
     auto encoded = control::put_string(payload, name);
@@ -127,7 +127,8 @@ Result<void> ModuleParams::register_value(std::string name, param::Value default
     if (!value) {
         return value;
     }
-    control::put_u32(payload, static_cast<std::uint32_t>(permission));
+    control::put_u32(payload, static_cast<std::uint32_t>(options.permission));
+    control::put_u32(payload, static_cast<std::uint32_t>(options.restart_hint));
     auto result = request(param::detail::Register, std::move(payload));
     if (!result) {
         return std::unexpected(param::detail::operation_error(ErrorOperation::Register, result.error()));
@@ -221,11 +222,44 @@ Result<void> ModuleParams::map_image(std::string_view name) {
     return {};
 }
 
-Result<std::optional<param::Snapshot>> ModuleParams::snapshot(std::uint64_t known_revision) {
-    std::lock_guard local_lock(read_mutex_);
+Result<void> ModuleParams::acquire_reader() {
+    // Serialize mapping/buffer use without holding a bookkeeping mutex during
+    // transport or shared-lock waits. Queued reads can time out or stop directly.
+    std::unique_lock local_lock(read_mutex_);
+    const auto deadline = std::chrono::steady_clock::now() + config::param_request_timeout;
+    const bool admitted = read_changed_.wait_until(local_lock, stop_.get_token(), deadline, [&] {
+        return !reading_;
+    });
     if (stop_.stop_requested()) {
-        return std::unexpected(Error{ErrorCode::Cancelled, ErrorOperation::Pump});
+        return std::unexpected(Error{ErrorCode::Cancelled, ErrorOperation::ReadSnapshot});
     }
+    if (!admitted) {
+        return std::unexpected(Error{ErrorCode::Timeout, ErrorOperation::ReadSnapshot});
+    }
+
+    reading_ = true;
+    return {};
+}
+
+Result<std::optional<param::Snapshot>> ModuleParams::snapshot(std::uint64_t known_revision) {
+    auto admitted = acquire_reader();
+    if (!admitted) {
+        return std::unexpected(admitted.error());
+    }
+
+    // The turn owns mapping_/buffer_ until every exit releases it, including
+    // exceptions. Native resources keep their existing Host lifetime.
+    struct FinishRead {
+        ModuleParams& owner;
+        ~FinishRead() {
+            {
+                std::lock_guard lock(owner.read_mutex_);
+                owner.reading_ = false;
+            }
+            owner.read_changed_.notify_one();
+        }
+    } finish{*this};
+
     if (!mapping_) {
         auto opened = attach();
         if (!opened) {
@@ -234,14 +268,14 @@ Result<std::optional<param::Snapshot>> ModuleParams::snapshot(std::uint64_t know
     }
     auto lease = locks_.lock(lock_id_, std::chrono::steady_clock::now() + config::param_lock_timeout);
     if (!lease) {
-        return std::unexpected(wrap_error(ErrorCode::StorageFailed, ErrorOperation::Pump, lease.error()));
+        return std::unexpected(wrap_error(ErrorCode::StorageFailed, ErrorOperation::ReadSnapshot, lease.error()));
     }
 
     auto copied =
         param::detail::copy_image(mapping_.bytes(), (*lease)->publication(), known_revision, buffer_);
     auto released = (*lease)->unlock();
     if (!released) {
-        return std::unexpected(wrap_error(ErrorCode::StorageFailed, ErrorOperation::Pump, released.error()));
+        return std::unexpected(wrap_error(ErrorCode::StorageFailed, ErrorOperation::ReadSnapshot, released.error()));
     }
     if (!copied) {
         return std::unexpected(copied.error());
@@ -252,7 +286,7 @@ Result<std::optional<param::Snapshot>> ModuleParams::snapshot(std::uint64_t know
 
     auto snapshot = param::detail::decode_snapshot(buffer_);
     if (!snapshot || snapshot->revision != *copied) {
-        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Pump});
+        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ReadSnapshot});
     }
 
     return std::optional<param::Snapshot>(std::move(*snapshot));
