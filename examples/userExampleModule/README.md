@@ -319,17 +319,61 @@ Release 的 `user_examples_python` 部署 target 亦執行成功；Debug 同步�
 
 <a id="macos-deployment-fixture-gap"></a>
 
-## Outstanding issue / 待處理：smoke fixture 部署資源（2026-11-02）
+## Deployment fixture repair / 範例部署測試修復（2026-11-03）
 
-Confirmed at `627c409`: `tests/smoke.py` copies the App, root DLLs, Tcl and Python,
-but omits `modules/` and the official UI assets. The unified relative Plugin catalog
-therefore cannot load native Modules in that temporary deployment. Native macOS
-Debug/Release `examples.user_module` both fail; complete external deployments of
-the same binaries pass. See the [validation report](../../src/vinc/sdk/MACOS_VALIDATION.md)
-for evidence. This is not a committed test fix or Windows/Linux validation.
+The temporary deployment now includes `modules/`, `licenses/`, and the bundled
+App's `vinc_data/open-vinc/ui/` tree. It preserves relative Plugin/resource paths
+without copying runtime logs or parameters. The test checks `ui/app/index.html`
+and both official Modules reaching Ready, in addition to all original C++/Python
+example assertions. Production Runtime, catalog and deployment contracts are unchanged.
+Native macOS Debug and Release focused CTest runs both passed; Windows/Linux
+execution of this fixture revision remains pending.
 
-已確認：測試部署漏複製相對 catalog 所需的 `modules/` 及官方 UI 資源，導致
-`ModuleSystem/LoadPlugin → OSAL/OpenLibrary` 失敗；兩種 Mac 組態皆重現。
-外部副本補複製 `modules/` 與 `vinc_data/open-vinc/ui/` 後，原範例斷言與收尾通過。
-建議補齊 fixture 部署，再於三平台驗證；目前建議 patch 僅存外部，尚未套用。
-詳細結果統一維護於上方報告，本項不授權更動正式 Runtime 或部署契約。
+**已修復並完成 macOS 定點驗證；Windows／Linux 原生重驗待補。**
+`tests/smoke.py` 現在補複製 `modules/`、`licenses/` 與 `vinc_data/open-vinc/ui/`，
+保留 bundled App `open-vinc` 的相對目錄。只取 UI 資源，不搬入執行紀錄或參數資料。
+新增 UI 入口 `ui/app/index.html` 存在與 Web UI／Bag Recorder Ready 斷言，
+原 C++／Python 雙向訊息、容器、參數權限、Manual 模式與正常收尾斷言均保留。
+三平台使用同一份腳本，沒有修改正式 Runtime、catalog 或 App 部署機制。
+
+| 原生定點驗證 | 結果 | CTest 時間 |
+| --- | --- | --- |
+| macOS Debug `examples.user_module` | 1/1 通過 | 9.06 秒 |
+| macOS Release `examples.user_module` | 1/1 通過 | 8.02 秒 |
+
+環境沿用前輪：macOS 26.3.1(a)／Apple M1 Pro arm64、Apple Clang 21／libc++、
+SDK 26.5、CMake 4.4.4、CPython 3.12.14。基底 `a19c0d4` 加既有退出修復及 Plugin 測試修復；
+本輪唯一非文件差異是 `smoke.py`。重用前輪 Debug／Release binaries，前後 SHA-256
+核對一致，不把這次描述成重新建置。兩組循序執行：
+
+```sh
+ctest --test-dir <Debug-or-Release-build> -R '^examples[.]user_module$' --verbose --output-junit <result.xml> --parallel 1
+```
+
+前輪完整 CTest 各 153/154、此範例失敗的紀錄保持不變；這輪只定點補驗該項，
+**不是修復後再跑一次完整 154 項**。先前 `627c409` 的原始各 125/126 及外部部署對照
+仍見 [SDK 原始報告](../../src/vinc/sdk/MACOS_VALIDATION.md)，退出修復第三步對照見
+[退出修復驗收](../../src/vinc/osal/MACOS_EXIT_VALIDATION.md#example-deployment--範例部署)。
+
+本輪初次新增入口檢查曾誤用 `ui/index.html`，在啟動 App 前即被斷言擋下；
+依 [UI 部署契約](../../src/vinc/ui/README.md#部署) 修正為 `ui/app/index.html` 後，
+兩組最終通過。初次失敗與最終結果分別保存，不覆寫歷史證據。
+
+原始 logs、JUnit、命令、環境與 binary/source hashes 留在 Git 外：
+`/private/tmp/open-vinc-example-deployment-20261103`。
+交付壓縮包：`/Users/jay/Downloads/open-vinc-example-deployment-20261103/evidence.tar.gz`。
+證據包 SHA-256：`7fb4d3849fa8e71ea2e442a2cc33dbd0570ab4dcc8e8445ae73a95abd6395c16`。
+受測 `tests/smoke.py` SHA-256：`0854d380d6f11205f8c525506f018fd93c684cbaf967753deb634a5ed1830012`。
+兩組原始輸出皆包含以下通過／回收訊息；完整 stdout 與 JUnit 保存在上述證據包：
+
+```text
+[OK] Web UI ready - browser workspace initialized (MID=1)
+[OK] Bag Recorder ready - idle, waiting for recording commands (MID=2)
+All module processes exited; Message Bus cleanup complete.
+C++ / Python user examples passed
+```
+
+來源核對、34 個 App／Module／Python 檔案的 hash 比對與最後程序篩選均通過。
+[本輪驗收總結](../../src/vinc/osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)
+連結退出修復、Plugin 測試修復與此定點補驗，避免混淆各次結果。
+本輪無 benchmark、commit 或 push；未新增 Windows／Linux 原生驗證證據。

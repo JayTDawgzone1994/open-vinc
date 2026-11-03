@@ -194,7 +194,30 @@ add_dependencies(module_plugin_tests plugin_valid plugin_no_entry plugin_bad_ver
 add_test(NAME module.plugin COMMAND module_plugin_tests
     "$<TARGET_FILE:plugin_valid>" "$<TARGET_FILE:plugin_no_entry>" "$<TARGET_FILE:plugin_bad_version>"
     "$<TARGET_FILE:plugin_null_factory>" "$<TARGET_FILE:plugin_reject>" "$<TARGET_FILE:plugin_stall>" "$<TARGET_FILE:plugin_throw_constructor>" "$<TARGET_FILE:plugin_late_coordinator>")
-set_tests_properties(module.plugin PROPERTIES TIMEOUT 90)
+# Leave room for the sequential cases and their bounded failure-path cleanup.
+# Per-case startup/wait limits still decide failures; this is only the outer kill guard.
+set_tests_properties(module.plugin PROPERTIES TIMEOUT 180)
+
+# Scripted peers hold failure reports until the controller observes the central
+# snapshot. Only this Manager copy uses the existing native-termination seam.
+add_executable(module_failure_order_helper failure_order_helper.cpp)
+target_link_libraries(module_failure_order_helper PRIVATE vinc_test_manager vinc::control vinc::module)
+add_executable(module_failure_order_tests failure_order_tests.cpp)
+target_link_libraries(module_failure_order_tests PRIVATE vinc_test_manager vinc::concurrency vinc::rpc_manager)
+target_compile_definitions(module_failure_order_tests PRIVATE VINC_MODULE_TESTING)
+target_include_directories(module_failure_order_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_dependencies(module_failure_order_tests module_failure_order_helper)
+foreach(target IN ITEMS module_failure_order_tests module_failure_order_helper)
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endforeach()
+add_test(NAME module.failure_order COMMAND module_failure_order_tests "$<TARGET_FILE:module_failure_order_helper>")
+set_tests_properties(module.failure_order PROPERTIES TIMEOUT 120)
 add_executable(module_plugin_initialize_tests plugin_initialize_tests.cpp)
 target_link_libraries(module_plugin_initialize_tests PRIVATE vinc::module)
 add_test(NAME module.plugin_initialize COMMAND module_plugin_initialize_tests)

@@ -21,6 +21,13 @@ def main():
         for library in original.parent.glob("*.dll"):
             shutil.copy2(library, root / library.name)
         shutil.copytree(original.parent / "lib", root / "lib")
+        shutil.copytree(original.parent / "modules", root / "modules")
+        shutil.copytree(original.parent / "licenses", root / "licenses")
+        # This fixture runs the bundled open-vinc App. Preserve its relative UI
+        # path without copying runtime logs, parameters, or other user state.
+        ui_assets = Path("vinc_data/open-vinc/ui")
+        shutil.copytree(original.parent / ui_assets, root / ui_assets)
+        assert (root / ui_assets / "app/index.html").is_file(), "deployed UI entry is missing"
         shutil.copytree(original.parent / "python/vinc", root / "python/vinc")
         shutil.copytree(examples / "python", root / "data/module")
 
@@ -64,7 +71,8 @@ def main():
         print(output)
         assert result.returncode == 0, output
         assert (root / "result.txt").read_text().startswith("0 "), output
-        for marker in ("READY native", "READY peer", "STORAGE_OK", "EXPECTED checked access",
+        for marker in ("[OK] Web UI ready", "[OK] Bag Recorder ready",
+                       "READY native", "READY peer", "STORAGE_OK", "EXPECTED checked access",
                        "EXPECTED capacity", "NESTED id=7 label=camera", "CACHE gain=3.5",
                        "CACHE gain=2.5", "TOPIC userExample/test", "RAW printf", "RAW print",
                        "MANUAL manualCpp", "MANUAL manualPy", "MANUAL loopPy",
