@@ -2,31 +2,15 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
-<a id="osalposix-fd-建立與-spawn-的並行競爭窗口"></a>
-<a id="osal-macos-標準串流與退出觀察"></a>
-<a id="osal-macos-退出事件後的回收進度"></a>
+## Tcl：WSL 掛載來源的並行資源部署
 
-## Windows／Linux：退出修復與測試修訂的原生補驗
+- [ ] 評估共用目的地的重複部署工作及慢速來源下的鎖等待政策。
 
-**狀態（2026-11-03）：macOS 本輪工作已完成；同一份修復的 Windows／Linux 驗證尚未完成。**
-Mac 結果與歷史失敗的區分見 [驗收總結](src/vinc/osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)。
-既有 FD／spawn 的三平台紀錄不等於本輪退出修復已通過三平台，不能沿用為新變更的結案證據。
-
-- [ ] Windows Debug／Release：建置同一份退出修復，執行共用退出進度契約、Process／OSAL 原生回歸及 App／Python／SDK 整合。
-- [ ] Linux Debug／Release：完成上述同一範圍，驗證 Linux monitor／waitpid 路徑；記錄實際發行版、編譯器、標準函式庫及 runtime 相容範圍。
-- [ ] 兩平台驗證修訂後的 `module.plugin`、`module.failure_order`、`app.plugin`：中央先保存的主要故障不被覆寫，失敗路徑先回收再刪檔，無法確認時保留檔案。
-- [ ] 兩平台重跑修正後的 `examples.user_module`，確認 Plugin／UI 資源搬移、官方 Module Ready、C++／Python 範例與正常收尾。
-
-每組紀錄需包含相同來源 commit／必要的工作樹差異、OS／CPU／工具鏈／Python 版本、
-實際命令、通過／失敗／略過數與程序清理。各平台只執行適用的原生測試；
-`osal.process_exit_macos` 是 Mac 專用，不能要求 Windows／Linux 執行，也不能用共用假後端測試代替原生證據。
-保留失敗與重跑的不同輪次，不將定點補驗改寫為完整套件重跑。
-
-契約及驗證主檔：
-
-- [退出進度修復](src/vinc/osal/PROCESS_EXIT_PROGRESS.md)與 [FD／spawn 計畫](src/vinc/osal/FD_SPAWN_PLAN.md)。
-- [Plugin 分類及順序測試](src/vinc/module_system/README.md#macos-plugin-classification-follow-up)。
-- [範例部署測試](examples/userExampleModule/README.md#macos-deployment-fixture-gap)。
+`9f0ec0b` 的 Windows／Linux 退出修復補驗已完成，結果見
+[跨平台驗收](src/vinc/osal/WINDOWS_LINUX_EXIT_VALIDATION.md)。其中 WSL 使用 `/mnt/d`
+來源並行建置時，Tcl resource deployment 的 60 秒鎖等待逾時；改用同版來源的 WSL
+原生檔案系統後，Debug／Release 建置及驗收通過。原掛載來源問題仍未修復，
+細節與建議方向見 [Tcl 待辦](library/tcl/README.md#待處理事項)，不改動執行期退出契約。
 
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 

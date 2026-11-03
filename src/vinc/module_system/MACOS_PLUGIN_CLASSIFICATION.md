@@ -2,6 +2,8 @@
 
 日期：2026-11-03。狀態：**調查完成，測試修復已實作；本輪驗收見文末。**
 以下原始調查與提案保留為歷史證據；後續修復不改正式 Runtime／OSAL 行為契約。
+後續同版來源的 Windows／WSL Debug／Release 定點、整合與乾淨 SDK 補驗已通過，
+見 [跨平台驗收](../osal/WINDOWS_LINUX_EXIT_VALIDATION.md)；下方 Mac 各輪結果保持原貌。
 
 The original classification test applied the same 600 ms startup deadline to ordinary
 Plugin rejection and the deliberately stalled loader. Fresh-path native runs

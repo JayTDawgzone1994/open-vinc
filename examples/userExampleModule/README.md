@@ -2,6 +2,11 @@
 
 # userExampleModule: C++/Python API comparison / userExampleModule：C++／Python 使用體驗對照
 
+Latest Windows/WSL Debug/Release deployment and lifecycle checks passed against
+`9f0ec0b`; see the [platform acceptance](../../src/vinc/osal/WINDOWS_LINUX_EXIT_VALIDATION.md).
+Windows／WSL 已補驗新版範例的 Plugin／UI／授權部署、Param 與 C++／Python 啟停；
+各輪結果與限制由上述驗收文件維護。
+
 Runnable Module SDK examples inherit BaseModule and use their Context for Bus/Param/Log, not self-managed Socket/heartbeat/shared regions. Scope is normal authors, excluding standalone OSAL/central Manager/detail integration. Component contracts, not examples, define semantics.
 
 這是一組可執行的 Module SDK 範例。從繼承 `BaseModule` 開始，透過自己的 `context`

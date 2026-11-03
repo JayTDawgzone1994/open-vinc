@@ -10,7 +10,8 @@ FD 契約由 [FD／spawn 計畫](FD_SPAWN_PLAN.md)維護。
 使用者後續明確授權第三步；原生退出、完整 App／Python／乾淨 SDK 矩陣、保留的失敗
 與交付見 [第三步驗收](MACOS_EXIT_VALIDATION.md)。後續 Plugin／範例修復的不同驗證輪次
 統一索引於 [目前驗收狀態](MACOS_EXIT_VALIDATION.md#current-acceptance-status)，不改寫原始全套結果。
-第四步 Windows／Linux 修復後回歸尚未執行，不以 Mac 結果代替。
+第四步 Windows／Linux Debug／Release 修復後回歸已完成，結果與獨立建置問題見
+[跨平台補驗](WINDOWS_LINUX_EXIT_VALIDATION.md)；不以 Mac 結果代替。
 沒有 benchmark。第一步的失敗紀錄保留為歷史證據，不改記成修復後的成功。
 
 ### Confirmed constraints / 已確認約束
