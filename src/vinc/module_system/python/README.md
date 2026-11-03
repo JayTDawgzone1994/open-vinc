@@ -635,13 +635,13 @@ Context 無公開建構子，來自框架建立的 BaseModule；成功 import �
 
 ## Integration responsibilities / 接線與責任
 
-Private ModuleSource creates native Plugins through paired create/destroy or Python wrappers through PythonSource. Shared Runtime prepares authentication/fatal bridge/Bus/Param/Log/watchdog before user loading; after object destruction stop services, clear Source before bridge expiry. The extension owns one runtime, not an extra forwarding Host. Initial Python integration did not change native entry; current RPC Context uses entry 8/bootstrap 13. No-argument Python wrapper construction receives no central default name; on_name still decides.
+Private ModuleSource creates native Plugins through paired create/destroy or Python wrappers through PythonSource. Shared Runtime prepares authentication/fatal bridge/Bus/Param/Log/watchdog before user loading; after object destruction stop services, clear Source before bridge expiry. The extension owns one runtime, not an extra forwarding Host. Initial Python integration did not change native entry; current Plugin/bootstrap versions follow the [Module System contract](../README.md). No-argument Python wrapper construction receives no central default name; on_name still decides.
 
 `ModuleSource` 是 Module System 私有建立介面；native_source.cpp 保留 Plugin create／destroy 配對，
 PythonSource 提供 Python 物件適配。共同 Runtime 先準備認證、fatal bridge、Bus／Param／Log 接線及 watchdog，
 再載入使用者程式。Module 銷毀後停止服務，最後 clear source，仍早於 fatal bridge 失效。
 Python 擴充包含唯一 Runtime owner；不另啟動一個 ModuleHost 幫 Python 轉送。
-Python 初次接入時未改變 Native Plugin 入口；目前 Context 使用 Plugin entry 10／bootstrap v16。
+Python 初次接入時未改變 Native Plugin 入口；目前版本依上述 Module System 契約，不沿用歷史 entry 值。
 Python Source 以無參數 create 建立 wrapper，不從中央取得預設實例名稱；on_name 契約不變。
 
 <a id="驗證與後續"></a>
@@ -752,12 +752,25 @@ param/log/messages/message_bus support both package import and vinc.* attributes
 ```python
 self.context.param.register_param("gain", vinc.param.Type.Double, 1.25)
 self.context.param.register_param("other.gain", vinc.param.Type.Double)
+entry = self.context.param.read_current("gain")  # Independent value; no pump required.
+assert entry.type == vinc.param.Type.Double
+startup_gain = entry.value
 self.context.param.on_change(self.parameters_changed)
+# Later, after a successful pump has populated the cache:
 value = self.context.param.update("gain", vinc.param.Type.Double)
 ```
 
+- Registration accepts optional `permission=` (Limited by default) and `restart_hint=`
+  (`vinc.param.RestartHint.None_` by default; Module/App also available).
+  `Entry.restart_hint` is read-only. Pure watches reject non-default metadata.
+  See [registration contracts](../../param/README.md#restart-hints).
+- 註冊可省略 `permission=`（Limited）與 `restart_hint=`（None_），亦可宣告 Module／App。
+  Entry 標記唯讀；純監聽不接受非預設 metadata。完整契約見上述 Param 文件。
+
 - Explicit Param Type selects fixed widths; Python int never guesses. None means omitted default/watch, not a value.
-- FrameworkOnly is default; Open permits all Modules. Typed set goes to central; update reads cache only.
+- Limited is default and permits central/owner writes; Public permits all Modules. Typed set goes to central; update reads cache only.
+- `read_current(name)` returns an independent immutable Entry, including type/value/default/permission/restart_hint/version/timestamp. It accepts short or full names, needs no watch/pump, and does not refresh the cache or dispatch callbacks. Native waiting releases the GIL; errors become VincError. See [Param current reads](../../param/README.md#current-reads) for costs and cancellation.
+- For fixed defaults, author-defined startup args and business correction through ordinary set, follow the [C++/Python examples](../../../../examples/userExampleModule/README.md#startup-parameters). Neither overrides nor correction imply save; save does not await callback approval.
 - on_change runs in pump with an independent read-only mapping snapshot/immutable Entry fields, safe to retain across pumps. Missing names stay absent; watches checks presence/compatibility; None clears callback.
 - Log severity/write uses native service with framework identity/time. enabled avoids unnecessary eager f-string formatting. Capacity/backpressure raises VincError; Python strings are never reinterpreted by fmt. print stays raw.
 - Escaping Param/Bus callbacks retain traceback/causes and latch Module fault. Caught exceptions are application responsibility; central/peers continue.
@@ -765,10 +778,15 @@ value = self.context.param.update("gain", vinc.param.Type.Double)
 
 - Type 明確選擇 Bool、Int8／UInt8、Int16／UInt16、Int32／UInt32、Int64／UInt64、Float、Double、String。
   不由 Python int 自動推測寬度。None 作為省略 default 的監聽形式，不是參數值。
-- register_param 的 permission 預設 FrameworkOnly；Open 允許所有 Module 修改，沿用中央權限驗證。
+- register_param 的 permission 預設 Limited，中央與所屬 Module 可寫；Public 允許所有 Module 修改，沿用中央權限驗證。
   set(name, Type, value) 請求中央更新；update(name, Type) 只讀 Context 快取，不同步去中央撈。
+- `read_current(name)` 回獨立且唯讀的 Entry，包含型別／值／預設／權限／重啟標記／版本／時間戳。
+  支援簡稱或完整名稱，不必監聽或 pump，不改快取、不派送 callback；原生等待釋放 GIL，
+  Result 失敗轉為 VincError。成本與取消契約見上述 Param 文件。
+- 固定 default、作者自行解析啟動 args、普通 set 的業務修正見上述 C++／Python 範例。
+  覆寫與修正都不隱含 save，save 不等待 callback 審核。
 - on_change(callback) 在 pump 執行；傳入獨立複製的唯讀 mapping，Entry 的 value/default_value、
-  permission、version、timestamp、type 皆唯讀。可保留 snapshot，不隨下次 pump 改變。
+  permission、restart_hint、version、timestamp、type 皆唯讀。可保留 snapshot，不隨下次 pump 改變。
   未出現的監聽參數不在 map 中；watches() 可查 present／compatible。None 清除 callback。
 - `context.log.error/warn/info/debug(text)` 或 write(Level, text) 使用同一套原生 Log，
   module／MID／時間由框架填入。enabled(Level) 可避免不必要格式化；先用 Python f-string 建立文字。
@@ -825,6 +843,26 @@ was subsequently repaired and passed focused native Mac Debug/Release checks.
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
+
+<a id="msvc-1951-static-import-review"></a>
+
+### MSVC 19.51 static import review / 靜態匯入清單待核對
+
+During Param stage-one validation on Windows x64, a Release binding built with
+MSVC 19.51.36257 (toolset 14.51.36231) and CPython 3.13.12 was rejected by
+`cmake/runtime_metadata.py`: the image imports `api-ms-win-core-synch-l1-2-0.dll`,
+which the static-image import policy does not currently approve. This is a
+confirmed build-validation failure, not evidence of a Param or CRT crash.
+The equivalent MSVC 19.44.35229 (toolset 14.44.35207) build passed the Python service tests. Follow up
+by tracing this import and reviewing the supported Windows API-set contract;
+do not bypass the guard or infer safety from the DLL name. No Runtime-policy
+change was made in the Param task.
+
+Param 第一階段驗收中，Windows x64／MSVC 19.51.36257／CPython 3.13.12 的
+Release binding 被 `cmake/runtime_metadata.py` 拒絕：產物包含目前靜態映像政策
+未允許的 `api-ms-win-core-synch-l1-2-0.dll`。這是已重現的建置驗證阻擋，
+不是 Param 或 CRT 崩潰證據。同條測試流程改用 MSVC 19.44.35229 已通過；
+後續應追查匯入來源並核對 Windows API-set 支援契約，本輪未放寬防護。
 
 Current pending validation is tracked in the [root TODO](../../../../TODO.md).
 The records below preserve completed rollout stages and historical diagnosis;

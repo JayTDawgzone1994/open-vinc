@@ -144,19 +144,114 @@ param get native.gain
 param save
 ```
 
-- gain is Double/Open, writable by every Module; locked_gain is FrameworkOnly even for its owner.
-- label is String/FrameworkOnly. Example set accepts doubles only; central param set parses the registered type.
+- gain is Double/Public, writable by every Module; locked_gain is Limited, writable by its owner and central.
+- label is String/Limited with a Module restart hint; `status` shows the startup-applied `startup_label`. Example set accepts doubles only; central param set parses the registered type.
 - Successful set acknowledges commit; subsequent pumps refresh caches/callbacks independently across instances.
 - peer.gain demonstrates full-name watching; absent peer means absent map entry/missing watch.
 - Explicit param save persists central values; exit does not save and examples do not save secretly.
 - C++ callbacks borrow maps only during invocation; Python receives independent read-only snapshots.
 
-- `gain` 是 Double／Open，其他 Module 也能改；`locked_gain` 是 Double／FrameworkOnly，Module 自己也不能改。
-- `label` 是 String／FrameworkOnly。`set` 是本範例只接受 double 的 Module 命令，中央 `param set` 依登記型別解析。
+- `gain` 是 Double／Public，其他 Module 也能改；`locked_gain` 是 Double／Limited，只有所屬 Module 與中央可改。
+- `label` 是 String／Limited，宣告需重啟 Module；`status` 顯示啟動時套用的 `startup_label`。`set` 是本範例只接受 double 的 Module 命令，中央 `param set` 依登記型別解析。
 - 成功 set 表示中央提交；快取在後續 pump 更新。`params`／callback 稍後才看見新值，不要求兩個實例同時更新。
 - `peer.gain` 示範完整名稱監聽；沒有 peer 時 map 中沒有這筆，`watches` 顯示 missing。
 - `param save` 會保存此中央的參數；退出不自動保存 live 調整。範例不偷偷呼叫 save。
 - C++ callback 借用 map，不能保留其 reference；Python callback 收到獨立唯讀快照。
+
+<a id="restart-hints"></a>
+
+### Restart-hint example / 重啟標記範例
+
+Both implementations declare `label` at registration, keeping the default Limited
+permission. The C++ source uses `RegisterOptions`; Python uses a keyword:
+兩種實作都在註冊時宣告 `label`，省略權限即為 Limited；C++ 使用 options，Python 使用關鍵字：
+
+```cpp
+auto label = context.param.register_param<std::string>(
+    "label", "example", {.restart_hint = vinc::param::RestartHint::Module});
+if (!label) {
+    return label;
+}
+```
+
+```python
+self.context.param.register_param("label", vinc.param.Type.String, "example",
+                                 restart_hint=vinc.param.RestartHint.Module)
+```
+
+The Module reads `label` once with `read_current()` during startup, then retains
+it in `startup_label`. Param callbacks still receive updated metadata/values but
+do not apply this field. Gain remains the example of live callback application.
+The framework does not enforce this timing; the Module author owns it.
+Module 啟動時用 `read_current()` 讀取 label 並保存在 startup_label；callback 仍收到新值，
+但不套用此欄位。gain 則繼續示範即時 callback 更新。何時套用由作者負責，不由標記強制。
+
+```text
+param get native.label
+param set native.label reviewed
+native status
+```
+
+Get displays `[restart: Module 'native']`; set confirms commit and reminds the
+operator to restart that Module. Status still shows `startup_label=example` on
+its first lifetime. Explicitly stop the MID reported by status using `debug stop
+<MID>`, then start `userExampleModule --name native` again: startup_label becomes
+reviewed. Use the corresponding `peer`/`userExamplePython` commands for Python.
+
+get 顯示 `[restart: Module 'native']`；set 確認提交並提醒重啟該 Module，但第一次啟動的
+status 仍為 `startup_label=example`。以 status 顯示的 MID 執行 `debug stop <MID>`，
+再執行 `userExampleModule --name native`，才會套用 reviewed。Python 用 peer 與
+userExamplePython 做相同操作。MID 每次啟動不同，勿照抄舊編號。
+
+Module restart retains the central live value. App restart drops unsaved edits:
+use `param save` explicitly when the change must survive it. Restart hints are
+not saved in TOML; each Module registers them again. `RestartHint::App` is also
+available for author-declared whole-App requirements; these examples do not
+invent an App-wide dependency merely to demonstrate that annotation.
+Module 重啟沿用中央 live value；App 重啟會丟失未保存修改，需要跨 App 重啟保留時才明確
+`param save`。TOML 不保存標記，Module 下次註冊重新宣告。若需求是整個 App，作者可選
+`RestartHint::App`；本範例無此相依，不為展示標記而虛構 App 重啟需求。
+
+The smoke test runs both actual implementations, verifies unchanged active values/MIDs after a write, no implicit save, loss of
+unsaved edits after central restart, and startup application after explicit save
+and App restart. See [Param](../../src/vinc/param/README.md#restart-hints)
+for the shared contract and platform evidence.
+自動 smoke 實跑兩種語言，驗證寫入後有效值／MID 不變、不隱含保存、
+中央重啟丟失未保存修改，以及明確保存並重啟 App 後才於啟動時套用新值。共用契約與驗收證據見上述 Param 文件。
+
+<a id="startup-parameters"></a>
+
+### Startup values and correction / 啟動值與修正
+
+```text
+userExampleModule --name native --topic userExample/frames --gain 2.0
+userExamplePython --name peer --topic userExample/frames --gain 3.0
+```
+
+Both Modules parse their own `--topic`/`--gain` flags. Gain must be finite and in
+0..10; duplicate/unknown/incomplete flags or invalid startup gains reject startup.
+The registered default stays 1.0. Each Module reads the committed Entry before
+its first pump, applies an explicit override through `set()`, validates it, and
+only then opens Bus resources. `INITIAL` reports the effective gain and fixed
+default. A later start without `--gain` uses current state; after central restart
+it uses the saved value. Nothing here automatically saves.
+
+兩個 Module 自己解析 `--topic`／`--gain`。gain 必須有限且介於 0..10；重複、未知、
+不完整旗標及非法啟動 gain 拒絕啟動。註冊 default 固定為 1.0；第一次 pump 前讀目前
+Entry，透過 set 提交明確覆寫，驗證後才建立 Bus 資源。`INITIAL` 顯示有效 gain 與固定
+default。不帶 `--gain` 的後續啟動沿用中央目前值；中央重啟後改用已保存值，不隱含 save。
+
+For a correctly typed but unsuitable value loaded from TOML or delivered by a
+callback, the example reports `CORRECT` and writes 1.0 using ordinary set. This
+can overwrite a concurrent edit; it is not a conditional transaction. Startup
+correction failure rejects startup; callback correction failure reports the
+error and retains the last effective gain. `param save` does not wait for this
+validation. Save again to persist a correction if the prior value was saved.
+
+TOML 或 callback 給的值若型別正確但不適用，範例輸出 `CORRECT` 並用普通 set 寫回 1.0。
+這可能覆蓋並行修改，不是條件交易。啟動修正失敗就拒絕啟動；callback 修正失敗則回報並
+保留最後有效 gain。param save 不等待這項審核；若舊值已保存，需再次 save 才保存修正。
+完整契約見 [Param](../../src/vinc/param/README.md#startup-and-correction)。
 
 <a id="可恢復失敗與資源生命週期"></a>
 
@@ -257,6 +352,7 @@ Loop mode calls pumpLoop in its own main, awakened by central stop without anoth
 | Param registration/defaults/permission/watch | register_parameters | explicit param.Type |
 | Param callback/Entry/update/watches | registration/execute(params) | parameters_changed/execute(params) |
 | Param set/set_value | execute(set) | typed set, no separate set_value |
+| Param current read/startup override/business correction | initialize_gain/apply_gain | initialize_gain/apply_gain |
 | Log enabled/write/format/severity | execute(logs) | demonstrate_logs; eager f-string |
 | Result/Error/wrap/text | hooks/start_failure/storage/capacity | VincError.error/causes/standard exceptions |
 
@@ -282,6 +378,7 @@ Loop mode calls pumpLoop in its own main, awakened by central stop without anoth
 | Param 註冊／預設／權限、外部監聽 | register_parameters | register_parameters；明確指定 param.Type |
 | Param callback／Entry.get／update／watches | register_parameters、execute(params) | parameters_changed、execute(params) |
 | Param set／set_value、文字轉值 | execute(set) | param.set(Type, value)；沒有另設 set_value |
+| Param 目前值／啟動覆寫／業務修正 | initialize_gain／apply_gain | initialize_gain／apply_gain |
 | Log enabled／write／format／error／warn／info／debug | execute(logs) | demonstrate_logs；f-string 先格式化 |
 | Result、Error.is、wrap_error、error_to_string | hooks、start_failure、storage、capacity | VincError.error、cause chain、標準 Python 例外 |
 
@@ -377,3 +474,22 @@ C++ / Python user examples passed
 [本輪驗收總結](../../src/vinc/osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)
 連結退出修復、Plugin 測試修復與此定點補驗，避免混淆各次結果。
 本輪無 benchmark、commit 或 push；未新增 Windows／Linux 原生驗證證據。
+
+### Parallel Param validation / develop 的 Param 驗證紀錄
+
+2026-11-03 Param stage-one validation reproduced the same omission on Windows
+x64 (MSVC 19.44.35229, Release, CPython 3.13.12). A separate test App explicitly
+selected both example ModuleTypes. With `modules/` and its UI assets copied in
+an external fixture variant, all updated C++/Python smoke assertions passed,
+including owner Limited writes, foreign Limited rejection and Public writes.
+At stage 1, the repository fixture's deployment omission remained unfixed; that result does
+not claim an unmodified `examples.user_module` pass.
+
+2026-11-03：Windows 隔離 App 已選入兩個 C++ 範例 ModuleType；外部測試副本補齊
+`modules/` 與 UI 資源後，更新過的所有 C++／Python 斷言通過，包含自己可改 Limited、
+其他 Module 不可改 Limited 及跨 Module 修改 Public。第一階段當時尚未修正原 fixture 漏檔，
+不能將本次結果當作未修改的 `examples.user_module` 已通過。
+
+整合 develop `f16da98` 後保留其完整 Param／重啟標記 workflow，並合併本輪授權檔案與 UI／Bag 檢查。
+上方 9.06／8.02 秒是合併前的歷史結果；整合後驗證另見
+[發布前驗證](../../src/vinc/osal/MACOS_EXIT_VALIDATION.md#publication-validation)。

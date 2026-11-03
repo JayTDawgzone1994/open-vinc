@@ -38,7 +38,9 @@ inline constexpr std::array operation_entries{ErrorOperationEntry{ErrorOperation
                                               ErrorOperationEntry{ErrorOperation::Decode, "Decode"},
                                               ErrorOperationEntry{ErrorOperation::Attach, "Attach"},
                                               ErrorOperationEntry{ErrorOperation::Receive, "Receive"},
-                                              ErrorOperationEntry{ErrorOperation::Shutdown, "Shutdown"}};
+                                              ErrorOperationEntry{ErrorOperation::Shutdown, "Shutdown"},
+                                              ErrorOperationEntry{ErrorOperation::ReadCurrent, "ReadCurrent"},
+                                              ErrorOperationEntry{ErrorOperation::ReadSnapshot, "ReadSnapshot"}};
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::Param, "Param", error_entries, operation_entries};
 static_assert(valid_catalog(error_catalog));
 }

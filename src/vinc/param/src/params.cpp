@@ -33,12 +33,15 @@ Result<void> Params::watch(std::string name, Type type) {
     return result;
 }
 
-Result<void> Params::register_value(std::string name, Value defaults, Permission permission) {
+Result<void> Params::register_value(std::string name, Value defaults, RegisterOptions options) {
     if (!access_) {
         return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Register});
     }
     if (!valid_segment(name)) {
         return std::unexpected(Error{ErrorCode::InvalidName, ErrorOperation::Register});
+    }
+    if (!valid_permission(options.permission) || !valid_restart_hint(options.restart_hint)) {
+        return std::unexpected(Error{ErrorCode::InvalidValue, ErrorOperation::Register});
     }
 
     auto valid = validate_value(defaults);
@@ -52,7 +55,7 @@ Result<void> Params::register_value(std::string name, Value defaults, Permission
         return std::unexpected(detail::operation_error(ErrorOperation::Register, watched.error()));
     }
 
-    auto result = access_->register_value(std::move(name), std::move(defaults), permission);
+    auto result = access_->register_value(std::move(name), std::move(defaults), options);
     if (!result) {
         return std::unexpected(detail::operation_error(ErrorOperation::Register, result.error()));
     }
@@ -79,6 +82,34 @@ Result<void> Params::set_value(std::string name, Value value) {
         return std::unexpected(detail::operation_error(ErrorOperation::Set, result.error()));
     }
     return result;
+}
+
+Result<Entry> Params::read_current(std::string_view name) const {
+    if (!access_) {
+        return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::ReadCurrent});
+    }
+
+    auto full = qualify(access_->module_name(), name);
+    if (!full) {
+        return std::unexpected(detail::operation_error(ErrorOperation::ReadCurrent, full.error()));
+    }
+
+    // UINT64_MAX is never a published revision, so Host must return a full
+    // image. Do not share pump's revision or mutate its cache/watch state.
+    auto snapshot = access_->snapshot(UINT64_MAX);
+    if (!snapshot) {
+        return std::unexpected(detail::operation_error(ErrorOperation::ReadCurrent, snapshot.error()));
+    }
+    if (!*snapshot) {
+        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ReadCurrent});
+    }
+
+    auto found = (*snapshot)->entries.find(*full);
+    if (found == (*snapshot)->entries.end()) {
+        return std::unexpected(Error{ErrorCode::NotFound, ErrorOperation::ReadCurrent});
+    }
+
+    return std::move(found->second);
 }
 
 Result<Value> Params::read(std::string_view name) const {

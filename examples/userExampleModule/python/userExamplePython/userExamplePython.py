@@ -1,11 +1,14 @@
 """Same Shell commands and message layout as the C++ userExampleModule."""
 import copy
+import math
 import vinc
 
 MESSAGE = vinc.messages.UserExampleFrame
 MESSAGE_LIMIT_BYTES = 64 * 1024
 RING_SLOTS = 8
 INITIAL_GAIN = 1.0
+MINIMUM_GAIN = 0.0
+MAXIMUM_GAIN = 10.0
 RESERVED_SAMPLES = 8
 
 
@@ -94,28 +97,73 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
         self.retained = None
         self.gain = INITIAL_GAIN
         self.topic = "userExample/frames"
-        if args:
-            if len(args) != 2 or args[0] != "--topic":
-                raise ValueError("Usage: --name <instance> [--topic <topic>]")
-            self.topic = args[1]
+        startup_gain = self.parse_start_args(args)
         self.register_parameters()
+        self.initialize_gain(startup_gain)
+        # Read once: restart_hint is descriptive, not a framework apply/restart mechanism.
+        self.startup_label = self.context.param.read_current("label").value
         self.open_publisher()
         self.open_subscribers()
         print(f"READY {self.get_module_name()} mid={self.get_mid()} topic={self.topic}")
 
+    def parse_start_args(self, args):
+        options = {}
+        for index in range(0, len(args), 2):
+            name = args[index]
+            if index + 1 == len(args) or name not in ("--topic", "--gain") or name in options:
+                raise ValueError("Usage: [--topic <topic>] [--gain <finite 0..10>]")
+            options[name] = args[index + 1]
+        self.topic = options.get("--topic", self.topic)
+        if "--gain" not in options:
+            return None
+        value = float(options["--gain"])
+        if not self.valid_gain(value):
+            raise ValueError("--gain must be finite and within [0, 10]")
+        return value
+
+    @staticmethod
+    def valid_gain(value):
+        return math.isfinite(value) and MINIMUM_GAIN <= value <= MAXIMUM_GAIN
+
+    def apply_gain(self, value):
+        if not self.valid_gain(value):
+            # A normal write can overwrite a concurrent edit; correction is not save.
+            print(f"CORRECT {self.get_module_name()} gain={value} "
+                  f"outside finite [0, 10]; restoring {INITIAL_GAIN}")
+            self.context.param.set("gain", vinc.param.Type.Double, INITIAL_GAIN)
+            value = INITIAL_GAIN
+        # Keep the last effective value if the correction above raises VincError.
+        self.gain = value
+
+    def initialize_gain(self, startup_gain):
+        current = self.context.param.read_current("gain")
+        value = current.value
+        if startup_gain is not None:
+            self.context.param.set("gain", vinc.param.Type.Double, startup_gain)
+            value = startup_gain
+        self.apply_gain(value)
+        print(f"INITIAL {self.get_module_name()} gain={self.gain} default={current.default_value}")
+        # Resources are opened after validation; this does not pump or save.
+
     def register_parameters(self):
         self.context.param.register_param("gain", vinc.param.Type.Double, INITIAL_GAIN,
-                                          vinc.param.Permission.Open)
-        self.context.param.register_param("label", vinc.param.Type.String, "example")
+                                          vinc.param.Permission.Public)
+        self.context.param.register_param("label", vinc.param.Type.String, "example",
+                                         restart_hint=vinc.param.RestartHint.Module)
         self.context.param.register_param("locked_gain", vinc.param.Type.Double, INITIAL_GAIN)
         self.context.param.register_param("peer.gain", vinc.param.Type.Double)
         self.context.param.on_change(self.parameters_changed)
 
     def parameters_changed(self, values):
+        # label remains visible in the cache, but startup_label changes only at startup.
         # Python receives an independent read-only snapshot; C++ receives a borrowed map.
         entry = values.get(f"{self.get_module_name()}.gain")
         if entry is not None:
-            self.gain = entry.value
+            try:
+                self.apply_gain(entry.value)
+            except vinc.VincError as error:
+                print(f"Gain correction failed: {error}")
+                return
             print(f"PARAM {self.get_module_name()} gain={self.gain} version={entry.version}")
         if "peer.gain" not in values:
             print("WATCH peer.gain missing")
@@ -192,7 +240,7 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
             describe(self.latest.get_last())
         elif command == "status":
             print(f"STATUS {self.get_module_name()} mid={self.get_mid()} "
-                  f"living={self.context.living()} gain={self.gain}")
+                  f"living={self.context.living()} gain={self.gain} startup_label={self.startup_label}")
             if self.publisher is not None:
                 stats = self.publisher.stats()
                 print(f"PUB published={stats.published} slots={stats.effective_slots} "

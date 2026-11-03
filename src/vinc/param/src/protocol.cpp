@@ -33,6 +33,9 @@ Result<control::Bytes> encode_snapshot(const Snapshot& snapshot) {
         if (!valid_name(name)) {
             return std::unexpected(Error{ErrorCode::InvalidName, ErrorOperation::Encode});
         }
+        if (!valid_permission(entry.permission) || !valid_restart_hint(entry.restart_hint)) {
+            return std::unexpected(Error{ErrorCode::InvalidValue, ErrorOperation::Encode});
+        }
 
         auto named = control::put_string(bytes, name);
         if (!named) {
@@ -49,6 +52,7 @@ Result<control::Bytes> encode_snapshot(const Snapshot& snapshot) {
             return std::unexpected(defaults.error());
         }
         control::put_u32(bytes, static_cast<std::uint32_t>(entry.permission));
+        control::put_u32(bytes, static_cast<std::uint32_t>(entry.restart_hint));
         control::put_u64(bytes, entry.version);
         control::put_u64(bytes, entry.timestamp);
     }
@@ -76,16 +80,18 @@ Result<Snapshot> decode_snapshot(std::span<const std::byte> bytes) {
         auto value = read_value(reader);
         auto defaults = read_value(reader);
         const auto permission = reader.u32();
+        const auto restart_hint = static_cast<RestartHint>(reader.u32());
         const auto revision = reader.u64();
         const auto timestamp = reader.u64();
         if (!valid_name(name) || !value || !defaults || type_of(*value) != type_of(*defaults) ||
-            permission > 1 || !revision || revision > snapshot.revision || snapshot.entries.contains(name)) {
+            !valid_permission(static_cast<Permission>(permission)) || !valid_restart_hint(restart_hint) || !revision ||
+            revision > snapshot.revision || snapshot.entries.contains(name)) {
             return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Decode});
         }
 
         snapshot.entries.emplace(std::move(name),
                                  Entry{std::move(*value), std::move(*defaults),
-                                       static_cast<Permission>(permission), revision, timestamp});
+                                       static_cast<Permission>(permission), revision, timestamp, restart_hint});
     }
     if (!reader.done()) {
         return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Decode});

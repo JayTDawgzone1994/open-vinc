@@ -59,7 +59,12 @@ template<class T> T parameter_value(py::handle value) {
 struct Params {
     std::shared_ptr<ContextState> state;
 
-    void register_param(std::string name, param::Type type, py::object defaults, param::Permission permission) {
+    void register_param(std::string name, param::Type type, py::object defaults, param::Permission permission,
+                        param::RestartHint restart_hint) {
+        if (defaults.is_none() &&
+            (permission != param::Permission::Limited || restart_hint != param::RestartHint::None)) {
+            raise_error(Error{param::ErrorCode::InvalidValue, param::ErrorOperation::Watch});
+        }
         ContextCall call(state);
         visit_type(type, [&]<class T> {
             Result<void> result;
@@ -69,7 +74,7 @@ struct Params {
             } else {
                 auto value = parameter_value<T>(defaults);
                 py::gil_scoped_release release;
-                result = call.context().param.register_param<T>(std::move(name), std::move(value), permission);
+                result = call.context().param.register_param<T>(std::move(name), std::move(value), {permission, restart_hint});
             }
             unwrap(std::move(result));
         });
@@ -87,6 +92,16 @@ struct Params {
             unwrap(std::move(result));
             return py::cast(value);
         });
+    }
+
+    param::Entry read_current(std::string name) {
+        ContextCall call(state);
+        Result<param::Entry> result;
+        {
+            py::gil_scoped_release release;
+            result = call.context().param.read_current(name);
+        }
+        return unwrap(std::move(result));
     }
 
     void set(std::string name, param::Type type, py::object value) {
@@ -150,8 +165,12 @@ void bind_services(py::module_& module) {
         .value("Float", param::Type::Float).value("Double", param::Type::Double)
         .value("String", param::Type::String);
     py::enum_<param::Permission>(params, "Permission")
-        .value("FrameworkOnly", param::Permission::FrameworkOnly)
-        .value("Open", param::Permission::Open);
+        .value("Limited", param::Permission::Limited)
+        .value("Public", param::Permission::Public);
+    py::enum_<param::RestartHint>(params, "RestartHint")
+        .value("None_", param::RestartHint::None)
+        .value("Module", param::RestartHint::Module)
+        .value("App", param::RestartHint::App);
     py::class_<param::Entry>(params, "Entry")
         .def_property_readonly("type", [](const param::Entry& entry) {
             return param::type_of(entry.value);
@@ -167,6 +186,7 @@ void bind_services(py::module_& module) {
             }, entry.default_value);
         })
         .def_readonly("permission", &param::Entry::permission)
+        .def_readonly("restart_hint", &param::Entry::restart_hint)
         .def_readonly("version", &param::Entry::version)
         .def_readonly("timestamp", &param::Entry::timestamp);
     py::class_<param::WatchStatus>(params, "WatchStatus")
@@ -176,8 +196,10 @@ void bind_services(py::module_& module) {
         .def_readonly("compatible", &param::WatchStatus::compatible);
     py::class_<Params>(module, "Params")
         .def("register_param", &Params::register_param, py::arg("name"), py::arg("type"),
-             py::arg("default") = py::none(), py::arg("permission") = param::Permission::FrameworkOnly)
+             py::arg("default") = py::none(), py::arg("permission") = param::Permission::Limited,
+             py::arg("restart_hint") = param::RestartHint::None)
         .def("update", &Params::update)
+        .def("read_current", &Params::read_current, py::arg("name"))
         .def("set", &Params::set)
         .def("on_change", &Params::on_change)
         .def("watches", [](Params& self) {

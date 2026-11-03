@@ -37,6 +37,55 @@ public:
 #endif
         std::cout << "NATIVE_PID=" << pid << '\n' << std::flush;
 
+        auto registered = context.param.register_param("fixed", std::int32_t{7},
+            {.restart_hint = vinc::param::RestartHint::Module});
+        if (!registered) {
+            return std::unexpected(registered.error());
+        }
+
+        auto shared = context.param.register_param("shared", std::int32_t{7},
+            {.permission = vinc::param::Permission::Public});
+        if (!shared) {
+            return std::unexpected(shared.error());
+        }
+
+        auto plain = context.param.register_param("plain", std::int32_t{1});
+        if (!plain) {
+            return std::unexpected(plain.error());
+        }
+
+        auto default_entry = context.param.read_current("plain");
+        if (!default_entry) {
+            return std::unexpected(default_entry.error());
+        }
+
+        const bool defaults_match = default_entry->permission == vinc::param::Permission::Limited
+            && default_entry->restart_hint == vinc::param::RestartHint::None;
+        if (!defaults_match) {
+            return std::unexpected(vinc::Error{vinc::module_system::ErrorCode::InvalidArgument,
+                vinc::module_system::ErrorOperation::StartHook});
+        }
+
+        // Startup reads use the installed Host bridge before the first pump.
+        auto current = context.param.read_current("fixed");
+        if (!current) {
+            return std::unexpected(current.error());
+        }
+
+        auto value = current->get<std::int32_t>();
+        std::int32_t cached = 0;
+        auto cache = context.param.update("fixed", cached);
+        const bool cache_is_empty = !cache && cache.error().is(vinc::param::ErrorCode::NotFound);
+        const bool metadata_matches = current->permission == vinc::param::Permission::Limited
+            && current->restart_hint == vinc::param::RestartHint::Module;
+        if (!value || *value != 7 || !metadata_matches || !cache_is_empty) {
+            return std::unexpected(vinc::Error{vinc::module_system::ErrorCode::InvalidArgument,
+                vinc::module_system::ErrorOperation::StartHook});
+        }
+
+        std::cout << "NATIVE_PARAM_CURRENT_OK\n" << std::flush;
+        std::cout << "NATIVE_PARAM_RESTART_OK\n" << std::flush;
+
         auto publisher = context.advertise<Packet>("sdk/reply");
         if (!publisher) {
             return std::unexpected(publisher.error());

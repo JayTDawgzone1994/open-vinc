@@ -18,12 +18,14 @@ public:
     void exited(std::uint64_t mid);
     Result<void> submit(std::uint64_t mid, std::shared_ptr<control::Session> session, control::Frame frame);
     Result<void> configure(std::filesystem::path path);
-    Result<void> register_framework(std::string name, Value defaults);
+    Result<void> register_framework(std::string name, Value defaults, RestartHint restart_hint = RestartHint::None);
     Result<std::string> command(std::vector<std::string> args, std::stop_token stop = {});
     Result<Snapshot> inspect();
     std::string diagnostic(std::uint64_t& cursor);
 
 private:
+    // Test-only queue admission lets a fixture gate the real worker without sleeps.
+    friend struct ParamManagerTestAccess;
     std::unique_ptr<Storage> storage_;
     Persistence persistence_;
     SavedMap saved_;
@@ -54,7 +56,7 @@ private:
     void run(std::stop_token stop);
     Result<void> enqueue(std::function<void()> work);
     Result<control::Bytes> execute(std::uint64_t mid, const control::Frame& request);
-    Result<void> register_value(std::uint64_t mid, std::string name, Value defaults, Permission permission);
+    Result<void> register_value(std::uint64_t mid, std::string name, Value defaults, RegisterOptions options);
     Result<void> set_value(std::uint64_t mid, const std::string& name, Value value);
     Result<void> commit(Snapshot next, const std::string& name);
     Result<void> save();

@@ -530,6 +530,13 @@ if {[catch {exampleNode status} reason]} {
 ```
 
 - Script commands wait sequentially; startup waits Ready. Success returns0 and prints the approved name.
+- `param set` requires an existing typed parameter. On a clean first run, start
+  the Module with its author-defined args (for example `userExampleModule --gain 2.0`)
+  before adjusting it through `param set`. Shell does not synthesize parameter
+  flags or wait for owner validation when saving. See [Param startup/save](../param/README.md#startup-and-correction).
+- `param set` 必須已有具型別的參數。乾淨首次啟動，先用 Module 作者定義的 args
+  （例如 `userExampleModule --gain 2.0`）啟動，再用 param set 調整。Shell 不生成
+  參數旗標，save 也不等擁有者審核；完整契約見上述 Param 文件。
 - Duplicate instances fail without suffixes; source naming hooks choose options and scripts use approved names, never rewritten targets.
 - Nonzero hooks/unknown/start/timeout become catchable Tcl errors.
 - Unhandled errors show file/line/stack and stop only that script, including -S, leaving central/Modules alive.
@@ -887,14 +894,22 @@ Debugger/symbol workflow and limits: [debugging guide](../module_system/DEBUGGIN
 
 ## Param commands (2026-10-08) / Param 命令（2026-10-08）
 
-Reserved list/get/set/save/status share local/Tcl/remote router. Central may write FrameworkOnly; errors retain Shell→Module→Param causes without central exit. Persistence/type-change notices are independent of OutputHub subscriptions. [Param](../param/README.md) owns format/cache/save policy; listener settings were not moved.
+Reserved list/get/set/save/status share local/Tcl/remote router. Central may write Limited; errors retain Shell→Module→Param causes without central exit. Persistence/type-change notices are independent of OutputHub subscriptions. [Param](../param/README.md) owns format/cache/save policy; listener settings were not moved.
 
 新增保留命令 `param list`、`param get NAME`、`param set NAME VALUE`、`param save`、
-`param status`；本地、Tcl、Socket Shell 共用 CommandRouter。中央權限可改 FrameworkOnly
+`param status`；本地、Tcl、Socket Shell 共用 CommandRouter。中央權限可改 Limited
 參數。錯誤以 Shell → ModuleSystem → Param 原因鏈呈現，失敗不要求框架退出。
 本機與遠端會顯示新的 Param 保存／型別更新診斷；不是 Module OutputHub 訂閱的一部分。
 完整格式、保存政策與快取時機由 [Param README](../param/README.md) 維護。
 本輪不更動 Shell IP／port／timeout 的既有設定來源。
+
+Param get/list display declared restart metadata; successful set adds a reminder
+without restarting or saving. Same-value writes still show the declaration;
+failed writes do not show success reminders. Local/Socket/Tcl share the reply;
+see [Param restart hints](../param/README.md#restart-hints) for semantics and evidence.
+Param get／list 顯示作者宣告的重啟需求，set 成功後提醒但不重啟、不保存；同值寫入也提示，
+失敗不顯示成功提醒。本機／Socket／Tcl 共用回覆，契約與測試統一見上述 Param 文件。
+
 
 <a id="log-指令2026-10-08"></a>
 

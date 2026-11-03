@@ -313,13 +313,17 @@ component/
 - RuntimeServices is internal, not in vinc.hpp; common_error only adds public classification. Host/Plugin lifetime belongs to their contracts; add_module builds a Plugin, not an executable.
 
 Stage 1 of the [FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md) adds separate
-Host/Plugin coordination wiring and Plugin entry **11**. `vinc::module` explicitly
+Host/Plugin coordination wiring and introduced Plugin entry **11**. The current
+entry is **13** after [Param RegisterOptions/restart hints](../param/README.md#restart-hints).
+`vinc::module` explicitly
 depends on OSAL; its component install rules carry the new header/archive and the
 existing Plugin helper carries the new entry. Static linking and ABI/CRT requirements
 remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance)
-owns current source/moved-SDK results, including the subsequent native macOS round and remaining full acceptance of the subsequent exit-observation repair.
-第一階段已接上 entry 11 與共用協調器，一般 Module 作者無須管理鎖；
-來源與乾淨安裝式 SDK 的驗收結果、Mac 原生補驗及剩餘缺口統一見第四階段紀錄。
+owns the earlier source/moved-SDK results. Mac exit-repair evidence is in the
+[current summary](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status); newer Param entry-13 SDK acceptance remains separate.
+該第一階段以 entry 11 接上共用協調器；目前 Param RegisterOptions／重啟標記已升為 entry 13，
+中央與 SDK 消費端需一起重建，一般 Module 作者無須管理鎖。
+來源與乾淨安裝式 SDK 的本輪驗收結果、環境及 Mac 待驗範圍統一見第四階段紀錄。
 
 - 正式程式的標頭留在元件的 include，實作留在 src。測試 helper 不成為 SDK 的一部分。
 - detail 可被編譯器看見，不代表外部 API 承諾；元件之間只依賴 README 指定的接線契約。
@@ -646,6 +650,10 @@ Umbrella includes Param facade/types/errors, used through inherited context.para
 ModuleParams 控制接線，中央擁有 ParamManager 與 TOML。
 資料位置、保存／權限／pump 契約見 [Param README](../param/README.md)。
 既有 config／Socket Shell 設定未自動遷移至 Param。
+
+Installed C++/Python Param acceptance and the native macOS checklist are maintained
+in the [Param stage 4 record](../param/README.md#param-redesign-stage-four).
+安裝式 C++／Python Param 驗收與 Mac 原生待驗清單統一維護於上述第四階段紀錄。
 
 <a id="log-api2026-10-08"></a>
 
