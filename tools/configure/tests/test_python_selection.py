@@ -134,7 +134,8 @@ class PythonSelectionTests(unittest.TestCase):
     def test_probe_timeout_and_failure_report_app_and_reason(self):
         output = self.configure(self.custom(), env=self.probe_environment(delay=True), success=False)
         self.assertIn("App First: cannot inspect Module Python", output)
-        self.assertIn("limit 10s", output)
+        # CMake may wrap the diagnostic after a long interpreter path.
+        self.assertRegex(output, r"\blimit\s+10s\b")
         self.assertIn("timeout", output.lower())
         output = self.configure(self.custom(), env=self.probe_environment(failure=True), success=False)
         self.assertIn("probe startup failed", output)
