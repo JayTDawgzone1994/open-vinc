@@ -4,10 +4,12 @@ App dispatches both roles and launches itself; standalone Host export/copy wirin
 is removed. Clean SDK-only and relocated C++ App validation passed on Windows/WSL;
 the final Windows/WSL integration regressions also passed. The subsequent native
 macOS baseline is recorded in [MACOS_VALIDATION.md](MACOS_VALIDATION.md).
-The newer Param restart hints have their own [acceptance and Mac checklist](../param/README.md#restart-hints-stage-three).
+The newer Param restart hints passed fresh native Mac Debug/Release installed-SDK
+acceptance; see [MACOS_PARAM_VALIDATION.md](MACOS_PARAM_VALIDATION.md).
 App 已自行分流／啟動自己，獨立 Host 匯出與複製接線已移除；乾淨 SDK-only 與搬移 C++ App
 及最終整合回歸已通過 Windows／WSL 驗證，後續 Mac 原生基線見上述報告。
-本次較新的 Param 變更另依其驗收紀錄／Mac 清單驗證，不能套用舊基線直接認證。
+新版 Param／重啟標記已補齊 Mac Debug／Release 乾淨 SDK，方法及限制見上述新報告，
+不套用舊基線直接認證。
 
 This package reuses prebuilt framework libraries through
 `find_package(vinc CONFIG REQUIRED)`. Source `add_subdirectory()` remains supported.
@@ -575,6 +577,10 @@ validation evidence is maintained in the [App composition report](../../../apps/
 內建 App 已統一組裝，最新遷移與驗證結果見上述主紀錄；下方保留各階段的歷史證據。
 
 ## Validation / 驗證
+
+新版 Plugin entry 13／Param wire v3 的 Mac 乾淨 SDK producer、搬移 consumer／App／Python
+已通過 Debug／Release 各三套；見 [Mac SDK 報告](MACOS_PARAM_VALIDATION.md)。
+以下退出修復／FD／舊 SDK 數字保留其原始受測版本，不代表本輪重跑完整框架。
 
 Latest Mac exit-repair results are in the [step 3 report](../osal/MACOS_EXIT_VALIDATION.md).
 Original Python-enabled full CTest is Debug **151/153**, Release **152/153**;

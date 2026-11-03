@@ -2,17 +2,13 @@
 
 # Param / 具型別參數服務
 
-**Mac source follow-up (2026-11-03):** after merging develop `f16da98`, Debug/Release source rebuilds and 96 selected tests per configuration passed, including Param/Plugin/Python, Shell and the expanded example. Clean installed-SDK acceptance remains pending; see the [publication validation](../osal/MACOS_EXIT_VALIDATION.md#publication-validation).
+**macOS acceptance (2026-11-03):** source Debug/Release regressions passed 96/96 per configuration; subsequent fresh SDK-only producers at `9f0ec0b` passed installed consumer/application/python acceptance **3/3 each in Debug and Release**. See the [Mac SDK report](../sdk/MACOS_PARAM_VALIDATION.md) for environment, commands, Param markers and coverage limits.
 
-**Mac 來源補驗：** 已通過上述整合後的 Debug／Release 來源回歸；下文各階段的「Mac 待驗」保留為當時紀錄，完整驗收仍缺新版乾淨 installed SDK，不能以舊 ABI 的 SDK 結果替代。
+**Mac 驗收已完成：** 新版 Plugin entry 13／Param wire v3 的來源及乾淨 installed SDK 已有原生證據，範圍依上述報告。下文歷史階段表格的 Mac Pending／待驗保留當輪結果，後續驗收由新報告補齊，不代表目前仍待驗，也不把不同輪次合計為一次完整 CTest。
 
-**Restart-hint stages 1–3:** Registration wiring, Shell reminders, examples and clean installed-SDK acceptance passed on Windows/WSL. Native macOS remains pending. See [registration options](#restart-hints) and [SDK acceptance](#restart-hints-stage-three).
+**Restart-hint stages 1–3 and earlier redesign stages 1–4:** implementation and Windows/WSL acceptance are recorded below; native Mac follow-up is linked above. This README owns the current contracts; [the implementation record](REDESIGN.md) indexes decisions and evidence. System-setting migration remains excluded.
 
-**重啟標記第一至三階段：** 接線、Shell 提醒、範例及乾淨 installed SDK 已通過 Windows／WSL 驗收；Mac 原生仍待驗。見[註冊選項](#restart-hints)與[SDK 驗收](#restart-hints-stage-three)。
-
-**Earlier redesign stages 1–4:** Windows/WSL source and clean installed-SDK acceptance passed. This README owns the current contracts; [the implementation record](REDESIGN.md) indexes decisions and evidence. Native macOS acceptance remains pending. System-setting migration remains excluded.
-
-**先前重設計第一至四階段：** Windows／WSL 來源及乾淨 installed SDK 驗收通過。本文維護正式契約，[實作紀錄](REDESIGN.md) 保留決策與證據索引。Mac 原生驗收待補，不包含系統設定搬移。
+**重啟標記及先前重設計：** 實作、Windows／WSL 原始驗收見下方各階段，後續 Mac 驗收見上述報告。本文維護正式契約，實作紀錄保留索引；不包含系統設定搬移。
 
 Param is a centrally managed typed parameter service. Modules use inherited context.param with approved name/MID, not self-created Contexts, shared regions, or Guards. Updates may be delayed/coalesced; Param neither replaces Bus nor synchronizes application across Modules.
 
@@ -317,7 +313,7 @@ Evidence: `build/param-full-validation/{windows,linux}-{configure,build,ctest,ex
 Local build artifacts are Git-ignored. Windows build is `windows-debug` under
 that directory; WSL build is `/home/vinc-test/build/param-full-validation-debug`.
 
-Native macOS follow-up / 原生 macOS 待驗：
+Native macOS follow-up checklist / 原生 macOS 補驗清單（已完成，見 [新報告](../sdk/MACOS_PARAM_VALIDATION.md)）：
 
 1. Use the same topic commit; record OS/CPU, Clang/libc++, CMake, Ninja and CPython.
    Rebuild App, Plugins and binding together (Plugin entry 13, bootstrap 16,
@@ -1037,13 +1033,12 @@ Public writes. Both success markers are required in the relocated App flow.
 第一次 pump 前讀取參數。驗證快取未被填入、Entry 獨立副本、自己可寫 Limited、其他
 Module 寫 Limited 遭拒、其他 Module 可寫 Public；搬移後 App 必須輸出兩種語言的成功標記。
 
-Native macOS acceptance remains pending. Follow the current
-[combined checklist](#restart-hints-stage-three), which also includes the later
-restart hints and expanded example smoke. Earlier Mac baseline results remain
-valid for their tested revision, not this redesign.
+At the original stage-4 checkpoint, native macOS was pending. Subsequent source and
+Debug/Release clean-SDK acceptance are recorded in the [Mac report](../sdk/MACOS_PARAM_VALIDATION.md),
+covering the later restart-hint ABI as well. Earlier results retain their tested revisions.
 
-Mac 原生驗收仍待執行，統一依[新版合併清單](#restart-hints-stage-three)，一併涵蓋
-後續重啟標記與擴充後的範例 smoke；先前 Mac 基線仍有效，但不能代表本次重設計已通過。
+第四階段原始輪次尚缺 Mac；後續已補來源及 Debug／Release 乾淨 SDK，並涵蓋較新的重啟標記 ABI，
+見上述報告。舊紀錄保留原版本與範圍，不改寫為當輪已通過。
 
 ### Earlier validation and retained limits / 先前驗收與既有限制
 
