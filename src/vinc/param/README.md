@@ -2,6 +2,10 @@
 
 # Param / 具型別參數服務
 
+**Mac source follow-up (2026-11-03):** after merging develop `f16da98`, Debug/Release source rebuilds and 96 selected tests per configuration passed, including Param/Plugin/Python, Shell and the expanded example. Clean installed-SDK acceptance remains pending; see the [publication validation](../osal/MACOS_EXIT_VALIDATION.md#publication-validation).
+
+**Mac 來源補驗：** 已通過上述整合後的 Debug／Release 來源回歸；下文各階段的「Mac 待驗」保留為當時紀錄，完整驗收仍缺新版乾淨 installed SDK，不能以舊 ABI 的 SDK 結果替代。
+
 **Restart-hint stages 1–3:** Registration wiring, Shell reminders, examples and clean installed-SDK acceptance passed on Windows/WSL. Native macOS remains pending. See [registration options](#restart-hints) and [SDK acceptance](#restart-hints-stage-three).
 
 **重啟標記第一至三階段：** 接線、Shell 提醒、範例及乾淨 installed SDK 已通過 Windows／WSL 驗收；Mac 原生仍待驗。見[註冊選項](#restart-hints)與[SDK 驗收](#restart-hints-stage-three)。

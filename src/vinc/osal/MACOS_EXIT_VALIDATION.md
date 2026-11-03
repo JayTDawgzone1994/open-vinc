@@ -1,5 +1,9 @@
 # macOS exit repair: native and application acceptance
 
+發布前已整合 develop `f16da98`（Param entry 13／wire v3）；整合後檢查另見
+[發布前驗證](#publication-validation)。下方原生壓力、完整 CTest 與乾淨 SDK 數字
+屬於合併前的受測版本，不自動涵蓋新版 Param ABI。
+
 <a id="current-acceptance-status"></a>
 
 ## Current acceptance status / 目前驗收狀態（2026-11-03）
@@ -229,3 +233,37 @@ runner 中的實際工具路徑與全部參數保存在對應 `*-results.json`�
 - 沒有驗證 Intel Mac、最低支援 macOS、其他 Python minor 或工具鏈組合。
 - 沒有強制取得真實 PID 重用；舊事件／新紀錄分離由受控契約及第一步 native token 證據支援。
 - 沒有 benchmark、硬即時延遲保證、GUI 人工巡覽或完整故障注入矩陣。
+
+<a id="publication-validation"></a>
+
+## Publication validation / 整合 develop 後的發布前驗證（2026-11-03）
+
+本輪將 develop `f16da98` 合入主題分支，受測實作 commit 為 `3c0aa44`。
+保留 Param entry 13／wire v3、最新 C++／Python 範例的多次啟動／保存／重啟提示流程，
+並合併授權檔案、UI 入口與官方 Module Ready 檢查；沒有覆蓋上游 Param 實作。
+先前的 9.06／8.02 秒範例紀錄與受測 script hash 僅適用合併前版本。
+
+在原本的 Git 外 Debug／Release 建置目錄同步受測來源，兩組都重新建置所有預設 targets，
+快照仍只額外啟用 bundled App 的 Python/System 設定。執行選擇如下，兩組依序執行：
+
+```sh
+cmake --build <build> --parallel 4
+ctest --test-dir <build> --output-on-failure --output-junit <result.xml> --parallel 1 \
+  -R '^(osal\.|module\.|param\.|shell\.|app\.|examples\.user_module$)'
+```
+
+| 整合後來源驗證 | Debug | Release |
+| --- | --- | --- |
+| 全部預設 targets 建置 | 通過 | 通過 |
+| 選定 CTest（無略過） | **96/96**，262.42 秒 | **96/96**，251.02 秒 |
+| OSAL／Module／Param／Shell／App／範例 | 50／23／3／7／12／1，全部通過 | 50／23／3／7／12／1，全部通過 |
+
+上述結果涵蓋新版 Plugin、Python、Param 權限／current reads／重啟標記，以及新版範例
+多次中央啟動與明確保存。最終非文件來源與受測快照 hash 一致；之後僅補寫驗證文件。
+環境同本文所列 macOS arm64／Apple Clang 21／CPython 3.12.14，既有編譯警告仍保留。
+
+這是整合後來源回歸，沒有重跑全部 CTest、6,624 案原生批次或乾淨 installed SDK。
+新版 Param 的乾淨 SDK consumer／application／python 矩陣仍待另輪驗證；
+Windows／Linux 仍須驗證本 PR 的退出修復與測試修訂，沒有 benchmark。
+原始輸出、命令、JUnit 與來源 hash 保存於 Git 外
+`/private/tmp/open-vinc-publication-20261103`。

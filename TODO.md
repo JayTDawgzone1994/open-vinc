@@ -2,25 +2,17 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
-## Param 重啟標記：macOS 驗收
+## Param 重設計與重啟標記：macOS 乾淨 SDK 驗收
 
-- [ ] macOS：重啟標記版本的乾淨 installed SDK consumer／application／python 三套驗收。
-- [ ] macOS 重建 Plugin entry 13／Param wire v3，跑 Param 三套及 Plugin／Python 四套測試，
-  驗證預設 Limited + None、跨程序標記、callback、舊協定拒絕、重新註冊與 TOML 不保存標記。
-- [ ] macOS 補跑 Shell unit／integration／socket／tcl 與新版 C++／Python 範例 smoke，
-  包含重啟提示、非同步診斷交錯、啟動才套用 label、明確保存及未保存修改的 App 重啟行為。
+- [ ] 使用整合後同一 commit，製作新版 Plugin entry 13／Param wire v3 的乾淨 SDK producer，重跑 installed consumer／application／python 三套驗收。
 
-Windows／WSL Release 第三階段已通過全新 SDK 建置及三套 installed 驗收，各 **3/3**。
-本次契約、結果與 Mac 步驟統一見 [Param restart hints](src/vinc/param/README.md#restart-hints-stage-three)。
-既有 Mac 基線早於本次 ABI 變更，不代替新版 Mac 驗收。
-
-## Param 重設計：macOS 同版原生驗收
-
-- [ ] 在同一 topic branch／commit 重建中央、Plugin、Python binding，驗證 Limited／Public、read_current、啟動覆寫與保存契約。
-- [ ] 重跑來源 Param／Plugin／Python 測試、新版範例 smoke，以及乾淨 installed SDK 的 consumer／application／python 三個整合案例。
-
-驗收步驟、環境要求及結果統一維護於 [Param 第四階段紀錄](src/vinc/param/README.md#param-redesign-stage-four)。
-Windows／WSL 結果不能代替 Mac；先前 macOS SDK 通過紀錄仍保留，但不涵蓋本次 Param 變更。
+發布前整合 develop `f16da98` 後，Mac Debug／Release 已重建全部來源 targets，
+包含 Param 三套、Plugin／Python、Shell 與新版範例的來源回歸各 **96/96** 通過。
+來源檢查不取代乾淨 installed SDK 驗收；先前 SDK 基線早於此 ABI 變更。
+本次來源結果見 [發布前驗證](src/vinc/osal/MACOS_EXIT_VALIDATION.md#publication-validation)，
+乾淨 SDK 步驟及既有 Windows／WSL 證據見
+[Param restart hints](src/vinc/param/README.md#restart-hints-stage-three)與
+[Param 第四階段紀錄](src/vinc/param/README.md#param-redesign-stage-four)。
 
 <a id="osalposix-fd-建立與-spawn-的並行競爭窗口"></a>
 <a id="osal-macos-標準串流與退出觀察"></a>
