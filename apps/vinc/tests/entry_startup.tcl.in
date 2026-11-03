@@ -1,0 +1,16 @@
+puts "ENTRY_SCRIPT_ONCE"
+if {[catch {
+    # An internal-looking token after -S belongs to Tcl, not process dispatch.
+    if {$argc > 0 && [lindex $argv 0] ne "--vinc-module-v0"} {
+        error "Script arguments changed"
+    }
+    set app [file join $::vinc::app_dir @ENTRY_FILENAME@]
+    EntryModule first $app --vinc-module-v0
+    EntryModule second $app --vinc-module-v0
+    first identity
+    second identity
+    puts "ENTRY_FLOW_OK"
+} diagnostic]} {
+    puts "ENTRY_FLOW_FAILED: $diagnostic"
+}
+exit

@@ -1128,9 +1128,15 @@ namespace {
 template<class Character>
 int run_cli(int argc, Character** argv) {
     vinc::Ribosome generator;
+#ifndef VINC_RIBOSOME_INSTALLED_TOOL
     generator.set_text_message_path(std::filesystem::path(vinc::kDefaultInputPath));
     generator.set_cpp_message_path(std::filesystem::path(vinc::kDefaultOutputPath));
+#endif
     bool explicit_input = false;
+#ifdef VINC_RIBOSOME_INSTALLED_TOOL
+    bool explicit_output = false;
+    bool explicit_template = false;
+#endif
     for (int i = 1; i < argc; i += 2) {
         if (i + 1 >= argc) {
             std::cerr << "Expected --input/--output/--template PATH\n";
@@ -1147,8 +1153,14 @@ int run_cli(int argc, Character** argv) {
             }
         } else if (option == std::filesystem::path("--output")) {
             generator.set_cpp_message_path(argv[i + 1]);
+#ifdef VINC_RIBOSOME_INSTALLED_TOOL
+            explicit_output = true;
+#endif
         } else if (option == std::filesystem::path("--template")) {
             generator.set_template_path(argv[i + 1]);
+#ifdef VINC_RIBOSOME_INSTALLED_TOOL
+            explicit_template = true;
+#endif
         } else {
             const auto utf8 = option.u8string();
             std::cerr << "Unknown option: " << std::string(utf8.begin(), utf8.end()) << '\n';
@@ -1156,6 +1168,13 @@ int run_cli(int argc, Character** argv) {
         }
     }
 
+#ifdef VINC_RIBOSOME_INSTALLED_TOOL
+    // Installed tools must never fall back to paths on the SDK producer's disk.
+    if (!explicit_input || !explicit_output || !explicit_template) {
+        std::cerr << "Installed Ribosome requires explicit --input, --output and --template paths\n";
+        return 1;
+    }
+#endif
     return generator.make_ligand();
 }
 

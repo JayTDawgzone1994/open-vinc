@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 #include <vinc/osal/detail/native_error.hpp>
 #include <vinc/osal/detail/posix/descriptor.hpp>
 // POSIX shm_open/mmap backend with exclusive creation and owner-only initial permissions.
@@ -83,6 +84,11 @@ vinc::Result<void> SharedMemoryMappingState::unmap_native() noexcept {
 }
 
 vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& name, std::uint64_t size) {
+    auto resources = acquire_resources(ErrorOperation::CreateSharedMemory);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     constexpr auto operation = vinc::osal::ErrorOperation::CreateSharedMemory;
     if (size > static_cast<std::uint64_t>((std::numeric_limits<off_t>::max)())) {
         return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument, operation});
@@ -103,21 +109,27 @@ vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& na
         return std::unexpected(isolated.error());
     }
 
-    state.handle = fd; // RAII closes on any subsequent failure
     int result;
     do {
         result = ::ftruncate(fd, static_cast<off_t>(size));
     } while (result < 0 && errno == EINTR);
     if (result < 0) {
         const auto failure = error(operation);
+        (void)::close(fd);
         (void)::shm_unlink(native.c_str()); // remove only the object we just created
         return std::unexpected(failure);
     }
+    state.handle = fd;
     // shm_open specifies FD_CLOEXEC; no inherited descriptor protocol is used.
     return {};
 }
 
 vinc::Result<void> open_memory(SharedMemoryState& state, const std::string& name, SharedMemoryAccess access) {
+    auto resources = acquire_resources(ErrorOperation::OpenSharedMemory);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     const auto native = native_name(name);
     int fd;
     do {

@@ -5,7 +5,7 @@ set_tests_properties(param.values PROPERTIES TIMEOUT 30)
 
 vinc_add_module_plugin(param_module_helper module_helper.cpp)
 add_executable(param_process_tests process_tests.cpp)
-target_link_libraries(param_process_tests PRIVATE vinc::module_manager vinc::param_manager vinc::shell)
+target_link_libraries(param_process_tests PRIVATE vinc_test_manager vinc::param_manager vinc::shell)
 add_dependencies(param_process_tests param_module_helper)
 vinc_deploy_tcl(param_process_tests)
 add_test(NAME param.process COMMAND param_process_tests "$<TARGET_FILE:param_module_helper>")

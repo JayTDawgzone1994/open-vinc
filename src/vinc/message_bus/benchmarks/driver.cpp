@@ -1,5 +1,6 @@
 #include <benchmark.hpp>
 #include <vinc/module/host/module_manager.hpp>
+#include <vinc/module/detail/module_runtime.hpp>
 #include <vinc/osal/path.hpp>
 #include <iostream>
 #include <thread>
@@ -153,7 +154,13 @@ int entry(const std::vector<std::string>& argv) {
     const auto before = resources();
     message_bus::Limits limits;
     limits.max_shared_bytes = shared_budget;
-    auto created = ModuleManager::create(limits);
+    auto executable = osal::executable_path();
+    if (!executable) {
+        std::cerr << error_to_string(executable.error()) << '\n';
+        return 1;
+    }
+
+    auto created = ModuleManager::create(limits, *executable);
     if (!created) {
         std::cerr << error_to_string(created.error()) << '\n';
         return 1;
@@ -169,6 +176,12 @@ int entry(const std::vector<std::string>& argv) {
 }
 
 int guarded_entry(const std::vector<std::string>& args) {
+    // This development tool owns its child role; no production Host binary or
+    // test fixture is required when benchmarks are built without BUILD_TESTING.
+    if (args.size() > 1 && vinc::detail::is_module_launch(args[1])) {
+        return vinc::run_module_process(std::vector<std::string>(args.begin() + 1, args.end()));
+    }
+
     try {
         return entry(args);
     } catch (const std::exception& error) {

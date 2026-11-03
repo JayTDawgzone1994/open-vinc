@@ -2,6 +2,40 @@
 
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
+新版 Param／重啟標記的 [macOS 乾淨 SDK 驗收](MACOS_PARAM_VALIDATION.md) 已於
+`9f0ec0b` 完成：全新 Debug／Release producer 及 installed consumer／application／python
+各 3/3 通過。來源、舊版 SDK 和原始整合失敗保留各自紀錄，不混成一次完整驗收。
+
+The [2026-11-03 Mac exit-repair report](../osal/MACOS_EXIT_VALIDATION.md) records
+Debug/Release App, Python and SDK verification, including the separate clean
+producer handoff and retained original integration failures. It does not establish
+Windows/Linux acceptance of the exit repair. The subsequent
+[Windows/WSL follow-up](../osal/WINDOWS_LINUX_EXIT_VALIDATION.md) now records
+Debug/Release source regression and all three fresh installed-SDK suites passing
+on each platform; it retains the separate mounted-source Tcl build failure.
+
+最新 Mac 退出修復、Plugin 與範例測試補驗見上述報告的
+[驗收總結](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)；
+原始整合失敗與定點補驗分開記錄。後續 Windows／WSL Debug／Release 已完成同版來源與
+三套乾淨 installed SDK 補驗，見上述補驗文件；新版 Mac Param SDK 則已由本頁上方的獨立報告結案。
+
+Central application features use [Kconfig configuration](../../../tools/configure/README.md).
+This interpreter requirement applies to application composition, not plain SDK
+lookup/linking; Python Module bindings remain a separate capability.
+
+中央應用功能使用上述 Kconfig 設定；直譯器需求限應用組裝，單純查找／連結 SDK 不需要。
+Python Module 綁定是另一項獨立能力。
+
+The [multi-App plan](../../../apps/vinc/MULTI_APP.md) now has a common source/installed
+App constructor: `vinc_add_app(target INSTANCE_NAME ... VINC_BUILD_CONFIG ... )`.
+Stage 2 isolates catalogs/scripts/UI adapters and shares compatible Modules/Python
+bindings. Stage 3 adds independent deployment/install and official startup; see the
+[composition contract](INSTALL.md#c-application-composition--c-應用組裝).
+
+多 App 已接上來源／安裝式共用建構介面，各 App 必須明確提供設定檔。
+第二階段隔離 catalog／腳本／UI 接線，共用相容的 Module 與 Python 綁定。
+第三階段已接上獨立部署、安裝與官方 Module 自動啟動；組裝契約見上方連結。
+
 Public convenience entry is `<vinc/vinc.hpp>`/vinc::sdk, aggregating existing APIs/dependencies without an extra runtime or implicit startup. Components retain API ownership; OSAL/Common can be used independently. The umbrella includes time.hpp/Deadline and contract.hpp fatal entries.
 
 對外整合入口是 `<vinc/vinc.hpp>`，CMake target 為 `vinc::sdk`。
@@ -18,14 +52,25 @@ Strict UTF-8 path conversion is included through path.hpp; see [OSAL](../osal/RE
 
 ## Usage / 使用方式
 
+Production Apps use the framework-provided entry, through source application
+configuration or installed `vinc_add_app()`. Custom central/Host mains and direct
+user-owned Manager bootstrap are unsupported; see the
+[entry contract](../../../apps/vinc/SINGLE_EXECUTABLE.md).
+The plain linking example below illustrates independent utility/component use,
+not an alternative way to launch an Open-VINC central process or Module.
+
+正式 App 使用框架入口，透過原始碼應用設定或安裝式 `vinc_add_app()` 組裝。
+不支援自訂中央／Host main 或使用者自行建立 Manager 啟動框架，完整規則見上述入口契約。
+下方單純連結的範例用於獨立工具／元件，不是啟動 Open-VINC 中央或 Module 的替代方式。
+
 Module authors can begin with runnable [C++/Python examples](../../../examples/userExampleModule/README.md) and their Shell/API index.
 
 一般 Module 作者可先看 [userExampleModule C++／Python 對照](../../../examples/userExampleModule/README.md)，
 包含可執行的 Shell 操作與 API 閱讀索引。
 
-Below is the C++ SDK. Optional system-Python bindings live in Module System behind VINC_BUILD_PYTHON, without linking Python into central/general C++ consumers. See [Python](../module_system/python/README.md) for Context services, containers, and ABI.
+Below is the C++ SDK. Optional system-Python bindings live in Module System and are selected by App Kconfig's CONFIG_VINC_APP_PYTHON, without linking Python into central/general C++ consumers. See [Python](../module_system/python/README.md) for Context services, containers, and ABI.
 
-以下是 C++ SDK。可選的系統 Python 綁定位於 Module System，建置開關為 `VINC_BUILD_PYTHON`；
+以下是 C++ SDK。可選的系統 Python 綁定位於 Module System，由 App Kconfig 的 `CONFIG_VINC_APP_PYTHON` 選擇；
 不會讓一般 C++ 使用端或中央連入 Python。Context 的 Bus／Param／Log、訊息容器與 ABI 限制見
 [Python SDK](../module_system/python/README.md)。
 
@@ -37,7 +82,6 @@ Below is the C++ SDK. Optional system-Python bindings live in Module System behi
 # 使用原始碼套件；請先初始化 library/ 下 Tcl 與 toml++ submodule。
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(VINC_BUILD_APPS OFF CACHE BOOL "" FORCE)
-set(VINC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(path/to/open-vinc/src open-vinc)
 
 add_executable(my_app main.cpp)
@@ -62,13 +106,13 @@ This is build-time copying, with no runtime library or Node/Python requirement.
 重新建置已是最新的 target 也會補回遺失的聲明，不必重新連結。
 這是建置期複製，不增加 runtime library，也不要求 Node 或 Python。
 
-Central, ModuleHost, and Plugins created by `add_module` receive this deployment automatically.
+The framework App and Plugins created by `add_module` receive this deployment automatically.
 Custom executables/libraries that directly link SDK/component targets call the helper explicitly, as above.
 For a source-only package, retain the three root files and the upstream license/notice files; the helper does not create an installed CMake package.
 The shared inventory includes optional components and incorporated third-party code, so it is a superset rather than a claim that every binary links every listed dependency.
 Dependency-pin updates must refresh the inventory; see [library maintenance](../../../library/README.md#license-inventory).
 
-中央、ModuleHost 及透過 `add_module` 建立的 Plugin 會自動部署。
+框架 App 及透過 `add_module` 建立的 Plugin 會自動部署。
 自行直接連結 SDK／元件的 executable 或 library，需如上例明確呼叫 helper。
 僅交付原始碼時，保留這三個根目錄檔案與上游授權／聲明；helper 不提供安裝式 CMake 套件。
 共用清單包含可選元件及套件內納入的第三方程式碼，是完整盤點範圍，不表示每個 binary 都連入全部套件。
@@ -126,7 +170,7 @@ target_include_directories(camera_module PRIVATE include)
 - add_message_dir collects direct .msg children, not recursive. Resolve relative to caller source; reject missing directories and deduplicate canonical ones. Built-ins remain, all types share namespace vinc.
 - Normal CMake registrations are collected at configure completion, including parent calls after add_subdirectory. No manual finalize or late registration in user DEFER callbacks.
 - Configure registers only. Build compiles Ribosome, generates all headers/type lists, then consumers. No nested configure-time build; every build regenerates fail-closed. Added/deleted/case-colliding types are tracked/rejected and cross-directory references resolve together.
-- Catalog collection waits for outer configure completion; central depends on all registered Plugins. APPS=OFF still builds messages/Plugins without central, not hot loading.
+- Catalog collection waits for outer configure completion. New Apps depend only on their selections plus official Modules; the legacy source shell still selects all registrations. APPS=OFF omits that legacy shell, not explicitly declared Apps. Unselected Plugins are excluded from the default build, but may be built by target name. This is not hot loading.
 
 - `add_module(target MODULE_TYPE_NAME name SOURCES ...)` 建立 MODULE 動態庫，自動連結
   `vinc::sdk`／`vinc::messages`，沿用 C++23、Plugin 可見性及 Windows CRT 契約。
@@ -145,12 +189,14 @@ target_include_directories(camera_module PRIVATE include)
 - `.msg` 在配置時登記；Build 先編譯 Ribosome、統一生成標頭與型別清單，再編譯所有相依
   使用端。不在 configure 期間偷做巢狀編譯。每次建置仍重新生成，沿用失敗封閉契約。
   新增／刪除 `.msg` 由 CMake 追蹤，重名（含大小寫）拒絕；跨目錄引用由 Ribosome 解析。
-- 中央 catalog 延至外部父專案配置結束後收集，建置中央亦建置所有已登記 Plugin。
-  關閉 VINC_BUILD_APPS 時仍可建置 Plugin／訊息，但不產生中央；不是即時載入 Plugin。
+- catalog 延至外部父專案配置結束後收集；新 App 僅相依選中的自訂 Module 與官方 Module，
+  舊來源 shell 仍選入全部登記。VINC_BUILD_APPS=OFF 只略過舊 shell，不影響明確宣告的 App。
+  未選 Plugin 不列入預設建置，但可指定 target 建置；不是即時載入 Plugin。
 
-Functions are source-package APIs without manually including private CMake files. The old vinc_add_process_module alias is removed. Headers remain vinc_messages/Name.hpp; Recorder/enabled Python share the merged compile-time type list without runtime registry.
+These registration functions are available from source and installed packages without manually including private CMake files. Installed application assembly uses [vinc_add_app](INSTALL.md). The old vinc_add_process_module alias is removed. Headers remain vinc_messages/Name.hpp; typed consumers and optional Python bindings share the merged compile-time type list without runtime registry.
 
-上述 functions 仍以原始碼套件提供；不要求使用者另外 include 私有 CMake 檔。
+上述登記 functions 由原始碼與安裝式套件提供；不要求使用者另外 include 私有 CMake 檔。
+安裝式應用由 [vinc_add_app](INSTALL.md) 組裝，亦可經 Kconfig 啟用應用專屬 Python 綁定。
 舊 `vinc_add_process_module()` 名稱不保留。生成標頭沿用 `<vinc_messages/Name.hpp>`；
 Bag 與啟用時的 Python SDK 取得同一份合併型別清單，沒有新增 runtime schema registry。
 
@@ -177,20 +223,20 @@ Windows x64、MSVC 19.51.36257、CMake 4.3.2、Ninja 1.13.2，啟用系統 Pytho
 - 生成器舊獨立來源副本腳本仍有過時假設，未列入本輪測試；見
   [Ribosome 待處理事項](../ribosome/README.md#待處理事項)。Linux／macOS 本輪未驗證。
 
-Logs: build/cmake-api-*-tests.log. That change originally used entry 6/bootstrap v11; current ABI is entry 8/v13. All connected consumers rebuild together; see [Module source/CMake contracts](../module_system/README.md#source-擁有實例命名與公開-cmake-接線2026-10-12).
+Logs: build/cmake-api-*-tests.log. That change originally used entry 6/bootstrap v11; see Module System for current markers. All connected consumers rebuild together; see [Module source/CMake contracts](../module_system/README.md#source-擁有實例命名與公開-cmake-接線2026-10-12).
 
-本機紀錄位於 build/cmake-api-*-tests.log；當時 entry 6／bootstrap v11 已被目前 entry 8／v13 取代；相容性與
+本機紀錄位於 build/cmake-api-*-tests.log；當時使用 entry 6／bootstrap v11，目前標記、相容性與
 重建要求見 [Module System](../module_system/README.md#source-擁有實例命名與公開-cmake-接線2026-10-12)。
 
-SDK supplies neither main nor message generation by itself; include/link starts no services. Central-owned main with embedded startup is available through vinc_configure_app, documented in [application setup](../../../apps/vinc/README.md#打包應用程式的啟動腳本). Central initializes Tcl/Socket automatically, unlike child Modules. APPS=OFF above is SDK-only; retain ON for central. Shell exposes only errors/SocketShellOptions, not internal Shell/SocketShell/ScriptService/TclRuntime/init APIs. CLI selects listener settings; see [Shell](../shell/README.md). Build-time vinc_deploy_tcl follows the actual target directory or an explicit destination; see [Tcl](../../../library/tcl/README.md). User/built-in messages share vinc::messages and explicit generated includes; Ribosome development API is not SDK. Delivery remains source add_subdirectory, not installed find_package(VINC).
+SDK supplies neither main nor message generation by itself; include/link starts no services. Central-owned main with embedded startup is available through vinc_add_app, documented in [application setup](../../../apps/vinc/README.md#打包應用程式的啟動腳本). Central initializes Tcl/Socket automatically, unlike child Modules. APPS=OFF above is SDK-only; declare your App with vinc_add_app. Shell exposes only errors/SocketShellOptions, not internal Shell/SocketShell/ScriptService/TclRuntime/init APIs. CLI selects listener settings; see [Shell](../shell/README.md). Build-time vinc_deploy_tcl follows the actual target directory or an explicit destination; see [Tcl](../../../library/tcl/README.md). User/built-in messages share vinc::messages and explicit generated includes; Ribosome development API is not SDK. Source add_subdirectory remains supported. The opt-in installed C++ SDK now provides find_package(vinc CONFIG REQUIRED); vinc_add_app assembles installed C++ applications. See [installed SDK](INSTALL.md).
 
 `vinc::sdk` 本身不提供 main、不生成使用者訊息；include 與連結不會啟動服務。
-需要直接開啟即可執行固定部署腳本的應用，可使用 `vinc_configure_app(NAME ... STARTUP_SCRIPT ...)`，
+需要直接開啟即可執行固定部署腳本的應用，可使用 `vinc_add_app(App INSTANCE_NAME ... VINC_BUILD_CONFIG ... STARTUP_SCRIPT ...)`，
 由中央提供 main 並嵌入腳本；建置順序、名稱與部署契約見
 [中央應用設定](../../../apps/vinc/README.md#打包應用程式的啟動腳本)。
 中央 `Vinc` 啟動時自動初始化 Tcl 並開啟 Socket Shell，兩者都是預設功能，
 使用者不負責呼叫初始化或服務啟停函式；Module 子程序也不建立中央 Shell。
-上例關閉 `VINC_BUILD_APPS` 是只建置 SDK 消費端；需要中央執行檔時保留該選項為 ON。
+上例關閉 `VINC_BUILD_APPS` 是只建置 SDK 消費端；需要中央執行檔時呼叫 `vinc_add_app()`。
 SDK 對 Shell 只提供錯誤分類與 `SocketShellOptions` 設定資料；
 `Shell`、`SocketShell`、`ScriptService`、`TclRuntime` 和初始化函式均屬框架內部接線。
 使用者透過中央 CLI 調整 IP、port 與 timeout，詳見 [Shell README](../shell/README.md)。
@@ -198,7 +244,8 @@ SDK 對 Shell 只提供錯誤分類與 `SocketShellOptions` 設定資料；
 部署 helper 的契約與平台限制見 [Tcl 整合](../../../library/tcl/README.md)。
 登記的自訂訊息與專案內建訊息統一使用 `vinc::messages`（既有 `vinc_messages` target 仍可用），
 並另外 include `<vinc_messages/name.hpp>`。SDK 不包含 Ribosome 開發介面。
-目前交付方式為原始碼加 `add_subdirectory`；尚未提供安裝後的 `find_package(VINC)` 套件。
+原始碼 `add_subdirectory` 仍支援；已增加可選的 `find_package(vinc CONFIG REQUIRED)` 安裝式 C++ SDK。
+應用組裝、自訂訊息與官方 C++ Module 的範圍及限制見 [安裝式 SDK](INSTALL.md)。
 
 The aggregate brings many headers/dependencies; select individual component headers/targets for smaller dependency sets.
 
@@ -223,7 +270,7 @@ The aggregate brings many headers/dependencies; select individual component head
 | rpc | vinc::rpc | Typed request/response facade; internal targets in RPC |
 | module_system | vinc::module | BaseModule/Plugin client dependencies |
 | module_system | vinc::module_manager | Central Manager |
-| module_system | vinc::module_entry | Host main/wmain object target |
+| module_system | vinc::module_runtime | Host Runtime, dispatched by the framework App |
 | shell | vinc::shell | Internal services; public settings/errors only |
 | vinc_messages | vinc::messages | Definitions/generation usage requirements |
 | sdk | vinc::sdk | Aggregate, excluding generated messages |
@@ -243,7 +290,7 @@ The aggregate brings many headers/dependencies; select individual component head
 | rpc | `vinc::rpc` | Context typed request／response facade；Host／Manager 私有接線另列於 RPC |
 | module_system | `vinc::module` | BaseModule、Plugin client 相依 |
 | module_system | `vinc::module_manager` | 中央 ModuleManager |
-| module_system | `vinc::module_entry` | 提供 Host main／wmain 的 object target |
+| module_system | `vinc::module_runtime` | 框架 App 分流呼叫的 Host Runtime |
 | shell | `vinc::shell` | 框架內部的 Shell、Socket Shell、Tcl 執行；設定及錯誤型別公開 |
 | vinc_messages | `vinc::messages` | .msg 定義與生成標頭使用需求 |
 | sdk | `vinc::sdk` | 以上現有框架 API 的便利入口，不含生成訊息 |
@@ -273,6 +320,19 @@ component/
 - Context/pump is implemented through BaseModule and context.hpp; lifecycle belongs to Module documentation.
 - RuntimeServices is internal, not in vinc.hpp; common_error only adds public classification. Host/Plugin lifetime belongs to their contracts; add_module builds a Plugin, not an executable.
 
+Stage 1 of the [FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md) adds separate
+Host/Plugin coordination wiring and introduced Plugin entry **11**. The current
+entry is **13** after [Param RegisterOptions/restart hints](../param/README.md#restart-hints).
+`vinc::module` explicitly
+depends on OSAL; its component install rules carry the new header/archive and the
+existing Plugin helper carries the new entry. Static linking and ABI/CRT requirements
+remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance)
+owns the earlier source/moved-SDK results. Mac exit-repair evidence is in the
+[current summary](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status); newer Param entry-13 SDK acceptance remains separate.
+該第一階段以 entry 11 接上共用協調器；目前 Param RegisterOptions／重啟標記已升為 entry 13，
+中央與 SDK 消費端需一起重建，一般 Module 作者無須管理鎖。
+來源與乾淨安裝式 SDK 的本輪驗收結果、環境及 Mac 待驗範圍統一見第四階段紀錄。
+
 - 正式程式的標頭留在元件的 include，實作留在 src。測試 helper 不成為 SDK 的一部分。
 - detail 可被編譯器看見，不代表外部 API 承諾；元件之間只依賴 README 指定的接線契約。
 - CMake target 傳遞標頭／連結需求，不加入其他元件的 src include 路徑。
@@ -292,6 +352,8 @@ component/
 ## Designated integration seams / 元件接線契約
 
 - Runtime creates/receives/closes Bus clients through detail/runtime.hpp.
+- Module Plugin initialization uses OSAL `detail/resource_coordinator.hpp` solely
+  to borrow Host resource coordination; the [FD plan](../osal/FD_SPAWN_PLAN.md) owns lifetime restrictions.
 - Manager submits requests/confirms exit/waits for reclamation through detail/bus_manager.hpp.
 - Bus binds fixed storage through message/detail/framework_access.hpp.
 - RingBuffer and native/state headers belong to owning implementations/tests, not general cross-component APIs.
@@ -408,16 +470,51 @@ Windows x64／MSVC／Ninja 驗證：
 
 ## Outstanding issues / 待處理事項
 
+- See the [Windows toolchain evaluation](WINDOWS_TOOLCHAIN.md) for the isolated
+  historical 19.42/19.44 results and Runtime-floor diagnosis. Python now uses the
+  [static SDK closure](INSTALL.md#static-python-sdk-validation) on MSVC; native C++
+  retains its dynamic CRT contract. Native MSVC
+  now requires 19.44 or newer; see the [Common policy](../common/README.md#build-toolchain-policy).
+  Exact installed-SDK compiler/ABI matching remains the
+  current contract; cross-toolchain or cross-patch relaxation is not approved
+  by successful same-toolchain builds.
+  Windows 舊工具鏈與 Runtime 門檻歷史診斷見上述評估；Python 已改用上述靜態庫，
+  原生 C++ 動態 CRT 契約不變。原生 MSVC 最低為 19.44，可使用較新版；
+  預編譯 SDK 的編譯器／ABI 比對仍維持原契約，不把同工具鏈成功擴張成混用版本保證。
+- Multi-App acceptance is recorded in the [plan](../../../apps/vinc/MULTI_APP.md#stage-4-acceptance).
+  The later Python Runtime policy has its own
+  [integration acceptance](INSTALL.md#runtime-final-acceptance), including
+  installed multi-App/System Module checks and an explicit native macOS handoff.
+  後續 Python Runtime 政策的整合驗收另見上述紀錄，包含安裝式多 App／System Module
+  與當時列出的 macOS 待驗證範圍；後續 Mac 實測見下方連結。
+  Linux installed composition, Windows Debug/Release complete multi-App retries,
+  and both platforms' Runtime regressions passed. The Windows port-8080 conflict
+  was resolved through an authorized preview pause and restoration. Subsequent
+  [native Mac acceptance](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)
+  includes source/moved multi-App and clean installed-SDK evidence. Interactive
+  editor coverage remains pending; do not expand these results beyond their recorded scope.
+  多 App 驗收見計畫：Linux 安裝式組裝、Windows Debug／Release 完整多 App 重驗及兩平台
+  Runtime 回歸通過；已經授權暫停並恢復網站，解除 8080 衝突。Mac 來源／搬移多 App
+  與乾淨 SDK 後續已有上述原生證據；編輯器互動驗證仍待補，不改寫既有歷史結果。
 - Reproduced Windows Tcl build-root spaces break unquoted upstream rules/mkdir even with relative-path attempts. No upstream patches; a build-location strategy needs separate design. Spaced deployment/output paths are distinct and tested. See [Tcl issues](../../../library/tcl/README.md#待處理事項).
-- Source add_subdirectory remains delivery. Installed find_package, non-single-config builds, and native Linux/macOS deployment remain incomplete/unverified; Windows cannot establish them.
+- Source add_subdirectory remains supported. [Installed SDK](INSTALL.md) provides C++ app composition and optional consumer-built Python bindings; multi-config support remains pending. Platform evidence is scoped separately.
+- The 2026-11-02 WSL `/mnt/d` run exceeded `installed_consumer.cmake`'s default
+  90-second command limit while copying Tcl resources. A manual rerun with the
+  explicit 600-second test limit passed; the default CTest timeout is unchanged.
+  Prefer native filesystem validation or explicitly record raised limits; see
+  [SDK validation](INSTALL.md#static-python-sdk-validation). This is a validation
+  environment limit, not evidence of a framework lifecycle defect.
+  本輪 WSL `/mnt/d` 複製 Tcl 資源超過測試預設 90 秒，明確提高至 600 秒後完整通過。
+  預設 CTest 期限未變；後續宜使用原生檔案系統，或記錄調高的測試期限。
+  這是驗證環境限制，並非框架生命週期錯誤的證據。
 
 - **已重現：Windows Tcl 建置根目錄含空白時，NMAKE 失敗。** 上游 `rules.vc` 的
   inference rules 使用無引號來源／輸出路徑；改用相對路徑後，仍在上游絕對路徑 mkdir
   步驟失敗。本輪保留既有建置方式，不修改上游；後續須另討論建置位置策略。
   執行檔輸出與部署目錄含空白是不同情境，已加入本輪回歸。
   證據及平台限制見 [Tcl 待處理事項](../../../library/tcl/README.md#待處理事項)。
-- 原始碼套件以 add_subdirectory 整合；安裝後 find_package、單組態以外的建置及
-  Linux／macOS 原生部署仍未完成驗證，不由本輪 Windows 結果推論支援。
+- 原始碼套件以 add_subdirectory 整合；[安裝式 SDK](INSTALL.md) 已提供 C++ 應用及 Python 綁定組裝，單組態以外的建置
+  仍待完成。Windows／WSL 與後續 macOS 安裝式 SDK 驗證見上述文件，範圍依各輪紀錄。
 
 <a id="plugin-連結集合2026-10-06"></a>
 
@@ -430,13 +527,21 @@ Module helper 設定 `VINC_MODULE_PLUGIN` target property。`vinc::sdk` 對此 c
 一般 executable consumer 保留原本完整連結集合；Plugin 只能使用 Module 端 API，不能因
 標頭可見就自行建立中央服務。public header 位置由所屬 target 提供，不引用其他元件 src。
 
-MODULE libraries produce Windows DLLs without standalone main. Match Host toolchain/stdlib/config/layout/CRT, without prebuilt cross-version ABI promises. module_entry is Host-only. Deploy Host/Plugin with specified absolute paths under current source integration; see Manager::create/ModuleType::library.
+MODULE libraries produce Windows DLLs without standalone main. Match Host toolchain/stdlib/config/layout/CRT, without prebuilt cross-version ABI promises. App owns the sole production entry and launches itself for native Modules; no module_entry/module_host target remains. Legacy source-shell catalogs retain absolute Plugin paths; source/installed vinc_add_app catalogs use relative deployed paths; see the [entry contract](../../../apps/vinc/SINGLE_EXECUTABLE.md).
 
 正式 helper 使用 CMake MODULE library；Windows 產出 DLL，不提供獨立 main。
 Plugin 與 Host 需相同工具鏈、標準庫、組態、布局及 CRT；不承諾預編譯 Plugin 跨版本 ABI。
-`vinc::module_entry` 僅供 Host 組裝，不能再連入應用 Module。
-既有 source-build 的 add_subdirectory 交付方式不變；部署時同時提供 ModuleHost 與 Plugin，
-並指定其絕對路徑，詳見 Module System 的 Manager::create 與 ModuleType::library。
+正式唯一入口由 App 維護，啟動原生 Module 時再次執行自己；不再提供 module_entry／module_host target。
+舊來源 shell 的 catalog 仍使用 Plugin 絕對路徑；來源／安裝式 `vinc_add_app` 改用相對部署路徑，見[入口契約](../../../apps/vinc/SINGLE_EXECUTABLE.md)。
+
+Current single-entry validation is recorded in that plan, separately from the
+historical Plugin migration below. Installed Python integration checks the native
+peer's App image and three distinct central/native/Python PIDs in addition to its
+existing Bus/RPC/Param and wrong-ABI isolation checks.
+
+本次單一入口的驗證記錄於上述計畫，與下方歷史 Plugin 遷移分開。安裝式 Python 整合
+除既有 Bus／RPC／Param 與錯誤 ABI 隔離，亦檢查原生 peer 的 App 路徑及中央／原生／
+Python 三個不同 PID。
 
 Historical Plugin migration: Windows Debug/Release full builds/suites **55/55**, including Plugin-delivered SDK/external consumers/headers. Link closures excluded central/Session implementations. No Linux/macOS verification.
 
@@ -487,6 +592,13 @@ Common VincMsvcDependencies.cmake re-probes localized showIncludes as UTF-8 at c
 避免再次生成會默默漏編的設定；Windows MSVC／Ninja 請使用 UTF-8 開發者環境。
 此接線只套用 Windows MSVC／Ninja，其他編譯器與 generator 不變。
 
+The root build wrapper now supplies an isolated UTF-8 console for Windows build
+and install steps, including callers using CP950. Direct CMake callers still own
+their console setup. See [native console validation](../../../tools/README.md#native-console-encoding-follow-up-2026-10-31--原生-console-編碼補驗).
+
+根目錄建置腳本已為 Windows 建置／安裝步驟提供獨立 UTF-8 console，支援從 CP950 呼叫；
+直接使用 CMake 時仍須自行準備終端環境。本輪補驗及前輪覆蓋缺口見上述紀錄。
+
 **Affected existing builds need reconfigure then one clean rebuild.** Prefix correction cannot reconstruct missing object dependencies. After that, incremental builds work; both local external fixtures were rebuilt.
 
 **既有受影響目錄需先重新配置，再做一次 clean rebuild。** 前綴修正不會補回既有 object
@@ -527,12 +639,12 @@ build/msvc-deps-*-common.log，
 
 ## Central identity and private Host locks / 中央名稱與 Host 私有鎖
 
-VINC_NAME selects central identity; conflicting names fail Manager::create. Private ContextLockAccess gets Host leases and is absent from umbrella/public methods. Host owns Guards/lifetime, not a second Plugin lock service. Current entry 8/v13 requires matched rebuilds; old Param/Log-stage entry 5/v10 is historical. See [Instance](../module_system/INSTANCE.md).
+INSTANCE_NAME selects central identity; conflicting names fail Manager::create. Private ContextLockAccess gets Host leases and is absent from umbrella/public methods. Host owns Guards/lifetime, not a second Plugin lock service. Current versions follow [Module System](../module_system/README.md); matched rebuilds are required; old Param/Log-stage entry 5/v10 is historical. See [Instance](../module_system/INSTANCE.md).
 
-中央建置可設定 `VINC_NAME`；同名占用會由 Manager::create 回報錯誤。
+App 建構器指定 `INSTANCE_NAME`；同名占用會由 Manager::create 回報錯誤。
 框架私有 `ContextLockAccess` 經 Host 取得 lease，未加入 SDK 總標頭或公開 Context 方法。
 Concurrency Guard 的操作／析構留在 Host；Plugin 不因此擁有另一份框架鎖管理服務。
-目前 Plugin entry 8／bootstrap v13 需完整重新建置；先前 Param／Log 階段的 entry 5／v10 為歷史值。
+目前版本依 [Module System](../module_system/README.md)，需完整重新建置；先前 Param／Log 階段的 entry 5／v10 為歷史值。
 名稱、依賴及清理契約見 [Module System INSTANCE.md](../module_system/INSTANCE.md)。
 
 <a id="param-接線2026-10-08"></a>
@@ -547,26 +659,30 @@ ModuleParams 控制接線，中央擁有 ParamManager 與 TOML。
 資料位置、保存／權限／pump 契約見 [Param README](../param/README.md)。
 既有 config／Socket Shell 設定未自動遷移至 Param。
 
+Installed C++/Python Param acceptance and the native macOS checklist are maintained
+in the [Param stage 4 record](../param/README.md#param-redesign-stage-four).
+安裝式 C++／Python Param 驗收與 Mac 原生待驗清單統一維護於上述第四階段紀錄。
+
 <a id="log-api2026-10-08"></a>
 
 ## Log API（2026-10-08） / Log 介面（2026-10-08）
 
-Umbrella includes Log/context.log and fmt, not spdlog headers/definitions. Plugins gain no Log Host/Manager/Control ownership. The original Log stage used entry 5/v10; current matched ABI is entry 8/v13. See [Log](../log/README.md).
+Umbrella includes Log/context.log and fmt, not spdlog headers/definitions. Plugins gain no Log Host/Manager/Control ownership. The original Log stage used entry 5/v10; current versions follow [Module System](../module_system/README.md). See [Log](../log/README.md).
 
 vinc/vinc.hpp 包含 Log；Module 透過繼承的 context.log 使用。SDK target 帶入 fmt，
 不洩漏 spdlog headers／definitions；Plugin 不取得 Log Host／Manager 或 control service。
-Log 初次接線時為 entry 5／v10，目前為 entry 8／bootstrap v13，須匹配重建。見 [Log](../log/README.md)。
+Log 初次接線時為 entry 5／v10，目前版本依 [Module System](../module_system/README.md)，須匹配重建。見 [Log](../log/README.md)。
 
 <a id="雙時間與-utc2026-10-13"></a>
 
 ## Dual time and UTC (2026-10-13) / 雙時間與 UTC（2026-10-13）
 
-Umbrella time.hpp exposes unix_nanoseconds/format_utc; see [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13). BaseMessage dual-time changes require rebuilding central/Host/Plugin/SDK/Python together. Current entry 8/bootstrap 13; payload/hash unchanged.
+Umbrella time.hpp exposes unix_nanoseconds/format_utc; see [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13). BaseMessage dual-time changes require rebuilding central/Host/Plugin/SDK/Python together. Current versions follow [Module System](../module_system/README.md); payload/hash unchanged.
 
 `<vinc/vinc.hpp>` 已包含 `<vinc/time.hpp>`，可使用 `vinc::unix_nanoseconds()` 與
 `vinc::format_utc(uint64_t)`；API 契約見 [Common](../common/README.md#unsigned-unix-time-and-utc-formatting-2026-10-13)。
 BaseMessage 的 Unix／單調發布時間變更需中央、Host、Plugin／SDK 使用端與 Python 擴充一起重建。
-目前 Plugin entry 8／bootstrap v13；payload 映像与訊息 schema hash 不變。
+目前版本依 [Module System](../module_system/README.md)；payload 映像与訊息 schema hash 不變。
 
 <a id="rpc-sdk2026-10-14"></a>
 
@@ -582,6 +698,71 @@ ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件�
 
 ### Notification integration rebuild / 通知整合重建
 
-Host/Plugin entry 10 and bootstrap v16 require rebuilding connected SDK consumers, Plugins and Python native adapters with the central/Host. Public pumpOnce syntax/semantics stay unchanged; pumpLoop uses the Host-owned notification receiver plus the existing fallback. ModuleInfo now carries notification diagnostics. See [Pump wakeup](../module_system/PUMP_WAKEUP.md) for ownership, protocol versions, recovery and validation.
+The notification stage introduced Host/Plugin entry 10/bootstrap v16; current versions follow [Module System](../module_system/README.md). Changes require rebuilding connected SDK consumers, Plugins and Python native adapters with the central/Host. Public pumpOnce syntax/semantics stay unchanged; pumpLoop uses the Host-owned notification receiver plus the existing fallback. ModuleInfo now carries notification diagnostics. See [Pump wakeup](../module_system/PUMP_WAKEUP.md) for ownership, protocol versions, recovery and validation.
 
-本輪 entry 10／bootstrap v16 要求所有相連產物一起重建。pumpOnce 不變，pumpLoop 使用 Host 的通知與備援等待；ModuleInfo 加入通知診斷。完整契約見上述連結。
+通知接入當時為 entry 10／bootstrap v16，目前版本依 Module System；所有相連產物須一起重建。pumpOnce 不變，pumpLoop 使用 Host 的通知與備援等待；ModuleInfo 加入通知診斷。完整契約見上述連結。
+
+<a id="system-module-validation"></a>
+
+### System Module integration validation / System Module 接線驗證
+
+`tests/system_apps.py` is the C++-only installed-SDK acceptance path. It builds
+two Apps with `find_package(vinc)`, installs and moves both packages, then checks
+same-name exclusion, independent Shell/Recorder processes, an actual HTTP port
+conflict, automatic recovery after the configured start-limit window, and
+recording/shutdown isolation. Python runs the test harness only; neither App
+enables the Python Module capability. CTest exposes it as `sdk.system_apps` for
+Ninja SDK builds with testing, UI and a Python interpreter available.
+
+`tests/system_apps.py` 是純 C++ 安裝式 SDK 驗收：透過 `find_package(vinc)` 建置兩個
+App，安裝並搬移後測試同名排他、獨立 Shell／Recorder、真實 HTTP port 衝突、限流
+時間窗後自動恢復，以及錄製與關閉隔離。Python 只執行測試腳本，兩個 App 均不啟用
+Python Module。啟用測試與 UI 且有 Python interpreter 的 Ninja SDK 建置會登記
+`sdk.system_apps`。
+
+Windows Release acceptance passed for two installed-and-moved C++ Apps; see the
+[stage 3 evidence and platform limits](../module_system/README.md#system-module-stage3).
+The compatible-Python follow-up and the historical dynamic-CRT limitation are recorded below.
+
+Windows Release 的兩個安裝並搬移 C++ App 已通過驗收；證據與平台限制見上述第三階段
+紀錄。下文分別記錄相容 Python 的補驗，以及先前動態 CRT 建置的 Runtime 限制。
+
+2026-11-01, Windows x64 / MSVC 19.51.36257 Release: an installed SDK built the
+C++ `First` App, installed it with `VincApp_First`, moved the package, and passed
+`apps/vinc/tests/system_services.py`. Official UI/Recorder registration, command
+visibility/protection, crash recovery and whole-framework shutdown passed.
+Full behavior and source Debug/Release evidence belong to the
+[Module System README](../module_system/README.md#system-modules).
+
+2026-11-01，Windows x64／MSVC 19.51.36257 Release：安裝式 SDK 建立 C++ First App，
+以 `VincApp_First` 安裝並搬移後通過 System 服務測試；官方登記、命令顯示／保護、crash
+恢復與框架關閉均通過。完整契約及來源版 Debug／Release 證據見上述文件。
+
+**Earlier blocked validation (environment):** `tests/multi_app.py` built First,
+Second and Third, then stopped at Second's Python Module startup. The local
+CPython 3.13 executable loaded its bundled VCRUNTIME140 14.42.34438.0; that dynamic
+SDK required at least 14.51.36244.0. `python/vinc/_windows_runtime.py` correctly
+raised ImportError before loading native code. This run did not reach the later
+multi-App concurrency and failure-injection checks. Compatible-environment
+acceptance subsequently passed as recorded below. This restriction applies to that
+dynamic-CRT package, not the current static binding. Linux/macOS were not verified
+in that run.
+Evidence: `build/system-stage2-sdk-multi.log` and
+`build/system-stage2-installed-services.log` (local build artifacts).
+
+**先前被擋住的驗證（環境限制）：**多 App 測試建好三個 App 後，在 Second 的 Python Module
+因上述 Runtime 版本不符而中止；guard 正確先回 ImportError，尚未執行後續多 App 並行與
+故障注入案例。相容 Python Runtime 的後續補驗見下文；此限制屬於當時的動態 CRT 套件，
+不代表目前靜態綁定仍有相同限制。當時未放寬 guard 或替換使用者 DLL。
+該次未驗證 Linux／macOS，原始紀錄位於上述本機建置目錄。
+
+**Follow-up (2026-11-01):** Windows MSVC 19.44.35229 Release with isolated
+CPython 3.13.12 / compatible 14.51 Runtime passed `sdk.multi_app` (418.28 s),
+including the later coexistence and failure cases, and `sdk.system_apps`
+(204.14 s). The user's original Python still failed that dynamic Runtime guard;
+this resolved the missing compatible-environment acceptance, not that deployment
+restriction. See the [toolchain report](WINDOWS_TOOLCHAIN.md) for exact scope.
+
+**後續補驗（2026-11-01）：**19.44 Release 配合隔離的相容 Python／Runtime，完整
+`sdk.multi_app` 與 `sdk.system_apps` 通過，補到後續並行與故障案例。原始 Python 安裝當時仍
+被動態 CRT 防護拒絕；解決的是相容環境的驗證缺口，不是放寬部署限制。完整範圍見上述報告。

@@ -40,7 +40,7 @@ English and Traditional Chinese are paired below. Commands and code blocks are s
 | Shell and scripts | Console, Raw TCP Socket Shell, Tcl scripts, cancellation, and embedded startup scripts. / 互動終端、Raw TCP Socket Shell、Tcl 腳本、中斷與啟動腳本打包。 |
 | Logging | Central capture of stdout/stderr and structured Error/Warn/Info/Debug records with time and Module identity. / 中央擷取 stdout／stderr，保存含時間與 Module 身分的 Error／Warn／Info／Debug 結構化紀錄。 |
 | Bag Recorder | SQLite recording of selected or all discovered topics, bounded queues, and loss statistics. Payload recording requires compiled-in types. Player is not implemented. / 以 SQLite 錄製指定或探索到的全部 topic，具備有界佇列與損失統計；payload 限建置時已知型別，Player 尚未實作。 |
-| Web UI | Optional-to-start Module, plugin workspace, manual-refresh Module Graph, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 預設不啟動的官方 Module、plugin 工作區、手動刷新 Module Graph，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
+| Web UI | Automatically started official Module, plugin workspace, manual-refresh Module Graph, and read-only Topic Monitor with Hz, collision/loss status, and latest-message previews. / 自動啟動的官方 Module、plugin 工作區、手動刷新 Module Graph，以及含 Hz、碰撞／漏資料狀態與最新訊息預覽的唯讀 Topic Monitor。 |
 
 <a id="architecture"></a>
 
@@ -53,16 +53,16 @@ Central Vinc / 中央
        | Socket: identity, lifecycle, heartbeat, commands, control metadata
        | Socket：身分、生命週期、heartbeat、命令與控制資訊
        |
-       +---- ModuleHost process ---- C++ Plugin + Context
+       +---- same App (Host role) ---- C++ Plugin + Context
        +---- system Python process ---- Python Module + Context
 
   Module <====== shared memory / 共享記憶體 ======> Module
                  Message Bus / RPC payloads
 ```
 
-A C++ Module is a Plugin library, not a standalone executable. Vinc starts a separate ModuleHost for each instance; the Host loads the Plugin and owns its process-level control services. Python Modules run in separate system-Python processes. Authors use the Context inherited from BaseModule instead of implementing sockets or heartbeat.
+A C++ Module is a Plugin library, not a standalone executable. Vinc starts a separate ModuleHost process for each instance using the same App executable; the Host loads the Plugin and owns its process-level control services. Python Modules run in separate system-Python processes. Authors use the Context inherited from BaseModule instead of implementing sockets or heartbeat.
 
-C++ Module 是 Plugin 動態庫，不是獨立執行檔。Vinc 為每個實例啟動獨立 ModuleHost，由 Host 載入 Plugin 並持有程序級控制服務；Python Module 則在獨立的系統 Python 程序執行。開發者使用 BaseModule 繼承的 Context，不必自行實作 Socket 或 heartbeat。
+C++ Module 是 Plugin 動態庫，不是獨立執行檔。Vinc 使用同一份 App 執行檔，為每個實例啟動獨立的 ModuleHost 程序，由 Host 載入 Plugin 並持有程序級控制服務；Python Module 則在獨立的系統 Python 程序執行。開發者使用 BaseModule 繼承的 Context，不必自行實作 Socket 或 heartbeat。
 
 Sockets carry control information. Message Bus payloads use one shared RingBuffer per Publisher; RPC payloads use fixed shared slots. Subscription delivery copies a validated message into the receiving process before invoking user callbacks. A Publisher loan lets users fill shared storage directly, then commit it.
 
@@ -82,11 +82,19 @@ See [Module System](src/vinc/module_system/README.md), [Message Bus](src/vinc/me
 
 ### Requirements / 工具需求
 
+Windows native MSVC builds require **19.44 or newer** (no patch pin). Installed SDK
+ABI matching and the selected Python binding's Runtime policy still apply; see the
+[toolchain contract](src/vinc/common/README.md#build-toolchain-policy).
+
+Windows 原生 MSVC 建置最低為 **19.44**，不限制修補版；SDK 的 ABI 配對與所選 Python
+綁定的 Runtime 政策仍須符合，詳見上述工具鏈契約。
+
 - **C++23 compiler and standard library**, **CMake 3.20+**, and **Ninja**. C++23 is required, with language extensions disabled; newer toolchains may need newer CMake. / **支援所用 C++23 功能的編譯器與標準庫**、**CMake 3.20 以上**及 **Ninja**；要求 C++23 且關閉語言擴充，較新工具鏈可能需要較新 CMake。
 - **Windows:** an x64 MSVC developer environment with NMAKE for Tcl. Keep build-directory paths free of spaces due to a known Tcl integration limitation. / **Windows：**使用含 NMAKE 的 x64 MSVC 開發環境；目前 Tcl 整合有已知限制，建置目錄路徑須避免空白。
 - **Linux/macOS:** a suitable C++ toolchain, make, and zlib development files for Tcl. Ubuntu 22.04 is the minimum Linux target; its default GCC 11 is not the C++23 baseline. / **Linux／macOS：**適用 C++ 工具鏈、make 與 Tcl 所需 zlib 開發檔。Linux 最低目標為 Ubuntu 22.04，不以預設 GCC 11 為 C++23 基準。
 - **Default Web UI build:** Node.js and npm; local validation records use Node.js 24.19.0. These are build-time tools, not browser/runtime requirements. / **預設 Web UI 建置：**需要 Node.js 與 npm，本機驗證紀錄使用 Node.js 24.19.0；部署後的瀏覽器與執行環境不需要 Node.js。
 - **Optional Python SDK:** compatible 64-bit, GIL-enabled CPython and Development.Module files. The deployment environment supplies Python. / **選用 Python SDK：**需要相容的 64 位元、含 GIL 的 CPython 與 Development.Module 開發檔，部署環境自行提供 Python。
+- **Application configuration:** Python 3.11+ (Python 3 only) runs the bundled Kconfig tool at configure time, even when Python Modules are disabled. Plain SDK lookup/linking does not need it. / **應用功能設定：**配置時需要 Python 3.11+（限 Python 3）執行內附 Kconfig 工具，與是否啟用 Python Module 無關；單純查找／連結 SDK 不需要。
 
 See [Tcl integration](library/tcl/README.md), [Python SDK](src/vinc/module_system/python/README.md), and [third-party dependencies](library/README.md) for detailed requirements.
 
@@ -97,18 +105,75 @@ See [Tcl integration](library/tcl/README.md), [Python SDK](src/vinc/module_syste
 Run `tools\setup.bat` on Windows, or `bash tools/setup.sh` on Ubuntu/macOS.
 These scripts install/check tools, restore pinned submodules and install UI npm
 dependencies. They **do not configure or build your project**. UI and optional
-Python SDK prerequisites are included by default; use `--no-ui` or `--no-python`
-to omit them, or `--check` to inspect without installing. Standalone temporary
+Python SDK prerequisites are included by default; `--no-ui` omits UI dependencies,
+while `--no-python` omits Module development files but still checks the build
+interpreter. Use `--check` to inspect without installing. Standalone temporary
 compiler probes check toolchain capabilities. See [setup instructions](tools/README.md)
 for platform requirements, environment selection and validation limits.
+Use `--recommended` for the recommended installation candidates. Successful setup
+remembers local tool selections for this checkout's root build wrappers; see the
+[toolchain selection contract](tools/README.md#remembering-selections--記住本機工具選擇).
 
 Windows 執行 `tools\setup.bat`，Ubuntu／macOS 執行 `bash tools/setup.sh`。
 腳本安裝／檢查工具、還原固定 submodule 並安裝 UI npm 套件，**不配置或編譯使用者專案**。
-預設包含 UI 與選用 Python SDK 的相依，可用 `--no-ui`／`--no-python` 略過；
+預設包含 UI 與選用 Python SDK 的相依；`--no-ui` 略過 UI，`--no-python` 略過 Module 開發檔，但仍檢查建置直譯器；
 `--check` 僅檢查、不安裝。工具鏈能力由獨立暫存小程式驗證。
 平台需求、環境選擇與驗證限制見 [setup 說明](tools/README.md)。
+`--recommended` 使用建議安裝候選；setup 成功後會記住本機工具選擇，供本 checkout 的
+根目錄 build 入口使用。已合格工具保留，檢查失敗不覆寫舊紀錄。
 
 ### Configure, build, test / 配置、建置、測試
+
+All Apps use `vinc_add_app()`. The bundled Vinc selects its examples and Python
+in [apps/vinc/vinc.conf](apps/vinc/vinc.conf); UI and Recorder are mandatory System
+Modules. Python defaults off. Source and installed SDK applications follow the
+same [composition contract](src/vinc/sdk/INSTALL.md).
+
+所有 App 統一使用 `vinc_add_app()`；內建 Vinc 的範例與 Python 選擇放在上述設定檔。
+UI／Recorder 固定包含，Python 預設關閉。來源與安裝式 SDK 共用組裝與部署流程。
+
+After preparing dependencies, the root build entry configures and builds in one
+command. Default is Debug; CMake also builds the UI frontend when selected. Tests,
+installation and dependency setup remain separate actions.
+
+相依準備完成後，可直接使用根目錄入口配置及建置；預設 Debug，UI 前端也由 CMake
+接續建置。不自動執行測試、安裝產物或補裝相依。
+
+```bat
+build.bat --jobs 4
+build.bat --config Release --jobs 4
+```
+
+```sh
+sh build.sh --jobs 4
+sh build.sh --config Release --jobs 4
+```
+
+The shared implementation is also at the root: `py -3 build.py` on Windows,
+or `./build.py` / `python3 build.py` on Linux/macOS, with the same options.
+
+共用實作也放在根目錄：Windows 可用 `py -3 build.py`，Linux／macOS 可用
+`./build.py` 或 `python3 build.py`，參數與上述入口相同。
+
+Windows automatically prepares an x64 MSVC environment for the child build.
+Outputs default to `build/windows-msvc-debug` or the corresponding platform/profile.
+Use `--source` for an external project's CMake entry and `--target` for selected
+Apps. See [build options and safety boundaries](tools/README.md#build-entry--統一建置入口).
+The direct CMake workflow below remains supported.
+
+Windows 自動為本次建置準備 x64 MSVC 環境；預設輸出在 `build/windows-msvc-debug`
+或對應平台／組態的目錄。外部專案用 `--source` 指定入口，`--target` 選擇 App；
+詳見上述工具說明。下方直接執行 CMake 的方式仍可使用。
+
+To install a reusable SDK, explicitly run `py -3 build.py --install-vinc-sdk`
+on Windows or `./build.py --install-vinc-sdk` on Linux/macOS. SDK mode defaults
+to Release, verifies the installed package and registers it for CMake lookup.
+Replacing an existing installer-owned SDK requires confirmation. See the
+[SDK installation/update contract](src/vinc/sdk/INSTALL.md#sdk-install-command).
+
+若要安裝可重複使用的 SDK，Windows 執行 `py -3 build.py --install-vinc-sdk`，
+Linux／macOS 執行 `./build.py --install-vinc-sdk`。預設 Release，安裝驗證後登記供
+CMake 查找；已有本工具安裝的 SDK 時，先詢問是否更新。完整契約見上述文件。
 
 Run from the repository root in a configured compiler environment. Restore pinned submodules first; CMake does not install npm packages automatically.
 
@@ -129,46 +194,56 @@ Release 請另用建置目錄並指定 `-DCMAKE_BUILD_TYPE=Release`。目前 Tcl
 | CMake option / 選項 | Default / 預設 | Purpose / 用途 |
 | --- | --- | --- |
 | `VINC_BUILD_APPS` | `ON` | Build the central Vinc application. / 建置中央 Vinc 應用。 |
-| `VINC_BUILD_EXAMPLES` | `ON` | Build and register bundled example Modules. / 建置並登記內建範例 Module。 |
-| `VINC_BUILD_UI` | `ON` | Build the official Web UI when apps are enabled; does not auto-start it. / 啟用 apps 時建置官方 Web UI，但不自動啟動。 |
-| `VINC_BUILD_PYTHON` | `OFF` | Build native bindings and bootstrap resources, without bundling Python. / 建置 Python 原生綁定與啟動資源，不附帶直譯器。 |
 | `BUILD_TESTING` | `ON` | Configure CTest tests. / 配置 CTest 測試。 |
 
-To build without the UI, add `-DVINC_BUILD_UI=OFF` and omit `npm ci`. SDK-only consumers with `VINC_BUILD_APPS=OFF` also do not require Node.js. Native Plugins and Hosts must use matching toolchains, standard libraries, build configurations, layout settings, and Windows CRT.
+Python bindings are selected with `CONFIG_VINC_APP_PYTHON` in App Kconfig (default `n`).
+The old `VINC_BUILD_PYTHON` and `VINC_BUILD_BAG` CMake variables no longer affect VINC;
+they are not rejected or deleted. See [configuration](tools/configure/README.md#build-integration--建置整合).
 
-不需要 UI 時加入 `-DVINC_BUILD_UI=OFF`，可省略 `npm ci`。設定 `VINC_BUILD_APPS=OFF` 的純 SDK 使用端也不需要 Node.js。原生 Plugin 與 Host 必須使用相同工具鏈、標準庫、建置組態、布局設定及 Windows CRT。
+Python 綁定由 App Kconfig 的 `CONFIG_VINC_APP_PYTHON` 選擇（預設 `n`）。
+舊 `VINC_BUILD_PYTHON`／`VINC_BUILD_BAG` CMake 變數不再影響 VINC，也不主動拒絕或刪除。
+
+The full source build and official SDK always prepare UI libraries/assets; Node/npm
+and frontend dependencies are required even for SDK production. Linking an installed
+OSAL/Common target does not start or link the UI service. Native Plugin ABI matching
+requirements are unchanged.
+
+完整來源建置及官方 SDK 固定提供 UI 能力，製作時需要 Node／npm 與前端相依。
+單獨連結安裝好的 OSAL／Common 不會啟動或連入 UI 服務；原生 Plugin 的 ABI 契約不變.
 
 ### First run / 第一次執行
 
-Start Vinc from the repository root:
+Start Vinc from the repository root (paths below use the wrapper's default Debug
+directories; direct CMake users substitute their `-B` directory):
 
-從儲存庫根目錄啟動 Vinc：
+從儲存庫根目錄啟動 Vinc（下方採 wrapper 的預設 Debug 目錄；直接使用 CMake 時，
+請換成自己的 `-B` 目錄）：
 
 ```powershell
 # Windows PowerShell
-.\build\debug\Vinc.exe
+.\build\windows-msvc-debug\apps\vinc\Vinc\Debug\Vinc.exe
 ```
 
 ```sh
-# Linux / macOS
-./build/debug/Vinc
+# Linux / GCC
+./build/linux-gcc-debug/apps/vinc/Vinc/Debug/Vinc
+# macOS: ./build/macos-clang-debug/apps/vinc/Vinc/Debug/Vinc
 ```
 
-Enter the following in the **Vinc Shell**, not the OS terminal. `exampleModule` requires examples enabled; `webUi` requires the UI build.
+Enter the following in the **Vinc Shell**, not the OS terminal. `exampleModule` must be selected in App Kconfig; `ui status` requires the included UI Module to have started successfully.
 
-在 **Vinc Shell** 輸入下列命令，不是在作業系統終端。`exampleModule` 需啟用範例建置，`webUi` 需啟用 UI 建置。
+在 **Vinc Shell** 輸入下列命令，不是在作業系統終端。`exampleModule` 需在 App Kconfig 選入，`ui status` 需 UI Module 已成功啟動。
 
 ```text
 help
 exampleModule
 exampleNode status
-webUi
 ui status
 ```
 
-Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. `webUi` is built by default but starts only when requested. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
+Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. The included UI starts before startup Tcl; Bag also starts and stays idle until commanded. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
 
-開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。`webUi` 預設建置，需明確啟動才會執行。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
+開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。包含的 UI 會在啟動 Tcl 前自動啟動；Bag 同時啟動待命，收到命令才錄製。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
 
 <a id="develop-a-module"></a>
 
@@ -208,13 +283,13 @@ The umbrella header does not include generated messages. Include `<vinc_messages
 
 ### Python
 
-Build with `-DVINC_BUILD_PYTHON=ON` and select the build interpreter with `-DPython_EXECUTABLE=/absolute/path/to/python3`. Vinc does not embed Python or install packages. At runtime, it selects Python from PATH unless overridden with `Vinc --python PATH`.
+Enable `CONFIG_VINC_APP_PYTHON=y` in the App's Kconfig file. Select System Python (PATH) or a Custom absolute executable path there; the App uses the same selection as its runtime default. `Vinc --python PATH` overrides one invocation. `Python_EXECUTABLE` does not select VINC's interpreter; other CMake consumers may still use it. Vinc does not embed Python or install packages. See [Python selection](tools/configure/README.md#module-python-selection--module-python-選擇).
 
-建置時加入 `-DVINC_BUILD_PYTHON=ON`，並以 `-DPython_EXECUTABLE=/absolute/path/to/python3` 指定建置用直譯器。Vinc 不嵌入 Python、不安裝套件；執行時預設從 PATH 選取 Python，可用 `Vinc --python PATH` 覆寫。
+在 App 的 Kconfig 啟用 `CONFIG_VINC_APP_PYTHON=y`，並選擇 System（PATH）或 Custom 絕對路徑，建置與執行預設共用此設定。`Vinc --python PATH` 僅覆寫本次執行；`Python_EXECUTABLE` 不再選擇 VINC 的直譯器，但不禁止其他 CMake 元件使用。Vinc 不嵌入 Python、不安裝套件。
 
-Place Modules beside Vinc as `data/module/<ModuleType>/<ModuleType>.py`. Vinc scans once at startup; use the ModuleType name in the same Shell as C++ Modules. Python ABI must match the native extension. On Windows, MSVC Runtime dependencies are checked before loading it. See the [Python guide](src/vinc/module_system/python/README.md).
+Place Modules beside Vinc as `data/module/<ModuleType>/<ModuleType>.py`. Vinc scans once at startup; use the ModuleType name in the same Shell as C++ Modules. Python ABI must match the native extension. Current Windows bindings use static MSVC CRT; before loading, Vinc checks the metadata and selected extension's filename/SHA-256, without inspecting or preloading MSVC Runtime DLLs. See the [Python guide](src/vinc/module_system/python/README.md#windows-msvc-runtime-載入前檢查) for the current policy and retained legacy dynamic-mode guard.
 
-將 Module 放在 Vinc 旁的 `data/module/<ModuleType>/<ModuleType>.py`。中央啟動時掃描一次，在同一個 Shell 以 ModuleType 名稱啟動，與 C++ Module 操作一致。Python ABI 必須符合原生擴充；Windows 會在載入前檢查所需 MSVC Runtime。詳見 [Python 指南](src/vinc/module_system/python/README.md)。
+將 Module 放在 Vinc 旁的 `data/module/<ModuleType>/<ModuleType>.py`。中央啟動時掃描一次，在同一個 Shell 以 ModuleType 名稱啟動，與 C++ Module 操作一致。Python ABI 必須符合原生擴充。目前 Windows 綁定使用靜態 MSVC CRT；載入前檢查 metadata 與所選擴充的檔名／SHA-256，不檢查或預載 MSVC Runtime DLL。現行政策與保留的舊動態防護見 [Python 指南](src/vinc/module_system/python/README.md#windows-msvc-runtime-載入前檢查)。
 
 <a id="messages-and-communication"></a>
 
@@ -250,19 +325,19 @@ Vinc initializes Tcl and starts Socket Shell automatically at `127.0.0.1:5500` b
 
 Vinc 自動初始化 Tcl 並啟動 Socket Shell，預設為 `127.0.0.1:5500`，可用 PuTTY Raw 模式連入，目前沒有登入驗證或加密。以 `--shell-ip`／`--shell-port` 調整位址與埠；對 localhost 以外開放前，請閱讀 [Socket Shell 契約](src/vinc/shell/SOCKET.md)。
 
-Use `Vinc -S startup.tcl` for startup scripts, `srun file.tcl` within Shell, and Ctrl+D to cancel the foreground script. `vinc_configure_app(NAME MyApp STARTUP_SCRIPT startup.tcl)` embeds an application's default startup script; those applications reject `-S`. See [Shell](src/vinc/shell/README.md) and [application packaging](apps/vinc/README.md).
+Use `Vinc -S startup.tcl` for startup scripts, `srun file.tcl` within Shell, and Ctrl+D to cancel the foreground script. `vinc_add_app(MyApp INSTANCE_NAME my-app VINC_BUILD_CONFIG app.config STARTUP_SCRIPT startup.tcl)` embeds an application's default startup script; those applications reject `-S`. See [Shell](src/vinc/shell/README.md) and [application packaging](apps/vinc/README.md).
 
-使用 `Vinc -S startup.tcl` 執行啟動腳本，Shell 內用 `srun file.tcl` 執行其他腳本，Ctrl+D 中斷前景腳本。`vinc_configure_app(NAME MyApp STARTUP_SCRIPT startup.tcl)` 可內嵌應用預設啟動腳本，此類應用不接受 `-S`。詳見 [Shell](src/vinc/shell/README.md) 與[應用打包](apps/vinc/README.md)。
+使用 `Vinc -S startup.tcl` 執行啟動腳本，Shell 內用 `srun file.tcl` 執行其他腳本，Ctrl+D 中斷前景腳本。`vinc_add_app(MyApp INSTANCE_NAME my-app VINC_BUILD_CONFIG app.config STARTUP_SCRIPT startup.tcl)` 可內嵌應用預設啟動腳本，此類應用不接受 `-S`。詳見 [Shell](src/vinc/shell/README.md) 與[應用打包](apps/vinc/README.md)。
 
 ### Param and Log / 參數與紀錄
 
-Modules register and watch typed parameters through `context.param`; pump updates local caches and callbacks. Shell provides `param list/get/set/save/status`. Saved values and registration defaults live in `vinc_data/<VINC_NAME>/params.toml` beside Vinc. Live changes require explicit save. Existing `vinc::config` settings have not all moved to Param.
+Modules register and watch typed parameters through `context.param`; pump updates local caches and callbacks. Shell provides `param list/get/set/save/status`. Saved values and registration defaults live in `vinc_data/<INSTANCE_NAME>/params.toml` beside Vinc. Live changes require explicit save. Existing `vinc::config` settings have not all moved to Param.
 
-Module 透過 `context.param` 註冊與監聽具型別參數，由 pump 更新本地快取與 callback。Shell 提供 `param list/get/set/save/status`。保存值與註冊預設值位於 Vinc 旁的 `vinc_data/<VINC_NAME>/params.toml`，即時調整須明確 save 才保存。既有 `vinc::config` 設定並未全部搬到 Param。
+Module 透過 `context.param` 註冊與監聽具型別參數，由 pump 更新本地快取與 callback。Shell 提供 `param list/get/set/save/status`。保存值與註冊預設值位於 Vinc 旁的 `vinc_data/<INSTANCE_NAME>/params.toml`，即時調整須明確 save 才保存。既有 `vinc::config` 設定並未全部搬到 Param。
 
-Use `context.log.error/warn/info/debug` for structured records. Existing `printf`/stdout/stderr are centrally captured without structured severity. Logs default to `vinc_data/<VINC_NAME>/logs/<date>/`, 16 MiB per file and 128 MiB total. `log status` shows diagnostics; `log show on` enables structured display in the current Shell. Bounded queues can lose records under overload; accepted writes do not guarantee persistence.
+Use `context.log.error/warn/info/debug` for structured records. Existing `printf`/stdout/stderr are centrally captured without structured severity. Logs default to `vinc_data/<INSTANCE_NAME>/logs/<date>/`, 16 MiB per file and 128 MiB total. `log status` shows diagnostics; `log show on` enables structured display in the current Shell. Bounded queues can lose records under overload; accepted writes do not guarantee persistence.
 
-使用 `context.log.error/warn/info/debug` 寫結構化紀錄；既有 `printf`／stdout／stderr 也由中央擷取，但沒有結構化等級。預設路徑為 `vinc_data/<VINC_NAME>/logs/<日期>/`，單檔 16 MiB、總量 128 MiB。`log status` 查看狀態，`log show on` 開啟目前 Shell 的結構化顯示。佇列有上限，過載可能遺失紀錄；接受寫入不代表保證持久保存。
+使用 `context.log.error/warn/info/debug` 寫結構化紀錄；既有 `printf`／stdout／stderr 也由中央擷取，但沒有結構化等級。預設路徑為 `vinc_data/<INSTANCE_NAME>/logs/<日期>/`，單檔 16 MiB、總量 128 MiB。`log status` 查看狀態，`log show on` 開啟目前 Shell 的結構化顯示。佇列有上限，過載可能遺失紀錄；接受寫入不代表保證持久保存。
 
 See [Param](src/vinc/param/README.md), [Log](src/vinc/log/README.md), and [OutputHub](src/vinc/output_hub/README.md) for permissions, persistence, and output contracts.
 
@@ -274,9 +349,9 @@ The [Topic Monitor](src/vinc/ui/README.md) shows publication Hz, Publisher/Subsc
 
 [Topic Monitor](src/vinc/ui/README.md) 顯示發布 Hz、Publisher／Subscriber 數、碰撞、漏資料與建置時已知型別的有界預覽；未知型別仍可看 schema 與統計。綠燈表示近期未觀察到問題，黃燈表示碰撞／漏資料或恢復觀察，紅燈表示 Writer 長時間等待或預覽錯誤，灰燈表示資料不可用／過期。燈號不代表所有應用功能健康；預覽會建立真正的 Subscriber，也可能增加競爭。
 
-Use `bagRecorder record session01 --all`, then `recorder status` and `recorder finish` in Shell. The default main SQLite database limit is 16 GiB; transaction temporary files take additional space. Capacity exhaustion or disk failure stops recording and reports the cause without shutting down Vinc. Recording can drop data when it cannot keep up. Player is not implemented. See [Bag Recorder](src/vinc/bag/README.md).
+Use `recorder record session01 --all`, then `recorder status` and `recorder finish` in Shell. The default main SQLite database limit is 16 GiB; transaction temporary files take additional space. Capacity exhaustion or disk failure stops recording and reports the cause without shutting down Vinc. Recording can drop data when it cannot keep up. Player is not implemented. See [Bag Recorder](src/vinc/bag/README.md).
 
-在 Shell 使用 `bagRecorder record session01 --all` 開始錄製，以 `recorder status` 與 `recorder finish` 查看及結束。主 SQLite 資料庫預設上限為 16 GiB，交易暫存檔另占空間。達上限或磁碟失敗會停止錄製並回報原因，不關閉中央。跟不上時可能丟資料；Player 尚未實作。詳見 [Bag Recorder](src/vinc/bag/README.md)。
+在 Shell 使用 `recorder record session01 --all` 開始錄製，以 `recorder status` 與 `recorder finish` 查看及結束。主 SQLite 資料庫預設上限為 16 GiB，交易暫存檔另占空間。達上限或磁碟失敗會停止錄製並回報原因，不關閉中央。跟不上時可能丟資料；Player 尚未實作。詳見 [Bag Recorder](src/vinc/bag/README.md)。
 
 <a id="validation-and-limits"></a>
 
@@ -362,7 +437,7 @@ Release, optional Python bindings, browser automation, and other operating syste
 
 上述 macOS 驗證未涵蓋 Release、選用 Python 綁定、瀏覽器自動化或其他 OS。原本 `vinc/` 中間產物目錄與 `Vinc` 在不區分大小寫的檔案系統衝突，現改放 `framework/`；從舊布局升級時請使用新的建置目錄。
 
-- **ABI and deployment:** native Plugins require matching toolchain, standard library, configuration, layout, and Windows CRT. There is no installed `find_package(VINC)` SDK or complete relocatable Plugin/UI package yet. / **ABI 與部署：**原生 Plugin 須符合工具鏈、標準庫、組態、布局及 Windows CRT 契約；尚無安裝式 `find_package(VINC)` SDK 或完整可重定位的 Plugin／UI 部署包。
+- **ABI and deployment:** native Plugins require matching toolchain, standard library, configuration, layout, and Windows CRT. The [installed C++ SDK](src/vinc/sdk/INSTALL.md) provides `find_package(vinc CONFIG REQUIRED)` and custom message/Module helpers. Multi-App stage 2 supports per-App composition with official UI/Bag and shared optional Python bindings; [stage 3](apps/vinc/MULTI_APP.md) adds independent deployment/install and automatic official startup. / **ABI 與部署：**原生 Plugin 須匹配工具鏈、標準庫、組態、布局及 Windows CRT。安裝式 SDK 提供套件查找與自訂訊息／Module helper；多 App 第二階段已接上各 App 組裝、官方 UI／Bag 與選用的共用 Python 綁定，第三階段已接上獨立部署／安裝及官方 Module 自動啟動。
 - **UI scope:** Read-only Topic Monitor and a manually refreshed Module Graph are available. Module control, Param editing, Log panels, 3D panels, and browser management RPC are not wired. Trusted plugins share page privileges, not a sandbox. / **UI 範圍：**已提供唯讀 Topic Monitor 與手動刷新的唯讀 Module Graph；Module 控制、Param 編輯、Log 面板、3D 面板與瀏覽器管理 RPC 尚未接線。受信任 plugin 共用頁面權限，不是隔離沙箱。
 - **Future capabilities:** native Plugin hot discovery/loading, dynamic message schemas, Bag Player, and framework-to-framework multi-machine transport are not implemented. / **未來能力：**尚未實作原生 Plugin 熱探索／載入、動態訊息 schema、Bag Player 與框架對框架的多機傳輸。
 - **Failure isolation:** process boundaries limit crash propagation, but do not promise security sandboxing or hard real-time behavior. Heartbeat detects only limited liveness; resource bounds and shared-memory recovery remain explicit contracts. / **故障隔離：**程序邊界可限制 crash 連帶影響，不等於安全沙箱或硬即時保證；heartbeat 只能有限度偵測存活，資源上限與共享記憶體回收仍依明定契約。

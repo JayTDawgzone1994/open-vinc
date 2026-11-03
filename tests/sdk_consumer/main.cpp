@@ -6,7 +6,7 @@ int main(int argc, char** argv) {
     constexpr auto command_timeout = 3s;
     constexpr auto shutdown_timeout = 5s;
 
-    if (argc != 2) {
+    if (argc != 3) {
         return 3;
     }
 
@@ -15,7 +15,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    auto manager_owner = vinc::ModuleManager::create();
+    auto host = vinc::osal::path_from_utf8(argv[2]);
+    if (!host) {
+        return 10;
+    }
+
+    auto manager_owner = vinc::ModuleManager::create({}, *host);
     if (!manager_owner) {
         return 10;
     }

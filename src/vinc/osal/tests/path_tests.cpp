@@ -97,6 +97,34 @@ void test_file_access() {
         check(bool(output), "write Unicode path");
     }
 
+    check(!take(is_executable_candidate(path.parent_path())), "directory is not an executable candidate");
+    check(!take(is_executable_candidate(path / "missing")), "non-directory prefix is not a candidate");
+    expect_error(is_executable_candidate({}), ErrorCode::InvalidArgument, ErrorOperation::CheckExecutable);
+    auto embedded_nul = path.native();
+    embedded_nul.push_back(std::filesystem::path::value_type{});
+    expect_error(is_executable_candidate(std::filesystem::path(embedded_nul)),
+                 ErrorCode::InvalidArgument, ErrorOperation::CheckExecutable);
+#ifdef _WIN32
+    // Windows candidate selection must not pretend to validate executable images.
+    check(take(is_executable_candidate(path)), "regular Windows file is a candidate");
+#else
+    std::filesystem::permissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    check(!take(is_executable_candidate(path)), "non-executable file must be skipped");
+    std::filesystem::permissions(path, std::filesystem::perms::owner_exec,
+                                 std::filesystem::perm_options::add);
+    check(take(is_executable_candidate(path)), "executable file must be a candidate");
+    const auto link = std::filesystem::path(path.native() + ".link");
+    Cleanup link_cleanup{link};
+    std::filesystem::create_symlink(path, link);
+    check(take(is_executable_candidate(link)), "executable symlink must be a candidate");
+    std::filesystem::remove(link);
+    std::filesystem::create_symlink(path / "missing", link);
+    check(!take(is_executable_candidate(link)), "broken symlink must be skipped");
+    std::filesystem::remove(link);
+    std::filesystem::create_symlink(link, link);
+    check(!take(is_executable_candidate(link)), "cyclic symlink must be skipped");
+#endif
+
     std::ifstream input(take(path_from_utf8(take(path_to_utf8(path)))), std::ios::binary);
     std::string content;
     input >> content;
@@ -109,6 +137,10 @@ int main() {
         test_round_trip();
         test_invalid_encoding();
         test_file_access();
+        const auto executable = take(vinc::osal::executable_path());
+        check(executable.is_absolute(), "executable path must be absolute");
+        check(std::filesystem::is_regular_file(executable), "executable path must exist");
+        check(take(vinc::osal::is_executable_candidate(executable)), "running executable is a candidate");
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

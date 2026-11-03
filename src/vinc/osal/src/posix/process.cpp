@@ -4,6 +4,7 @@
 
 #include <vinc/osal/detail/posix/platform.hpp>
 #include <vinc/osal/detail/process_pipe_native.hpp>
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 
 #include <cerrno>
 #include <cstdlib>
@@ -21,6 +22,89 @@ extern char** environ;
 #endif
 
 namespace vinc::osal::detail {
+namespace {
+// The fixed standard-stream set, not a configurable resource budget.
+constexpr std::size_t standard_stream_count = STDERR_FILENO + 1;
+
+struct StdioSnapshots {
+    std::array<int, standard_stream_count> descriptors{-1, -1, -1};
+
+    StdioSnapshots() = default;
+    StdioSnapshots(const StdioSnapshots&) = delete;
+    StdioSnapshots(StdioSnapshots&& other) noexcept : descriptors(other.descriptors) {
+        other.descriptors.fill(-1);
+    }
+
+    ~StdioSnapshots() {
+        close();
+    }
+
+    void close() noexcept {
+        for (int& descriptor : descriptors) {
+            if (descriptor >= 0) {
+                // Never retry close: even EINTR can leave this number reusable.
+                (void)::close(descriptor);
+                descriptor = -1;
+            }
+        }
+    }
+};
+
+Result<StdioSnapshots> snapshot_stdio(const std::array<StdioMode, standard_stream_count>& modes,
+                                     int first_source) {
+    auto resources = acquire_resources(ErrorOperation::Spawn);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
+    StdioSnapshots snapshots;
+    for (std::size_t stream = 0; stream < modes.size(); ++stream) {
+        if (modes[stream] != StdioMode::Inherit) {
+            continue;
+        }
+
+        int duplicate;
+        do {
+            duplicate = ::fcntl(static_cast<int>(stream), F_DUPFD_CLOEXEC, first_source);
+        } while (duplicate < 0 && errno == EINTR);
+        if (duplicate < 0 && errno != EBADF) {
+            return std::unexpected(native_error(ErrorOperation::Spawn, errno));
+        }
+
+        // EBADF records an absent stream. Only the child receives /dev/null.
+        snapshots.descriptors[stream] = duplicate;
+    }
+
+    return snapshots;
+}
+
+Result<void> add_stdio_actions(posix_spawn_file_actions_t& actions,
+                              const std::array<StdioMode, standard_stream_count>& modes,
+                              const StdioSnapshots& snapshots, const ChildPipe* child_pipe) {
+    for (std::size_t stream = 0; stream < modes.size(); ++stream) {
+        int source = snapshots.descriptors[stream];
+        if (modes[stream] == StdioMode::Capture) {
+            // Capture sources already have independent ownership above all
+            // bootstrap targets; stdin Capture is rejected by the public API.
+            source = static_cast<int>(child_pipe->output(stream - 1));
+        }
+
+        const int target = static_cast<int>(stream);
+        int error;
+        if (source >= 0) {
+            error = posix_spawn_file_actions_adddup2(&actions, source, target);
+        } else {
+            error = posix_spawn_file_actions_addopen(
+                &actions, target, "/dev/null", stream == STDIN_FILENO ? O_RDONLY : O_WRONLY, 0);
+        }
+        if (error) {
+            return std::unexpected(native_error(ErrorOperation::Spawn, error));
+        }
+    }
+
+    return {};
+}
+}
 
 char pipe_platform_tag() noexcept {
     return 'p';
@@ -31,7 +115,17 @@ void close_pipe_transfer(std::intptr_t handle) noexcept {
 }
 
 vinc::Result<std::intptr_t> duplicate_pipe_transfer(std::intptr_t source) {
-    const int duplicate = fcntl(static_cast<int>(source), F_DUPFD_CLOEXEC, first_pipe_source_fd);
+    // PipeState's mutex may pin the endpoint before taking coordination. No
+    // acquisition helper takes a PipeState/service lock in the reverse order.
+    auto resources = acquire_resources(ErrorOperation::Spawn);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
+    int duplicate;
+    do {
+        duplicate = fcntl(static_cast<int>(source), F_DUPFD_CLOEXEC, first_pipe_source_fd);
+    } while (duplicate < 0 && errno == EINTR);
     if (duplicate < 0) {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, errno));
     }
@@ -111,7 +205,8 @@ bool NativeProcess::event_driven() const noexcept {
 }
 
 vinc::Result<std::unique_ptr<NativeProcess>>
-NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const ChildPipe* child_pipe) {
+NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, ProcessId id,
+                     const ChildPipe* child_pipe) {
     // The embedding application must not auto-reap or independently wait for
     // OSAL-owned children. Do not replace a host's global SIGCHLD disposition.
     struct sigaction disposition{};
@@ -208,31 +303,19 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
     }
     attributes.initialized = true;
 
-    const StdioMode modes[]{options.stdin_mode, options.stdout_mode, options.stderr_mode};
-    for (int fd = 0; fd < 3; ++fd) {
-        if (modes[fd] == StdioMode::Capture) {
-            // Sources are duplicated above all bootstrap targets. Apply stdio
-            // redirection before closefrom and before handing off generic pipes.
-            error = posix_spawn_file_actions_adddup2(
-                &actions.value, static_cast<int>(child_pipe->output(static_cast<std::size_t>(fd - 1))), fd);
-            if (error) {
-                return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
-            }
-            continue;
-        }
-        bool inherit = modes[fd] == StdioMode::Inherit;
-        if (inherit && fcntl(fd, F_GETFD) == -1) {
-            if (errno != EBADF) {
-                return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, errno));
-            }
-            inherit = false; // missing standard streams explicitly become /dev/null
-        }
-        error = inherit ? posix_spawn_file_actions_adddup2(&actions.value, fd, fd)
-                        : posix_spawn_file_actions_addopen(&actions.value, fd, "/dev/null",
-                                                           fd == 0 ? O_RDONLY : O_WRONLY, 0);
-        if (error) {
-            return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
-        }
+    const std::array modes{options.stdin_mode, options.stdout_mode, options.stderr_mode};
+    const int first_snapshot_source = static_cast<int>(standard_stream_count) +
+        (child_pipe ? static_cast<int>(child_pipe->inheritance().size()) : 0);
+    auto snapshots = snapshot_stdio(modes, first_snapshot_source);
+    if (!snapshots) {
+        return std::unexpected(snapshots.error());
+    }
+
+    // Coordination is already released. Owned copies remain alive through
+    // posix_spawn; later reuse/closure of parent stdio cannot redirect the child.
+    auto stdio_actions = add_stdio_actions(actions.value, modes, *snapshots, child_pipe);
+    if (!stdio_actions) {
+        return std::unexpected(stdio_actions.error());
     }
 
     if (options.working_directory) {
@@ -271,7 +354,7 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
     // glibc >= 2.34, including Ubuntu 22.04. Close even descriptors opened by
     // other threads, instead of enumerating the parent's descriptor table.
     error = posix_spawn_file_actions_addclosefrom_np(
-        &actions.value, child_pipe ? 3 + static_cast<int>(child_pipe->inheritance().size()) : 3);
+        &actions.value, first_snapshot_source);
     if (error) {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
@@ -297,13 +380,16 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
     auto native = std::unique_ptr<NativeProcess>(new NativeProcess(std::make_unique<ProcessImpl>()));
     error = posix_spawn(&native->impl_->pid, options.executable.c_str(), &actions.value, &attributes.value,
                         argv.data(), envp.data());
+    // The child now owns its actions' destinations. Release the launch copies
+    // before pidfd acquisition so they do not unnecessarily consume its budget.
+    snapshots->close();
     if (error) {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::Spawn, error));
     }
     // No allocations after spawning. If event registration fails (including a
     // very fast exit on macOS), retain ownership and use waitpid/WNOHANG polling.
     // Only OSAL may reap these PIDs, so a live or unreaped child cannot be reused.
-    auto watch = watch_process(monitor.implementation(), native->impl_->pid);
+    auto watch = watch_process(monitor.implementation(), native->impl_->pid, id);
     if (watch) {
         native->impl_->watch = *watch;
         native->impl_->monitored = true;

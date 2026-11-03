@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 // Linux socket readiness backend using epoll and an eventfd wake source.
 // Return registration identities to the common layer, which filters stale watches.
 
@@ -30,7 +31,12 @@ NativeSocketPoller::NativeSocketPoller(std::unique_ptr<NativeSocketPollerImpl> i
 NativeSocketPoller::~NativeSocketPoller() = default;
 
 vinc::Result<std::unique_ptr<NativeSocketPoller>>
-NativeSocketPoller::create(std::size_t maximum, vinc::Deadline, std::stop_token) {
+NativeSocketPoller::create(std::size_t maximum, vinc::Deadline deadline, std::stop_token stop) {
+    auto resources = acquire_resources(ErrorOperation::InitializeService, deadline, stop);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     auto impl = std::make_unique<NativeSocketPollerImpl>();
     impl->events.resize(maximum + 1);
     impl->queue = epoll_create1(EPOLL_CLOEXEC);

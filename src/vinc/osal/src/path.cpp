@@ -2,14 +2,112 @@
 #include <vinc/osal/error.hpp>
 #include <vinc/osal/detail/utf8.hpp>
 #include <limits>
+#include <cerrno>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 namespace vinc::osal {
+namespace {
+bool unavailable_candidate(const std::error_code& error) {
+    return error == std::errc::no_such_file_or_directory ||
+           error == std::errc::not_a_directory ||
+           error == std::errc::permission_denied ||
+           error == std::errc::too_many_symbolic_link_levels;
+}
+}
+
+Result<bool> is_executable_candidate(const std::filesystem::path& path) {
+    constexpr auto operation = ErrorOperation::CheckExecutable;
+    const auto& native = path.native();
+    if (path.empty() || native.find(std::filesystem::path::value_type{}) != native.npos) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, operation});
+    }
+
+    std::error_code error;
+    const auto status = std::filesystem::status(path, error);
+    if (error) {
+        if (unavailable_candidate(error)) {
+            return false;
+        }
+
+        return std::unexpected(Error{ErrorCode::SystemError, operation, native_error(error)});
+    }
+
+    if (!std::filesystem::is_regular_file(status)) {
+        return false;
+    }
+
+#ifndef _WIN32
+    // Match a program-search permission check, not an execution guarantee. In
+    // particular this does not validate the file format or resolve venv symlinks.
+    if (::access(path.c_str(), X_OK) != 0) {
+        const std::error_code permission_error(errno, std::generic_category());
+        if (unavailable_candidate(permission_error)) {
+            return false;
+        }
+
+        return std::unexpected(Error{ErrorCode::SystemError, operation, native_error(permission_error)});
+    }
+#endif
+    return true;
+}
+
+Result<std::filesystem::path> executable_path() {
+    constexpr auto operation = ErrorOperation::ExecutablePath;
+    std::filesystem::path candidate;
+#ifdef _WIN32
+    // Win32 extended paths are bounded by 32767 UTF-16 units plus the terminator.
+    constexpr DWORD maximum_path_units = 32768;
+    std::wstring buffer(maximum_path_units, L'\0');
+    const auto size = GetModuleFileNameW(nullptr, buffer.data(), maximum_path_units);
+    if (size == 0) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation,
+            {NativeErrorSource::Win32, GetLastError()}});
+    }
+
+    if (size == maximum_path_units) {
+        return std::unexpected(Error{ErrorCode::MessageTooLarge, operation});
+    }
+
+    buffer.resize(size);
+    candidate = std::filesystem::path(std::move(buffer));
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (size == 0 || _NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation});
+    }
+
+    candidate = std::filesystem::path(buffer.c_str());
+#else
+    std::error_code error;
+    candidate = std::filesystem::read_symlink("/proc/self/exe", error);
+    if (error) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation, native_error(error)});
+    }
+#endif
+    // Resolve native symlinks once. Missing/deleted executables fail rather than
+    // returning a misleading deployment root (including Linux's " (deleted)").
+    std::error_code canonical_error;
+    auto resolved = std::filesystem::canonical(candidate, canonical_error);
+    if (canonical_error) {
+        return std::unexpected(Error{ErrorCode::SystemError, operation, native_error(canonical_error)});
+    }
+
+    return resolved;
+}
+
 #ifdef _WIN32
 namespace {
 Error conversion_error(ErrorOperation operation) {

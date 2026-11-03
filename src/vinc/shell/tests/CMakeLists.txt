@@ -2,7 +2,12 @@
 # tests are separate from portable redirected-input and module integration tests.
 
 add_executable(shell_unit_tests unit_tests.cpp)
-target_link_libraries(shell_unit_tests PRIVATE vinc_shell)
+target_link_libraries(shell_unit_tests PRIVATE vinc_shell vinc_test_manager)
+
+add_executable(shell_startup_report_tests startup_report_tests.cpp)
+target_link_libraries(shell_startup_report_tests PRIVATE vinc_shell)
+add_test(NAME shell.startup_report COMMAND shell_startup_report_tests)
+set_tests_properties(shell.startup_report PROPERTIES TIMEOUT 15)
 
 add_executable(shell_terminal_tests terminal_tests.cpp)
 target_link_libraries(shell_terminal_tests PRIVATE vinc::osal)
@@ -11,20 +16,20 @@ vinc_add_module_plugin(shell_process_helper helper.cpp)
 target_link_libraries(shell_process_helper PRIVATE vinc::module)
 
 add_executable(shell_integration_tests integration_tests.cpp)
-target_link_libraries(shell_integration_tests PRIVATE vinc_shell)
+target_link_libraries(shell_integration_tests PRIVATE vinc_shell vinc_test_manager)
 vinc_deploy_tcl(shell_unit_tests)
 vinc_deploy_tcl(shell_integration_tests)
 add_dependencies(shell_integration_tests shell_process_helper)
 
 add_executable(shell_socket_tests socket_shell_tests.cpp)
-target_link_libraries(shell_socket_tests PRIVATE vinc_shell)
+target_link_libraries(shell_socket_tests PRIVATE vinc_shell vinc_test_manager)
 add_dependencies(shell_socket_tests shell_process_helper)
 vinc_deploy_tcl(shell_socket_tests)
 add_test(NAME shell.socket COMMAND shell_socket_tests "$<TARGET_FILE:shell_process_helper>")
 set_tests_properties(shell.socket PROPERTIES TIMEOUT 40)
 
 add_executable(shell_tcl_tests tcl_tests.cpp)
-target_link_libraries(shell_tcl_tests PRIVATE vinc_shell)
+target_link_libraries(shell_tcl_tests PRIVATE vinc_shell vinc_test_manager)
 add_dependencies(shell_tcl_tests shell_process_helper)
 vinc_deploy_tcl(shell_tcl_tests)
 if(MSVC)
@@ -55,7 +60,7 @@ set_tests_properties(shell.integration PROPERTIES TIMEOUT 45)
 
 if(WIN32 AND VINC_BUILD_APPS)
     add_executable(shell_console_tests console_tests.cpp)
-    target_link_libraries(shell_console_tests PRIVATE vinc_shell)
+    target_link_libraries(shell_console_tests PRIVATE vinc_shell vinc_test_manager)
     vinc_deploy_tcl(shell_console_tests)
     add_dependencies(shell_console_tests shell_process_helper)
     if(MSVC)
@@ -63,19 +68,23 @@ if(WIN32 AND VINC_BUILD_APPS)
     else()
         target_compile_options(shell_console_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
-    add_dependencies(shell_console_tests shell)
-    add_test(NAME shell.console COMMAND shell_console_tests "$<TARGET_FILE:shell>")
-    set_tests_properties(shell.console PROPERTIES TIMEOUT 20)
+    add_dependencies(shell_console_tests Vinc)
+    add_test(NAME shell.console COMMAND shell_console_tests "$<TARGET_FILE:Vinc>")
+    # Validate input modes/keys/shutdown independently of central App instance ownership.
+    add_test(NAME shell.console_input COMMAND shell_console_tests "$<TARGET_FILE:Vinc>" --input-only)
+    add_test(NAME shell.console_output COMMAND shell_console_tests "$<TARGET_FILE:Vinc>" --startup-only)
+    set_tests_properties(shell.console shell.console_input shell.console_output PROPERTIES TIMEOUT 20)
 endif()
 
 # Compile private Shell implementations with deterministic I/O fault hooks.
 # No production Shell object is linked into this fixture.
 add_executable(shell_fault_tests fault_tests.cpp
     ../src/command_line.cpp ../src/command_router.cpp
-    ../src/script_service.cpp ../src/tcl_runtime.cpp)
+    ../src/script_service.cpp ../src/tcl_runtime.cpp
+    ../src/startup_report.cpp ../src/session_feedback.cpp)
 target_include_directories(shell_fault_tests PRIVATE ../include "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(shell_fault_tests PRIVATE VINC_SHELL_TESTING)
-target_link_libraries(shell_fault_tests PRIVATE vinc::module_manager vinc::common vinc_tcl)
+target_link_libraries(shell_fault_tests PRIVATE vinc_test_manager vinc::common vinc_tcl)
 vinc_deploy_tcl(shell_fault_tests)
 add_dependencies(shell_fault_tests shell_process_helper)
 if(MSVC)

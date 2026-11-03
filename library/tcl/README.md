@@ -58,7 +58,8 @@ Open-VINC 自有原始碼目錄，編譯產物放到根目錄 `build/`。
   NMAKE 需要在來源 `win/` 工作，因此 `stage.cmake` 將未修改來源複製到 `build` 下，
   並依 `revision.txt` 生成上游正常建置使用的 `manifest.uuid`；不在 submodule 產生輔助檔。
 - Linux／macOS：上游 `unix/configure --disable-shared --disable-zipfs` 與 make，需 zlib 開發套件。
-  已提供建置路徑，尚未實機驗證。
+  已有 Linux／macOS 的框架建置與執行紀錄，範圍見[根目錄平台驗證](../../README.md#validation-and-limits)。
+  較新的安裝式 SDK／多 App 在 Windows 與 WSL 驗證，macOS 對應範圍仍待補。
 - Tcl 核心不依賴系統 Tcl 安裝；`lib/tcl9.1` 的初始化、編碼與腳本資源隨執行檔部署。
   各執行檔從自己的目錄定位資源，不依賴目前工作目錄或本機來源樹。
   同時部署 Tcl、utf8proc、libtommath 與 zlib 授權文件，不納入 Tk。
@@ -83,7 +84,8 @@ binary directory 為基準。此覆寫只控制複製位置，runtime 仍從執�
 
 上游 `win/README` 記載 Tcl 9.1 的 Windows 最低目標為 Windows 10，並提供 Visual C++／NMAKE
 建置路徑。這是選定相依套件的限制，Open-VINC 的完整最低 OS／工具鏈矩陣仍須在整合時確認。
-Linux Ubuntu 22.04 與 macOS 的實際建置、部署與行為尚待驗證。
+Linux Ubuntu 22.04 部署相容性仍須另行驗證；不要把 Ubuntu 24.04／WSL 的結果視為
+22.04 保證。macOS 既有驗證不代表最新 SDK／多 App 改動亦已完成原生驗證。
 
 Ctrl+D／scancel 經公開 `Tcl_CancelEval(..., TCL_CANCEL_UNWIND)` 取消腳本；
 Ctrl+C 另外觸發框架完整關閉。標準 Tcl 的阻塞式 `after ms` 由封裝提供可取消等待，
@@ -97,6 +99,19 @@ Ctrl+C 另外觸發框架完整關閉。標準 Tcl 的阻塞式 `after ms` 由�
 來源 tag 方便辨識版本，實際回溯依據為主專案保存的完整 commit。
 
 ## 待處理事項
+
+### WSL 掛載來源的並行部署鎖逾時（2026-11-03）
+
+本輪退出進度跨平台驗收使用 `9f0ec0b`、Ubuntu 24.04.5／WSL2、GCC 13.3。
+來源位於 `/mnt/d/code/open-vinc`、建置位於 WSL ext4，以 Ninja `--parallel 6`
+全新建置 Debug 時，Shell 測試的多個 Tcl resource target 解析到同一目的地；
+其中兩個在 `deploy.cmake:18` 回報 `Cannot acquire Tcl resource deployment lock: Timeout reached`。
+這是已重現的建置失敗，尚未證明檔案鎖或執行期 Tcl／OSAL 有功能缺陷。
+
+初次失敗與後續中止的單工建置另存於 Git 外 `build/exit-platform-validation/`；
+後續改用非文件輸入雜湊一致的 WSL 原生來源副本補驗，不改 60 秒上限或正式部署實作。
+建議另輪評估同一 resolved destination 的部署工作是否應合併，以及慢速來源的等待政策；
+目前只是待評估方向，不構成修正授權。跨平台驗收結果由 OSAL 的驗收文件維護。
 
 ### 增量建置與父專案整合（2026-10-06 CMake 重審）
 

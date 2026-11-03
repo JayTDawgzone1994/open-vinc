@@ -89,7 +89,7 @@ namespace child_exit {
 constexpr int invalid_bootstrap = 64;
 constexpr int connection_failed = 65;
 constexpr int handshake_failed = 66;
-constexpr int application_exception = 70;
+constexpr int application_exception = detail::module_application_failure_exit;
 constexpr int central_lost = 72;
 constexpr int stop_deadline_expired = 73;
 constexpr int invalid_stop_message = 74;

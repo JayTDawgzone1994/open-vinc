@@ -6,6 +6,19 @@
 #include <string_view>
 
 namespace vinc::osal {
+// Query the running executable, independently of argv[0], PATH and the working
+// directory. Linux requires /proc/self/exe. The executable must still exist;
+// this is a location query, not a security/identity or deployment ABI guarantee.
+[[nodiscard]] Result<std::filesystem::path> executable_path();
+
+// A candidate query only, never PATH lookup or an attempt to launch the file.
+// Follows symlinks without rewriting the caller's path. Missing/inaccessible paths,
+// directories and broken/cyclic links return false. POSIX additionally uses X_OK
+// with the real user/group credentials; Windows tests regular-file status only.
+// Other filesystem failures return Error. No image/ABI/ACL guarantee is implied:
+// the file or permissions can change before spawn, whose error remains authoritative.
+[[nodiscard]] Result<bool> is_executable_candidate(const std::filesystem::path& path);
+
 // Strict UTF-8/native conversion only: no locale guessing, replacement characters,
 // filesystem access, normalization or absolute-path resolution. Empty paths are valid.
 // Embedded NUL and malformed encodings return Error. Returned values own their storage;

@@ -27,6 +27,11 @@ int main() {
         auto opened = Terminal::open();
         check(bool(opened), "open redirected terminal");
         auto terminal = std::move(*opened);
+        if (!terminal->ansi_output()) {
+            const auto written = terminal->write_console("redirected output");
+            check(!written && written.error().is(ErrorCode::Unsupported),
+                  "console-only output rejects redirected stdout");
+        }
         auto busy = Terminal::open();
         check(!busy && busy.error().is(vinc::osal::ErrorCode::Busy), "exclusive input ownership");
         check(!terminal->interactive(), "redirected input detected");

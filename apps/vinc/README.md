@@ -2,58 +2,158 @@
 
 # Vinc central application / Vinc 中央程式
 
-This directory composes CLI, Module catalog, and central services; Shell logic belongs to src/vinc/shell. Target shell outputs Vinc.exe/Vinc in the build directory, optionally renamed below. Modules register during ordinary configure; the catalog is generated at outermost configure completion, inside the build tree.
+## Official System Modules / 官方 System Module
 
-本目錄負責 CLI、Module catalog 與中央服務的組裝。
-Shell 邏輯仍由 `src/vinc/shell` 元件維護。
-CMake target 為 `shell`，預設輸出為建置目錄中的 `Vinc.exe`／`Vinc`，可透過下方應用設定更名。
-Module 在正常配置流程登記，最外層配置結束時統一生成 catalog；生成檔在本次建置目錄內。
+Both the source App and `vinc_add_app()` register UI (`ui`) and Bag Recorder
+(`recorder`) with the [Module System policy](../../src/vinc/module_system/README.md#system-modules).
+Startup waits for Ready or failure before continuing to Tcl. A failed attempt is
+reported but remains supervised for retry; central and other services continue.
+Shell exposes `ui enable|disable|status` and `recorder record|status|finish|info`.
+They are hidden from ordinary Module listings, with process/recovery details in
+`help --verbose`. Only whole-framework shutdown stops these protected processes.
 
-VINC_BUILD_APPS=OFF omits central; VINC_BUILD_EXAMPLES=OFF omits examples/catalog entries. CLI, listener defaults, and shutdown follow [Shell](../../src/vinc/shell/README.md).
+來源版 App 與 `vinc_add_app()` 都以 System 政策登記 UI／Recorder；啟動等待就緒或失敗後
+才繼續 Tcl。失敗會回報，但仍由中央監督重試，不關閉其他服務。
+Shell 以上述內建命令操作，一般 Module 清單隱藏它們，`help --verbose` 保留程序與恢復診斷。
+只有整個框架 shutdown 才停止這些受保護程序。
 
-`VINC_BUILD_APPS=OFF` 可略過中央程式；`VINC_BUILD_EXAMPLES=OFF` 可略過內建範例及其 catalog 項目。
-一般中央的 CLI、socket 預設值與關閉行為維持原有契約。操作方式見 [Shell README](../../src/vinc/shell/README.md)。
+## Startup status / 初始化狀態
+
+Central records each completed initialization step, then Shell renders one status
+row per step after OSAL Terminal is ready. ANSI terminals use green/red check/cross
+markers; redirected output uses plain `[OK]` / `[FAIL]`. The final summary counts
+failed steps without implying that a failed official Module stopped the framework.
+Initialization order, deadlines, cancellation, and official-Module cleanup policies
+are unchanged. Readiness describes startup completion, not ongoing health.
+
+中央收集各初始化步驟的結果，待 Shell 的 OSAL Terminal 準備好後統一顯示每項一行。
+ANSI 終端使用綠／紅勾叉，重導向則用純文字 `[OK]`／`[FAIL]`。最後列出失敗步驟數；
+官方 Module 啟動失敗不代表中央停止。初始化順序、期限、取消與收尾政策不變；
+ready 表示完成啟動，不保證之後一直健康。
+
+Complete startup errors (including a distinct Manager failure, when present) are
+submitted to the existing bounded framework Log before entering Shell. Log's queue,
+disk-failure and durability limits still apply; files live beside the executable
+under `vinc_data/<instance>/logs/`. If Log could not be configured, details remain
+on screen. A fatal failure before Shell starts prints a plain aborted-startup report
+with full details, never a ready banner. Failure descriptions do not infer a busy
+port from a generic Module hook failure. Runtime output/Log formatting is unchanged.
+
+完整錯誤鏈及有差異的 Manager 故障送入既有框架 Log，沿用有界佇列、磁碟故障與保存限制；
+檔案位於執行檔旁 `vinc_data/<instance>/logs/`。Log 無法配置時，完整細節仍留在畫面。
+Shell 啟動前必須中止的錯誤會顯示純文字中止摘要與完整原因，不印 ready。
+不從一般 hook 失敗推論 port 被占用；本輪不更動 runtime Log 的呈現格式。
+
+Validation (2026-11-01): Windows x64 / MSVC 19.51 / Release passed
+`shell.startup_report`, `shell.integration`, `shell.console_input`, and `app.entry`.
+The production-entry fixture checks a synthetic official-Module startup failure,
+one console failure row, the complete cause chain in a new log file, continued
+script execution, and a fatal listener-configuration failure without a ready banner.
+This is not native socket fault injection. Linux/macOS and a fresh installed-SDK
+consumer were not rerun for this presentation change.
+
+驗證（2026-11-01）：Windows x64／MSVC 19.51／Release 通過上述四項測試。
+正式入口測試以替身 Module 製造啟動失敗，確認畫面只有一筆失敗、完整原因鏈寫入新 Log、
+腳本繼續執行，以及 listener 設定失敗時不誤印 ready；這不代表原生 socket 故障注入。
+本輪未重跑 Linux／macOS 與全新 installed-SDK 使用端。
+
+Follow-up: the full Windows Debug build exposed a missing `startup_report.cpp`
+source in `shell_fault_tests`, which compiles its own Shell implementation.
+After adding that source, the full Debug build and `shell.faults` /
+`shell.startup_report` passed. The earlier selected-target Release build had not
+covered this fixture.
+
+後續完整 Windows Debug 建置發現 `shell_fault_tests` 自行編譯 Shell 時漏列
+`startup_report.cpp`。補齊後，完整 Debug 建置及上述兩項測試通過；
+前次選定 target 的 Release 建置未涵蓋此故障測試。
+
+
+The confirmed next-step design is tracked in the
+[Multi-App composition plan](MULTI_APP.md): shared Modules/messages, per-App Kconfig
+selection and deployment, and automatic official UI/Bag startup. Stage 2 adds the
+shared source/installed `vinc_add_app()` constructor, per-App catalogs and optional
+shared Python bindings. Stage 3 adds independent deployment/install and automatic official startup.
+All application paths now use the common constructor documented in
+the [SDK composition guide](../../src/vinc/sdk/INSTALL.md#c-application-composition--c-應用組裝).
+
+已確認的下一輪設計見 [多 App 組裝開工文件](MULTI_APP.md)：共用 Module／Message、
+各 App 獨立 Kconfig 選擇與部署，以及官方 UI／Bag 自動啟動。第二階段接上來源／安裝式
+共用的 `vinc_add_app()`、各自 catalog 與選用的共用 Python 綁定；第三階段已接上
+獨立部署／安裝及官方 Module 自動啟動。所有 App 已統一使用共用建構器，見上方 SDK 組裝指南。
+
+The framework supplies the sole supported production App entry; user-defined or
+replacement central/Host mains are unsupported. Entry ownership and
+executable consolidation are documented in the
+[Single executable application plan](SINGLE_EXECUTABLE.md). App dispatches both roles and launches itself. Production standalone Host targets
+and SDK export/copy references are removed. Clean SDK-only and relocated C++ App
+validation and final integration regressions passed on Windows/WSL; the plan
+tracks the remaining native macOS validation.
+正式 App 的唯一入口由框架提供，不支援使用者自訂或替換中央／Host main。
+入口所有權與合併步驟見上述契約；App 已分流角色並啟動自己，正式獨立 Host target 與
+SDK 匯出／複製引用已移除。乾淨 SDK-only 與搬移 C++ App 已通過 Windows／WSL 驗證；
+最終整合回歸亦通過；剩餘 macOS 原生驗證由計畫追蹤。
+
+The `app.entry` fixtures compile this production main in plain and embedded-script
+forms. Additional `app.*` tests reuse Module lifecycle, Context, fatal, debug,
+Plugin-loader, Bus, Param, Log and RPC suites with the App selected as native Host.
+The test-only selection in `tests/support/manager.hpp` is not a production
+environment option. Injection Hosts remain explicit test fixtures.
+
+`app.entry` 以正式 main 編譯一般／內嵌腳本版本；其他 `app.*` 測試以 App 作為原生
+Host，重用 Module 生命週期、Context、fatal、debug、Plugin loader、Bus、Param、
+Log 與 RPC 測試。`tests/support/manager.hpp` 的選擇方式只供測試，不是正式環境變數
+介面；故障注入仍保留明確指定的測試 Host。
+
+The bundled `Vinc` target uses `vinc_add_app()` with identity `open-vinc` and
+[its own Kconfig file](vinc.conf). Output is `<build>/apps/vinc/Vinc/<configuration>/Vinc[.exe]`.
+UI/Recorder are mandatory; registered example Modules are explicitly selected in that file.
+`VINC_BUILD_APPS=OFF` omits this demonstration App and its example registration;
+external consumers register their own Modules and Apps. All production catalogs use
+relative deployed Plugin paths. Build settings and editors follow [configuration](../../tools/configure/README.md).
+
+內建 `Vinc` target 與外部 App 共用建構器；身份為 `open-vinc`，產物採上方獨立目錄。
+設定檔明確選入範例，UI／Recorder 固定提供。`VINC_BUILD_APPS=OFF` 只略過內建示範 App
+及其範例登記，不會禁止外部呼叫 `vinc_add_app()`。
 
 <a id="打包應用程式的啟動腳本"></a>
 
 ## Embedded application startup script / 打包應用程式的啟動腳本
 
-Call once in the parent after add_subdirectory(open-vinc/src ...):
-
-父專案在 `add_subdirectory(open-vinc/src ...)` 完成後呼叫一次：
+Source and installed consumers use the same constructor; see [SDK composition](../../src/vinc/sdk/INSTALL.md).
+來源與安裝式使用端共用建構器，target 決定檔名、`INSTANCE_NAME` 決定排他身份：
 
 ```cmake
-set(VINC_NAME "my-app" CACHE STRING "Central instance identity")
+set(VINC_BUILD_APPS OFF CACHE BOOL "Build the bundled App")
 add_subdirectory(open-vinc/src open-vinc-build)
-
-# Register application Modules and message directories here as needed.
-vinc_configure_app(
-    NAME MyApp
-    STARTUP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/startup.tcl"
+# Register shared Modules/messages, then select them in my-app.config.
+vinc_add_app(MyApp
+    INSTANCE_NAME my-app
+    VINC_BUILD_CONFIG my-app.config
+    STARTUP_SCRIPT startup.tcl
 )
 ```
 
-- Requires APPS; configures existing shell, one central application per build.
-- NAME is an extensionless ASCII letter/digit/_/- filename; Windows appends .exe. It does not change VINC_NAME, which must be set before adding the framework for [exclusive identity/data ownership](../../src/vinc/module_system/INSTANCE.md). Distinct same-host apps also need distinct ports.
+Multiple Apps can be declared. Module and config paths follow the SDK composition contract.
+可宣告多個 App；同機不同身份仍需自行避免服務 port 衝突。
+
 - STARTUP_SCRIPT resolves relative to the caller source directory; missing/directory input fails configure. Build accepts strict UTF-8/BOM, rejects NUL, normalizes CRLF/CR to LF, and generates C++ bytes. It neither guesses encoding nor evaluates Tcl syntax; runtime reports syntax/command failures.
 - Empty scripts are legal. No CMake expansion/extra Tcl substitution. Editing the source normally rebuilds the EXE; generated headers stay build-local. No new runtime thread/temp script/external interpreter dependency.
 - Embedded apps reject -S before service creation and offer no --no-startup. Unconfigured central retains -S file.tcl [args...]; srun is unchanged.
-- Execute once after central initialization/catalog/Python discovery/Socket Shell. Success/failure leaves central and started Modules running; exit requests normal shutdown, cancellation keeps existing behavior.
+- Execute once after central initialization/catalog/Python discovery/Socket Shell and official UI/Bag readiness or failure. Success/failure leaves central and started Modules running; exit requests normal shutdown, cancellation keeps existing behavior.
 - argv0/info script is embedded:startup.tcl, argc0/empty argv. It is a diagnostic identity, not a path; source/line diagnostics remain.
 - All Tcl environments expose ::vinc::app_dir for separately deployed resources:
 
-- 必須啟用 `VINC_BUILD_APPS`；本函式設定既有 `shell` target，一份建置只配置一個中央應用。
-- `NAME` 是不含副檔名的輸出檔名，限 ASCII 字母、數字、`_`、`-`；Windows 自動加 `.exe`。
-  它不更改 `VINC_NAME`。中央身分須在加入框架前設定，影響排他及資料歸屬，見
-  [Instance 契約](../../src/vinc/module_system/INSTANCE.md)。同機不同應用的 Socket port 仍需分開。
+- 正式入口由框架提供；不支援使用者另寫 main。
+
 - `STARTUP_SCRIPT` 相對於呼叫函式的來源目錄解析；不存在或是目錄時 configure 失敗。
   建置時驗證 UTF-8（接受 BOM、拒絕 NUL），正規化 CRLF／CR 為 LF，再生成 C++ byte array。
   不猜編碼、不執行 Tcl 來驗證語法；Tcl 語法及命令錯誤仍於啟動時報告。
 - 空腳本合法。來源內容不經 CMake 變數展開或 Tcl 二次替換；修改腳本後正常 build 即更新 EXE。
   生成標頭在建置目錄，無新 runtime thread、暫存腳本檔或外部腳本直譯器相依。
 - 有內嵌腳本的應用不接受 `-S`，會在建立服務前回報參數錯誤；不提供 `--no-startup`。
-  未呼叫此函式的中央保留既有 `-S file.tcl [args...]`。Shell 的 `srun` 不受影響。
-- 腳本在既有中央初始化、catalog／Python discovery 和 Socket Shell 啟動後執行一次。
+  未指定內嵌腳本的 App 保留既有 `-S file.tcl [args...]`。Shell 的 `srun` 不受影響。
+- 腳本在中央初始化、catalog／Python discovery、Socket Shell 及官方 UI／Bag 啟動後執行一次。
+  官方 Module 分別等待 Ready 或有界失敗；失敗回報後仍執行腳本，Bag 預設待命不錄製。
   正常完成或失敗都保留框架及已啟動 Module；`exit` 才要求正常關閉，取消沿用原有流程。
 - 內嵌入口的 `argv0`／`info script` 為 `embedded:startup.tcl`，`argc=0`、`argv` 為空。
   此名稱是診斷身分，不是真實路徑；錯誤保留來源及行號。
@@ -63,35 +163,48 @@ vinc_configure_app(
 source [file join $::vinc::app_dir scripts common.tcl]
 ```
 
-Cwd is unchanged, as are ordinary -S/srun relative paths. Embedding does not bundle other scripts, Plugins, Python, or Tcl library assets. Catalogs still contain build-time Plugin paths; embedding does not make complete deployment relocatable. No terminal/Socket disable option was added.
+Cwd is unchanged, as are ordinary -S/srun relative paths. Embedding does not bundle other scripts, Plugins, Python, or Tcl library assets. All App catalogs use relative deployed Plugin paths. No terminal/Socket disable option was added.
 
 不自動改變 cwd；`-S`／`srun` 及一般相對路徑的既有語意維持。入口內嵌不會把其他 Tcl
-腳本、Module Plugin、Python 或 Tcl library 資源一併嵌入。Module catalog 目前仍含建置時
-Plugin 路徑，不能由本功能推論整套 Plugin 部署已任意可搬移。本輪不增加停用 Terminal／
+腳本、Module Plugin、Python 或 Tcl library 資源一併嵌入。所有 App 的 catalog 都使用相對部署路徑，支援完整套件搬移。本輪不增加停用 Terminal／
 Socket Shell 的設定。
 
-Complete parent example: [embedded_app](../../examples/embedded_app/CMakeLists.txt). Configure with cmake -S examples/embedded_app -B build/my-app, then build target shell. Existing toolchain constraints apply; output is build/my-app/open-vinc, subject to generator configuration.
+Complete parent example: [embedded_app](../../examples/embedded_app/CMakeLists.txt). Configure with cmake -S examples/embedded_app -B build/my-app, then build target MyApp. Output is build/my-app/MyApp/<configuration>/.
 
 完整父專案範例在 [examples/embedded_app](../../examples/embedded_app/CMakeLists.txt)：
-`cmake -S examples/embedded_app -B build/my-app`，再 `cmake --build build/my-app --target shell`。
+`cmake -S examples/embedded_app -B build/my-app`，再 `cmake --build build/my-app --target MyApp`。
 沿用框架工具鏈需求；輸出在 `build/my-app/open-vinc`（依生成器組態而定）。
 
-Tcl and Socket Shell initialize automatically with central startup. Users configure CLI rather than call service-init/start/stop APIs. Central uses Shell detail wiring; SDK exposes settings/errors only. vinc_deploy_tcl(shell) follows actual output paths, including later parent customization.
+Tcl and Socket Shell initialize automatically with central startup. Users configure CLI rather than call service-init/start/stop APIs. Central uses Shell detail wiring; SDK exposes settings/errors only. The shared deployment manifest follows actual output paths, including later parent customization.
 
 Tcl 腳本與 Socket Shell 都是中央啟動時自動準備的預設功能，使用者只設定 CLI，
 不呼叫初始化或服務啟停 API。中央使用 Shell 的 detail 接線標頭；SDK 只提供設定與錯誤型別。
-建置時 `vinc_deploy_tcl(shell)` 跟隨執行檔實際輸出位置部署資源，包含父專案後設的輸出目錄。
+建置時共用部署清單跟隨執行檔實際輸出位置部署資源，包含父專案後設的輸出目錄。
 
 <a id="入口與生成來源"></a>
 
 ## Entry points and generated sources / 入口與生成來源
 
-Startup scans executable-adjacent data/module/<ModuleType>/<ModuleType>.py without execution. Missing directories mean no Python Modules; individual issues diagnose/continue. --python PATH before -S selects system Python/venv, default PATH. VINC_BUILD_PYTHON builds/deploys native package/bootstrap, not an interpreter; see [Python](../../src/vinc/module_system/python/README.md).
+After platform argument conversion, only argv[1] is inspected for the reserved
+`--vinc-module` family. Host launches call the existing Module Runtime before any
+central initialization; unsupported/malformed bootstrap versions are rejected there.
+Central queries `osal::executable_path()` and explicitly supplies that path to Manager.
+Startup scripts run only in central. Internal-looking arguments after `-S` or inside
+Module hook arguments remain user data. Both source and installed App entry targets
+link `vinc::module_runtime`; this does not start Runtime services in central.
+
+平台參數轉換後，僅檢查 argv[1] 的保留 `--vinc-module` 系列標記。Host 在中央初始化前
+直接進既有 Module Runtime；不支援或損壞的 bootstrap 由 Runtime 拒絕。中央查詢
+`osal::executable_path()` 並明確交給 Manager；啟動腳本只在中央執行。`-S` 後或 Module
+hook 中類似內部標記的參數仍是使用者資料。原始碼及安裝式 App target 均連結既有
+`vinc::module_runtime`，不因此在中央啟動 Runtime 服務。
+
+Startup scans executable-adjacent data/module/<ModuleType>/<ModuleType>.py without execution. Missing directories mean no Python Modules; individual issues diagnose/continue. --python PATH before -S overrides the Kconfig-selected default. CONFIG_VINC_APP_PYTHON=y in App Kconfig builds/deploys native package/bootstrap, not an interpreter; see [Python](../../src/vinc/module_system/python/README.md).
 
 - 中央啟動時亦掃描執行檔旁 `data/module/<ModuleType>/<ModuleType>.py`，不執行腳本。
   缺少目錄視為沒有 Python Module；個別登記問題回報後繼續啟動。
   `--python PATH` 指定系統 Python／venv，預設依 PATH 選取；放在 `-S` 之前。
-  `VINC_BUILD_PYTHON=ON` 建置並部署 `python/vinc` 原生擴充與啟動腳本，不部署直譯器。
+  App Kconfig 的 `CONFIG_VINC_APP_PYTHON=y` 建置並部署 `python/vinc` 原生擴充與啟動腳本，不部署直譯器。
   詳見 [Python Module](../../src/vinc/module_system/python/README.md)。
 
 Binary builds also deploy `licenses/open-vinc/` beside the executable. Keep it with the application; see [SDK license delivery](../../src/vinc/sdk/README.md#license-delivery).
@@ -189,6 +302,54 @@ Windows Debug／Release 均已驗證中文／emoji 的部署目錄、Tcl 資源�
 此段保留當時 Windows 路徑案例紀錄；目前各平台的建置與執行範圍見[平台驗證報告](../../README.md#validation-and-limits)。
 
 <a id="待處理事項"></a>
+
+## App composition unification / App 組裝統一
+
+Implemented 2026-11-02; validation scope is recorded below.
+The bundled App, source consumers and installed SDK consumers share `vinc_add_app()`.
+Removed the legacy catalog/deployment pipeline and `vinc_configure_app()`.
+`VINC_BUILD_UI`, `VINC_BUILD_EXAMPLES`, `VINC_NAME`, `VINC_CONFIG_FILE` are no longer
+configuration inputs; CMake may warn about unused command-line values. UI capability
+is always present in the official full SDK. `INSTANCE_NAME` remains per-App.
+
+2026-11-02 統一實作；驗收範圍如下。舊入口不設相容別名，舊 CMake 變數
+不讀取、不拒絕、不自動清除。內建設定檔選入既有範例；自訂 App 的 Module 預設仍不選入。
+CLI、System Module 監督、Python ABI、腳本及 Param／port 行為維持既有契約。
+舊平鋪 build 產物不會自動刪除；請執行新目錄內的 App，不要誤啟動舊檔。
+
+### Validation (2026-11-02) / 本輪驗證
+
+- Windows x64, MSVC 19.44.35229/toolset 14.44.35207, Release, CMake 4.3.2,
+  CPython 3.13.12: bundled App build and **28/28** related CTests passed.
+- WSL Ubuntu 24.04 x86_64, GCC 13.3/libstdc++, Release, CPython 3.12.3,
+  Node 24.19.0: source App with Python enabled and **32/32** related CTests passed.
+- Configuration tool: **17/17** on Windows and WSL. Windows tools: **118** tests,
+  **22 skipped**, no failures.
+- Windows installed Python SDK: relocation, custom Bus/RPC/Param, schema incremental
+  changes, ABI/runtime rejection, resource repair and disabling Python passed.
+- Windows installed multi-App suite: explicit/late selection, unselected-target
+  exclusion, shared Plugin/binding reuse, individual install, relocation, identity
+  exclusion/concurrency, UI/Bag failure isolation and managed-file cleanup passed.
+- Windows source SDK consumer: complete incremental/embedding suite passed
+  (`sdk.external_consumer`, 472 seconds), including custom schemas, late Module
+  registration, relocation, embedded-script updates/rejection, and selection cleanup.
+
+Windows／WSL 如上列環境實測；預設內建範例、單一程序入口與 System Module 政策維持。
+舊 CMake UI／Examples／名稱／設定檔參數以刻意相反或無效值驗證，不會覆蓋 App 設定。
+WSL 的 Python 選擇只改測試副本；儲存庫預設仍為關閉。
+本輪未重跑 Debug、macOS 原生或 WSL installed SDK 全套；不可由上述結果推稱已通過。
+本機原始紀錄：`build/app-composition-review/`（不納入 Git）。
+
+### Native macOS follow-up / macOS 原生補驗（2026-11-02）
+
+At `627c409`, Debug/Release builds, source/installed multi-App composition and clean
+SDK downstream acceptance passed on macOS arm64. Original CTest passed **125/126**
+in each configuration: the example fixture omitted deployed Plugin/UI resources.
+The external complete-deployment comparison passed; the fixture remains unfixed.
+See the [macOS report](../../src/vinc/sdk/MACOS_VALIDATION.md) for methods and limits.
+
+macOS 原生補驗已有結果，取代上方該輪未測的狀態；原始全套各有一項 fixture 失敗，
+不宣稱 126/126。完整證據與未套用修正的對照見上方報告，歷史 Windows／WSL 結果保留。
 
 ## Resolved follow-up / 已解決後續事項
 

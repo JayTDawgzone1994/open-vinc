@@ -4,20 +4,44 @@
 #include <vinc/shell/detail/command_router.hpp>
 #include <vinc/module/detail/manager_access.hpp>
 #include <algorithm>
+#include <array>
 #include <sstream>
 #include <charconv>
 #include <vinc/osal/path.hpp>
 
 namespace vinc::shell {
-std::string command_text(const Result<CommandReply>& result) {
-    if (!result) {
-        return vinc::error_to_string(result.error());
+namespace {
+// Fixed columns keep local and remote help identical without querying terminal width.
+template<class Names>
+void append_help_names(std::ostream& output, std::string_view heading, const Names& names) {
+    constexpr std::size_t columns = 3;
+    constexpr std::size_t column_gap = 2;
+    std::array<std::size_t, columns> widths{};
+    output << heading << '\n';
+    if (names.empty()) {
+        output << "  (none)\n";
+        return;
     }
 
-    return result->message;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        auto& width = widths[index % columns];
+        width = (std::max)(width, names[index].size());
+    }
+
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const auto column = index % columns;
+        if (column == 0) {
+            output << "  ";
+        }
+        output << names[index];
+        if (column + 1 == columns || index + 1 == names.size()) {
+            output << '\n';
+        } else {
+            output << std::string(widths[column] - names[index].size() + column_gap, ' ');
+        }
+    }
 }
 
-namespace {
 // Expose retry-relevant state in the Shell domain. The original ModuleSystem
 // operation and diagnostics remain in the cause chain; no automatic retry occurs.
 Error module_failure(const Error& failure, ErrorCode fallback, ErrorOperation operation) {
@@ -146,6 +170,52 @@ bool CommandRouter::builtin(std::string_view name) const {
     return builtins_.contains(std::string(name));
 }
 
+std::optional<std::string_view> CommandRouter::command_help(const std::vector<std::string>& arguments) const {
+    if (arguments.size() != 2 || (arguments[1] != "-h" && arguments[1] != "--help")) {
+        return std::nullopt;
+    }
+
+    // Static descriptions serve all command entry points without a runtime registry.
+    struct HelpEntry {
+        std::string_view name;
+        std::string_view text;
+    };
+    static constexpr HelpEntry entries[]{
+        {"ui", "Usage: ui enable | disable | status\nEnable/disable HTTP service; the supervised System Module stays alive."},
+        {"recorder", "Usage: recorder record <DIR> (--all | --topic <NAME>...)\n"
+                     "       [--database-bytes N] [--queue-bytes N] [--message-bytes N]\n"
+                     "       recorder status | finish | info <DIR>\n"
+                     "finish stops recording, not the System Module. A crash restarts idle."},
+        {"shell", "Usage: shell -e | --error\nShow this session's last failure. Success does not clear it."},
+        {"help", "Usage: help [--verbose]\nShow commands, user ModuleTypes and Modules.\n"
+                 "--verbose also shows System Modules and retained fault diagnostics."},
+        {"log", "Usage: log status\n       log reopen\n"
+                "       log level <MODULE|MID|all> <error|warn|info|debug>\n"
+                "       log show <on|off|error|warn|info|debug>\n"
+                "       log show module <NAME|MID|all>\n"
+                "show affects this interactive session only, not saved logs."},
+        {"param", "Usage: param list\n       param get <NAME>\n       param set <NAME> <VALUE>\n"
+                  "       param save\n       param status\nQuote values containing spaces.\n"
+                  "Restart hints are declarations, not pending-state tracking; no automatic restart or save."},
+        {"debug", "Usage: debug start <ModuleType> [args...]\n       debug continue <MID>\n"
+                  "       debug stop <MID>\nAttach a debugger to the reported PID before continuing."},
+        {"srun", "Usage: srun <file.tcl> [args...]\nRun a Tcl script; following arguments belong to the script."},
+        {"scancel", "Usage: scancel\nRequest cancellation of the current script; native blocking work may delay it."},
+        {"sstatus", "Usage: sstatus\nShow whether a script is running."},
+        {"output", "Usage: output <on|off>\nShow or hide Module stdout/stderr in this session."},
+        {"exit", "Usage: exit\nShut down the framework and wait for Module cleanup. Local shortcut: Ctrl+C."},
+        {"disconnect", "Usage: disconnect\nDisconnect this Socket Shell session without shutting down the framework."},
+        {"resume", "Usage: resume <code>\nRecover a disconnected Socket Shell session before its timeout."}
+    };
+    for (const auto& entry : entries) {
+        if (arguments.front() == entry.name) {
+            return entry.text;
+        }
+    }
+
+    return std::nullopt;
+}
+
 Result<CommandReply> CommandRouter::execute(const std::vector<std::string>& arguments, std::stop_token stop) {
     if (stop.stop_requested()) {
         return std::unexpected(Error{ErrorCode::Cancelled, ErrorOperation::Execute});
@@ -157,6 +227,10 @@ Result<CommandReply> CommandRouter::execute(const std::vector<std::string>& argu
 
     const auto& target = arguments.front();
     if (const auto builtin_entry = builtins_.find(target); builtin_entry != builtins_.end()) {
+        if (const auto help = command_help(arguments)) {
+            return CommandReply{0, false, std::string(*help)};
+        }
+
         if (builtin_entry->second == Builtin::Log) {
             if (arguments.size() > 1 && arguments[1] == "show") {
                 return std::unexpected(Error{ErrorCode::SessionRequired, ErrorOperation::Execute});
@@ -180,6 +254,9 @@ Result<CommandReply> CommandRouter::execute(const std::vector<std::string>& argu
         if (builtin_entry->second == Builtin::Debug) {
             return execute_debug(arguments, stop);
         }
+        if (builtin_entry->second == Builtin::System) {
+            return execute_system(arguments, stop);
+        }
         return execute_builtin(builtin_entry->second, arguments);
     }
 
@@ -200,6 +277,10 @@ Result<CommandReply> CommandRouter::execute(const std::vector<std::string>& argu
 
 Result<CommandReply> CommandRouter::execute_builtin(Builtin builtin_kind,
                                                     const std::vector<std::string>& arguments) {
+    if (builtin_kind == Builtin::Help && arguments.size() == 2 && arguments[1] == "--verbose") {
+        return make_help(true);
+    }
+
     if (builtin_kind == Builtin::Script || builtin_kind == Builtin::Cancel ||
         builtin_kind == Builtin::Session) {
         return std::unexpected(Error{ErrorCode::SessionRequired, ErrorOperation::Execute});
@@ -213,7 +294,7 @@ Result<CommandReply> CommandRouter::execute_builtin(Builtin builtin_kind,
         return CommandReply{0, true, {}};
     }
 
-    return make_help();
+    return make_help(false);
 }
 
 Result<CommandReply> CommandRouter::execute_debug(const std::vector<std::string>& arguments,
@@ -284,20 +365,62 @@ Result<CommandReply> CommandRouter::execute_debug(const std::vector<std::string>
     return CommandReply{0, false, arguments[1] == "continue" ? "Debug startup release queued" : "Module stopped"};
 }
 
-Result<CommandReply> CommandRouter::make_help() {
-    std::ostringstream help;
-    help << "[Commands] debug start <ModuleType> [args...], debug continue <MID>, debug stop <MID>\n"
-            "log status|reopen|level MODULE_OR_MID_OR_all error|warn|info|debug\n"
-            "log show on|off|error|warn|info|debug; log show module NAME_OR_MID_OR_all\n"
-            "param list|get NAME|set NAME VALUE|save|status\nhelp, srun file.tcl [args...], scancel, sstatus, output on|off, exit\n[Remote] "
-            "disconnect, resume <code>\nCtrl+D cancels a local script; Ctrl+C shuts down the "
-            "framework.\n[ModuleTypes]";
-    for (const auto& name : manager_.get_registered_module_type_names()) {
-        help << "\n  " << name;
+Result<CommandReply> CommandRouter::execute_system(const std::vector<std::string>& arguments,
+                                                   std::stop_token stop) {
+    const auto& name = arguments.front();
+    if (arguments.size() < 2) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute});
     }
+    const auto snapshot = manager_.inspect(name);
+    if (!snapshot || snapshot->kind != ModuleKind::System) {
+        return std::unexpected(wrap_error(ErrorCode::CommandFailed, ErrorOperation::Execute,
+            Error{module_system::ErrorCode::ModuleNotFound, module_system::ErrorOperation::Command}));
+    }
+    if (name == "ui" && arguments.size() == 2 && (arguments[1] == "enable" || arguments[1] == "disable")) {
+        const bool enabled = arguments[1] == "enable";
+        auto changed = detail::ManagerAccess::set_system_enabled(manager_, name, enabled,
+            control::Clock::now() + config::shell_command_timeout, stop);
+        if (!changed) {
+            return std::unexpected(module_failure(changed.error(), ErrorCode::CommandFailed, ErrorOperation::Execute));
+        }
+        return CommandReply{0, false, enabled ? "UI enable requested." : "UI disable requested."};
+    }
+    if (name == "ui" && (arguments.size() != 2 || arguments[1] != "status")) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Execute});
+    }
+    if (arguments.size() == 2 && arguments[1] == "status" && snapshot->state != ModuleState::Running) {
+        std::string state = name + " " + state_name(snapshot->state);
+        if (snapshot->system_enabled) {
+            state += *snapshot->system_enabled ? " desired=enabled" : " desired=disabled";
+        }
+        if (snapshot->restart_rate_limited) {
+            state += " (restart rate limited)";
+        }
+        state += "; details: help --verbose";
+        return CommandReply{0, false, std::move(state)};
+    }
+    return execute_module(arguments, stop);
+}
+
+Result<CommandReply> CommandRouter::make_help(bool verbose) {
+    static constexpr std::array<std::string_view, 12> commands{
+        "help", "shell", "log", "param", "debug", "srun", "scancel", "sstatus", "output", "ui", "recorder", "exit"};
+    static constexpr std::array<std::string_view, 2> remote_commands{"disconnect", "resume"};
+    std::ostringstream help;
+    help << "Usage: <command> -h / --help; last error: shell -e\n\n";
+    append_help_names(help, "[Commands]", commands);
+    if (remote_session_) {
+        help << '\n';
+        append_help_names(help, "[Remote]", remote_commands);
+    }
+    help << '\n';
+    append_help_names(help, "[ModuleTypes]", manager_.get_registered_module_type_names(false));
 
     help << "\n[Modules]";
     for (const auto& snapshot : manager_.snapshots()) {
+        if (snapshot.kind == ModuleKind::System) {
+            continue;
+        }
         help << "\n  " << (snapshot.name.empty() ? "<unnamed>" : snapshot.name) << " "
              << state_name(snapshot.state) << " MID=" << snapshot.mid << " PID=" << snapshot.pid;
         if (snapshot.debug) {
@@ -306,17 +429,49 @@ Result<CommandReply> CommandRouter::make_help() {
                 help << " (waiting before Plugin load)";
             }
         }
-        if (snapshot.last_failure) {
+        if (verbose && snapshot.last_failure) {
             help << " : MID=" << snapshot.last_failure->mid << " "
                  << vinc::error_to_string(snapshot.last_failure->error);
         }
 
-        if (snapshot.last_contract_failure) {
+        if (verbose && snapshot.last_contract_failure) {
             help << "\n    " << contract_diagnostic_text(snapshot.name, *snapshot.last_contract_failure);
         }
-        if (snapshot.cleanup_failure) {
+        if (verbose && snapshot.cleanup_failure) {
             help << " cleanup MID=" << snapshot.cleanup_failure->mid << " "
                  << vinc::error_to_string(snapshot.cleanup_failure->error);
+        }
+    }
+
+    if (verbose) {
+        help << "\n[System Modules]";
+        for (const auto& snapshot : manager_.snapshots()) {
+            if (snapshot.kind != ModuleKind::System) {
+                continue;
+            }
+            help << "\n  " << snapshot.name << " " << state_name(snapshot.state)
+                 << " MID=" << snapshot.mid << " PID=" << snapshot.pid;
+            if (snapshot.system_enabled) {
+                help << " desired=" << (*snapshot.system_enabled ? "enabled" : "disabled");
+            }
+            if (snapshot.next_restart) {
+                const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    *snapshot.next_restart - control::Clock::now()).count();
+                help << " retry_in_ms=" << (std::max)(std::int64_t{0}, remaining)
+                     << " rate_limited=" << snapshot.restart_rate_limited;
+            }
+            if (snapshot.last_failure) {
+                help << "\n    MID=" << snapshot.last_failure->mid << " " << error_to_string(snapshot.last_failure->error);
+            }
+            if (snapshot.last_contract_failure) {
+                help << "\n    " << contract_diagnostic_text(snapshot.name, *snapshot.last_contract_failure);
+            }
+            if (snapshot.cleanup_failure) {
+                help << "\n    cleanup MID=" << snapshot.cleanup_failure->mid << " " << error_to_string(snapshot.cleanup_failure->error);
+            }
+            if (snapshot.restart_failure) {
+                help << "\n    restart: " << error_to_string(*snapshot.restart_failure);
+            }
         }
     }
 
@@ -324,7 +479,7 @@ Result<CommandReply> CommandRouter::make_help() {
     if (!legacy.empty()) {
         help << "\n[Registered commands]";
         for (const auto& name : legacy) {
-            help << "\n  " << name;
+            help << "  " << name;
         }
     }
 
@@ -384,7 +539,7 @@ void CommandRouter::collect_target_choices(CompletionResult& result) {
         result.choices.push_back(name);
     }
 
-    for (const auto& names : {manager_.get_registered_module_type_names(), manager_.get_active_module_names(),
+    for (const auto& names : {manager_.get_registered_module_type_names(false), manager_.get_active_module_names(false),
                               manager_.get_micro_program_names()}) {
         result.choices.insert(result.choices.end(), names.begin(), names.end());
     }
@@ -393,6 +548,14 @@ void CommandRouter::collect_target_choices(CompletionResult& result) {
 Result<void> CommandRouter::collect_argument_choices(CompletionResult& result,
                                                      const std::vector<std::string>& arguments) {
     const auto target = arguments.front();
+    if (target == "ui") {
+        result.choices = {"enable", "disable", "status"};
+        return {};
+    }
+    if (target == "recorder") {
+        result.choices = {"record", "status", "finish", "info"};
+        return {};
+    }
     if (manager_.inspect(target)) {
         auto response =
             manager_.complete(target, arguments, control::Clock::now() + config::shell_completion_timeout);

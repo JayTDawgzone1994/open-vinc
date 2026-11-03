@@ -31,20 +31,43 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
          const std::filesystem::path& script, const std::filesystem::path& plugin, std::string mode) {
     auto manager = take(test::create_manager());
     auto output = take(manager->output_hub().subscribe());
-    const auto root = std::filesystem::temp_directory_path() / test::instance_name();
+    // macOS temp paths can contain symlink ancestors, which Log rejects.
+    // Resolve the existing temp root before appending this fixture's directory.
+    const auto root = std::filesystem::canonical(std::filesystem::temp_directory_path()) / test::instance_name();
     take(detail::ManagerAccess::configure_params(*manager, root));
     take(detail::ManagerAccess::configure_log(*manager, root));
     ModuleType native{"nativePeer", plugin, {}};
     take(manager->register_module_type(native));
-    auto native_mid = take(manager->start_module(native.name));
+    auto native_mid = take(manager->start_module(native.name, {mode}));
     take(manager->wait_started(native_mid));
+    const auto publisher_id = take(manager->command(native_mid, {"publisher-id"},
+                                                    control::Clock::now() + finish_timeout));
     ModuleType type;
     type.name = "pythonServices";
 
     type.python = PythonLaunch{script, bootstrap, python};
     take(manager->register_module_type(type));
-    auto mid = take(manager->start_module(type.name, {"--name", "pythonNode", mode}));
-    take(manager->wait_started(mid));
+    // A wrong expected identity must still fail; accepting coincident IDs must
+    // not weaken the actual Publisher identity check.
+    const auto expected_publisher_id = mode == "identity-error" ? publisher_id + 1 : publisher_id;
+    auto mid = take(manager->start_module(type.name,
+        {"--name", "pythonNode", mode, std::to_string(expected_publisher_id)}));
+    const auto expected_operation = mode == "param-error" ? module_system::ErrorOperation::ParamCallback
+                                                          : module_system::ErrorOperation::SubscriptionCallback;
+    const bool expects_failure = mode != "normal" && mode != "same-id";
+    auto started = manager->wait_started(mid);
+    // Intentional callbacks may fault immediately after Ready, before the
+    // waiter observes Running. Validate that exact fault below as usual.
+    if (!started && !(expects_failure && started.error().is(module_system::ErrorCode::HookException) &&
+                      started.error().is_operation(expected_operation))) {
+        take(std::move(started));
+    }
+    std::cout << "Identity case=" << mode << " Publisher=" << publisher_id << " Python MID=" << mid << '\n';
+    if (mode == "same-id") {
+        check(static_cast<std::uint64_t>(publisher_id) == mid, "fixture must reproduce equal Publisher ID and MID");
+    } else if (mode == "normal") {
+        check(static_cast<std::uint64_t>(publisher_id) != mid, "fixture must also exercise distinct numeric IDs");
+    }
     const auto deadline = control::Clock::now() + finish_timeout;
     std::optional<ModuleSnapshot> record;
     while (control::Clock::now() < deadline) {
@@ -63,7 +86,7 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     if (record && record->last_failure) {
         std::cout << error_to_string(record->last_failure->error) << '\n';
     }
-    if (mode == "normal") {
+    if (mode == "normal" || mode == "same-id") {
         check(record && record->state == ModuleState::Stopped, "Python services must finish successfully");
         check(captured.find("PYTHON_SERVICES_PASSED") != std::string::npos, "all Python service checks ran");
         check(captured.find("PYTHON_SERVICE_REFERENCES_RELEASED") != std::string::npos,
@@ -76,11 +99,13 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     } else {
         check(record && record->state == ModuleState::Failed && record->last_failure,
               "uncaught callback exception fails its module");
-        auto operation = mode == "param-error" ? module_system::ErrorOperation::ParamCallback
-                                               : module_system::ErrorOperation::SubscriptionCallback;
-        check(record->last_failure->error.is_operation(operation), "callback operation retained");
+        check(record->last_failure->error.is_operation(expected_operation), "callback operation retained");
         check(captured.find("services_module.py(") != std::string::npos,
               "callback traceback retains source location");
+        if (mode == "identity-error") {
+            check(captured.find("Unexpected reply Publisher ID") != std::string::npos,
+                  "wrong Publisher identity must be rejected by the identity assertion");
+        }
         if (mode == "vinc-error") {
             const auto causes = record->last_failure->error.causes();
             check(!causes.empty() && causes.back().code == static_cast<std::int32_t>(module_system::ErrorCode::Busy) &&
@@ -98,7 +123,7 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
 int main(int argc, char** argv) {
     try {
         check(argc == 5, "interpreter/bootstrap/script/plugin arguments");
-        for (const auto* mode : {"normal", "param-error", "bus-error", "vinc-error"}) {
+        for (const auto* mode : {"same-id", "normal", "identity-error", "param-error", "bus-error", "vinc-error"}) {
             run(std::filesystem::absolute(argv[1]), std::filesystem::absolute(argv[2]),
                 std::filesystem::absolute(argv[3]), std::filesystem::absolute(argv[4]), mode);
         }

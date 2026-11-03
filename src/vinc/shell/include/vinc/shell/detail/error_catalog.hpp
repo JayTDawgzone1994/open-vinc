@@ -70,6 +70,7 @@ inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::Receive, "Receive"},
     ErrorOperationEntry{ErrorOperation::CloseSocket, "CloseSocket"},
     ErrorOperationEntry{ErrorOperation::Accept, "Accept"},
+    ErrorOperationEntry{ErrorOperation::WriteTerminal, "WriteTerminal"},
 };
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::Shell, "Shell", error_entries, operation_entries};
 static_assert(valid_catalog(error_catalog));

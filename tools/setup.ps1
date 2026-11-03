@@ -7,23 +7,31 @@ param(
 # Functions are also dot-sourceable for offline policy/failure-path tests.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Discovery must not install through py.exe, especially in --check mode.
+# Explicit installations remain owned by the package-manager stage below.
+$env:PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false'
+$env:PYLAUNCHER_ALLOW_INSTALL = $null
+$env:PYLAUNCHER_ALWAYS_INSTALL = $null
 $script:SetupDirectory = $PSScriptRoot
 $script:Repository = Split-Path -Parent $PSScriptRoot
 $script:CheckOnly = $false
+$script:Recommended = $false
 $script:WithUi = $true
 $script:WithPython = $true
 $script:Temporary = $null
 $script:Python = $null
 $script:DeveloperCommand = $null
+$script:CompilerVersion = ''
 
 function Show-Usage {
     Write-Host @'
-Usage: tools\setup.bat [--check] [--no-ui] [--no-python]
+Usage: tools\setup.bat [--recommended] [--check] [--no-ui] [--no-python]
 Install/check dependencies, restore pinned submodules, and run npm ci.
 No CMake configure, project build, tests, or browser downloads are performed.
 --check       Check only; no installs, downloads, or dependency restoration.
+--recommended Prefer documented installation candidates; keep compatible tools.
 --no-ui       Skip Node/npm and frontend packages.
---no-python   Skip Python SDK interpreter/development requirements.
+--no-python   Skip Python Module development files; still check the build interpreter.
 VINC_SETUP_PYTHON selects a specific CPython executable.
 '@
 }
@@ -33,6 +41,7 @@ function Read-Options {
     foreach ($option in $Arguments) {
         switch ($option) {
             '--check' { $script:CheckOnly = $true }
+            '--recommended' { $script:Recommended = $true }
             '--no-ui' { $script:WithUi = $false }
             '--no-python' { $script:WithPython = $false }
             '--help' {
@@ -75,7 +84,7 @@ function Update-ToolPath {
 }
 
 function Install-Package {
-    param([string]$Id, [string]$Override = '')
+    param([string]$Id, [string]$Override = '', [string]$Version = '')
     if ($script:CheckOnly) {
         throw "Missing/incompatible dependency: $Id; rerun without --check"
     }
@@ -88,6 +97,9 @@ function Install-Package {
         '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')
     if ($Override) {
         $arguments += @('--override', $Override)
+    }
+    if ($Version) {
+        $arguments += @('--version', $Version)
     }
     Invoke-Checked 'winget.exe' $arguments
     Update-ToolPath
@@ -113,10 +125,20 @@ function Initialize-Tools {
         Install-Package 'Git.Git'
     }
     if (-not (Test-ToolVersion 'cmake.exe' ([version]'3.20.0'))) {
-        Install-Package 'Kitware.CMake'
+        if ($script:Recommended) {
+            Install-Package 'Kitware.CMake' -Version '4.4.4'
+        }
+        else {
+            Install-Package 'Kitware.CMake'
+        }
     }
     if (-not (Get-Command ninja.exe -ErrorAction SilentlyContinue)) {
-        Install-Package 'Ninja-build.Ninja'
+        if ($script:Recommended) {
+            Install-Package 'Ninja-build.Ninja' -Version '1.13.2'
+        }
+        else {
+            Install-Package 'Ninja-build.Ninja'
+        }
     }
     if (-not (Test-ToolVersion 'cmake.exe' ([version]'3.20.0'))) {
         throw 'CMake 3.20+ remains unavailable; check PATH or installer restart requirements.'
@@ -145,9 +167,56 @@ function Find-DeveloperCommand {
     return $null
 }
 
+function Test-MsvcMinimum {
+    $policy = Join-Path $script:Repository 'src\vinc\common\cmake\msvc_minimum.txt'
+    $minimum = (Get-Content -LiteralPath $policy -Raw).Trim()
+    if ($minimum -notmatch '^[0-9]+\.[0-9]+$') {
+        throw 'Invalid Open-VINC MSVC minimum version policy.'
+    }
+
+    # Query the compiler itself, not the Visual Studio installation version.
+    # Preprocessing avoids localized banners and does not link or run code.
+    $probe = Join-Path $script:Temporary 'msvc-version.c'
+    Set-Content -LiteralPath $probe -Encoding Ascii -Value '_MSC_VER'
+    # Windows PowerShell 5.1 wraps native stderr as ErrorRecords, even for cl's
+    # successful source-name banner. Judge the native exit code, not that banner.
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & cl.exe /nologo /EP /TC $probe 2>&1
+        $queryStatus = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedPreference
+    }
+    if ($queryStatus -ne 0) {
+        throw 'Unable to query the MSVC compiler version.'
+    }
+    $numbers = @($output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -match '^\d{4}$' })
+    if ($numbers.Count -ne 1) {
+        throw 'Unable to identify the MSVC compiler version.'
+    }
+    $number = [int]$numbers[0]
+    $version = [version]::new([int][Math]::Floor($number / 100), $number % 100)
+    $script:CompilerVersion = $version.ToString()
+    if ($version -lt [version]$minimum) {
+        throw "Open-VINC requires MSVC $minimum or newer; selected compiler is $version. Recommended: VS 2022 17.14 C++ tools (MSVC 19.44), including the Windows SDK. Update the Visual Studio C++ toolset and rerun setup --recommended."
+    }
+    Write-Host "MSVC minimum version check: PASS ($version >= $minimum)"
+}
+
 function Import-DeveloperEnvironment {
     # The environment is local to setup. Never persist a selected compiler globally.
+    $explicitEnvironment = [bool]$env:VSCMD_VER
+    if ($explicitEnvironment -and $env:VSCMD_ARG_TGT_ARCH -ne 'x64') {
+        throw 'The explicit Visual Studio developer environment must target x64.'
+    }
+    if (-not $explicitEnvironment -and ($env:VCINSTALLDIR -or $env:VCToolsInstallDir)) {
+        throw 'Partial/custom MSVC environment found. Select a complete x64 Developer environment first.'
+    }
     $script:DeveloperCommand = Find-DeveloperCommand
+    if ($explicitEnvironment -and $env:VSINSTALLDIR) {
+        $script:DeveloperCommand = Join-Path $env:VSINSTALLDIR 'Common7\Tools\VsDevCmd.bat'
+    }
     if (-not $script:DeveloperCommand) {
         Install-Package 'Microsoft.VisualStudio.2022.BuildTools' '--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
         $script:DeveloperCommand = Find-DeveloperCommand
@@ -156,15 +225,16 @@ function Import-DeveloperEnvironment {
         throw 'MSVC C++ tools were not found; complete Visual Studio installation and rerun setup.'
     }
 
-    $command = '"{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $script:DeveloperCommand
-    $environment = & $env:ComSpec /d /c $command
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Unable to initialize the x64 MSVC/Windows SDK environment.'
-    }
-
-    foreach ($line in $environment) {
-        if ($line -match '^([^=]+)=(.*)$') {
-            [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
+    if (-not $explicitEnvironment) {
+        $command = '"{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $script:DeveloperCommand
+        $environment = & $env:ComSpec /d /c $command
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to initialize the x64 MSVC/Windows SDK environment.'
+        }
+        foreach ($line in $environment) {
+            if ($line -match '^([^=]+)=(.*)$') {
+                [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
+            }
         }
     }
     foreach ($tool in @('cl.exe', 'link.exe', 'rc.exe', 'nmake.exe')) {
@@ -173,6 +243,7 @@ function Import-DeveloperEnvironment {
         }
     }
 
+    Test-MsvcMinimum
     $source = Join-Path $script:SetupDirectory 'setup\toolchain.cpp'
     $object = Join-Path $script:Temporary 'toolchain.obj'
     $executable = Join-Path $script:Temporary 'toolchain.exe'
@@ -199,9 +270,11 @@ function Find-Python {
         ForEach-Object { $_.Source })
     # WinGet CPython defaults to a per-user installation, with PATH changes
     # potentially taking effect only in a later terminal.
-    $installed = "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
-    if (Test-Path -LiteralPath $installed) {
-        $candidates += $installed
+    foreach ($series in @('314', '313', '312', '311')) {
+        $installed = "$env:LOCALAPPDATA\Programs\Python\Python$series\python.exe"
+        if (Test-Path -LiteralPath $installed) {
+            $candidates += $installed
+        }
     }
     return @($candidates | Select-Object -Unique)
 }
@@ -214,7 +287,11 @@ function Select-Python {
             Write-Host "Python executable is unavailable: $candidate"
             continue
         }
-        & $candidate $probe | Out-Host
+        $probeMode = '--with-development'
+        if (-not $script:WithPython) {
+            $probeMode = '--interpreter-only'
+        }
+        & $candidate $probe $probeMode | Out-Host
         if ($LASTEXITCODE -eq 0) {
             return $candidate
         }
@@ -223,20 +300,21 @@ function Select-Python {
 }
 
 function Initialize-Python {
-    if (-not $script:WithPython) {
-        return
-    }
 
     $script:Python = Select-Python
     if (-not $script:Python) {
         if ($env:VINC_SETUP_PYTHON) {
             throw 'Explicit VINC_SETUP_PYTHON is incompatible; install its matching development files.'
         }
-        Install-Package 'Python.Python.3.13'
+        $package = 'Python.Python.3.13'
+        if ($script:Recommended) {
+            $package = 'Python.Python.3.14'
+        }
+        Install-Package $package
         $script:Python = Select-Python
     }
     if (-not $script:Python) {
-        throw 'Compatible 64-bit Windows CPython and development files are unavailable.'
+        throw 'Compatible 64-bit Windows CPython is unavailable; select VINC_SETUP_PYTHON and include development files when Python Modules are enabled.'
     }
 }
 
@@ -254,7 +332,13 @@ function Initialize-Node {
         return
     }
     if (-not (Test-Node) -or -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
-        Install-Package 'OpenJS.NodeJS.LTS'
+        if ($script:Recommended) {
+            # The unversioned LTS ID can move to another major line.
+            Install-Package 'OpenJS.NodeJS.LTS' -Version '24.22.1'
+        }
+        else {
+            Install-Package 'OpenJS.NodeJS.LTS'
+        }
     }
     if (-not (Test-Node)) {
         throw 'Node remains incompatible; check PATH or open a new terminal after installation.'
@@ -309,6 +393,24 @@ function Initialize-Frontend {
     Invoke-Checked 'node.exe' @((Join-Path $script:SetupDirectory 'setup\check_frontend.mjs'), $web)
 }
 
+function Save-Toolchain {
+    if ($script:CheckOnly) {
+        return
+    }
+    $arguments = @((Join-Path $script:SetupDirectory 'toolchain_profile.py'),
+        '--build-python', $script:Python, '--config-python', $script:Python,
+        '--cc', (Get-Command cl.exe).Source, '--cxx', (Get-Command cl.exe).Source,
+        '--cmake', (Get-Command cmake.exe).Source, '--ninja', (Get-Command ninja.exe).Source,
+        '--vsdevcmd', $script:DeveloperCommand,
+        '--compiler-version', $script:CompilerVersion,
+        '--toolset', $env:VCToolsVersion.TrimEnd('\'),
+        '--windows-sdk', $env:WindowsSDKVersion.TrimEnd('\'))
+    if ($script:WithUi) {
+        $arguments += @('--node', (Get-Command node.exe).Source, '--npm', (Get-Command npm.cmd).Source)
+    }
+    Invoke-Checked $script:Python $arguments
+}
+
 function Invoke-Setup {
     param([string[]]$Arguments)
     try {
@@ -322,17 +424,25 @@ function Invoke-Setup {
         $script:Temporary = Join-Path ([IO.Path]::GetTempPath()) ('open-vinc-setup-' + [guid]::NewGuid().ToString('N'))
         [void][IO.Directory]::CreateDirectory($script:Temporary)
         Write-Host "Open-VINC dependency setup (Windows x64; check-only=$script:CheckOnly)"
+        if ($script:Recommended) {
+            Write-Host 'Recommended mode: keep compatible tools. Missing Python selects 3.14; MSVC minimum is 19.44.'
+        }
         Initialize-Tools
         Import-DeveloperEnvironment
         Initialize-Python
         Initialize-Node
         Initialize-Submodules
         Initialize-Frontend
+        Save-Toolchain
         Write-Host 'Dependency checks passed. No project was configured or built.'
-        Write-Host 'For your own builds, open an x64 Visual Studio Developer terminal, or run:'
+        Write-Host 'Root build wrappers reuse saved selections for this checkout. For direct CMake, run:'
         Write-Host ('call "{0}" -arch=x64 -host_arch=x64' -f $script:DeveloperCommand)
         if ($script:Python) {
-            Write-Host "For Python SDK builds, select Python_EXECUTABLE=$script:Python"
+            Write-Host "Build interpreter: $script:Python"
+            Write-Host 'For direct CMake, select Python3_EXECUTABLE explicitly; root wrappers use the saved selection.'
+            if ($script:WithPython) {
+                Write-Host "For Python Module builds, choose Custom in App Kconfig and set CONFIG_VINC_PYTHON_EXECUTABLE to: $script:Python"
+            }
         }
         return 0
     }
@@ -344,7 +454,7 @@ function Invoke-Setup {
         if ($script:Temporary) {
             # Delete only our known probe artifacts; never recursively clean a
             # caller-supplied directory or any existing project build tree.
-            foreach ($name in @('toolchain.obj', 'toolchain.exe')) {
+            foreach ($name in @('toolchain.obj', 'toolchain.exe', 'msvc-version.c')) {
                 $file = Join-Path $script:Temporary $name
                 if (Test-Path -LiteralPath $file) {
                     Remove-Item -LiteralPath $file

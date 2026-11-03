@@ -9,3 +9,9 @@ if(NOT actual_revision STREQUAL expected_revision)
 endif()
 add_library(vinc_ui_hash INTERFACE)
 target_include_directories(vinc_ui_hash SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/upstream")
+if(VINC_INSTALL_SDK)
+    set_target_properties(vinc_ui_hash PROPERTIES EXPORT_NAME detail_ui_hash
+        INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream>"
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream>")
+    install(TARGETS vinc_ui_hash EXPORT VincTargets COMPONENT VincSDK)
+endif()

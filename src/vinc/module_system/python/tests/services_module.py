@@ -6,6 +6,10 @@ import vinc
 TIMEOUT_SECONDS = 8
 POLL_SECONDS = 0.01
 MESSAGE_LIMIT_BYTES = 4096
+PARALLEL_READ_COUNT = 64
+# Published numeric identities; Python exposes Error fields without component enums.
+PARAM_ERROR_DOMAIN = 10
+PARAM_PERMISSION_DENIED = 6
 
 
 def raises(kind, function):
@@ -23,6 +27,7 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         raises(TypeError, lambda: vinc.format_utc(-1))
         raises(TypeError, lambda: vinc.format_utc(2**64))
         self.mode = args[0] if args else "normal"
+        self.expected_publisher_id = int(args[1])
         self.received = []
         self.snapshots = []
         self.pump_thread = threading.get_ident()
@@ -31,10 +36,32 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         options.max_message_bytes = MESSAGE_LIMIT_BYTES
         self.publisher = self.context.advertise(vinc.messages.int3, "python/request", options)
         self.subscriber = self.context.subscribe(vinc.messages.int3, "python/reply", self.received_message)
-        self.context.param.register_param("gain", vinc.param.Type.Double, 1.25, vinc.param.Permission.Open)
-        self.context.param.register_param("protected", vinc.param.Type.Int32, 7)
+        self.context.param.register_param("gain", vinc.param.Type.Double, 1.25, vinc.param.Permission.Public)
+        self.context.param.register_param("protected", vinc.param.Type.Int32, 7,
+                                          restart_hint=vinc.param.RestartHint.App)
+        assert self.context.param.read_current("protected").restart_hint == vinc.param.RestartHint.App
+        raises(vinc.VincError, lambda: self.context.param.register_param(
+            "nativeNode.fixed", vinc.param.Type.Int32, restart_hint=vinc.param.RestartHint.Module))
+        # Foreign reads do not require notification subscriptions.
+        watches_before = len(self.context.param.watches())
+        assert self.context.param.read_current("nativeNode.fixed").value == 7
+        assert self.context.param.read_current("nativeNode.fixed").restart_hint == vinc.param.RestartHint.Module
+        assert len(self.context.param.watches()) == watches_before
         self.context.param.register_param("missing.value", vinc.param.Type.Int32)
+        self.context.param.register_param("nativeNode.fixed", vinc.param.Type.Int32)
+        self.context.param.register_param("nativeNode.shared", vinc.param.Type.Int32)
         self.context.param.on_change(self.params_changed)
+        current = self.context.param.read_current("gain")
+        assert current.value == 1.25 and current.default_value == 1.25
+        assert current.type == vinc.param.Type.Double
+        assert current.permission == vinc.param.Permission.Public
+        assert current.restart_hint == vinc.param.RestartHint.None_
+        assert current.version > 0
+        assert self.snapshots == []
+        raises(vinc.VincError, lambda: self.context.param.update("gain", vinc.param.Type.Double))
+        raises(vinc.VincError, lambda: self.context.param.read_current("missing.value"))
+        raises(vinc.VincError, lambda: self.context.param.read_current("bad/name"))
+        self.startup_entry = current
         self.context.log.info("PYTHON_STRUCTURED_LOG")
         self.context.log.warn("Python warning")
         self.context.log.error("Python error level")
@@ -45,6 +72,7 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         if self.mode == "param-error":
             raise ValueError("PYTHON_PARAM_CALLBACK_FAILURE")
         self.snapshots.append(snapshot)
+        assert self.context.param.read_current("gain").version >= snapshot["pythonNode.gain"].version
         assert "missing.value" not in snapshot
         assert snapshot["pythonNode.gain"].type == vinc.param.Type.Double
         try:
@@ -61,17 +89,46 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         if self.mode == "vinc-error":
             self.context.pumpOnce()
         assert message.publisher_name() == "nativeNode"
-        assert message.publisher_instance() != self.get_mid()
+        assert message.topic_name() == "python/reply"
+        # Publisher IDs and Module MIDs are independent namespaces and may coincide.
+        assert message.publisher_instance() == self.expected_publisher_id, "Unexpected reply Publisher ID"
+        if self.mode == "same-id":
+            assert message.publisher_instance() == self.get_mid(), "ID overlap fixture was not exercised"
         assert message.get_topic_count() > 0
         assert message.get_message_timestamp() > 1_000_000_000_000_000_000
         assert message.get_message_monotonic_timestamp() > 0
         assert vinc.format_utc(message.get_message_timestamp()).endswith("Z")
         copied = message.copy()
+        assert copied.publisher_instance() == self.expected_publisher_id
+        assert copied.publisher_name() == "nativeNode"
         assert copied.get_message_timestamp() == message.get_message_timestamp()
         assert copied.get_message_monotonic_timestamp() == message.get_message_monotonic_timestamp()
         assert message.data().x == 42
         assert message.data().y == 84
         self.received.append(message)
+
+    def check_parallel_reads(self):
+        failures = []
+        done = threading.Event()
+
+        def read_values():
+            try:
+                for _ in range(PARALLEL_READ_COUNT):
+                    assert self.context.param.read_current("gain").value == 2.5
+            except BaseException as error:
+                failures.append(error)
+            finally:
+                done.set()
+
+        reader = threading.Thread(target=read_values)
+        reader.start()
+        try:
+            # Host admission is shared with pump; native waits release the GIL.
+            self.wait(done.is_set)
+        finally:
+            reader.join(TIMEOUT_SECONDS)
+        assert not reader.is_alive(), "concurrent Param reader did not stop"
+        assert not failures, failures
 
     def wait(self, predicate):
         deadline = time.monotonic() + TIMEOUT_SECONDS
@@ -87,11 +144,35 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         assert self.context.param.update("gain", vinc.param.Type.Double) == 1.25
         assert any(not watch.present for watch in self.context.param.watches())
         raises(vinc.VincError, lambda: self.context.param.update("missing.value", vinc.param.Type.Int32))
-        raises(vinc.VincError, lambda: self.context.param.set("protected", vinc.param.Type.Int32, 9))
+        self.context.param.set("protected", vinc.param.Type.Int32, 9)
+        self.wait(lambda: self.context.param.update("protected", vinc.param.Type.Int32) == 9)
+        assert self.snapshots[-1]["pythonNode.protected"].permission == vinc.param.Permission.Limited
+        assert self.snapshots[-1]["pythonNode.protected"].restart_hint == vinc.param.RestartHint.App
+        assert self.snapshots[-1]["nativeNode.fixed"].restart_hint == vinc.param.RestartHint.Module
+        assert self.snapshots[-1]["pythonNode.gain"].permission == vinc.param.Permission.Public
+        assert not hasattr(vinc.param.Permission, "FrameworkOnly")
+        assert not hasattr(vinc.param.Permission, "Open")
+        assert self.context.param.update("nativeNode.fixed", vinc.param.Type.Int32) == 7
+        try:
+            self.context.param.set("nativeNode.fixed", vinc.param.Type.Int32, 9)
+        except vinc.VincError as error:
+            # Param's published PermissionDenied code; do not accept NotFound as protection.
+            assert error.error.domain == PARAM_ERROR_DOMAIN
+            assert error.error.code == PARAM_PERMISSION_DENIED
+        else:
+            raise AssertionError("Python must not write a foreign Limited parameter")
+        self.context.param.set("nativeNode.shared", vinc.param.Type.Int32, 9)
+        self.wait(lambda: self.context.param.update("nativeNode.shared", vinc.param.Type.Int32) == 9)
         self.context.param.set("gain", vinc.param.Type.Double, 2.5)
+        callbacks_before = len(self.snapshots)
+        assert self.context.param.read_current("gain").value == 2.5
+        assert self.startup_entry.value == 1.25
+        assert self.context.param.update("gain", vinc.param.Type.Double) == 1.25
+        assert len(self.snapshots) == callbacks_before
         self.wait(lambda: self.context.param.update("gain", vinc.param.Type.Double) == 2.5)
         assert self.snapshots[0]["pythonNode.gain"].value == 1.25
         assert self.snapshots[-1]["pythonNode.gain"].value == 2.5
+        self.check_parallel_reads()
         self.context.param.on_change(None)
         local = vinc.make_message(vinc.messages.int3)
         local.data().x = 42
@@ -105,11 +186,13 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         raises(ReferenceError, loan.data)
         raises(ReferenceError, lambda: self.publisher.commit(loan))
         self.wait(lambda: len(self.received) >= 2)
-        if self.mode != "normal":
+        if self.mode not in ("normal", "same-id"):
             return
         retained = self.received[0]
         assert retained.copy().publisher_instance() == retained.publisher_instance()
         latest = self.subscriber.get_last()
+        assert latest.publisher_instance() == self.expected_publisher_id
+        assert latest.publisher_name() == "nativeNode"
         assert latest.data().y == 84
         latest.data().y = 999
         assert self.subscriber.get_last().data().y == 84

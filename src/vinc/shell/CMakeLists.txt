@@ -9,9 +9,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../library/tcl" "${CMAKE_BINARY_DIR}/library/tcl")
 add_library(vinc_shell STATIC
     src/shell.cpp
+    src/startup_report.cpp
     src/tcl_runtime.cpp
     src/command_line.cpp
     src/command_router.cpp
+    src/session_feedback.cpp
     src/script_service.cpp
     src/socket_shell.cpp
 )
@@ -24,7 +26,7 @@ vinc_register_error_catalog(TARGET vinc_shell_errors
     HEADER vinc/shell/detail/error_catalog.hpp SYMBOL vinc::shell::detail::error_catalog)
 target_compile_features(vinc_shell PUBLIC cxx_std_23)
 target_include_directories(vinc_shell PUBLIC include)
-target_link_libraries(vinc_shell PUBLIC vinc::module_manager vinc::common PRIVATE vinc_tcl vinc::log_manager)
+target_link_libraries(vinc_shell PUBLIC vinc::module_manager vinc::common PRIVATE "$<BUILD_INTERFACE:vinc_tcl>" "$<INSTALL_INTERFACE:vinc::detail_tcl>" vinc::log_manager)
 if(MSVC)
     target_compile_options(vinc_shell PRIVATE /W4 /utf-8)
 else()
@@ -33,4 +35,10 @@ endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_shell vinc_shell_errors)
 endif()

@@ -2,6 +2,7 @@
 #include <vinc/module/detail/plugin.hpp>
 #include <vinc/osal/dynamic_library.hpp>
 #include <memory>
+#include <optional>
 
 namespace vinc::detail {
 using PluginModule = std::unique_ptr<ModuleObject, void (*)(ModuleObject*) noexcept>;
@@ -16,7 +17,8 @@ public:
     LoadedPlugin& operator=(const LoadedPlugin&) = delete;
 
     static Result<LoadedPlugin> load(const std::filesystem::path& path,
-                                     const std::string& type, const RuntimeServices& services);
+                                     const std::string& type, const RuntimeServices& services,
+                                     std::optional<osal::DynamicLibrary>& rejected_library);
     Result<PluginModule> create() const;
 
 private:

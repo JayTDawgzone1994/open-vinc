@@ -5,6 +5,7 @@
 
 #include <vinc/osal/error.hpp>
 #include <vinc/osal/process.hpp>
+#include <array>
 
 namespace vinc::osal::detail {
 
@@ -14,12 +15,20 @@ bool valid_utf8(const std::string&) noexcept;
 
 struct MonitorImpl;
 
+// Consumed one-shot notifications carry service identities, never borrowed pointers.
+// Match the native monitor's bounded event batch; waiting must not allocate.
+struct ProcessExitEvents {
+    static constexpr std::size_t capacity = 32;
+    std::array<ProcessId, capacity> ids{};
+    std::size_t count = 0;
+};
+
 class NativeMonitor {
 public:
     static vinc::Result<std::unique_ptr<NativeMonitor>> create();
     ~NativeMonitor();
     void wake() noexcept;
-    vinc::Result<void> wait(bool polling) noexcept;
+    vinc::Result<ProcessExitEvents> wait(bool polling) noexcept;
 
     MonitorImpl& implementation() noexcept {
         return *impl_;
@@ -34,7 +43,7 @@ struct ProcessImpl;
 
 class NativeProcess {
 public:
-    static vinc::Result<std::unique_ptr<NativeProcess>> spawn(const SpawnOptions&, NativeMonitor&,
+    static vinc::Result<std::unique_ptr<NativeProcess>> spawn(const SpawnOptions&, NativeMonitor&, ProcessId,
                                                               const ChildPipe* = nullptr);
     ~NativeProcess();
     // ObservationLost revokes exclusive child ownership (POSIX ECHILD); the

@@ -13,3 +13,9 @@ if(MSVC)
 else()
     target_compile_options(vinc_bag PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_bag vinc_bag_errors)
+endif()

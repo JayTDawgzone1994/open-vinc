@@ -23,6 +23,7 @@
 namespace vinc {
 namespace detail {
 struct ManagerAccess;
+struct SystemModuleOptions;
 }
 using CommandFunction = std::function<Result<int32_t>(std::vector<std::string>&)>;
 using AutoCompleteFunction = std::function<Result<std::vector<std::string>>(std::vector<std::string>&)>;
@@ -83,7 +84,20 @@ struct ModuleContractDiagnostic {
     Result<ModuleContractReport> report;
 };
 
+enum class ModuleKind {
+    User,
+    System
+};
+
 struct ModuleSnapshot {
+    ModuleKind kind = ModuleKind::User;
+    std::optional<bool> system_enabled;
+    // Local steady-clock diagnostics, never transmitted as a raw C++ layout.
+    bool restart_rate_limited = false;
+    std::optional<Deadline> next_restart;
+    // A permanent restart-admission failure (e.g. MID exhaustion), separate
+    // from the old process's primary and cleanup diagnostics.
+    std::optional<Error> restart_failure;
     std::string name;
     std::string module_type;
     std::filesystem::path plugin_path;
@@ -108,8 +122,10 @@ struct ModuleSnapshot {
 // Requests are bounded, never automatically replayed, and timeout does not imply cancellation.
 class ModuleManager {
 public:
-    static Result<std::unique_ptr<ModuleManager>> create(message_bus::Limits limits = {},
-                                                          std::filesystem::path host_executable = {});
+    // Framework composition supplies an absolute executable with Host dispatch.
+    // No implicit build-tree Host or user-owned application entry is provided.
+    static Result<std::unique_ptr<ModuleManager>> create(message_bus::Limits limits,
+                                                       std::filesystem::path host_executable);
     ~ModuleManager();
     ModuleManager(const ModuleManager&) = delete;
     ModuleManager& operator=(const ModuleManager&) = delete;
@@ -157,8 +173,8 @@ public:
     Result<int32_t> call_micro_program(const std::string& name, std::vector<std::string> args);
     Result<std::vector<std::string>> call_micro_program_autoComplete(const std::string& name,
                                                                      std::vector<std::string> args);
-    std::vector<std::string> get_registered_module_type_names() const;
-    std::vector<std::string> get_active_module_names() const;
+    std::vector<std::string> get_registered_module_type_names(bool include_system = true) const;
+    std::vector<std::string> get_active_module_names(bool include_system = true) const;
     std::vector<std::string> get_micro_program_names() const;
     bool has_module_type(const std::string& name) const;
     bool has_active_module(const std::string& name) const;
@@ -166,6 +182,8 @@ public:
 
 private:
     friend struct detail::ManagerAccess;
+    Result<void> register_type(ModuleType, const detail::SystemModuleOptions*);
+    Result<MID> start_type(const std::string&, std::vector<std::string>, ModuleStartOptions, bool system);
     struct Impl;
     explicit ModuleManager(std::unique_ptr<Impl>) noexcept;
     std::unique_ptr<Impl> impl_;

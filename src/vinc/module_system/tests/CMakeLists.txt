@@ -1,3 +1,41 @@
+# Isolated tests need a Host without central composition. Keep its path and
+# build dependency on this test-only interface, never on the production Manager.
+if(MSVC)
+    # Explicitly built by runtime-policy validation; ordinary builds do not pay
+    # for the additional static-CRT closure during the stage-one rollout.
+    add_executable(module_python_runtime_link_tests EXCLUDE_FROM_ALL python_runtime_link.cpp)
+    vinc_apply_runtime(module_python_runtime_link_tests PYTHON)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../python/cmake/VincPythonRuntime.cmake")
+    vinc_python_runtime_targets(python_runtime python_errors)
+    target_link_libraries(module_python_runtime_link_tests PRIVATE
+        ${python_runtime} ${python_errors})
+    set_target_properties(module_python_runtime_link_tests PROPERTIES
+        CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+endif()
+add_executable(vinc_test_host host_main.cpp)
+target_link_libraries(vinc_test_host PRIVATE vinc::module_runtime)
+if(MSVC)
+    get_filename_component(compiler_directory "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    # This opt-in validation target builds both link closures, inspects actual
+    # imports and runs the static bootstrap probe without altering default builds.
+    add_custom_target(vinc_check_python_runtime
+        COMMAND "${CMAKE_COMMAND}"
+            "-DDUMPBIN=${compiler_directory}/dumpbin.exe"
+            "-DSTATIC_IMAGE=$<TARGET_FILE:module_python_runtime_link_tests>"
+            "-DNATIVE_IMAGE=$<TARGET_FILE:vinc_test_host>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/python_runtime_link.cmake"
+        DEPENDS module_python_runtime_link_tests vinc_test_host VERBATIM)
+endif()
+set_target_properties(vinc_test_host PROPERTIES
+    CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+set(test_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
+file(GENERATE OUTPUT "${test_generated}/vinc_test/host_path.hpp"
+    CONTENT "#pragma once\n#define VINC_TEST_HOST_PATH u8\"$<TARGET_FILE:vinc_test_host>\"\n")
+add_library(vinc_test_manager INTERFACE)
+target_link_libraries(vinc_test_manager INTERFACE vinc::module_manager)
+target_include_directories(vinc_test_manager INTERFACE "${test_generated}")
+add_dependencies(vinc_test_manager vinc_test_host)
+
 add_executable(module_query_tests query_tests.cpp)
 target_link_libraries(module_query_tests PRIVATE vinc::module_runtime vinc::errors)
 add_test(NAME module.queries COMMAND module_query_tests)
@@ -7,13 +45,13 @@ target_link_libraries(module_lock_protocol_tests PRIVATE vinc::module_runtime vi
 add_test(NAME module.lock_protocol COMMAND module_lock_protocol_tests)
 set_tests_properties(module.lock_protocol PROPERTIES TIMEOUT 30)
 add_executable(module_instance_tests instance_tests.cpp)
-target_link_libraries(module_instance_tests PRIVATE vinc::module_manager)
+target_link_libraries(module_instance_tests PRIVATE vinc_test_manager)
 add_test(NAME module.instance COMMAND module_instance_tests)
 set_tests_properties(module.instance PROPERTIES TIMEOUT 45)
 # Build real child fixtures, including a silent peer, for session/lifecycle failure tests.
 vinc_add_module_plugin(module_lock_helper lock_helper.cpp)
 add_executable(module_lock_tests lock_tests.cpp)
-target_link_libraries(module_lock_tests PRIVATE vinc::module_manager vinc::concurrency)
+target_link_libraries(module_lock_tests PRIVATE vinc_test_manager vinc::concurrency)
 add_dependencies(module_lock_tests module_lock_helper)
 add_test(NAME module.locks COMMAND module_lock_tests "$<TARGET_FILE:module_lock_helper>")
 set_tests_properties(module.locks PROPERTIES TIMEOUT 60)
@@ -25,7 +63,7 @@ set_tests_properties(module.mid PROPERTIES TIMEOUT 10)
 vinc_add_module_plugin(module_context_helper context_helper.cpp)
 target_link_libraries(module_context_helper PRIVATE vinc_message_fixture)
 add_executable(module_context_tests context_tests.cpp)
-target_link_libraries(module_context_tests PRIVATE vinc::module_manager)
+target_link_libraries(module_context_tests PRIVATE vinc_test_manager)
 add_dependencies(module_context_tests module_context_helper)
 add_test(NAME module.context COMMAND module_context_tests "$<TARGET_FILE:module_context_helper>")
 set_tests_properties(module.context PROPERTIES TIMEOUT 90)
@@ -33,7 +71,7 @@ set_tests_properties(module.context PROPERTIES TIMEOUT 90)
 vinc_add_module_plugin(module_process_helper module_helper.cpp)
 target_link_libraries(module_process_helper PRIVATE vinc::module)
 add_executable(module_integration_tests module_tests.cpp)
-target_link_libraries(module_integration_tests PRIVATE vinc::module_manager)
+target_link_libraries(module_integration_tests PRIVATE vinc_test_manager)
 add_dependencies(module_integration_tests module_process_helper)
 add_executable(silent_module_helper silent_helper.cpp)
 target_link_libraries(silent_module_helper PRIVATE vinc::control vinc::module)
@@ -47,15 +85,23 @@ foreach(target IN ITEMS module_process_helper silent_module_helper module_integr
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endforeach()
-add_test(NAME module.process COMMAND module_integration_tests "$<TARGET_FILE:module_process_helper>" "$<TARGET_FILE:silent_module_helper>")
+add_test(NAME module.process COMMAND module_integration_tests "$<TARGET_FILE:module_process_helper>"
+    "$<TARGET_FILE:silent_module_helper>" "$<TARGET_FILE:plugin_stall>")
 set_tests_properties(module.process PROPERTIES TIMEOUT 90)
 add_test(NAME module.error_protocol COMMAND module_error_protocol_tests)
 set_tests_properties(module.error_protocol PROPERTIES TIMEOUT 10)
 
+add_executable(module_system_tests system_module_tests.cpp)
+target_link_libraries(module_system_tests PRIVATE vinc_test_manager)
+add_dependencies(module_system_tests module_process_helper module_context_helper)
+add_test(NAME module.system COMMAND module_system_tests
+    "$<TARGET_FILE:module_process_helper>" "$<TARGET_FILE:module_context_helper>")
+set_tests_properties(module.system PROPERTIES TIMEOUT 60)
+
 # Include the component implementation in isolated fixtures to inspect private
 # lifetime invariants without exposing test APIs in the production libraries.
 add_executable(module_manager_fault_tests manager_fault_tests.cpp)
-target_link_libraries(module_manager_fault_tests PRIVATE vinc::module_manager vinc::concurrency vinc::rpc_manager)
+target_link_libraries(module_manager_fault_tests PRIVATE vinc_test_manager vinc::concurrency vinc::rpc_manager)
 add_dependencies(module_manager_fault_tests module_process_helper)
 add_executable(module_runtime_fault_tests runtime_fault_tests.cpp)
 target_link_libraries(module_runtime_fault_tests PRIVATE vinc::module_runtime)
@@ -74,7 +120,7 @@ add_test(NAME module.runtime_faults COMMAND module_runtime_fault_tests)
 set_tests_properties(module.runtime_faults PROPERTIES TIMEOUT 15)
 
 add_executable(module_contract_tests contract_tests.cpp)
-target_link_libraries(module_contract_tests PRIVATE vinc::module_manager vinc_module_contract)
+target_link_libraries(module_contract_tests PRIVATE vinc_test_manager vinc_module_contract)
 add_dependencies(module_contract_tests module_process_helper)
 if(MSVC)
     target_compile_options(module_contract_tests PRIVATE /W4 /utf-8)
@@ -90,7 +136,7 @@ target_link_libraries(module_contract_fault_helper PRIVATE vinc::module_runtime)
 target_compile_definitions(module_contract_fault_helper PRIVATE VINC_FAULT_HOST)
 vinc_add_module_plugin(module_contract_fault_plugin contract_fault_helper.cpp)
 add_executable(module_contract_supervision_tests contract_supervision_tests.cpp)
-target_link_libraries(module_contract_supervision_tests PRIVATE vinc::module_manager vinc_module_contract vinc::concurrency vinc::rpc_manager)
+target_link_libraries(module_contract_supervision_tests PRIVATE vinc_test_manager vinc_module_contract vinc::concurrency vinc::rpc_manager)
 add_dependencies(module_contract_supervision_tests module_contract_fault_helper module_contract_fault_plugin)
 foreach(target IN ITEMS module_contract_fault_helper module_contract_supervision_tests)
     target_compile_definitions(${target} PRIVATE VINC_MODULE_TESTING)
@@ -134,7 +180,7 @@ add_test(NAME module.runtime_services
 set_tests_properties(module.runtime_services PROPERTIES TIMEOUT 120)
 
 # Production loader fault cases run in disposable Host processes.
-foreach(mode IN ITEMS valid no_entry bad_version null_factory reject stall throw_constructor)
+foreach(mode IN ITEMS valid no_entry bad_version null_factory reject stall throw_constructor late_coordinator)
     vinc_add_module_plugin(plugin_${mode} plugin_fixture.cpp)
     if(NOT mode STREQUAL "valid")
         string(TOUPPER "${mode}" mode_definition)
@@ -142,14 +188,42 @@ foreach(mode IN ITEMS valid no_entry bad_version null_factory reject stall throw
     endif()
 endforeach()
 add_executable(module_plugin_tests plugin_tests.cpp)
-target_link_libraries(module_plugin_tests PRIVATE vinc::module_manager)
-add_dependencies(module_plugin_tests plugin_valid plugin_no_entry plugin_bad_version plugin_null_factory plugin_reject plugin_stall plugin_throw_constructor)
+add_dependencies(module_integration_tests plugin_stall)
+target_link_libraries(module_plugin_tests PRIVATE vinc_test_manager vinc::module)
+add_dependencies(module_plugin_tests plugin_valid plugin_no_entry plugin_bad_version plugin_null_factory plugin_reject plugin_stall plugin_throw_constructor plugin_late_coordinator)
 add_test(NAME module.plugin COMMAND module_plugin_tests
     "$<TARGET_FILE:plugin_valid>" "$<TARGET_FILE:plugin_no_entry>" "$<TARGET_FILE:plugin_bad_version>"
-    "$<TARGET_FILE:plugin_null_factory>" "$<TARGET_FILE:plugin_reject>" "$<TARGET_FILE:plugin_stall>" "$<TARGET_FILE:plugin_throw_constructor>")
-set_tests_properties(module.plugin PROPERTIES TIMEOUT 90)
+    "$<TARGET_FILE:plugin_null_factory>" "$<TARGET_FILE:plugin_reject>" "$<TARGET_FILE:plugin_stall>" "$<TARGET_FILE:plugin_throw_constructor>" "$<TARGET_FILE:plugin_late_coordinator>")
+# Leave room for the sequential cases and their bounded failure-path cleanup.
+# Per-case startup/wait limits still decide failures; this is only the outer kill guard.
+set_tests_properties(module.plugin PROPERTIES TIMEOUT 180)
+
+# Scripted peers hold failure reports until the controller observes the central
+# snapshot. Only this Manager copy uses the existing native-termination seam.
+add_executable(module_failure_order_helper failure_order_helper.cpp)
+target_link_libraries(module_failure_order_helper PRIVATE vinc_test_manager vinc::control vinc::module)
+add_executable(module_failure_order_tests failure_order_tests.cpp)
+target_link_libraries(module_failure_order_tests PRIVATE vinc_test_manager vinc::concurrency vinc::rpc_manager)
+target_compile_definitions(module_failure_order_tests PRIVATE VINC_MODULE_TESTING)
+target_include_directories(module_failure_order_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_dependencies(module_failure_order_tests module_failure_order_helper)
+foreach(target IN ITEMS module_failure_order_tests module_failure_order_helper)
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endforeach()
+add_test(NAME module.failure_order COMMAND module_failure_order_tests "$<TARGET_FILE:module_failure_order_helper>")
+set_tests_properties(module.failure_order PROPERTIES TIMEOUT 120)
+add_executable(module_plugin_initialize_tests plugin_initialize_tests.cpp)
+target_link_libraries(module_plugin_initialize_tests PRIVATE vinc::module)
+add_test(NAME module.plugin_initialize COMMAND module_plugin_initialize_tests)
+set_tests_properties(module.plugin_initialize PROPERTIES TIMEOUT 15)
 add_executable(module_debug_tests debug_tests.cpp)
-target_link_libraries(module_debug_tests PRIVATE vinc::module_manager vinc::shell)
+target_link_libraries(module_debug_tests PRIVATE vinc_test_manager vinc::shell)
 add_dependencies(module_debug_tests module_process_helper)
 if(MSVC)
     target_compile_options(module_debug_tests PRIVATE /W4 /utf-8)

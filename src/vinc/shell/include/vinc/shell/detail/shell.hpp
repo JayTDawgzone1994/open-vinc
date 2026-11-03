@@ -7,6 +7,7 @@
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/shell/detail/socket_shell.hpp>
 #include <vinc/shell/detail/script_source.hpp>
+#include <vinc/shell/detail/startup_report.hpp>
 #include <filesystem>
 #include <iosfwd>
 #include <memory>
@@ -25,6 +26,8 @@ public:
     // Individual command/script failures are displayed and leave the Shell running.
     Result<void> run(std::filesystem::path startup_script = {}, std::vector<std::string> script_args = {});
     Result<void> run_source(shell::ScriptSource startup_script, std::vector<std::string> script_args = {});
+    // Central-only startup presentation; call before run, on the Shell control thread.
+    void set_startup_report(shell::StartupReport report);
     // Bind before deployment; failures preserve the Socket/OSAL cause.
     Result<osal::IpEndpoint> start_socket_shell(shell::SocketShellOptions options = {});
     // Synchronous command entry. Does not parse Tcl. Nonzero application exit codes

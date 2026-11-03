@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <algorithm>
 
 namespace {
 using namespace vinc;
@@ -30,7 +31,7 @@ void value_and_wire() {
         const auto& value = values[index];
         check(take(parse_value(type_of(value), value_text(value))) == value, "numeric/string roundtrip");
         source.entries.emplace("camera.p" + std::to_string(index),
-                               Entry{value, value, Permission::Open, 9, 1234});
+                               Entry{value, value, Permission::Public, 9, 1234});
     }
     auto encoded = take(param::detail::encode_snapshot(source));
     auto decoded = take(param::detail::decode_snapshot(encoded));
@@ -64,6 +65,58 @@ void value_and_wire() {
     auto unknown = Error::from_raw(ErrorDomain::Param, 9999, 8888);
     const auto restored = take(param::detail::decode_error(param::detail::encode_error(unknown)));
     check(restored.code == 9999 && restored.operation == 8888, "unknown codes retained");
+}
+
+void permission_wire() {
+    Snapshot source;
+    source.revision = 1;
+    source.entries.emplace("camera.gain", Entry{std::int32_t{1}, std::int32_t{1}});
+    auto& entry = source.entries.at("camera.gain");
+    entry.version = source.revision;
+    check(entry.permission == Permission::Limited, "Limited is the default permission");
+    for (const auto permission : {Permission::Limited, Permission::Public}) {
+        entry.permission = permission;
+        const auto bytes = take(param::detail::encode_snapshot(source));
+        const auto decoded = take(param::detail::decode_snapshot(bytes));
+        check(decoded.entries.at("camera.gain").permission == permission, "permission roundtrip");
+    }
+
+    const auto encoded = take(param::detail::encode_snapshot(source));
+    for (const std::uint32_t invalid : {0u, 3u, UINT32_MAX}) {
+        entry.permission = static_cast<Permission>(invalid);
+        check(!param::detail::encode_snapshot(source), "encoder rejects retired and unknown permissions");
+
+        auto malformed = encoded;
+        control::Bytes permission_bytes;
+        control::put_u32(permission_bytes, invalid);
+        // The wire entry ends with two u32 metadata fields and two u64 stamps.
+        constexpr std::size_t entry_tail_bytes = 4 + 4 + 8 + 8;
+        std::copy(permission_bytes.begin(), permission_bytes.end(), malformed.end() - entry_tail_bytes);
+        check(!param::detail::decode_snapshot(malformed), "decoder rejects retired and unknown permissions");
+    }
+    auto previous_version = encoded;
+    control::Bytes version_bytes;
+    control::put_u32(version_bytes, param::detail::version - 1);
+    std::copy(version_bytes.begin(), version_bytes.end(), previous_version.begin());
+    check(!param::detail::decode_snapshot(previous_version), "previous shared snapshot is incompatible");
+    entry.permission = Permission::Limited;
+    check(entry.restart_hint == RestartHint::None, "restart hint defaults to None");
+    for (const auto hint : {RestartHint::None, RestartHint::Module, RestartHint::App}) {
+        entry.restart_hint = hint;
+        const auto bytes = take(param::detail::encode_snapshot(source));
+        check(take(param::detail::decode_snapshot(bytes)).entries == source.entries, "restart hint roundtrip");
+    }
+    const auto valid_hint_image = take(param::detail::encode_snapshot(source));
+    for (const std::uint32_t invalid : {3u, UINT32_MAX}) {
+        entry.restart_hint = static_cast<RestartHint>(invalid);
+        check(!param::detail::encode_snapshot(source), "encoder rejects invalid restart hint");
+        auto malformed = valid_hint_image;
+        control::Bytes hint_bytes;
+        control::put_u32(hint_bytes, invalid);
+        constexpr std::size_t hint_tail_bytes = 4 + 8 + 8;
+        std::copy(hint_bytes.begin(), hint_bytes.end(), malformed.end() - hint_tail_bytes);
+        check(!param::detail::decode_snapshot(malformed), "decoder rejects invalid restart hint");
+    }
 }
 
 void persistence() {
@@ -121,6 +174,7 @@ void persistence() {
 int main() {
     try {
         value_and_wire();
+        permission_wire();
         persistence();
         std::cout << "PASS: Param values, wire, TOML persistence and failure preservation\n";
     } catch (const std::exception& error) {

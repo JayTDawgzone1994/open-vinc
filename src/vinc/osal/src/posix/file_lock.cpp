@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 #include <vinc/osal/detail/native_error.hpp>
 #include <vinc/osal/detail/posix/descriptor.hpp>
 // Every process opens its own file description. No dup/fork handoff: inherited
@@ -63,6 +64,11 @@ FileLockState::~FileLockState() {
 vinc::Result<void> open_file_lock(FileLockState& state, const std::filesystem::path& path, bool create) {
     const auto operation =
         create ? vinc::osal::ErrorOperation::CreateFileLock : vinc::osal::ErrorOperation::OpenFileLock;
+    auto resources = acquire_resources(operation);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     const int flags = O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK | (create ? O_CREAT | O_EXCL : 0);
     int fd;
     do {
@@ -86,11 +92,17 @@ vinc::Result<void> open_file_lock(FileLockState& state, const std::filesystem::p
     if (::fstat(fd, &info) != 0) {
         auto failure = error(operation);
         (void)::close(fd);
+        if (create) {
+            (void)::unlink(path.c_str());
+        }
         return std::unexpected(failure);
     }
     // Parent-directory privacy and stable paths remain caller responsibilities.
     if (!S_ISREG(info.st_mode) || info.st_uid != ::geteuid() || (info.st_mode & 0077) != 0) {
         (void)::close(fd);
+        if (create) {
+            (void)::unlink(path.c_str());
+        }
         return std::unexpected(vinc::Error{vinc::osal::ErrorCode::InvalidArgument, operation});
     }
     state.handle = fd;

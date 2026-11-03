@@ -5,7 +5,7 @@
 
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/module/detail/contract_report.hpp>
-#include <vinc/module/detail/host_path.hpp>
+#include <vinc_test/host_path.hpp>
 #include <vinc/module/detail/error_protocol.hpp>
 #include <vinc/osal/path.hpp>
 #include <vinc/osal/notification.hpp>
@@ -82,7 +82,7 @@ vinc::Result<osal::Socket> make_raw_listener(const std::string& endpoint_text) {
 
 // This scenario owns its raw central and child. Cleanup still runs before the process
 // service and listener are destroyed, including when an assertion throws.
-void test_parent_loss(const std::filesystem::path& helper) {
+void test_parent_loss(const std::filesystem::path& helper, const std::filesystem::path& stalled_plugin) {
     // Own the real module child directly to verify self-exit when its central
     // stops heartbeats without closing the socket, and when the socket closes.
     auto process_service = osal::ProcessService::create();
@@ -103,9 +103,19 @@ void test_parent_loss(const std::filesystem::path& helper) {
     const std::string endpoint_text(reinterpret_cast<const char*>(endpoint_u8.data()), endpoint_u8.size());
     auto listener = make_raw_listener(endpoint_text);
 
-    for (int scenario = 0; scenario < 3; ++scenario) {
-        const bool disconnect = scenario == 1;
-        const bool missing_notification = scenario == 2;
+    enum class Scenario {
+        HeartbeatTimeout,
+        Disconnect,
+        MissingNotification,
+        WrongToken
+    };
+    // Authentication runs on the fresh listener, before any auxiliary Log session.
+    constexpr std::array scenarios{Scenario::WrongToken, Scenario::HeartbeatTimeout,
+        Scenario::Disconnect, Scenario::MissingNotification};
+    for (const auto scenario : scenarios) {
+        const bool disconnect = scenario == Scenario::Disconnect;
+        const bool missing_notification = scenario == Scenario::MissingNotification;
+        const bool wrong_token = scenario == Scenario::WrongToken;
         const auto notification_name = "orphan_n" + std::to_string(std::random_device{}());
         auto notification = take(osal::NotificationReceiver::create(notification_name));
         struct NotificationCleanup {
@@ -117,7 +127,7 @@ void test_parent_loss(const std::filesystem::path& helper) {
         auto report = take(detail::ContractReportStorage::create(
             "orphan_" + std::to_string(std::random_device{}()), 1234));
         osal::SpawnOptions spawn;
-        spawn.executable = std::filesystem::path(VINC_MODULE_HOST_PATH);
+        spawn.executable = vinc::test::host_path();
         spawn.arguments = {detail::bootstrap::version_marker,
                            endpoint_text,
                            "orphan-test",
@@ -134,6 +144,13 @@ void test_parent_loss(const std::filesystem::path& helper) {
             // If initialization ordering regresses, this nonexistent Plugin changes the error.
             spawn.arguments[detail::bootstrap::plugin_path] = "missing-plugin";
         }
+
+        if (wrong_token) {
+            // Its load-time initializer stalls for a minute. Prompt handshake
+            // rejection therefore proves that no Plugin initializer was entered.
+            spawn.arguments[detail::bootstrap::plugin_path] = take(osal::path_to_utf8(stalled_plugin));
+        }
+
         auto child = process_service->spawn(spawn);
         check(bool(child), "spawn orphan test");
 
@@ -153,7 +170,8 @@ void test_parent_loss(const std::filesystem::path& helper) {
         control::Frame hello{control::Kind::Hello};
         control::put_u32(hello.payload, static_cast<std::uint32_t>(control::Role::Central));
         control::put_u64(hello.payload, 1234);
-        check(bool(control::put_string(hello.payload, "orphan-test")), "encode token");
+        const auto token = wrong_token ? "incorrect-token" : "orphan-test";
+        check(bool(control::put_string(hello.payload, token)), "encode token");
         control::put_u32(hello.payload, 40);
         control::put_u32(hello.payload, 400);
         control::put_u32(hello.payload, control::hello_version);
@@ -166,6 +184,15 @@ void test_parent_loss(const std::filesystem::path& helper) {
             check(sent && *sent, "send central handshake");
             offset += *sent;
         }
+
+        if (wrong_token) {
+            constexpr int handshake_failure_exit = 66;
+            auto exited = take(child->wait_until(control::Clock::now() + raw_exit_timeout));
+            check(exited.value == handshake_failure_exit,
+                  "wrong token must reject before Plugin load or central startup");
+            continue;
+        }
+
         // Wait for Ready so the test distinguishes watchdog exit from failed startup.
         control::Decoder decoder;
         bool ready = false;
@@ -232,7 +259,7 @@ void test_parent_loss(const std::filesystem::path& helper) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
+    if (argc != 4) {
         return 2;
     }
 
@@ -630,7 +657,7 @@ int main(int argc, char** argv) {
         std::filesystem::remove(marker);
         check(shutdown_name == "scopeNode", "manager destruction stops child gracefully");
 
-        test_parent_loss(helper);
+        test_parent_loss(helper, std::filesystem::absolute(argv[3]));
         std::cout
             << "module process lifecycle, naming, commands, isolation, timeout and restart tests passed\n";
     } catch (const std::exception& error) {

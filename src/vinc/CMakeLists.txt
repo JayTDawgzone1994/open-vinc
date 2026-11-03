@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(vinc LANGUAGES CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/common/cmake/VincToolchain.cmake")
+vinc_require_toolchain()
 
 # =================================================================
 # Require C++23 consistently across framework targets.
@@ -19,7 +21,11 @@ endif()
 # =================================================================
 # Declare runtime libraries before application targets.
 # =================================================================
+include(sdk/cmake/VincInstall.cmake)
 include(sdk/cmake/VincLicenses.cmake)
+# Full framework composition declares private Python-capable variants. Standalone
+# Common/OSAL consumers do not acquire this extra dependency requirement.
+set(VINC_DECLARE_PYTHON_RUNTIME TRUE)
 # Explicit target dependencies below govern message generation.
 add_subdirectory(common)         # Shared framework Result and error interface
 add_subdirectory(ribosome)       # Build-time message compiler
@@ -46,9 +52,7 @@ if(BUILD_TESTING)
     add_subdirectory(rpc/tests)
 endif()
 
-if(VINC_BUILD_APPS AND VINC_BUILD_UI)
-    add_subdirectory(ui)
-endif()
+add_subdirectory(ui)
 
 # Every provider has registered C++ metadata; freeze one catalog for this build.
 vinc_finalize_error_catalog()

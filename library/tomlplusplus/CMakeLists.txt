@@ -16,3 +16,12 @@ endif()
 add_library(vinc_toml INTERFACE)
 target_include_directories(vinc_toml SYSTEM INTERFACE "${toml_source}/include")
 target_compile_definitions(vinc_toml INTERFACE TOML_EXCEPTIONS=0)
+
+if(VINC_INSTALL_SDK)
+    set_property(TARGET vinc_toml PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${toml_source}/include>")
+    set_property(TARGET vinc_toml PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${toml_source}/include>")
+    install(TARGETS vinc_toml EXPORT VincTargets ARCHIVE DESTINATION lib COMPONENT VincSDK)
+    set_target_properties(vinc_toml PROPERTIES EXPORT_NAME detail_tomlplusplus)
+endif()

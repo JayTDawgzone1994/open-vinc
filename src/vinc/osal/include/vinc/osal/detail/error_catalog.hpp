@@ -32,6 +32,9 @@ inline constexpr auto error_entries = std::array{
     ErrorCodeEntry{ErrorCode::NetworkUnreachable, "Network unreachable"},
     ErrorCodeEntry{ErrorCode::AlreadyExists, "Already exists"},
     ErrorCodeEntry{ErrorCode::InvalidEncoding, "Invalid Unicode encoding"},
+    ErrorCodeEntry{ErrorCode::IncompatibleCoordinator, "Incompatible resource coordinator"},
+    ErrorCodeEntry{ErrorCode::CoordinatorInUse, "Resource operations started before coordinator binding"},
+    ErrorCodeEntry{ErrorCode::CoordinatorAlreadyBound, "Resource coordinator already bound"},
 };
 inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::InitializeService, "InitializeService"},
@@ -79,6 +82,11 @@ inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::UnlockFileLock, "UnlockFileLock"},
     ErrorOperationEntry{ErrorOperation::PathFromUtf8, "PathFromUtf8"},
     ErrorOperationEntry{ErrorOperation::PathToUtf8, "PathToUtf8"},
+    ErrorOperationEntry{ErrorOperation::ExecutablePath, "ExecutablePath"},
+    ErrorOperationEntry{ErrorOperation::WriteTerminal, "WriteTerminal"},
+    ErrorOperationEntry{ErrorOperation::CheckExecutable, "CheckExecutable"},
+    ErrorOperationEntry{ErrorOperation::BindCoordinator, "BindCoordinator"},
+    ErrorOperationEntry{ErrorOperation::AcquireResources, "AcquireResources"},
     ErrorOperationEntry{ErrorOperation::OpenLibrary, "OpenLibrary"},
     ErrorOperationEntry{ErrorOperation::FindSymbol, "FindSymbol"},
     ErrorOperationEntry{ErrorOperation::CloseLibrary, "CloseLibrary"},

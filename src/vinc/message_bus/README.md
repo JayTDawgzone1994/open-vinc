@@ -370,7 +370,8 @@ Overlapping data operations on one Pub/Sub return OperationInProgress; different
 
 Manager Bus limits default 128 topics,32 Publishers/topic,128 Subscribers, 1 GiB active shared bytes. Maximum 65536 slots,4096 Subscribers,32 Publishers due to bounded descriptors. Names/topics<=256 UTF-8 bytes. Each Client has 32 pending controls, manager 256 application requests; accepted exit recovery is not dropped by that cap.
 
-`ModuleManager::create(message_bus::Limits)` 可設定中央預算：預設 128 topics、每 topic 32 Publishers、
+框架內部 `ModuleManager::create(limits, host_executable)` 可設定中央預算，Host 路徑由框架提供：
+預設 128 topics、每 topic 32 Publishers、
 128 Subscribers、1 GiB 活躍共享配置。每 Publisher 最多 65,536 slots；Subscriber 上限可設到 4,096，
 Publisher 上限目前不可超過 32（控制封包有界）。Publisher 名稱及 topic 最多 256 UTF-8 bytes。
 每個 Client 最多 32 個控制請求等待，BusManager 應用請求佇列最多 256；退出回收事件不因該上限被丟棄。
@@ -806,3 +807,88 @@ frames and genuinely lost Sessions retain existing protocol/lifecycle handling.
 單一退休查詢水位在驗證 envelope 後丟棄舊的無等待者唯讀回覆（含重複回覆）。
 逾時立即釋放 pending 額度，不因遺失回覆持續累積；mutation 回覆仍嚴格配對。不自動重試。傳送壅塞／中央佇列滿不套用 mutation
 逾時的關閉政策；中央回覆壅塞可丟棄，由呼叫端逾時。畸形控制封包及真正斷線仍照既有契約處理。
+
+<a id="macos-notification-snapshot-blocker"></a>
+
+## Notification snapshot portability / 通知快照可攜性（2026-11-02）
+
+Confirmed on source `50a88325245a02ce93d33f985e763284ed3f56bc`, 2026-11-02:
+macOS 26.3.1(a) arm64, Apple Clang 21.0.0, Apple libc++ 21.1.6, SDK 26.5.
+`include/vinc/message_bus/detail/notifications.hpp:180` declares
+`std::atomic<std::shared_ptr<const NotificationDestinations>>`. This toolchain
+does not supply that specialization; compiling `src/message_bus.cpp` fails the
+generic atomic template's trivially-copyable assertion. Its `<version>` header
+also leaves `__cpp_lib_atomic_shared_ptr` undefined. A standalone C++23 probe
+using only `<atomic>` and `<memory>` reproduces the failure without Python or Vinc.
+
+**原始問題：** 同一版本的完整 Release 建置停在通知路由快照，Python binding、
+新單一 App／Host 與 installed SDK 整合無法繼續驗證。這不是本輪已證實的 Python
+Runtime 故障；原生 Notification 的獨立測試通過也不代表 Bus／pump 通知整合已通過。
+較早的 Mac 驗證仍只適用於其原來源版本及範圍，不涵蓋新增的通知路由。
+
+最小重現內容（以該工具鏈 `clang++ -std=c++23 -c` 編譯）：
+
+```cpp
+#include <atomic>
+#include <memory>
+std::atomic<std::shared_ptr<int>> snapshot;
+```
+
+**修正：** 三平台共用 `NotificationRoutes` 的程序內 mutex 與不可變名單快照。
+每個 Publisher 各自持有快照鎖；`snapshot()` 只在鎖內複製 shared_ptr，`replace()`
+只在鎖內交換指標。名單建立、sender 開啟、通知發送及舊快照析構都在鎖外。
+既有接收 dispatcher 維持路由更新順序；這把鎖不負責將多個更新流程變成交易。
+取得快照後仍以 shared ownership 保住正在使用的 sender，不更改
+[pump 喚醒契約](../module_system/PUMP_WAKEUP.md)的提交後通知、安裝後補通知、
+退訂／世代隔離、通知故障診斷及 10 ms 補查，也不修改 RingBuffer 原子同步。
+
+Lock order: Transport may acquire a route's snapshot lock while collecting
+snapshots. The snapshot critical section acquires no other Bus lock and performs
+no endpoint operation or reclamation. Published lists are not modified in place.
+This is a process-local implementation detail, not a shared-memory layout or
+public API change. It provides no lock-free or latency-bound guarantee.
+
+`message_bus.notification_snapshots` compiles the same implementation with the
+existing test-only seams. It checks complete concurrent snapshots, retained sender
+lifetime, replacement while a native send is paused, old/new generation isolation,
+empty-route removal, reclamation outside the lock, and catch-up after publication
+and after healthy-route reuse. Pauses have deadlines; CTest supplies an outer
+30-second deadlock bound. `message_bus.cleanup` retains post-commit notification
+failure/retry/recovery checks. No production test hook or new worker is introduced.
+
+新增契約測試以受控通知暫停和並行替換驗證生命週期，沒有用效能數字判斷通過。
+當時尚未在 Windows／Linux 重跑；後續整合驗證見下方。本輪依使用者決定不執行 benchmark。
+
+Native macOS arm64 with the toolchain above: the full Python-enabled Release
+build passed after this repair. Debug built the selected test targets and passed
+**8/8** CTests: the six `message_bus.*` suites, `module.instance` and
+`module.context`. This includes the new snapshot test and existing notification
+failure/recovery tests. Debug did not build/test the full Python/App/SDK matrix.
+The consolidated Release integration results are recorded in the linked Mac
+Runtime validation record below.
+Release's initial full run passed 125/126; its unrelated Python services test-path
+fixture was corrected and the final three affected checks passed. All 126 distinct
+Release suites therefore have passing evidence, not a single all-green full run.
+
+Local evidence: `build/macos-validation-20261102/source-release-build.log`,
+`atomic-shared-ptr-probe.cpp` and `atomic-shared-ptr-probe.log` in that directory.
+These are ignored local artifacts. The [Mac Runtime validation record](../module_system/python/README.md#macos-runtime-validation-2026-11-02)
+owns the completed test scope and remaining acceptance work.
+Repair evidence: `build/macos-snapshot-mutex-20261102/`, including
+`release-build-complete.log`, `snapshot-ctest-final.log`, `debug-build.log`,
+`debug-ctest.log` and `debug-ctest.xml`. Source is the commit above plus this
+topic's notification snapshot repair and test changes; it is not the unmodified commit.
+
+### Windows and WSL integration follow-up (2026-11-02) / Windows 與 WSL 整合補驗
+
+After integrating develop `599e7af` with the App/Python build cleanup, complete
+Release builds succeeded on Windows x64 (MSVC 19.44.35229, CPython 3.13.12) and
+WSL Ubuntu 24.04 x86_64 (GCC/libstdc++ 13.3, CPython 3.12.3). Both passed all six
+Bus component CTests plus `message_bus.shell`, including notification snapshots
+and post-commit failure/recovery. This is correctness/regression evidence, not a
+benchmark, full-suite result or a new macOS validation.
+
+合併上述 develop 與 App／Python 建置整理後，Windows／WSL Release 完整建置成功，
+兩平台各六個 Bus 元件測試及 Shell 通訊測試皆通過，包含快照與通知失敗／恢復。
+未重跑 benchmark、全框架測試或 macOS；既有 Mac 證據保留原範圍。
+本機紀錄：`build/python-publisher-identity/publish-windows.log`、`publish-wsl.log`，不納入 Git。

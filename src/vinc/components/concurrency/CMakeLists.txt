@@ -1,17 +1,25 @@
 # Shared framework synchronization; native platform APIs remain in OSAL.
 find_package(Threads REQUIRED)
-add_library(vinc_concurrency STATIC src/interprocess_mutex.cpp)
+function(_vinc_build_concurrency variant)
+    vinc_runtime_name(vinc_concurrency vinc_concurrency ${variant})
+
+    add_library(${vinc_concurrency} STATIC src/interprocess_mutex.cpp)
+    vinc_apply_runtime(${vinc_concurrency} ${variant})
+
+    target_include_directories(${vinc_concurrency} PUBLIC include)
+    vinc_runtime_link_libraries(${vinc_concurrency} ${variant} PUBLIC vinc::common vinc::osal PRIVATE Threads::Threads)
+    target_compile_features(${vinc_concurrency} PUBLIC cxx_std_23)
+    set_target_properties(${vinc_concurrency} PROPERTIES
+        CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    if(MSVC)
+        target_compile_options(${vinc_concurrency} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${vinc_concurrency} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+vinc_runtime_variants(_vinc_build_concurrency)
 add_library(vinc::concurrency ALIAS vinc_concurrency)
-target_include_directories(vinc_concurrency PUBLIC include)
-target_link_libraries(vinc_concurrency PUBLIC vinc::common vinc::osal PRIVATE Threads::Threads)
-target_compile_features(vinc_concurrency PUBLIC cxx_std_23)
-set_target_properties(vinc_concurrency PROPERTIES
-    CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-if(MSVC)
-    target_compile_options(vinc_concurrency PRIVATE /W4 /utf-8)
-else()
-    target_compile_options(vinc_concurrency PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+
 # Metadata has no dependency on the mutex runtime or the combined catalog.
 add_library(vinc_concurrency_errors INTERFACE)
 target_include_directories(vinc_concurrency_errors INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -33,4 +41,10 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME concurrency.interprocess_mutex COMMAND concurrency_interprocess_mutex_tests)
     set_tests_properties(concurrency.interprocess_mutex PROPERTIES TIMEOUT 90)
+endif()
+
+# Installation keeps ownership here; standalone component builds remain unchanged.
+if(COMMAND vinc_install_component)
+    vinc_install_component(TARGETS
+        vinc_concurrency vinc_concurrency_errors)
 endif()

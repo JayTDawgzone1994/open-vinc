@@ -7,6 +7,7 @@
 | [Tcl](tcl/README.md) | 9.1.0 | 官方 GitHub 鏡像 submodule，固定 commit | 已接入 CMake 與 Shell；Windows 驗證，Linux／macOS 待驗證 |
 | [toml++](tomlplusplus/README.md) | 3.4.0 | 上游 submodule，固定 commit | 中央 Param 的 TOML 解析與輸出，Plugin 不相依 |
 | [pybind11](pybind11/README.md) | 3.1.0 | 上游 submodule，固定 commit | 可選 Python Module 綁定；生命週期、Shell hooks 與 pump |
+| [Kconfiglib](kconfiglib/README.md) | 14.1.0 | Zephyr 上游 submodule，固定正式版 commit | 應用 Kconfig／CMake 設定工具，非 Runtime 相依 |
 
 ## 維護原則
 

@@ -27,3 +27,10 @@ if(NOT actual_revision STREQUAL expected_revision)
 endif()
 add_subdirectory(upstream EXCLUDE_FROM_ALL)
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+
+if(VINC_INSTALL_SDK)
+    set_target_properties(spdlog PROPERTIES EXPORT_NAME detail_spdlog)
+    install(TARGETS spdlog EXPORT VincTargets ARCHIVE DESTINATION lib COMPONENT VincSDK)
+    set_property(TARGET spdlog PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream/include>")
+endif()

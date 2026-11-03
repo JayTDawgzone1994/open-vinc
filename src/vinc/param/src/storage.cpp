@@ -111,7 +111,7 @@ Result<void> Storage::publish(const Snapshot& snapshot, std::stop_token stop) {
 Result<std::uint64_t> copy_image(std::span<const std::byte> mapping, bool publication,
                                  std::uint64_t known_revision, control::Bytes& buffer) {
     if (mapping.size() != storage_bytes || buffer.capacity() < config::param_slot_bytes) {
-        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Pump});
+        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ReadSnapshot});
     }
 
     auto source = mapping.subspan(publication ? slot_extent : 0, slot_extent);
@@ -119,7 +119,7 @@ Result<std::uint64_t> copy_image(std::span<const std::byte> mapping, bool public
     const auto revision = header.u64();
     const auto size = header.u64();
     if (!header.done() || size > config::param_slot_bytes || size == 0) {
-        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Pump});
+        return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::ReadSnapshot});
     }
 
     buffer.clear();

@@ -49,6 +49,11 @@ public:
             arguments.erase(arguments.begin());
         }
 
+        if (arguments.size() == 1 && (arguments[0] == "-h" || arguments[0] == "--help")) {
+            mode_ = arguments[0];
+            return {};
+        }
+
         if (arguments.size() != 2) {
             return std::unexpected(vinc::Error{vinc::module_system::ErrorCode::InvalidArgument,
                                                vinc::module_system::ErrorOperation::StartHook});
@@ -79,6 +84,16 @@ public:
 
         if (arguments.empty()) {
             return 0;
+        }
+
+        if (arguments[0] == "-h") {
+            return 41;
+        }
+        if (arguments[0] == "--help") {
+            return 42;
+        }
+        if (arguments[0] == "startup-help") {
+            return mode_ == "--help" ? 43 : 44;
         }
 
         if (arguments[0] == "contract") {
@@ -131,7 +146,9 @@ public:
             std::this_thread::sleep_for(slow_stop_delay);
         }
 
-        mark(".stopped");
+        if (!directory_.empty()) {
+            mark(".stopped");
+        }
         if (mode_ == "output") {
             std::cout << "stop-tail-without-newline" << std::flush;
         }

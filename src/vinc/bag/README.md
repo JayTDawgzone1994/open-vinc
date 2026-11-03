@@ -11,18 +11,26 @@ Player 已決定另作 Module，播放功能不屬於本輪；沒有動態載入
 
 ## Usage / 使用
 
+Installed C++ applications also build this same typed Recorder adapter through
+[`vinc_add_app()`](../sdk/INSTALL.md); it is a mandatory App member. It is compiled
+against the application's merged message list; the core Bag library remains prebuilt.
+
+安裝式 C++ 應用也會透過上述 `vinc_add_app()` 編譯相同的 Recorder 接線，為固定 App 成員。
+它依應用自己的合併訊息清單編譯，Bag 核心儲存庫仍使用預編譯版本。
+
 VINC_BUILD_APPS=ON builds/registers bagRecorder, default instance recorder. It is a Plugin loaded in its own Host process, not central.
 
 `VINC_BUILD_APPS=ON` 會建置並登記 `bagRecorder` ModuleType，預設 Module 名稱是 `recorder`。
 它是由 ModuleHost 啟動的 DLL／共享 library，不在中央程序內執行。
 
-In Vinc Shell or Tcl:
+Central starts `recorder` before the startup script and waits for Ready or failure.
+It stays idle until a record command; an official Module failure does not stop central.
 
+中央在啟動腳本前啟動 `recorder` 並等待就緒或失敗；預設待命不錄製，失敗不終止中央。
 在 Vinc Shell 或 Tcl 腳本中：
 
 ```tcl
-bagRecorder record session01 --all
-# 等待 Started recorder 後：
+recorder record session01 --all
 recorder status
 recorder finish
 # finish 非同步；status 的 finished=1 才表示 worker 已結束。
@@ -34,17 +42,36 @@ Record selected topics:
 只錄指定 topic：
 
 ```tcl
-bagRecorder --name cameraRecorder record camera01 --topic camera/frames --topic camera/status
-cameraRecorder status
-cameraRecorder finish
+recorder record camera01 --topic camera/frames --topic camera/status
+recorder status
+recorder finish
 ```
 
-An idle Recorder can later run record DIR --all. Start another recording after its worker finishes. The target directory must not exist and its parent must exist; no overwrite/append/automatic deletion. Relative paths follow Host cwd; deployment should prefer absolute paths. bagRecorder info DIR queries metadata while leaving the Module available for later recording.
+The official Recorder is a protected **System Module** with one fixed instance.
+Use `recorder --help`; ordinary launches of `bagRecorder`, debug start/stop, forget
+and unregister are rejected. `finish` finishes the recording, not the process.
+Crash recovery starts idle and never replays `record`, appends to an old Bag, or
+claims that an interrupted recording completed. Normal framework shutdown still
+finishes ongoing recording through the existing bounded stop contract.
+See [System policy](../module_system/README.md#system-modules).
 
-也可以只啟動空閒 Module，再執行 `recorder record DIR --all`。
+官方 Recorder 是固定單一實例的 **System Module**。以 `recorder --help` 查語法；
+不接受一般 `bagRecorder` 建立、debug start/stop、forget 或 unregister。
+`finish` 只結束錄製，不關閉程序。crash 重啟後回到待命，不重播 record、不追加舊 Bag，
+也不宣稱中斷錄製已完成。完整框架正常關閉仍依既有有界收尾契約完成錄製。
+
+The service acceptance test checks SQLite's `completed` metadata after crash and
+normal shutdown, rather than only checking that a file exists. See
+[System Module validation](../module_system/README.md#system-module-stage3).
+服務驗收會檢查 crash 與正常關閉後 SQLite 的 `completed` 狀態，不只確認檔案存在；
+驗證範圍與結果見上述 System Module 紀錄。
+
+An idle Recorder can later run record DIR --all. Start another recording after its worker finishes. The target directory must not exist and its parent must exist; no overwrite/append/automatic deletion. Relative paths follow Host cwd; deployment should prefer absolute paths. recorder info DIR queries metadata while leaving the Module available for later recording.
+
+待命時可執行 `recorder record DIR --all`。
 上一份 worker 完成後可開始新的錄製。目錄必須不存在、父目錄必須已存在；不覆寫、
 不追加既有錄製、不自動刪除舊 Bag。相對路徑依 ModuleHost 的工作目錄解析，建議部署使用絕對路徑。
-執行 `bagRecorder info DIR` 可只查資訊；Module 仍保持運作，之後可再下 record 指令。
+執行 `recorder info DIR` 可只查資訊；Module 仍保持運作，之後可再下 record 指令。
 
 Recording options:
 

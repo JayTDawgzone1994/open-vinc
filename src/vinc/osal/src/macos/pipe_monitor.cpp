@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 // macOS readiness and wakeup backend for the single Pipe I/O worker.
 // kqueue filters follow each transfer direction and are removed when the transfer ends.
 
@@ -13,6 +14,11 @@ constexpr int max_events_per_wait = 32;
 }
 
 vinc::Result<std::unique_ptr<PipeMonitor>> PipeMonitor::create() {
+    auto resources = acquire_resources(ErrorOperation::InitializeService);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     auto impl = std::make_unique<PipeMonitorImpl>();
     impl->queue = kqueue();
     if (impl->queue < 0) {

@@ -1,11 +1,50 @@
 # Use helper executables to test native process, Pipe and shared-memory lifetimes.
 # CTest timeouts bound fault scenarios that would otherwise leave a hanging test run.
 
+# Real separate images: hidden OSAL symbols must never interpose another copy.
+foreach(image IN ITEMS a b)
+    add_library(osal_coordinator_${image} MODULE coordinator_plugin.cpp)
+    target_link_libraries(osal_coordinator_${image} PRIVATE vinc::osal)
+    set_target_properties(osal_coordinator_${image} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+endforeach()
+add_executable(osal_coordinator_tests coordinator_tests.cpp)
+target_link_libraries(osal_coordinator_tests PRIVATE vinc::osal Threads::Threads)
+add_dependencies(osal_coordinator_tests osal_coordinator_a osal_coordinator_b)
+add_test(NAME osal.coordinator COMMAND osal_coordinator_tests)
+foreach(mode IN ITEMS shared late)
+    add_test(NAME osal.coordinator_${mode} COMMAND osal_coordinator_tests
+        "$<TARGET_FILE:osal_coordinator_a>" "$<TARGET_FILE:osal_coordinator_b>" ${mode})
+endforeach()
+set_tests_properties(osal.coordinator osal.coordinator_shared osal.coordinator_late PROPERTIES TIMEOUT 20)
+
 # Link only the public OSAL target: common headers and formatter must propagate transitively.
 add_executable(osal_process_fault_tests process_fault_tests.cpp)
 target_link_libraries(osal_process_fault_tests PRIVATE vinc::osal)
 add_test(NAME osal.process_faults COMMAND osal_process_fault_tests)
 set_tests_properties(osal.process_faults PROPERTIES TIMEOUT 15)
+
+# Deterministic one-shot notification contracts use the real common observer.
+add_executable(osal_process_exit_progress_tests process_exit_progress_tests.cpp)
+target_link_libraries(osal_process_exit_progress_tests PRIVATE vinc::osal Threads::Threads)
+if(MSVC)
+    target_compile_options(osal_process_exit_progress_tests PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(osal_process_exit_progress_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+foreach(case IN ITEMS one-shot repeated-empty immediate early-publication failed-publication
+        stale-retained stale-forgotten batches waiters monitor-error poll-error ownership-lost shutdown record-state)
+    add_test(NAME osal.process_exit_progress.${case} COMMAND osal_process_exit_progress_tests ${case})
+    set_tests_properties(osal.process_exit_progress.${case} PROPERTIES TIMEOUT 20)
+endforeach()
+
+if(APPLE)
+    add_executable(osal_process_exit_macos_tests process_exit_macos_tests.cpp)
+    target_link_libraries(osal_process_exit_macos_tests PRIVATE vinc::osal Threads::Threads)
+    target_compile_options(osal_process_exit_macos_tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME osal.process_exit_macos COMMAND osal_process_exit_macos_tests)
+    set_tests_properties(osal.process_exit_macos PROPERTIES TIMEOUT 15)
+endif()
 
 add_executable(osal_operation_error_tests operation_error_tests.cpp)
 target_link_libraries(osal_operation_error_tests PRIVATE vinc::osal)
@@ -13,12 +52,28 @@ add_test(NAME osal.operation_error COMMAND osal_operation_error_tests)
 set_tests_properties(osal.operation_error PROPERTIES TIMEOUT 30)
 
 if(WIN32)
+    # No inherited dialog suppression: exercise the production launch scope.
+    add_executable(osal_process_error_mode_tests process_error_mode_tests.cpp)
+    target_link_libraries(osal_process_error_mode_tests PRIVATE vinc::osal Threads::Threads)
+    if(MSVC)
+        target_compile_options(osal_process_error_mode_tests PRIVATE /W4 /utf-8)
+    endif()
+    add_test(NAME osal.process_error_mode COMMAND osal_process_error_mode_tests)
+    set_tests_properties(osal.process_error_mode PROPERTIES TIMEOUT 20)
+
     # Link-time replacement exercises the real Pipe creation/rollback path.
     add_executable(osal_pipe_random_failure_tests pipe_random_failure_tests.cpp)
     target_link_libraries(osal_pipe_random_failure_tests PRIVATE vinc::osal)
     add_test(NAME osal.pipe_random_failure COMMAND osal_pipe_random_failure_tests)
     set_tests_properties(osal.pipe_random_failure PROPERTIES TIMEOUT 15)
 else()
+    add_executable(osal_fd_spawn_tests fd_spawn_tests.cpp)
+    target_link_libraries(osal_fd_spawn_tests PRIVATE vinc::osal Threads::Threads)
+    target_compile_options(osal_fd_spawn_tests PRIVATE -Wall -Wextra -Wpedantic)
+    foreach(case IN ITEMS matrix reuse exhaustion producers contention bindings late spawn-failure)
+        add_test(NAME osal.fd_spawn.${case} COMMAND osal_fd_spawn_tests ${case})
+        set_tests_properties(osal.fd_spawn.${case} PROPERTIES TIMEOUT 40)
+    endforeach()
     add_executable(osal_descriptor_tests descriptor_tests.cpp)
     target_link_libraries(osal_descriptor_tests PRIVATE vinc::osal)
     add_test(NAME osal.descriptor COMMAND osal_descriptor_tests)

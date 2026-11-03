@@ -10,6 +10,7 @@ This document owns names, meanings, and necessary distinctions. Component docume
 | --- | --- |
 | `ModuleType` | A launchable module type describing which kind of Module to create. |
 | `Module` | An instance created by starting a ModuleType. Use Module in discussion; there is no need to lengthen it to ModuleInstance. |
+| `System Module` | A framework-owned Module with a central-assigned role and protected lifecycle. It still runs in an isolated process under ModuleManager; it is not a separate container or a role a Plugin can claim. See the [System Module contract](src/vinc/module_system/README.md#system-modules). |
 | `BaseModule` | The C++ base class inherited by users, providing lifecycle and command hooks. Retain this name and `base_module.hpp`. |
 | `Context` | A Module's entry point to framework services, replacing the earlier PH/process header terminology. |
 
@@ -22,6 +23,12 @@ Calling an instance Module after startup distinguishes it from its type. It does
 **Module System** is the component responsible for Module execution and lifecycle. Its directory is `src/vinc/module_system/`, jointly maintaining `BaseModule`, the subprocess Runtime, and the central `ModuleManager`.
 
 Its unified error domain is `ErrorDomain::ModuleSystem`. Module still means a launched module instance.
+
+**ModuleHost / Host** names the native Module runtime role and its independent
+process, not a separately deployed executable. The framework App dispatches both
+central and Host roles from the same image. See the
+[single-entry contract](apps/vinc/SINGLE_EXECUTABLE.md); test-only Host executables
+do not change the production entry contract.
 
 Headers use `<vinc/module/...>`. See the [Module System README](src/vinc/module_system/README.md) for Runtime, Manager, and subprocess-entry targets and error contracts.
 
@@ -84,7 +91,7 @@ Types such as `TextRenderer` and `Subscription` retain their responsibility-base
 
 The central operator interface is **Shell**, located in `src/vinc/shell/`. Its internal framework class is `vinc::Shell`, with lifecycle managed by the central process. It is not a user-facing API for starting and stopping framework services.
 
-Supporting types remain in `vinc::shell`. Names such as `SocketShell` and `CommandRouter` retain their specific responsibilities. The central program defaults to `Vinc.exe`/`Vinc`. Applications may configure its output name through `vinc_configure_app` without changing the central identity `VINC_NAME`. See the [Shell README](src/vinc/shell/README.md) for entry points and build integration.
+Supporting types remain in `vinc::shell`. Names such as `SocketShell` and `CommandRouter` retain their specific responsibilities. The central program defaults to `Vinc.exe`/`Vinc`. New source/installed Apps use `vinc_add_app`: the target names the executable and `INSTANCE_NAME` selects the central identity. The bundled App uses this same constructor. See the [Shell README](src/vinc/shell/README.md) for entry points and build integration.
 
 ## Context and pump Naming Status
 
@@ -121,7 +128,11 @@ Only user-confirmed names are recorded here as decisions. Clearly mark proposals
 
 ## Vinc Identity
 
-`VINC_NAME` is the local central-process name specified at build time. It identifies exclusive startup of the same name and ownership of shared-resource records. It is distinct from Module names, MID, and the reserved VID. See [Module System INSTANCE.md](src/vinc/module_system/INSTANCE.md) for scope and lifecycle.
+`INSTANCE_NAME` is the per-App central-process name specified through `vinc_add_app()`. It identifies exclusive startup of the same name and ownership of shared-resource records. It is distinct from Module names, MID, and the reserved VID. See [Module System INSTANCE.md](src/vinc/module_system/INSTANCE.md) for scope and lifecycle.
+
+Source and installed C++ applications select that same identity with `vinc_add_app(INSTANCE_NAME ...)`,
+independently of the SDK producer. The function's target argument names the
+executable, not the central identity. See [installed SDK composition](src/vinc/sdk/INSTALL.md).
 
 ## Message Publication Times
 

@@ -1,3 +1,4 @@
+#include <vinc/osal/detail/posix/resource_guard.hpp>
 // Linux process wakeup backend: epoll observes pidfds and an eventfd wakes service work.
 // The common observer still reaps children; unavailable native watches use its polling fallback.
 
@@ -40,6 +41,11 @@ NativeMonitor::NativeMonitor(std::unique_ptr<MonitorImpl> impl) : impl_(std::mov
 NativeMonitor::~NativeMonitor() = default;
 
 vinc::Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
+    auto resources = acquire_resources(ErrorOperation::InitializeService);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     auto impl = std::make_unique<MonitorImpl>();
     impl->queue = epoll_create1(EPOLL_CLOEXEC);
     if (impl->queue < 0) {
@@ -78,7 +84,7 @@ void NativeMonitor::wake() noexcept {
     // EAGAIN means a wake is already pending.
 }
 
-vinc::Result<void> NativeMonitor::wait(bool polling) noexcept {
+vinc::Result<ProcessExitEvents> NativeMonitor::wait(bool polling) noexcept {
     epoll_event events[max_events_per_wait];
     const int count =
         epoll_wait(impl_->queue, events, max_events_per_wait, polling ? fallback_poll_interval_ms : -1);
@@ -103,7 +109,12 @@ vinc::Result<void> NativeMonitor::wait(bool polling) noexcept {
     return {};
 }
 
-vinc::Result<int> watch_process(MonitorImpl& monitor, pid_t pid) noexcept {
+vinc::Result<int> watch_process(MonitorImpl& monitor, pid_t pid, ProcessId) noexcept {
+    auto resources = acquire_resources(ErrorOperation::Observe);
+    if (!resources) {
+        return std::unexpected(resources.error());
+    }
+
     int fd = static_cast<int>(syscall(SYS_pidfd_open, pid, 0));
     if (fd < 0) {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::Observe, errno));

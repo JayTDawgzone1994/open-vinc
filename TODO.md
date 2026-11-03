@@ -2,6 +2,16 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## Tcl：WSL 掛載來源的並行資源部署
+
+- [ ] 評估共用目的地的重複部署工作及慢速來源下的鎖等待政策。
+
+`9f0ec0b` 的 Windows／Linux 退出修復補驗已完成，結果見
+[跨平台驗收](src/vinc/osal/WINDOWS_LINUX_EXIT_VALIDATION.md)。其中 WSL 使用 `/mnt/d`
+來源並行建置時，Tcl resource deployment 的 60 秒鎖等待逾時；改用同版來源的 WSL
+原生檔案系統後，Debug／Release 建置及驗收通過。原掛載來源問題仍未修復，
+細節與建議方向見 [Tcl 待辦](library/tcl/README.md#待處理事項)，不改動執行期退出契約。
+
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 
 - [ ] 定義原生 unlock 失敗後的鎖狀態、資料存取限制及清理／重試／故障政策。
@@ -12,19 +22,6 @@
 （見 [Concurrency](src/vinc/components/concurrency/README.md)），不代表 FileLock 問題已修復。
 詳細分析及後續決策統一維護於
 [OSAL README 待處理事項](src/vinc/osal/README.md#待處理事項)。
-
-## OSAL：POSIX fd 建立與 spawn 的並行競爭窗口
-
-- [ ] 修復標準串流關閉時，內部 fd 建立／搬移與 spawn 繼承取樣之間的競爭。
-
-**狀態（2026-10-05）：使用者決定暫緩處理。** 已確認程式交錯路徑，尚未以受控排程
-重現或修復；既有 fd 搬移及 Windows 測試不能證明此窗口已排除。
-2026-10-27 已修正 `osal.descriptor` 對繼承 fd 編號的測試假設，並完成 Ubuntu 24.04／WSL 2
-驗證；該修正未改動正式 OSAL 實作，不代表本項並行競爭已解決。
-共用 mutex＋標準串流快照仍為未核准提案，鎖成本及宿主／第三方責任邊界尚待決策。
-後續須在 Linux、macOS 分別建置並執行受控競爭與回收測試；Windows 僅作回歸驗證。
-詳細問題、提案、待決策與驗證需求統一維護於
-[OSAL README 待處理事項](src/vinc/osal/README.md#待處理事項)。恢復工作須另行確認範圍及取得開工授權。
 
 ## Socket Shell：背景輸出期間的遠端輸入列重繪
 

@@ -182,6 +182,18 @@ int main(int argc, char** argv) {
                          std::filesystem::path(argv[3]));
         }
         check(argc == 1, "unexpected arguments");
+        const auto name = test::instance_name();
+        for (const auto& host : {std::filesystem::path{}, std::filesystem::path("relative-host")}) {
+            auto refused = detail::ManagerAccess::create(name, {}, host);
+            check(!refused && refused.error().is(module_system::ErrorCode::InvalidArgument) &&
+                      refused.error().is_operation(module_system::ErrorOperation::Create),
+                  "Manager requires an explicit absolute Host path");
+        }
+
+        // Invalid launch configuration must not reserve the central identity.
+        auto admission = detail::Instance::create(name);
+        check(bool(admission), "invalid Host path retained central identity");
+        admission->reset();
         run(std::filesystem::absolute(argv[0]));
         std::cout << "PASS: instance admission, crash cleanup, names and retained mappings\n";
         return 0;

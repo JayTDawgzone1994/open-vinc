@@ -38,7 +38,9 @@ enum class ErrorOperation : std::int32_t {
     Decode = 10,
     Attach = 11,
     Receive = 12,
-    Shutdown = 13
+    Shutdown = 13,
+    ReadCurrent = 14,
+    ReadSnapshot = 15
 };
 }
 

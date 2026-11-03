@@ -1,0 +1,78 @@
+include_guard(GLOBAL)
+
+# Components call their own factory twice; this layer never clones target
+# internals or parses generator expressions to discover a dependency graph.
+function(vinc_runtime_variants factory)
+    cmake_language(CALL "${factory}" NATIVE)
+    if(MSVC AND VINC_DECLARE_PYTHON_RUNTIME)
+        cmake_language(CALL "${factory}" PYTHON)
+    endif()
+endfunction()
+
+function(vinc_runtime_name output base variant)
+    if(variant STREQUAL "NATIVE")
+        set(${output} "${base}" PARENT_SCOPE)
+    elseif(variant STREQUAL "PYTHON" AND MSVC)
+        set(${output} "${base}_python_runtime" PARENT_SCOPE)
+    else()
+        message(FATAL_ERROR "Unsupported Vinc runtime variant: ${variant}")
+    endif()
+endfunction()
+
+function(vinc_apply_runtime target variant)
+    if(NOT MSVC)
+        if(NOT variant STREQUAL "NATIVE")
+            message(FATAL_ERROR "Static Python runtime is not validated for this toolchain")
+        endif()
+        return()
+    endif()
+
+    if(variant STREQUAL "NATIVE")
+        set(crt dynamic)
+        set(runtime "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+        get_target_property(kind ${target} TYPE)
+        if(VINC_DECLARE_PYTHON_RUNTIME AND kind STREQUAL "STATIC_LIBRARY")
+            set_property(TARGET ${target} PROPERTY VINC_PYTHON_RUNTIME_TARGET "${target}_python_runtime")
+        endif()
+    elseif(variant STREQUAL "PYTHON")
+        set(crt static)
+        set(runtime "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        # Merely declaring Python-capable libraries must not add build work to
+        # applications which never select them. SDK installation explicitly opts
+        # its exported variants back in for downstream Python-enabled Apps.
+        set_property(TARGET ${target} PROPERTY EXCLUDE_FROM_ALL TRUE)
+    else()
+        message(FATAL_ERROR "Unsupported Vinc runtime variant: ${variant}")
+    endif()
+    set_target_properties(${target} PROPERTIES
+        MSVC_RUNTIME_LIBRARY "${runtime}"
+        VINC_CRT "${crt}" INTERFACE_VINC_CRT "${crt}")
+    set_property(TARGET ${target} APPEND PROPERTY COMPATIBLE_INTERFACE_STRING VINC_CRT)
+endfunction()
+
+# Only literal dependency names are accepted. Framework archives must explicitly
+# advertise a variant; system/import targets remain owned by their toolchain.
+function(vinc_runtime_link_libraries target variant)
+    set(dependencies)
+    foreach(item IN LISTS ARGN)
+        if(variant STREQUAL "PYTHON" AND TARGET "${item}")
+            get_target_property(alias "${item}" ALIASED_TARGET)
+            if(alias)
+                set(item "${alias}")
+            endif()
+            get_target_property(replacement "${item}" VINC_PYTHON_RUNTIME_TARGET)
+            get_target_property(kind "${item}" TYPE)
+            get_target_property(crt "${item}" VINC_CRT)
+            if(replacement)
+                set(item "${replacement}")
+            elseif((kind STREQUAL "STATIC_LIBRARY" OR kind STREQUAL "OBJECT_LIBRARY")
+                   AND NOT crt STREQUAL "static")
+                message(FATAL_ERROR "${target}: dependency ${item} has no declared Python runtime variant")
+            endif()
+        elseif(item MATCHES "\\$<")
+            message(FATAL_ERROR "Runtime dependencies must be literal target/library names: ${item}")
+        endif()
+        list(APPEND dependencies "${item}")
+    endforeach()
+    target_link_libraries(${target} ${dependencies})
+endfunction()

@@ -7,12 +7,12 @@ The C++ ModuleType is `rpcExample`, with instance name `rpcCpp`.
 
 兩個 Module 都登記 echo<int3,int3>，可互相或自己呼叫。C++ ModuleType 為 rpcExample，實例 rpcCpp。
 
-Build with `VINC_BUILD_EXAMPLES=ON`. For Python, also enable `VINC_BUILD_PYTHON`,
+Select `CONFIG_VINC_MODULE_rpcExample=y` in App Kconfig. For Python, also set `CONFIG_VINC_APP_PYTHON=y` in App Kconfig,
 install a compatible system Python, and copy `rpcPython.py` to
 `data/module/rpcPython/rpcPython.py` beside Vinc before launching it.
 This follows the normal Python discovery contract; no interpreter is embedded.
 
-啟用 VINC_BUILD_EXAMPLES。Python 另需 VINC_BUILD_PYTHON 與相容系統 Python，於啟動前把 rpcPython.py 放到 Vinc 旁 data/module/rpcPython/rpcPython.py。沿用一般啟動掃描，不嵌入直譯器。
+在 App Kconfig 選入 `CONFIG_VINC_MODULE_rpcExample=y`。Python 另需在 App Kconfig 設定 CONFIG_VINC_APP_PYTHON=y 與相容系統 Python，於啟動前把 rpcPython.py 放到 Vinc 旁 data/module/rpcPython/rpcPython.py。沿用一般啟動掃描，不嵌入直譯器。
 
 In the Vinc Shell:
 

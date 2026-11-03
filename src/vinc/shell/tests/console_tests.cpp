@@ -11,6 +11,7 @@
 #include <vinc/shell/detail/shell.hpp>
 #include <vinc/shell/detail/tcl_runtime.hpp>
 #include <sstream>
+#include <string_view>
 #include <atomic>
 #include <filesystem>
 #include <iostream>
@@ -18,6 +19,7 @@
 #include <thread>
 #include <stdexcept>
 #include <vector>
+#include <clocale>
 using namespace vinc::osal;
 using namespace std::chrono_literals;
 
@@ -131,9 +133,145 @@ void output_redraw() {
     const auto text = rendered.str();
     const auto output = text.find("interactive-output");
     check(fed && output != std::string::npos, "interactive output fixture");
-    check(text.find("\r\x1b[2KVINC > hel", output) != std::string::npos,
+    check(text.find("\r\x1b[2K\x1b[38;2;36;107;223mVINC >\x1b[39m hel", output) != std::string::npos,
           "partial input not redrawn after output");
+    check(text.find("\x1b[38;2;36;107;223mVINC >\x1b[39m help\n", output) != std::string::npos,
+          "submitted prompt must restore foreground before command text");
     check(text.find("[Modules]", output) != std::string::npos, "redrawn command did not execute");
+}
+
+void startup_output_locale(const char* locale) {
+    check(std::setlocale(LC_CTYPE, locale) != nullptr, "select CRT locale");
+    const std::string expected_locale = std::setlocale(LC_CTYPE, nullptr);
+    const auto handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    const auto original_cp = GetConsoleOutputCP();
+    CONSOLE_SCREEN_BUFFER_INFO before{};
+    check(GetConsoleScreenBufferInfo(handle, &before), "startup console position");
+
+    auto manager = checked_value(vinc::test::create_manager());
+    auto shell = checked_value(vinc::Shell::create(*manager, std::cout));
+    vinc::shell::StartupReport report;
+    report.entries.push_back({"Console", "UTF-8 \xe4\xb8\xad\xe6\x96\x87", {}});
+    report.entries.push_back({"Failure", "synthetic test", vinc::Error{
+        vinc::shell::ErrorCode::StartFailed, vinc::shell::ErrorOperation::Run}});
+    shell->set_startup_report(std::move(report));
+
+    std::vector<INPUT_RECORD> keys;
+    for (wchar_t value : std::wstring(L"exit\r")) {
+        INPUT_RECORD record{};
+        record.EventType = KEY_EVENT;
+        record.Event.KeyEvent.bKeyDown = TRUE;
+        record.Event.KeyEvent.wRepeatCount = 1;
+        record.Event.KeyEvent.uChar.UnicodeChar = value;
+        if (value == L'\r') {
+            record.Event.KeyEvent.wVirtualKeyCode = VK_RETURN;
+        }
+        keys.push_back(record);
+    }
+    DWORD count = 0;
+    check(WriteConsoleInputW(GetStdHandle(STD_INPUT_HANDLE), keys.data(),
+                            static_cast<DWORD>(keys.size()), &count), "queue startup exit");
+    check(shell->run(), "startup Shell run");
+
+    std::wstring line(static_cast<std::size_t>(before.dwSize.X), L'\0');
+    check(ReadConsoleOutputCharacterW(handle, line.data(), static_cast<DWORD>(line.size()),
+                                      before.dwCursorPosition, &count), "read actual startup characters");
+    check(line.find(L'\u2705') != std::wstring::npos, "actual console lost success check mark");
+    check(line.find(L"\u4e2d\u6587") != std::wstring::npos, "actual console lost UTF-8 Chinese");
+    check(line.find(L"[39m") == std::wstring::npos, "actual console leaked color reset");
+    const auto text_column = line.find(L"Console");
+    check(text_column != std::wstring::npos, "actual console lost startup text");
+    COORD text_position = before.dwCursorPosition;
+    text_position.X += static_cast<SHORT>(text_column);
+    WORD attribute = 0;
+    check(ReadConsoleOutputAttribute(handle, &attribute, 1, text_position, &count), "read text color");
+    constexpr WORD foreground_mask = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+    check((attribute & foreground_mask) == (before.wAttributes & foreground_mask), "startup text retained status color");
+    WORD marker_attribute = 0;
+    check(ReadConsoleOutputAttribute(handle, &marker_attribute, 1, before.dwCursorPosition, &count),
+          "read success marker color");
+    check((marker_attribute & foreground_mask) == FOREGROUND_GREEN, "success marker is not green");
+
+    COORD failure_position{before.dwCursorPosition.X, static_cast<SHORT>(before.dwCursorPosition.Y + 1)};
+    check(ReadConsoleOutputCharacterW(handle, line.data(), static_cast<DWORD>(line.size()),
+                                      failure_position, &count), "read failure row");
+    check(line.find(L'\u274c') != std::wstring::npos, "actual console lost failure cross");
+    check(line.find(L"[39m") == std::wstring::npos, "failure row leaked color reset");
+    check(ReadConsoleOutputAttribute(handle, &marker_attribute, 1, failure_position, &count),
+          "read failure marker color");
+    check((marker_attribute & foreground_mask) == FOREGROUND_RED, "failure marker is not red");
+    const auto failure_column = line.find(L"Failure");
+    check(failure_column != std::wstring::npos, "actual console lost failure text");
+    failure_position.X += static_cast<SHORT>(failure_column);
+    check(ReadConsoleOutputAttribute(handle, &attribute, 1, failure_position, &count), "read failure text color");
+    check((attribute & foreground_mask) == (before.wAttributes & foreground_mask), "failure color leaked");
+    check(expected_locale == std::setlocale(LC_CTYPE, nullptr), "Shell changed CRT locale");
+    check(GetConsoleOutputCP() == original_cp, "Shell did not restore output code page");
+}
+
+void startup_output() {
+    startup_output_locale(".950");
+    startup_output_locale(".1252");
+    startup_output_locale(".UTF8");
+
+    // A duplicate gives this fixture a disposable output handle without closing
+    // the caller's stdout. Restore it before the child reports its result.
+    const auto original = GetStdHandle(STD_OUTPUT_HANDLE);
+    HANDLE duplicate = INVALID_HANDLE_VALUE;
+    check(DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &duplicate,
+                          0, FALSE, DUPLICATE_SAME_ACCESS), "duplicate console output");
+    struct RestoreOutput {
+        HANDLE original;
+        HANDLE duplicate;
+        ~RestoreOutput() {
+            SetStdHandle(STD_OUTPUT_HANDLE, original);
+            if (duplicate != INVALID_HANDLE_VALUE) {
+                CloseHandle(duplicate);
+            }
+        }
+    } restore{original, duplicate};
+    check(SetStdHandle(STD_OUTPUT_HANDLE, duplicate), "select disposable output");
+    auto terminal = checked_value(Terminal::open());
+    check(terminal->write_console({}), "empty console write");
+    CONSOLE_SCREEN_BUFFER_INFO before{};
+    check(GetConsoleScreenBufferInfo(original, &before), "invalid UTF-8 starting cursor");
+    const auto invalid = terminal->write_console("must not appear\xff");
+    check(!invalid && invalid.error().is(ErrorCode::InvalidEncoding), "reject invalid UTF-8");
+    CONSOLE_SCREEN_BUFFER_INFO after{};
+    check(GetConsoleScreenBufferInfo(original, &after), "invalid UTF-8 ending cursor");
+    check(before.dwCursorPosition.X == after.dwCursorPosition.X &&
+              before.dwCursorPosition.Y == after.dwCursorPosition.Y, "invalid text was partially written");
+
+    // Put a three-byte scalar across the native 4096-byte conversion boundary.
+    constexpr std::size_t reset_repetitions = 819;
+    std::string chunk_boundary;
+    for (std::size_t index = 0; index < reset_repetitions; ++index) {
+        chunk_boundary += "\x1b[39m";
+    }
+    chunk_boundary += "\xe4\xb8\xad\xf0\x9f\x98\x80";
+    check(terminal->write_console(chunk_boundary), "chunked UTF-8 console write");
+    std::wstring actual(8, L'\0');
+    DWORD count = 0;
+    check(ReadConsoleOutputCharacterW(original, actual.data(), static_cast<DWORD>(actual.size()),
+                                      before.dwCursorPosition, &count), "read chunk boundary output");
+    // Legacy console readback can replace a supplementary scalar with U+FFFD.
+    // Compare with direct UTF-16 native output instead of assuming one cell/unit.
+    check(SetConsoleCursorPosition(original, before.dwCursorPosition), "reset native reference cursor");
+    constexpr std::wstring_view native_reference = L"\u4e2d\xd83d\xde00";
+    check(WriteConsoleW(original, native_reference.data(), static_cast<DWORD>(native_reference.size()),
+                         &count, nullptr) && count == native_reference.size(), "write UTF-16 reference");
+    std::wstring reference(actual.size(), L'\0');
+    check(ReadConsoleOutputCharacterW(original, reference.data(), static_cast<DWORD>(reference.size()),
+                                      before.dwCursorPosition, &count), "read UTF-16 reference");
+    check(actual.find(L'\u4e2d') != std::wstring::npos && actual == reference,
+          "chunked Unicode differs from native UTF-16 output");
+
+    check(CloseHandle(duplicate), "close disposable console output");
+    restore.duplicate = INVALID_HANDLE_VALUE;
+    const auto failed = terminal->write_console("closed output");
+    check(!failed && failed.error().is(ErrorCode::SystemError) &&
+              failed.error().operation == static_cast<std::int32_t>(ErrorOperation::WriteTerminal) &&
+              failed.error().native.value() != 0, "console write lost native failure");
 }
 
 void broadcast_shutdown(Terminal& terminal) {
@@ -264,19 +402,26 @@ void headless_deployment(Terminal& terminal, const std::filesystem::path& vinc_e
     check(event && event->key == TerminalKey::Interrupt, "fixture observes broadcast");
 }
 
-int child(const std::filesystem::path& vinc_exe) {
+int child(const std::filesystem::path& vinc_exe, bool test_deployment = true) {
     const auto input = GetStdHandle(STD_INPUT_HANDLE);
     const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD before_input = 0;
     DWORD before_output = 0;
     check(GetConsoleMode(input, &before_input) && GetConsoleMode(output, &before_output),
           "hidden console attached");
+    // Seed inherited mouse reporting explicitly so this catches the old mode mask.
+    before_input |= ENABLE_MOUSE_INPUT;
+    check(SetConsoleMode(input, before_input), "enable inherited mouse input");
     const auto output_code_page = GetConsoleOutputCP();
     {
         auto opened = Terminal::open();
         check(bool(opened), "open console terminal");
         auto terminal = std::move(*opened);
         check(terminal->interactive() && terminal->ansi_output(), "console identified");
+        DWORD active_input = 0;
+        check(GetConsoleMode(input, &active_input), "query active input mode");
+        check((active_input & ENABLE_MOUSE_INPUT) == 0, "text terminal must disable mouse reporting");
+        check((active_input & ENABLE_QUICK_EDIT_MODE) == 0, "legacy Quick Edit remains disabled");
         std::vector<INPUT_RECORD> keys;
         auto key = [&](WORD virtual_key, WCHAR value) {
             INPUT_RECORD record{};
@@ -319,7 +464,9 @@ int child(const std::filesystem::path& vinc_exe) {
         check(WriteConsoleInputW(input, &cancel, 1, &written), "inject Ctrl+D");
         check(next().key == TerminalKey::Cancel, "native Ctrl+D is distinct from EOF");
         broadcast_shutdown(*terminal);
-        headless_deployment(*terminal, vinc_exe);
+        if (test_deployment) {
+            headless_deployment(*terminal, vinc_exe);
+        }
     }
 
     output_redraw();
@@ -343,10 +490,23 @@ int main(int argc, char** argv) {
 
         if (argc == 4) {
             check(vinc::shell::initialize_tcl(argv[0]), "initialize Tcl");
-            return child(std::filesystem::absolute(argv[2]));
+            if (std::string_view(argv[1]) == "--startup-child") {
+                startup_output();
+                return 0;
+            }
+            // Isolate prompt checks from App deployment and its instance/port ownership.
+            if (std::string_view(argv[1]) == "--redraw-child") {
+                output_redraw();
+                return 0;
+            }
+
+            return child(std::filesystem::absolute(argv[2]), std::string_view(argv[1]) != "--input-child");
         }
 
-        if (argc != 2) {
+        const bool redraw_only = argc == 3 && std::string_view(argv[2]) == "--redraw-only";
+        const bool input_only = argc == 3 && std::string_view(argv[2]) == "--input-only";
+        const bool startup_only = argc == 3 && std::string_view(argv[2]) == "--startup-only";
+        if (argc != 2 && !redraw_only && !input_only && !startup_only) {
             return 2;
         }
 
@@ -366,7 +526,16 @@ int main(int argc, char** argv) {
             }
         } cleanup{diagnostic};
 
-        auto command = L"\"" + path + L"\" --child \"" + std::filesystem::absolute(argv[1]).wstring() +
+        const wchar_t* child_mode = L" --child ";
+        if (redraw_only) {
+            child_mode = L" --redraw-child ";
+        } else if (input_only) {
+            child_mode = L" --input-child ";
+        } else if (startup_only) {
+            child_mode = L" --startup-child ";
+        }
+
+        auto command = L"\"" + path + L"\"" + child_mode + L"\"" + std::filesystem::absolute(argv[1]).wstring() +
                        L"\" \"" + diagnostic.wstring() + L"\"";
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);

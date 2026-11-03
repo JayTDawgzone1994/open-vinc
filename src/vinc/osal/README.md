@@ -27,17 +27,55 @@ Shared Memory 提供原始 bytes 的映射與資源生命週期；訊息布局�
 
 <a id="標頭與實作位置"></a>
 
+## Terminal text output / 終端文字輸出
+
+`Terminal::write_console(string_view)` synchronously writes a complete UTF-8 view
+to the standard-output terminal. Redirected stdout returns `Unsupported`; invalid
+UTF-8 returns `InvalidEncoding` before any write. Windows converts bounded chunks
+to UTF-16 and uses `WriteConsoleW`, bypassing CRT locale translation. POSIX writes
+UTF-8 bytes to the terminal, retrying interrupted writes. The conversion buffer is
+bounded; the caller retains ownership of the text and serializes Terminal access.
+Writes can block and OS errors may follow partial output; failure is not a promise
+of zero output and callers must not replay the whole request automatically.
+Errors use `WriteTerminal` and preserve native diagnostics. This method does not
+change CRT locale/stream modes or interpret application status/color policy.
+
+`Terminal::write_console(string_view)` 同步將完整 UTF-8 文字寫入標準輸出終端。
+stdout 重導向時回傳 `Unsupported`；非法 UTF-8 在寫入前回傳 `InvalidEncoding`。
+Windows 使用有界 UTF-16 轉換緩衝區與 `WriteConsoleW`，避開 CRT locale 轉碼；
+POSIX 寫出 UTF-8 bytes 並重試被訊號中斷的寫入。呼叫端持有文字並序列化 Terminal 操作。
+寫入可能阻塞，原生錯誤可能發生在部分輸出之後，不應自動重送整筆文字。
+錯誤使用 `WriteTerminal` 並保留原生診斷；不修改 CRT locale／串流模式，
+也不包含應用程式狀態或配色政策。
+
 ## Headers and implementation / 標頭與實作位置
+
+`path.hpp` also provides `is_executable_candidate(path) -> Result<bool>`.
+It checks a regular file, following symlinks without changing the supplied path.
+Missing paths, directories, inaccessible paths and broken/cyclic symlinks are
+non-candidates. POSIX additionally checks `access(X_OK)` using real user/group
+credentials. Windows checks regular-file status only; this does not validate PE
+images, launch ACLs, ABI or dependent DLLs. Empty/NUL-containing paths are invalid;
+other filesystem failures retain native diagnostics under `CheckExecutable`.
+The query neither searches PATH nor executes anything. It is not a security check
+or a promise that a later spawn will succeed; launch failures remain authoritative.
+
+`is_executable_candidate()` 只檢查通用的檔案候選條件，不含 Python 名稱、版本、PATH
+搜尋或重試政策。POSIX 使用實際使用者／群組身分檢查執行權限；Windows 不模擬完整
+載入器或 ACL 判斷。符號連結只用於查詢，不改寫呼叫端的 venv 路徑。
+檢查與啟動間檔案／權限仍可能改變，必須處理真正的 spawn 錯誤。
+本輪搜尋整合與驗證集中於 [Python Module](../module_system/python/README.md#system-python-path-consistency)。
 
 The generic cross-process [Notification](NOTIFICATION.md) API is available through `<vinc/osal/notification.hpp>`. Windows and POSIX backends are implemented; validation and platform limits are recorded below. Bus/Context integration is implemented outside OSAL; its separate contracts and validation are in [Pump wakeup](../module_system/PUMP_WAKEUP.md).
 
 通用跨程序[通知原語](NOTIFICATION.md)已實作 Windows 與 POSIX 後端，平台驗證與限制見下方紀錄；Bus／Context 接線已於 OSAL 之外實作，契約及驗證另見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
 
-Public headers remain `<vinc/osal/...>`. Native/state/platform headers are under `include/vinc/osal/detail/`; shared and platform `.cpp` files stay in `src/`. Detail is for this component and designated tests. Directory cleanup does not change platform behavior; the error contract follows.
+Public headers remain `<vinc/osal/...>`. Native/state/platform headers are under `include/vinc/osal/detail/`; shared and platform `.cpp` files stay in `src/`. Detail is for this component and designated tests, with `detail/resource_coordinator.hpp` additionally designated for Host/Plugin integration. Its ownership, waiting and initialization contracts are in the [FD/spawn plan](FD_SPAWN_PLAN.md#resource-coordinator); [stage 2](FD_SPAWN_PLAN.md#stage-2-implementation) wires POSIX producers/spawn and records validation. Directory cleanup does not change platform behavior; the error contract follows.
 
 公開標頭維持 `<vinc/osal/...>`。native、state 與平台內部標頭統一放在 `include/vinc/osal/detail/`；
 `src/` 保留共用及各平台的 .cpp。detail 僅供本元件實作與指定測試使用，
-元件目錄整理不改變平台行為契約；本輪錯誤型別遷移見下節。
+`detail/resource_coordinator.hpp` 另指定給 Host／Plugin 接線使用；所有權、等待與初始化契約，
+以及第二階段 POSIX FD／spawn 接線與驗證見上述計畫。元件目錄整理不改變平台行為契約；本輪錯誤型別遷移見下節。
 
 <a id="統一錯誤介面"></a>
 
@@ -53,13 +91,13 @@ OSAL 使用 `vinc::Result<T>`／`vinc::Error`，不提供獨立 Result 或 Error
 舊的錯誤轉接標頭已由本元件 enum 定義取代。Deadline 是本地等待的截止時間，不是日期時間，
 也不直接序列化為跨程序協定欄位；原有等待、取消與逾時行為保持不變。
 
-`Error` stores `domain`, `code`, `operation`, and native source/value. Use domain-aware comparisons such as `error.is(osal::ErrorCode::Timeout)`; OSAL owns its text tables. `vinc::error_to_string(error)` formats diagnostics and does not print misleading native success text when no native value exists. Unknown codes/operations remain numeric. There are 23 error codes and 54 nonzero operations with stable explicit assignments; domain is part of identity. These are incompatible with old implicit enum ordinals, and C++ Error layout is not a cross-version wire format. Existing timeout, cancellation, lifecycle, classification, and exception boundaries remain.
+`Error` stores `domain`, `code`, `operation`, and native source/value. Use domain-aware comparisons such as `error.is(osal::ErrorCode::Timeout)`; OSAL owns its text tables. `vinc::error_to_string(error)` formats diagnostics and does not print misleading native success text when no native value exists. Unknown codes/operations remain numeric. There are 26 error codes and 59 nonzero operations with stable explicit assignments; domain is part of identity. These are incompatible with old implicit enum ordinals, and C++ Error layout is not a cross-version wire format. Existing timeout, cancellation, lifecycle, classification, and exception boundaries remain.
 
 `Error` 的 `domain`、`code`、`operation`、`native` 保存分類、失敗操作與原生來源／數值。
 使用 `error.is(osal::ErrorCode::Timeout)` 等具 domain 的比較，文字表由 OSAL 自行維護。
 `vinc::error_to_string(error)` 統一產生診斷文字；原生錯誤沒有值時，不輸出「成功」之類
 容易誤導的 OS 訊息。未知錯誤／操作保留數值，程式判斷仍使用具型別的錯誤碼。
-目前有 23 個錯誤碼與 54 個非零操作碼；既有明確指定的編號保持不變，domain 為完整身分的一部分。
+目前有 26 個錯誤碼與 59 個非零操作碼；既有明確指定的編號保持不變，domain 為完整身分的一部分。
 它們不相容於更早期 enum 的隱含序號；C++ Error 布局仍不是跨版本傳輸協定。
 現有逾時、取消、生命週期、平台錯誤分類與例外邊界保持原樣。
 
@@ -116,6 +154,28 @@ CMake 4.3.2、Ninja 1.13.2。完整 Debug／Release 建置及公開標頭編譯�
 <a id="utf-8-與原生路徑"></a>
 
 ## UTF-8 and native paths / UTF-8 與原生路徑
+
+`executable_path()` in the same header queries the running executable's absolute,
+canonical native path independently of argv/PATH/cwd. Windows uses GetModuleFileNameW,
+macOS uses _NSGetExecutablePath, and Linux requires `/proc/self/exe`. Missing/deleted
+executables or unavailable OS/filesystem data return Result errors under ExecutablePath=55.
+Unlike the conversion functions below, this query accesses OS/filesystem state; it
+does not change cwd or promise identity/security, deployment ABI, or availability after deletion.
+
+同一標頭的 `executable_path()` 查詢目前執行檔的絕對、解析符號連結後的原生路徑，不依賴
+argv／PATH／cwd。Windows 使用 GetModuleFileNameW，macOS 使用 _NSGetExecutablePath，
+Linux 需要 `/proc/self/exe`。檔案已刪除或 OS／檔案系統查詢失敗時回傳 Result 錯誤，
+operation 為 ExecutablePath=55。此查詢會存取 OS／檔案系統，與下方純編碼轉換不同；
+不修改 cwd，也不承諾身分安全驗證、部署 ABI 或檔案刪除後仍可取得有效路徑。
+
+Executable-path validation (2026-10-29): Windows MSVC Debug/Release and WSL Ubuntu
+24.04/GCC 13.3 path tests passed. Installed application/Host relocation tests also
+exercise this query from an unrelated cwd; see [SDK evidence](../sdk/INSTALL.md).
+Subsequent macOS Debug/Release `osal.path` and relocated-App checks passed at `a19c0d4`; see the [native report](MACOS_FD_VALIDATION.md). This does not establish a minimum macOS version.
+
+執行檔路徑驗證（2026-10-29）：Windows MSVC Debug／Release 與 WSL Ubuntu 24.04／GCC 13.3
+的 path 測試通過，另由 SDK 搬移應用／Host 並從不同 cwd 啟動驗證。後續 macOS Debug／Release
+原生 path 與搬移 App 驗收已通過，環境及限制見上述報告；不撤銷歷史結果。
 
 `<vinc/osal/path.hpp>` provides `path_from_utf8(std::string_view)` and `path_to_utf8(const std::filesystem::path&)`, returning `Result<std::filesystem::path>` and `Result<std::string>`. Link `vinc::osal`; the SDK umbrella includes this header.
 
@@ -214,6 +274,15 @@ Successful spawn means a managed child exists, not that Module initialization co
 `spawn()` 成功表示子程序已建立並納入管理，不表示模組初始化完成。
 原生啟動失敗以錯誤回報；POSIX 若以新程序退出碼呈現後續啟動失敗，則保留
 該退出碼，不把 127 一律解讀成某一種錯誤。
+
+Windows launch temporarily adds `SEM_FAILCRITICALERRORS` to the calling thread's
+error mode around `CreateProcessW()`, restoring its previous value on return.
+OSAL does not call process-wide `SetErrorMode()` or change child WER policy.
+The validated behavior and native limitations are recorded under
+[loader error dialogs](#windows-loader-error-dialogs--windows-載入器錯誤對話框).
+
+Windows 在原生啟動範圍暫時抑制呼叫執行緒的 critical-error 對話框，再恢復原值。
+OSAL 不主動改程序全域模式或子程序 WER 政策；這不構成原生啟動時間上限。
 
 <a id="所有權與回收"></a>
 
@@ -353,6 +422,8 @@ These are internal backend choices; framework callers use the common API above.
 Linux/macOS registration failure falls back to waitpid(WNOHANG) every 50 ms, retaining reap responsibility; complete monitor failure also degrades, with monitor_error retaining diagnostics. Normal event wakeups scan bounded records. Large-process-count performance is not yet measured.
 
 Linux／macOS 事件註冊失敗時，以 50ms 間隔的 `waitpid(WNOHANG)` 保留回收責任。
+macOS 已消耗一次性退出通知、但尚未取得結果時，也暫時使用此補查；完成或失去 owner 後清除。
+事件以 ProcessId 對應紀錄，取消／逾時不取消背景責任；詳見 [退出進度契約與驗證](PROCESS_EXIT_PROGRESS.md)。
 整個事件監看器失敗時也會降級；`monitor_error()` 保存這種基礎設施錯誤。
 一般事件通知每次喚醒會掃描有界的管理紀錄，尚未提供大量程序的效能量測。
 
@@ -468,7 +539,7 @@ Windows 另測試退出碼 259；POSIX 檢查子程序已被回收。
 | [Linux](../../../README.md#linux-validation) | Ubuntu 24.04 / WSL 2 standalone OSAL Debug; descriptor/Process/SharedMemory/FileLock **4/4**, descriptor repeat **20/20**, five negative controls / 獨立 OSAL Debug、四套通過、重跑與負向對照通過 |
 | [macOS](../../../README.md#macos-validation) | Full Debug build; initial full-project validation and follow-up OSAL/OutputHub **24/24** / 完整 Debug 建置、初次全專案驗證與後續 **24/24** |
 
-The linked reports own environment versions, source revisions, logs, and coverage limits. The dated records below preserve individual changes' validation history; they do not replace this current summary. Real native failure injection and the deferred creation/spawn race remain separate concerns.
+The linked reports own environment versions, source revisions, logs, and coverage limits. The dated records below preserve individual changes' validation history; they do not replace this current summary. The [FD/spawn repair plan](FD_SPAWN_PLAN.md#stage-2-implementation) indexes the repair evidence and remaining Windows/Linux acceptance of the subsequent exit repair; completed Mac checks and historical failures are separated in the [Mac report](MACOS_EXIT_VALIDATION.md#current-acceptance-status). Real native failure injection remains a separate concern.
 
 環境版本、原始碼版本、log 與覆蓋限制以連結的報告為準。以下日期紀錄保留各次修改的歷史驗證，不代表目前平台總狀態；真實原生故障注入與暫緩的建立／spawn 競爭問題仍分別追蹤。
 
@@ -549,6 +620,75 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
 
 ## Outstanding issues and resolved findings / 待處理事項與已解決發現
 
+### Windows loader error dialogs / Windows 載入器錯誤對話框
+
+**Implemented 2026-11-02.** A malformed EXE previously blocked both OSAL
+`spawn_with_output()` and a separate non-VINC Python probe. A thread-scoped
+native experiment returned error 216 without changing the final process mode
+or the child inheritance result. Windows `launch_process()` now owns a local
+`LaunchErrorMode` guard: preserve existing thread flags, add only
+`SEM_FAILCRITICALERRORS`, and restore the saved mode on both success and failure.
+Failure to establish the guard returns `Spawn` with its Win32 diagnostic before
+creating a child. The CreateProcess failure is captured before guard cleanup.
+Restoring the previously accepted mode is best-effort cleanup; it must not throw,
+terminate the caller, replace the launch error, or abandon an already-owned child.
+Native failure of restoration was not injected. No new thread, allocation,
+public option, error number, or POSIX behavior was introduced by the guard.
+
+**已實作（2026-11-02）：** Windows 損壞 EXE 原先會在 OSAL 與不含 VINC 的探針中等待。
+先以原生執行緒範圍探針確認可立即回報錯誤 216，再接入 `launch_process()`。
+guard 只增加 critical-error 抑制旗標，保留既有 WER 等設定；建立 guard 失敗時，
+在建立子程序之前回報 Spawn／Win32 錯誤。啟動結果先保存，再以原值進行 best-effort
+還原；不因清理而終止中央、覆蓋啟動錯誤或遺失已建立程序。未注入原生還原失敗。
+Python Shell 故障測試現在刻意讓中央繼承模式 0，不再以測試端抑制對話框掩蓋問題。
+
+**Native boundary:** a concurrent probe observed transient process-wide error-mode
+changes during successful `CreateProcessW()`. A standalone Win32/C++ control
+reproduced this **with and without** thread suppression and without linking VINC;
+the final process mode was restored in both cases. Therefore tests check the
+process mode at API boundaries and the other thread's own mode throughout, not
+an unsupported promise that Windows never changes its internal process mode.
+Children retain the parent process mode, with no inherited launching-thread
+override. This is not a guarantee against concurrent external `SetErrorMode()`
+calls, later child loader/crash dialogs, or all possible native launch stalls.
+
+**原生邊界：** 成功建立程序期間，全域模式可能短暫變動；純 Win32 對照在沒有 VINC、
+有／無 thread guard 時均可重現，呼叫後恢復。這不是本次 guard 引入的全域修改。
+驗證保證限於呼叫前後模式、另一執行緒自己的模式，以及子程序繼承結果；不宣稱 Windows
+內部永不修改全域狀態，也不協調外部並行 SetErrorMode。後續子程序載入／崩潰行為與
+原生啟動無硬期限的契約維持原樣。
+
+Validation uses `osal.process_error_mode`: malformed/missing EXEs, direct/captured
+launch, nonzero pre-existing modes, another thread, inherited child modes,
+repeated failed admission and successful retry with one process record.
+The final test passed five standalone runs; an isolated copy disabling only the
+guard reproduced a five-second timeout. Local experiment and regression logs:
+`build/spawn-error-mode-review/` (not tracked).
+
+驗收涵蓋壞映像／缺檔、直接／擷取輸出啟動、非零既有模式、並行觀察、子程序繼承、
+重複失敗及單一名額成功重試。最後測試獨立連跑五次通過，隔離停用 guard 的負向對照
+再次等到五秒逾時。三平台其他既有驗證紀錄維持其原範圍。
+
+| Environment / 環境 | Final verification / 最終驗證 |
+| --- | --- |
+| Windows 11 x64, MSVC 19.44.35229, Release, CPython 3.13.12 | Source build passed; OSAL, Python Module, RPC and App entry CTests **28/28**, 42.76 s. New loader test also passed five standalone runs. |
+| WSL2 Ubuntu 24.04 x86_64, GCC/libstdc++ 13.3.0, Release, CPython 3.12.3 | Source build passed; corresponding CTests **30/30**, 16.72 s. Windows-only tests are excluded; POSIX behavior is unchanged. |
+| macOS / other configurations | Not rerun for this Windows backend fix; existing evidence remains valid for its recorded scope. |
+
+Windows 與 WSL 本輪實際建置及回歸均通過。沒有重跑 macOS 或 Debug，未以 Linux
+測試代替 Windows 原生驗證，也未撤銷先前其他平台的驗證結果。
+
+- **Standalone MSVC encoding warnings (2026-11-02, confirmed):** An isolated
+  OSAL/Common Release build with MSVC 19.44 and code page 950 succeeds, but
+  `vinc_osal_errors` and the generated `vinc_errors` catalog emit C4819 for
+  `config.hpp`. These targets do not independently request `/utf-8`; full framework
+  composition supplies it at directory scope. Follow up by making their encoding
+  requirement local to the owning targets and validating standalone builds. This
+  runtime-policy stage records the issue without changing encoding behavior.
+  **獨立建置編碼警告：** 上述獨立建置成功，但兩個錯誤格式化／catalog target 依賴
+  外層提供 `/utf-8`，在 CP950 出現 C4819。可能錯誤解讀非 ASCII 原始碼；後續應將
+  編碼需求補到 target 並驗證。本輪僅記錄，不混入 CRT 政策修正。
+
 - **Descriptor rollback fixture, resolved (2026-10-27):** On Ubuntu 24.04 / WSL 2, GCC 13.3 and CMake 3.28.3, the original `osal.descriptor` passed directly but failed under CTest. `strace` confirmed that CTest's log occupied inherited fd 3; the fixture obtained fd 4 and rejected it before setting the resource limit or exercising rollback. The fixture now limits new descriptor numbers to `filler + 1`, verifies non-stdio exhaustion with `EMFILE`, and explicitly checks limit restoration. Anonymous shared diagnostics preserve child assertions without consuming a descriptor. Additional cases inherit occupied low descriptors and a sparse high descriptor. Direct execution, an explicit inherited-fd-3 launcher, and CTest passed; the descriptor test also passed 20 consecutive CTest runs. Related Linux descriptor/Process/SharedMemory/FileLock tests passed **4/4**. Tracing confirmed low-fd acquisition, relocation failure, close/unlink of new resources, and preservation of existing names after failed open. Five isolated negative controls (the old fixture assumption, omitted FileLock/SharedMemory create rollback, and erroneous unlink on either open failure) all failed as expected; restoring the copied sources passed. Production OSAL code was not changed. This validates these rollback paths, not all Linux behavior or the separately deferred creation/spawn race. Existing macOS validation remains recorded in the [validated environment](../../../README.md#macos-validation); this fixture revision was exercised on Ubuntu 24.04.
 - **Descriptor 回滾測試準備邏輯，已修正（2026-10-27）：** Ubuntu 24.04／WSL 2、GCC 13.3、CMake 3.28.3 上，原版直接執行通過，CTest 則失敗。`strace` 確認 CTest 日誌占用繼承的 fd 3，測試取得 fd 4 後，在設定資源上限及驗證回滾之前就誤判失敗。現在依實際 `filler + 1` 設限，明確驗證非標準串流 fd 已耗盡並回報 `EMFILE`，也檢查上限還原是否成功。匿名共享診斷保留子程序 assertion，且不占用 fd；新增繼承低編號與不連續高編號 fd 的案例。直接執行、明確繼承 fd 3、CTest 均通過，descriptor 另連跑 20 次通過；Linux descriptor／Process／SharedMemory／FileLock 共 **4/4** 通過。追蹤確認低 fd 建立、搬移失敗、新資源 close／unlink，以及 open 失敗保留既有名稱。隔離副本的五個負向對照（舊 fixture 假設、兩種 create 回滾缺漏、兩種 open 誤刪名稱）均被測試攔下，還原後通過。正式 OSAL 未修改；本次結論限於這些路徑，不代表所有 Linux 行為或另列的建立／spawn 競爭窗口已驗證。macOS 已有的驗證結果見[已驗證環境](../../../README.md#macos-validation)；本次 fixture 修訂於 Ubuntu 24.04 執行驗證。
 
@@ -557,7 +697,10 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
 
 - **FileLock ownership after native unlock failure (2026-10-05):** FileLockGuard::unlock retains the Guard/local occupied flag on backend failure, proving only retained cleanup responsibility, not continued native ownership. [UnlockFileEx](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-unlockfileex), [Linux flock](https://man7.org/linux/man-pages/man2/flock.2.html), and [macOS flock](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html) do not guarantee unchanged ownership for every failure. Retryable Guard state alone does not establish safe payload access. No failure-after-release case has been reproduced and no revised policy is approved. The user deferred implementation; [root TODO](../../../TODO.md) tracks it. Since 2026-10-08 Concurrency no longer uses FileLock, but this OSAL gap remains. Decide known/unknown ownership, cleanup, retry, and fault policy before changes; the superseded Concurrency refactor did not fix FileLock.
 - **POSIX internal-fd/stdio isolation:** Linux/macOS monitors, POSIX FileLock/SharedMemory originally could retain fd 0/1/2 after the host closed stdio. Spawn Inherit preserves these via adddup2(fd, fd), which on Linux clears CLOEXEC ([glibc](https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/spawni.c)); CLOEXEC alone was insufficient. A child could write internal resources or retain a FileLock open description after owner death. The implemented descriptor helper relocates these resources and Linux pidfd before delivery/registration; failure preserves native errors and closes fds. Name rollback removes only new undistributed resources, not opened ones. POSIX osal.descriptor covers closed stdio, mapping/locking, child Null streams, exhausted-fd rollback/retry, and no child-extended ownership. For current validation, see the descriptor fixture findings above for Ubuntu 24.04 / WSL 2 and the [existing macOS report](../../../README.md#macos-validation). Relocation addresses retained occupancy, not the separate concurrent window below.
-- **Deferred POSIX concurrent creation/spawn:** relocation is not one native operation. Another thread can spawn after open/pipe/socket receives a low fd but before relocation, causing accidental inheritance or invalid-source launch failure. Pipe/Socket and newly covered resources all remain exposed. Interleavings are identified in code but not reproduced with controlled scheduling or fixed; the user deferred changes and [TODO](../../../TODO.md) retains tracking. Resuming requires scope confirmation/authorization. **Unapproved proposal:** one private process-local mutex around fd creation, relocation, and rollback; under the same mutex spawn duplicates inherited streams outside Pipe bootstrap fd ranges and records missing streams as /dev/null, then releases the lock before spawn, using RAII copies. This must cover Pipe, Socket/accept, FileLock, SharedMemory, monitors, and pidfd, not just relocation. Decisions include lock contention and up to three temporary fds per spawn, and whether protection covers only directly managed OSAL resources. Third-party open/close/dup2 and libc resolver-created sockets are uncoordinated. Filling missing parent stdio with /dev/null during single-thread startup is another unapproved alternative because it mutates host state. Future Linux/macOS tests must pause after low-fd acquisition, interleave spawn, check Inherit/Null/Capture, exhaustion/rollback, lock order/deadlock. Linux VM/WSL2 and Mac/macOS CI can run separately; Windows regressions cannot replace POSIX race tests. There is no measured fix result.
+- **POSIX concurrent creation/spawn, stage 2 validated (2026-11-03):** directly managed acquisition and owned stdio snapshots have Windows/WSL and subsequent native macOS functional evidence. Mac Common/OSAL passed 42/42 per configuration; controlled FD assertions passed while separate exit-wait timeouts remain recorded. See the [repair contract](FD_SPAWN_PLAN.md#stage-2-implementation) and [Mac methods/results](MACOS_FD_VALIDATION.md). The three-copy bound and external-code limits are unchanged.
+- **macOS exit-progress repair (2026-11-03):** the [native baseline](MACOS_FD_VALIDATION.md) identified a consumed NOTE_EXIT followed by an empty waitpid result. The [repair and controlled-contract record](PROCESS_EXIT_PROGRESS.md) owns ProcessId-based identity, pending observation and temporary 50ms fallback. Subsequent [Mac acceptance](MACOS_EXIT_VALIDATION.md) passed 6,624 native cases and all 50 OSAL CTests per configuration. Original full integration is Debug 151/153 and Release 152/153, retaining the known example fixture failure and the original Debug Plugin classification failure. The subsequent [Plugin test repair](../module_system/MACOS_PLUGIN_CLASSIFICATION.md) has controlled ordering/cleanup evidence; Mac Debug/Release full reruns each pass 153/154, retaining only the example failure. That [example fixture](../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap) was subsequently repaired and passed focused Mac Debug/Release checks (1/1 each), without another full-suite run. Subsequent [Windows/WSL Debug/Release acceptance](WINDOWS_LINUX_EXIT_VALIDATION.md) passed the shared contracts, native/source regressions and fresh installed SDK suites. / Windows／WSL 補驗已完成；Mac 原始失敗及各次補驗仍分開保留，不宣稱一次全專案全綠。
+- **Cross-component and SDK acceptance (2026-11-03):** Windows/WSL and subsequent native Mac source/App/Plugin and moved-SDK results are linked from [stage 4](FD_SPAWN_PLAN.md#stage-4-acceptance). Mac Debug/Release original CTest passed 132/132 each, with additional clean producer/consumer/App checks. Those earlier results retained independent exit-stress failures. The later repair and [Windows/WSL acceptance](WINDOWS_LINUX_EXIT_VALIDATION.md) are separate evidence. / 原始失敗保留；後續退出修復與跨平台回歸另見補驗紀錄。
+- **ProcessService final cleanup observation (2026-11-02):** one initial Linux stress sample saw an immediate FD-set mismatch without retained FD identities; its exact cause is unconfirmed. A test-only delayed observer tail reproduced temporary epoll/eventfd retention and subsequent cleanup, consistent with the existing detached-worker contract. `shutdown_until()` is not a join/unload barrier. The final stress checks record both immediate and bounded eventual cleanup; no production delay or lifecycle change was introduced. Details and the unresolved original-sample limitation are in the [stage 2 evidence](FD_SPAWN_PLAN.md#stage-2-implementation). / 若未來需要「返回即已釋放執行緒所有引用」的保證，須另行 review，不能將目前 API 當作該屏障。
 - **Windows Pipe random diagnostics, resolved:** NativePipe::create_pair previously discarded BCrypt NTSTATUS. It now shares random_bytes and wraps CreatePipe ← RandomBytes with native data. Windows osal.pipe_random_failure replaces the provider at link time and exercises real PipeService creation, repeated errors, admission recovery, and later success. No production test hook or real BCrypt fault injection was added.
 
 - **FileLock 原生解鎖失敗後的持鎖狀態（2026-10-05 Concurrency 重審）：**
@@ -589,26 +732,14 @@ Historical environment, 2026-09-18: Windows x64, MSVC 19.44, SDK 10.0.26100, CMa
   子程序標準串流改接空裝置、fd 額滿時回滾及同名重試、持鎖者直接退出後子程序不延長占用。
   **目前驗證：** Ubuntu 24.04／WSL 2 的 descriptor 與相關原生測試已通過，詳見上方 fixture 修正紀錄；macOS 既有建置與測試結果見[已驗證環境](../../../README.md#macos-validation)。
   此修正處理資源建立完成後的持續占用，並行建立／spawn 的窗口另見下項。
-- **POSIX 關閉標準串流時的並行建立／spawn（2026-10-05 新發現）：**
-  搬移 fd 不是單一原生操作。另一執行緒可能在 open／pipe／socket 等取得低編號 fd 後、
-  搬移之前，進入 `src/posix/process.cpp` 的標準串流檢查及 spawn。
-  既有 Pipe／Socket 和本輪補齊的資源均不能僅靠事後搬移宣稱完全排除此窗口。
-  **影響：** 子程序可能誤繼承內部資源，或在 fd 搬移／關閉後因來源失效而啟動失敗。
-  **狀態（2026-10-05）：使用者決定暫緩處理。** 程式交錯路徑確認，尚未用受控排程重現或修復；
-  未擴大修改同步邊界。根目錄 [TODO](../../../TODO.md) 保留追蹤入口；恢復工作須重新確認範圍並取得開工授權。
-  **未核准提案：** OSAL 私有程序內 mutex 保護原生 fd 建立、搬離 0／1／2 及失敗清理的完整區間；
-  spawn 在同一把鎖內複製需繼承的標準串流，副本避開 Pipe bootstrap 目標編號區間，
-  不存在的串流記錄為子程序接 `/dev/null`。快照完成後釋放鎖，再執行 spawn；副本由 RAII 回收。
-  需涵蓋 Pipe、Socket／accept、FileLock、SharedMemory、各監看器及 pidfd，不能只鎖搬移 helper。
-  **待決策：** 是否接受建立／accept 與快照的鎖競爭，以及每次 spawn 最多三個暫存 fd 的成本；
-  是否將保證限定於 OSAL 直接管理的資源。宿主／第三方的 open、close、dup2 不受私有鎖協調，
-  libc resolver 也可能自行建立 socket，不能宣稱所有 OSAL 呼叫涉及的間接 fd 都已受保護。
-  宿主於單執行緒啟動階段將缺少的標準串流接到 `/dev/null` 並維持有效，是另一個待討論方向；
-  此舉會改變父程序狀態，尚未核准由 OSAL 或 Vinc 入口自動執行。
-  **恢復後驗證：** Linux、macOS 各自建置／執行，刻意停在取得低編號 fd、尚未搬移的位置，
-  驗證與 spawn 的交錯、Inherit／Null／Capture 行為、fd 額滿及失敗回收、鎖順序與無死鎖。
-  Linux 可使用 VM／WSL2，macOS 使用 Mac 或 macOS CI runner；不要求同時執行。
-  Windows 僅能驗證共用程式回歸，不能取代 POSIX 競爭測試；目前尚無該修復的實測結果。
+- **POSIX 關閉標準串流時的並行建立／spawn：**
+  macOS 原生證據與 Linux／WSL 受控排程已重現誤繼承、來源 FD 失效／重用及 Pipe EOF 延後；
+  Windows HANDLE 對照未重現相同問題。詳見[修復前驗證報告](FD_RACE_VALIDATION.md)。
+  **狀態（2026-11-03）：前兩階段與一般整合已有 Windows／WSL／macOS 驗證；Mac 退出修復已有針對性證據，完整平台驗收仍待補。**
+  資源建立同步、最多三個標準串流副本、Host／Plugin 共用協調器、初始化限制及第三方邊界，
+  統一維護於[修訂契約與四階段開工步驟](FD_SPAWN_PLAN.md)。三個是固定串流數量，
+  不是 spawn 總 FD 額度，也不放入 config。macOS 退出觀察的修復與驗收分別見
+  [退出進度紀錄](PROCESS_EXIT_PROGRESS.md)及 [第三步報告](MACOS_EXIT_VALIDATION.md)。
 - **Windows Pipe 遺失亂數失敗的原生診斷（2026-10-05 重審）：**
   `src/windows/pipe.cpp::NativePipe::create_pair()` 原先直接呼叫 `BCryptGenRandom`，
   失敗僅回傳 `SystemError / CreatePipe`，沒有保留回傳的 NTSTATUS；
@@ -719,7 +850,7 @@ has been fixed.
 | Windows x64, MSVC 19.51.36257, Debug | OSAL **19/19**, plus SDK consumer **1/1** passed. |
 | Windows x64, MSVC 19.51.36257, Release | OSAL **19/19** passed; notification test also passed **20 consecutive runs**. |
 | WSL2 Ubuntu 24.04.5 x86_64, GCC/libstdc++ 13.3.0, Debug | Standalone OSAL **24/24** passed; both notification tests also passed **20 consecutive runs each**. |
-| macOS | Backend and tests added; native execution of this new functionality is pending. Prior macOS results for other OSAL facilities remain valid. |
+| macOS | Not run in that original stage. Subsequent `a19c0d4` Debug/Release passed `osal.notification` and `osal.notification_native` within 42/42 standalone OSAL tests; see the [native report](MACOS_FD_VALIDATION.md), including separate controlled endpoint checks and limits. |
 
 **Receiver-open follow-up (2026-10-28):** Added `NotificationReceiver::open()`
 without creating/resetting resources or changing error numbers. Windows
@@ -748,7 +879,19 @@ preserve inherited descriptors; no fd-3-is-free assumption is introduced.
 驗證含真正的子程序、並行發送、無限等待取消、滿載合併、接收程序死亡與原生失敗回收。
 Windows 的 handle 計數先於 ProcessService 啟動，避免非同步回收干擾基準；
 POSIX 故障案例在隔離子程序執行，保留繼承 FD，不假設 fd 3 必須空閒。
-新增通知功能的 macOS 驗證待執行，沒有撤銷其他元件已有的 macOS 驗證結果。
+上述為 2026-10-28 的歷史範圍，macOS 後續結果見下方。
+
+**macOS follow-up (2026-11-02):** macOS 26.3.1(a) arm64, Apple Clang 21.0.0,
+Apple libc++ 21.1.6, SDK 26.5, Release: all **24/24 OSAL CTests passed**, including
+`osal.notification` and `osal.notification_native`. This covers receiver handoff,
+FIFO cancellation/coalescing, SIGPIPE policy, native failures and resource cleanup.
+No OSAL implementation was changed in this follow-up. Exact source, environment
+and logs are in the [Mac validation record](../module_system/python/README.md#macos-snapshot-repair-validation).
+The subsequent Bus/pump integration is described by [Pump wakeup](../module_system/PUMP_WAKEUP.md);
+the historical OSAL-only paragraphs above do not describe its current wiring.
+
+本次補齊 macOS Release 的 24 項 OSAL 功能驗證，包含兩項通知測試；沒有修改 OSAL
+實作或量測效能。上方「待驗證／尚未接線」是當時紀錄，後續整合及本次原生證據以上述連結為準。
 
 Reproduce after building the matching targets / 建置後執行：
 

@@ -203,6 +203,36 @@ int main(int argc, char** argv) {
                       "shutdown retained notification resource");
             }
         }
+        // Last case: exhaust this test process's allocator after admission but
+        // before recovery. Never restore/reuse identifiers, even in the fixture.
+        auto system_manager = take(vinc::test::create_manager());
+        detail::SystemModuleOptions system_options;
+        system_options.name = "node";
+        ModuleType system_type{"helper", std::filesystem::absolute(argv[1]), {}};
+        check(bool(detail::ManagerAccess::register_system_module(*system_manager, system_type, system_options)),
+              "register system exhaustion fixture");
+        const auto system_mid = take(detail::ManagerAccess::start_system_module(
+            *system_manager, system_type.name, {"crash-start"}));
+        next_mid.store(central_owner);
+        const auto exhaustion_deadline = control::Clock::now() + test_timeout;
+        std::optional<ModuleSnapshot> exhausted;
+        do {
+            exhausted = system_manager->inspect("node");
+            if (exhausted && exhausted->state == ModuleState::Failed) {
+                break;
+            }
+            std::this_thread::sleep_for(retry_interval);
+        } while (control::Clock::now() < exhaustion_deadline);
+        check(exhausted && exhausted->state == ModuleState::Failed && exhausted->mid == system_mid,
+              "MID exhaustion stops retries without inventing an identity");
+        check(exhausted->restart_failure && exhausted->restart_failure->is(module_system::ErrorCode::MidExhausted),
+              "retain restart-admission failure separately");
+        check(exhausted->last_failure && !exhausted->last_failure->error.is(module_system::ErrorCode::MidExhausted),
+              "retain original process fault");
+        check(!exhausted->next_restart, "permanent admission failure has no retry deadline");
+        system_manager->begin_shutdown();
+        check(bool(system_manager->wait_shutdown(control::Clock::now() + test_timeout)),
+              "shutdown after MID exhaustion");
         std::cout << "manager fault tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

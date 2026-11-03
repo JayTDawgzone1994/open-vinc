@@ -18,7 +18,7 @@ set_tests_properties(message_bus.ring_buffer PROPERTIES TIMEOUT 30)
 vinc_add_module_plugin(message_bus_module_helper module_helper.cpp)
 target_link_libraries(message_bus_module_helper PRIVATE vinc::module vinc_message_fixture)
 add_executable(message_bus_module_tests module_tests.cpp)
-target_link_libraries(message_bus_module_tests PRIVATE vinc::module_manager)
+target_link_libraries(message_bus_module_tests PRIVATE vinc_test_manager)
 add_dependencies(message_bus_module_tests message_bus_module_helper)
 add_test(NAME message_bus.module COMMAND message_bus_module_tests "$<TARGET_FILE:message_bus_module_helper>")
 set_tests_properties(message_bus.module PROPERTIES TIMEOUT 120)
@@ -26,7 +26,8 @@ set_tests_properties(message_bus.module PROPERTIES TIMEOUT 120)
 # Compile the same implementation with local fault seams; never link the
 # production Bus library into this target or export its test-only definition.
 add_executable(message_bus_cleanup_tests
-    cleanup_tests.cpp ../src/message_bus.cpp ../src/runtime.cpp ../src/bus_manager.cpp ../src/ring_buffer.cpp)
+    cleanup_tests.cpp notification_snapshot_tests.cpp
+    ../src/message_bus.cpp ../src/runtime.cpp ../src/bus_manager.cpp ../src/ring_buffer.cpp)
 target_include_directories(message_bus_cleanup_tests PRIVATE ../include "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(message_bus_cleanup_tests PRIVATE VINC_MESSAGE_BUS_TESTING)
 target_link_libraries(message_bus_cleanup_tests PRIVATE
@@ -38,3 +39,5 @@ else()
 endif()
 add_test(NAME message_bus.cleanup COMMAND message_bus_cleanup_tests)
 set_tests_properties(message_bus.cleanup PROPERTIES TIMEOUT 90)
+add_test(NAME message_bus.notification_snapshots COMMAND message_bus_cleanup_tests notification-snapshots)
+set_tests_properties(message_bus.notification_snapshots PROPERTIES TIMEOUT 30)

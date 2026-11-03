@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(ribosome LANGUAGES CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../common/cmake/VincToolchain.cmake")
+vinc_require_toolchain()
 
 # Use the same language level as the framework.
 set(CMAKE_CXX_STANDARD 23)
@@ -52,6 +54,17 @@ else()
 endif()
 if(MINGW)
     target_link_options(ribosome PRIVATE -municode)
+endif()
+
+if(VINC_INSTALL_SDK)
+    # Same generator, but no developer-machine defaults in the installed tool.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/sdk-config/ribosome_config.hpp"
+        "#pragma once\n#include <string_view>\nnamespace vinc {\nconstexpr std::u8string_view kDefaultInputPath{};\nconstexpr std::u8string_view kDefaultOutputPath{};\nconstexpr std::u8string_view kDefaultTemplatePath{};\n}\n")
+    add_executable(vinc_ribosome_sdk src/ribosome.cpp)
+    target_include_directories(vinc_ribosome_sdk PRIVATE include "${CMAKE_CURRENT_BINARY_DIR}/sdk-config")
+    target_compile_definitions(vinc_ribosome_sdk PRIVATE VINC_RIBOSOME_INSTALLED_TOOL)
+    set_target_properties(vinc_ribosome_sdk PROPERTIES OUTPUT_NAME ribosome
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/sdk-tools")
 endif()
 
 if(BUILD_TESTING)

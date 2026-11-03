@@ -14,3 +14,9 @@ target_link_libraries(vinc_ui_http INTERFACE Threads::Threads)
 if(WIN32)
     target_link_libraries(vinc_ui_http INTERFACE ws2_32)
 endif()
+if(VINC_INSTALL_SDK)
+    set_target_properties(vinc_ui_http PROPERTIES EXPORT_NAME detail_ui_http
+        INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream>"
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/upstream>")
+    install(TARGETS vinc_ui_http EXPORT VincTargets COMPONENT VincSDK)
+endif()
