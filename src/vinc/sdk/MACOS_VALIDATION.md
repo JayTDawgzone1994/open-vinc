@@ -97,6 +97,10 @@ Python 選擇／ABI 探測 **24/24**；工具測試共 **118** 項，**95 通過
 外部 `proposed-example-fixture.patch` 已通過 `git apply --check`，但**未套用**；
 本次只在 macOS 驗證對照，不宣稱 Windows／Linux 已驗證該修正。
 
+上述是當時紀錄。2026-11-03 維護中的 fixture 已修復並通過 macOS Debug／Release
+定點補驗，詳見 [範例 README](../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap)；
+本報告的原始失敗與外部比較均保留。
+
 ## 重跑與證據索引
 
 使用同一 commit 的外部快照及上述設定，分別令 `config=Debug`／`Release`。

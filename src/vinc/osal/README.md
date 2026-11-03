@@ -171,11 +171,11 @@ operation 為 ExecutablePath=55。此查詢會存取 OS／檔案系統，與下�
 Executable-path validation (2026-10-29): Windows MSVC Debug/Release and WSL Ubuntu
 24.04/GCC 13.3 path tests passed. Installed application/Host relocation tests also
 exercise this query from an unrelated cwd; see [SDK evidence](../sdk/INSTALL.md).
-The new macOS backend requires native validation; no prior OSAL platform evidence is withdrawn.
+Subsequent macOS Debug/Release `osal.path` and relocated-App checks passed at `a19c0d4`; see the [native report](MACOS_FD_VALIDATION.md). This does not establish a minimum macOS version.
 
 執行檔路徑驗證（2026-10-29）：Windows MSVC Debug／Release 與 WSL Ubuntu 24.04／GCC 13.3
-的 path 測試通過，另由 SDK 搬移應用／Host 並從不同 cwd 啟動驗證。macOS 此新增查詢尚待原生驗證，
-不撤銷既有 OSAL 平台證據。
+的 path 測試通過，另由 SDK 搬移應用／Host 並從不同 cwd 啟動驗證。後續 macOS Debug／Release
+原生 path 與搬移 App 驗收已通過，環境及限制見上述報告；不撤銷歷史結果。
 
 `<vinc/osal/path.hpp>` provides `path_from_utf8(std::string_view)` and `path_to_utf8(const std::filesystem::path&)`, returning `Result<std::filesystem::path>` and `Result<std::string>`. Link `vinc::osal`; the SDK umbrella includes this header.
 
@@ -422,6 +422,8 @@ These are internal backend choices; framework callers use the common API above.
 Linux/macOS registration failure falls back to waitpid(WNOHANG) every 50 ms, retaining reap responsibility; complete monitor failure also degrades, with monitor_error retaining diagnostics. Normal event wakeups scan bounded records. Large-process-count performance is not yet measured.
 
 Linux／macOS 事件註冊失敗時，以 50ms 間隔的 `waitpid(WNOHANG)` 保留回收責任。
+macOS 已消耗一次性退出通知、但尚未取得結果時，也暫時使用此補查；完成或失去 owner 後清除。
+事件以 ProcessId 對應紀錄，取消／逾時不取消背景責任；詳見 [退出進度契約與驗證](PROCESS_EXIT_PROGRESS.md)。
 整個事件監看器失敗時也會降級；`monitor_error()` 保存這種基礎設施錯誤。
 一般事件通知每次喚醒會掃描有界的管理紀錄，尚未提供大量程序的效能量測。
 
@@ -695,9 +697,9 @@ Windows 與 WSL 本輪實際建置及回歸均通過。沒有重跑 macOS 或 De
 
 - **FileLock ownership after native unlock failure (2026-10-05):** FileLockGuard::unlock retains the Guard/local occupied flag on backend failure, proving only retained cleanup responsibility, not continued native ownership. [UnlockFileEx](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-unlockfileex), [Linux flock](https://man7.org/linux/man-pages/man2/flock.2.html), and [macOS flock](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html) do not guarantee unchanged ownership for every failure. Retryable Guard state alone does not establish safe payload access. No failure-after-release case has been reproduced and no revised policy is approved. The user deferred implementation; [root TODO](../../../TODO.md) tracks it. Since 2026-10-08 Concurrency no longer uses FileLock, but this OSAL gap remains. Decide known/unknown ownership, cleanup, retry, and fault policy before changes; the superseded Concurrency refactor did not fix FileLock.
 - **POSIX internal-fd/stdio isolation:** Linux/macOS monitors, POSIX FileLock/SharedMemory originally could retain fd 0/1/2 after the host closed stdio. Spawn Inherit preserves these via adddup2(fd, fd), which on Linux clears CLOEXEC ([glibc](https://github.com/bminor/glibc/blob/master/sysdeps/unix/sysv/linux/spawni.c)); CLOEXEC alone was insufficient. A child could write internal resources or retain a FileLock open description after owner death. The implemented descriptor helper relocates these resources and Linux pidfd before delivery/registration; failure preserves native errors and closes fds. Name rollback removes only new undistributed resources, not opened ones. POSIX osal.descriptor covers closed stdio, mapping/locking, child Null streams, exhausted-fd rollback/retry, and no child-extended ownership. For current validation, see the descriptor fixture findings above for Ubuntu 24.04 / WSL 2 and the [existing macOS report](../../../README.md#macos-validation). Relocation addresses retained occupancy, not the separate concurrent window below.
-- **POSIX concurrent creation/spawn, stage 2 implemented (2026-11-02):** directly managed FD acquisition now shares coordination with owned stdio snapshots. Windows Debug/Release Common/OSAL passed 31/31 each; Linux passed 42/42 each, plus controlled races and 3,000 ordinary spawns per configuration. See the [baseline](FD_RACE_VALIDATION.md) and [current contracts, detailed evidence and limitations](FD_SPAWN_PLAN.md#stage-2-implementation). At most three stdio copies is a fixed stream-count bound, not a configuration or total FD budget. New native macOS acceptance remains pending.
-- **macOS stdio and exit observation, acceptance still open (2026-11-02):** supplied native evidence separately reproduces missing CLOEXEC stdio (69/144 cases per configuration) and normal-child exit observation timeouts even after the child became a zombie. Stage 2 replaces same-fd dup2 with owned stdio copies, but its Mac behavior needs native verification. Exit-observation root cause remains unconfirmed and belongs to stage 3. See [baseline findings](FD_RACE_VALIDATION.md) and [repair progress](FD_SPAWN_PLAN.md). / CLOEXEC 修復已接通但 Mac 原生驗證待補；退出觀察仍待第三階段調查，不以其他平台通過結案。
-- **Cross-component and SDK acceptance (2026-11-03):** source App/Host/Plugin and moved-SDK results are recorded in [stage 4](FD_SPAWN_PLAN.md#stage-4-acceptance). The moved consumer now verifies three independently linked images sharing one coordinator. Native macOS must repeat the new acceptance on the same topic revision. / 跨元件與 SDK 驗收結果集中於第四階段紀錄；Mac 須補驗新修復，不能沿用舊基線當作通過。
+- **POSIX concurrent creation/spawn, stage 2 validated (2026-11-03):** directly managed acquisition and owned stdio snapshots have Windows/WSL and subsequent native macOS functional evidence. Mac Common/OSAL passed 42/42 per configuration; controlled FD assertions passed while separate exit-wait timeouts remain recorded. See the [repair contract](FD_SPAWN_PLAN.md#stage-2-implementation) and [Mac methods/results](MACOS_FD_VALIDATION.md). The three-copy bound and external-code limits are unchanged.
+- **macOS exit-progress repair (2026-11-03):** the [native baseline](MACOS_FD_VALIDATION.md) identified a consumed NOTE_EXIT followed by an empty waitpid result. The [repair and controlled-contract record](PROCESS_EXIT_PROGRESS.md) owns ProcessId-based identity, pending observation and temporary 50ms fallback. Subsequent [Mac acceptance](MACOS_EXIT_VALIDATION.md) passed 6,624 native cases and all 50 OSAL CTests per configuration. Original full integration is Debug 151/153 and Release 152/153, retaining the known example fixture failure and the original Debug Plugin classification failure. The subsequent [Plugin test repair](../module_system/MACOS_PLUGIN_CLASSIFICATION.md) has controlled ordering/cleanup evidence; Mac Debug/Release full reruns each pass 153/154, retaining only the example failure. That [example fixture](../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap) was subsequently repaired and passed focused Mac Debug/Release checks (1/1 each), without another full-suite run. Windows/Linux reruns remain pending. / 原生退出及 OSAL 回歸通過；兩項測試缺口已有修復與各自 Mac 證據，原始失敗保留，不宣稱三平台全綠。
+- **Cross-component and SDK acceptance (2026-11-03):** Windows/WSL and subsequent native Mac source/App/Plugin and moved-SDK results are linked from [stage 4](FD_SPAWN_PLAN.md#stage-4-acceptance). Mac Debug/Release original CTest passed 132/132 each, with additional clean producer/consumer/App checks. Independent exit stress still fails; this is not final acceptance of the pending exit-observation repair. / 一般整合已有 Mac 證據，退出修復後仍須回歸。
 - **ProcessService final cleanup observation (2026-11-02):** one initial Linux stress sample saw an immediate FD-set mismatch without retained FD identities; its exact cause is unconfirmed. A test-only delayed observer tail reproduced temporary epoll/eventfd retention and subsequent cleanup, consistent with the existing detached-worker contract. `shutdown_until()` is not a join/unload barrier. The final stress checks record both immediate and bounded eventual cleanup; no production delay or lifecycle change was introduced. Details and the unresolved original-sample limitation are in the [stage 2 evidence](FD_SPAWN_PLAN.md#stage-2-implementation). / 若未來需要「返回即已釋放執行緒所有引用」的保證，須另行 review，不能將目前 API 當作該屏障。
 - **Windows Pipe random diagnostics, resolved:** NativePipe::create_pair previously discarded BCrypt NTSTATUS. It now shares random_bytes and wraps CreatePipe ← RandomBytes with native data. Windows osal.pipe_random_failure replaces the provider at link time and exercises real PipeService creation, repeated errors, admission recovery, and later success. No production test hook or real BCrypt fault injection was added.
 
@@ -733,10 +735,11 @@ Windows 與 WSL 本輪實際建置及回歸均通過。沒有重跑 macOS 或 De
 - **POSIX 關閉標準串流時的並行建立／spawn：**
   macOS 原生證據與 Linux／WSL 受控排程已重現誤繼承、來源 FD 失效／重用及 Pipe EOF 延後；
   Windows HANDLE 對照未重現相同問題。詳見[修復前驗證報告](FD_RACE_VALIDATION.md)。
-  **狀態（2026-11-02）：前兩階段協調器、Host／Plugin 接線及 POSIX FD／spawn 修復已完成 Windows／WSL 驗證；新 macOS 原生驗收待補。**
+  **狀態（2026-11-03）：前兩階段與一般整合已有 Windows／WSL／macOS 驗證；Mac 退出修復已有針對性證據，完整平台驗收仍待補。**
   資源建立同步、最多三個標準串流副本、Host／Plugin 共用協調器、初始化限制及第三方邊界，
   統一維護於[修訂契約與四階段開工步驟](FD_SPAWN_PLAN.md)。三個是固定串流數量，
-  不是 spawn 總 FD 額度，也不放入 config。macOS 退出觀察根因仍須獨立調查。
+  不是 spawn 總 FD 額度，也不放入 config。macOS 退出觀察的修復與驗收分別見
+  [退出進度紀錄](PROCESS_EXIT_PROGRESS.md)及 [第三步報告](MACOS_EXIT_VALIDATION.md)。
 - **Windows Pipe 遺失亂數失敗的原生診斷（2026-10-05 重審）：**
   `src/windows/pipe.cpp::NativePipe::create_pair()` 原先直接呼叫 `BCryptGenRandom`，
   失敗僅回傳 `SystemError / CreatePipe`，沒有保留回傳的 NTSTATUS；
@@ -847,7 +850,7 @@ has been fixed.
 | Windows x64, MSVC 19.51.36257, Debug | OSAL **19/19**, plus SDK consumer **1/1** passed. |
 | Windows x64, MSVC 19.51.36257, Release | OSAL **19/19** passed; notification test also passed **20 consecutive runs**. |
 | WSL2 Ubuntu 24.04.5 x86_64, GCC/libstdc++ 13.3.0, Debug | Standalone OSAL **24/24** passed; both notification tests also passed **20 consecutive runs each**. |
-| macOS | Backend and tests added; native execution of this new functionality is pending. Prior macOS results for other OSAL facilities remain valid. |
+| macOS | Not run in that original stage. Subsequent `a19c0d4` Debug/Release passed `osal.notification` and `osal.notification_native` within 42/42 standalone OSAL tests; see the [native report](MACOS_FD_VALIDATION.md), including separate controlled endpoint checks and limits. |
 
 **Receiver-open follow-up (2026-10-28):** Added `NotificationReceiver::open()`
 without creating/resetting resources or changing error numbers. Windows

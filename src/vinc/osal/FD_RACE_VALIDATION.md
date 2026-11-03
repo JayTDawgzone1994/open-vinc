@@ -188,7 +188,8 @@ failure by increasing the timeout or declaring Linux/Windows success a Mac fix.
 The original proposals were reviewed and accepted after this investigation.
 The [FD/spawn repair contract and implementation plan](FD_SPAWN_PLAN.md) owns
 confirmed behavior, cross-image coordination, initialization limits and four stages.
-The macOS exit-observation root cause remains unconfirmed; no production fix or
-post-fix validation is claimed by this report.
+At the time of this baseline report the macOS exit-observation root cause was
+unconfirmed. The [subsequent native Mac investigation](MACOS_FD_VALIDATION.md)
+identifies the progress gap and records new FD acceptance. Subsequent exit repair and its remaining platform acceptance are maintained in [exit progress](PROCESS_EXIT_PROGRESS.md). This baseline report itself claims no post-fix validation.
 
 本報告保留修復前證據；已確認的修訂契約與開工進度集中維護於上述文件。

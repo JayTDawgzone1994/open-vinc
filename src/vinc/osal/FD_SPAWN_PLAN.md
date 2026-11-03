@@ -8,7 +8,7 @@ Host/Plugin OSAL copies, and the initialization/external-code boundaries below.
 This document records those decisions and the work sequence; it is not itself
 authorization to modify implementation. Follow [AGENTS.md](../../../AGENTS.md).
 
-**2026-11-02 第二階段已接入 POSIX FD 建立與 spawn；新增 macOS 原生驗證仍待補。** 本文件是本次修訂契約與階段進度的主要維護位置；
+**第二階段已接入 POSIX FD 建立與 spawn；2026-11-03 macOS 原生補驗及退出調查結果見 [Mac 報告](MACOS_FD_VALIDATION.md)，後續退出修復的實作與待驗範圍見 [退出進度紀錄](PROCESS_EXIT_PROGRESS.md)。** 本文件是本次修訂契約與階段進度的主要維護位置；
 [驗證報告](FD_RACE_VALIDATION.md)保存修復前的證據，不將已重現誤記為已修復。
 各階段需依使用者的開工授權執行；新增重大架構問題仍須先討論。
 
@@ -19,7 +19,7 @@ authorization to modify implementation. Follow [AGENTS.md](../../../AGENTS.md).
 | POSIX FD creation/spawn races | Coordinate directly managed acquisition and inherited-stdio snapshots. Cover Linux and macOS. |
 | macOS CLOEXEC stdio | Deliver inherited streams through owned copies, without relying on same-fd spawn dup2 behavior. |
 | Multiple OSAL images | Host and its participating Plugins share one coordinator within that process. Keep static linking. |
-| macOS exit observation | Investigate and repair separately, preserving sole child-reaping ownership and existing API behavior. The root cause is not yet established. |
+| macOS exit observation | Investigate and repair separately, preserving sole child-reaping ownership and existing API behavior. The repair and controlled tests are implemented; subsequent native exit checks passed, and the two Mac integration-test gaps have since been repaired and verified in separate follow-ups. Historical failures remain recorded; Windows/Linux reruns are still pending. See the [design](PROCESS_EXIT_PROGRESS.md) and [Mac acceptance](MACOS_EXIT_VALIDATION.md). |
 | Windows | Preserve native HANDLE duplication and the explicit inheritance list. Validate shared integration without adding an unnecessary POSIX resource lock. |
 
 本次不改 Message Bus／Context 的資料傳輸、heartbeat、重啟政策或一般 Module 公開服務 API；
@@ -145,16 +145,21 @@ internal FD activity protected. This is not a sandbox or interception of native 
 
 ## Separate macOS exit investigation / macOS 退出觀察獨立工作
 
-The unmodified macOS control already demonstrates an exited zombie child followed
-by `wait_until()` timeout and immediate `try_wait()` recovery. Its root cause is
-not confirmed. Trace watch registration, NOTE_EXIT consumption, waitpid(WNOHANG),
-record publication, monitor wake delivery and waiter notification on native macOS.
+The unmodified macOS control demonstrates an exited zombie child followed
+by `wait_until()` timeout and immediate `try_wait()` recovery. The subsequent
+[2026-11-03 native traces](MACOS_FD_VALIDATION.md) confirm a consumed NOTE_EXIT
+followed by waitpid(WNOHANG) returning zero, then an indefinite monitor wait.
+Watch registration, record publication and user wakes succeeded in the fully
+traced failing sample. Subsequent [step 1 controlled reproduction and lifecycle design](PROCESS_EXIT_PROGRESS.md)
+is complete: the original observer deterministically stalls in Debug and Release.
+Step 2 subsequently implemented the repair and passing maintained regressions. Mac native/integration checks and the two test repairs are recorded in the [current acceptance summary](MACOS_EXIT_VALIDATION.md#current-acceptance-status); Windows/Linux reruns remain pending.
 
 Keep OSAL as the sole reaper. Use bounded observation records and test-owned
-process cleanup; preserve failed samples. Select the repair from those observations.
-Do not pre-approve periodic polling, increase public timeouts or treat other-platform
-passes as a fix. If new steady-state polling or another major mechanism/lifecycle
-trade-off is necessary, return for a decision before implementing that change.
+process cleanup; preserve failed samples. The owner subsequently accepted 50ms follow-up
+only while consumed exit notifications still need observation, preserving caller deadlines.
+The recorded exit-repair authorization covers the implementation, controlled contracts and subsequent Mac acceptance. Do not turn this into
+permanent polling, increase public timeouts or treat other-platform passes as a fix.
+New major lifecycle trade-offs still require discussion before implementation.
 
 ## Implementation stages / 分階段開工步驟
 
@@ -189,11 +194,11 @@ not be independently releasable; do not label partial integration as the complet
 - [x] Baseline investigation and Windows/Linux comparison recorded.
 - [x] Owner decisions and standard-stream copy bound confirmed; this contract written.
 - [x] Stage 1: coordinator and Host/Plugin integration implemented; Windows/WSL evidence below.
-- [x] Stage 2: POSIX acquisition/spawn implementation and Windows/WSL validation; new native macOS acceptance remains pending.
-- [ ] Stage 3 (deferred by the owner on 2026-11-02): macOS exit root cause established and repair verified.
-- [ ] Stage 4: three-platform integration acceptance and documentation completed.
+- [x] Stage 2: POSIX acquisition/spawn implementation and Windows/WSL/macOS FD validation; independent Mac exit-observation failures remain recorded.
+- [x] Stage 3: macOS exit-repair checks and the two integration-test follow-ups completed. Native exit checks passed 6,624/6,624; original full integration is Debug 151/153 and Release 152/153. The Plugin test repair now has controlled ordering/cleanup coverage and native Mac validation; the subsequent Debug/Release full suites each pass 153/154. The example fixture was then repaired and passed focused Mac Debug/Release CTest (1/1 each); the full suite was not rerun after that final script-only change. See the [Mac report](MACOS_EXIT_VALIDATION.md) and [Module investigation](../module_system/MACOS_PLUGIN_CLASSIFICATION.md). Historical failures remain recorded; Windows/Linux validation remains separate.
+- [ ] Stage 4: final three-platform repair acceptance. Earlier source/SDK runs are recorded, but Windows/Linux must rerun the subsequent exit repair, and the retained Mac integration failures need resolution.
 - [x] Stage 4 Windows/WSL: Debug/Release source and installed-SDK acceptance recorded below.
-- [ ] Stage 4 macOS: repeat integration acceptance on the same topic revision.
+- [x] Stage 4 macOS: native `a19c0d4` Debug/Release integration passed; see the separate exit-stress failures in the Mac report.
 
 **Owner deferral (2026-11-02):** Skip native macOS work for now: both the new
 stage 2 repair acceptance and stage 3 exit-observation investigation remain open
@@ -208,6 +213,18 @@ other platforms. The deferral itself did not authorize stage 4.
 **Stage 4 authorized on 2026-11-03:** run Windows/WSL Debug and Release source
 and installed-SDK acceptance. Native macOS stage 2/4 acceptance and the stage 3
 investigation remain deferred in TODO; do not mark three-platform acceptance complete.
+
+**Subsequent Mac authorization on 2026-11-03:** the owner resumed native stage 2/4
+acceptance and stage 3 investigation, with documentation only: no production fix
+and no benchmark. The [Mac report](MACOS_FD_VALIDATION.md) owns this round's results
+and supersedes the earlier deferral. The subsequently authorized exit-repair steps 1–2 and remaining validation are recorded separately in [exit progress](PROCESS_EXIT_PROGRESS.md).
+
+**Exit-repair step 3 subsequently authorized:** native Mac exit, full source App/Python
+and clean SDK verification are recorded in the [dedicated report](MACOS_EXIT_VALIDATION.md).
+Original failures remain visible; neither the completed native checks nor later
+successful Plugin repeats alone close the classification failure. The subsequently authorized
+[test repair and acceptance](../module_system/MACOS_PLUGIN_CLASSIFICATION.md) add controlled
+central-save ordering and failure cleanup evidence. The subsequent [example fixture repair](../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap) passed focused Mac checks; historical full-suite failures remain recorded.
 
 <a id="resource-coordinator"></a>
 
@@ -291,9 +308,9 @@ late-binding diagnostics across control transport, and rejected-image `_Exit(70)
 instead of its intentionally fatal unload destructor. Initialization tests verify
 partial binding failure retains coordination and does not leak a fatal binding.
 
-Windows/WSL evidence covers this stage only. **Native macOS execution of these new
-tests is pending**; existing macOS baseline evidence is preserved. No claim is made
-that the POSIX FD race, macOS CLOEXEC issue, or macOS exit observation is fixed.
+Windows/WSL evidence above covers that stage only. Subsequent native macOS execution
+is recorded in the [Mac report](MACOS_FD_VALIDATION.md); existing baseline evidence
+is preserved. Coordinator passes alone do not establish FD/stdio or exit-observation correctness.
 
 After final wake-all/error-table/cause-chain refinements, the affected Release
 checks passed **6/6** and Debug checks **4/4** on both Windows and WSL.
@@ -378,7 +395,7 @@ disposable reproducers are under ignored `build/fd-coordinator/` and
 | --- | --- |
 | Windows 11 x64 build 26200, MSVC 19.44.35229 / toolset 14.44.35207 | Common/OSAL Debug **31/31**, Release **31/31** |
 | WSL Ubuntu 24.04.5 x86-64, GCC/libstdc++ 13.3, glibc 2.39, CMake 3.28.3 | Common/OSAL Debug **42/42**, Release **42/42** |
-| Native macOS | New stage 2 execution pending; existing Mac baseline remains valid evidence of the original defects |
+| Native macOS | Subsequent Debug/Release Common/OSAL 42/42 and FD diagnostics are in the [Mac report](MACOS_FD_VALIDATION.md); exit stress still reproduces the separate observation defect. |
 
 Final Linux image-local forwarding checks passed **11/11** in both Debug/Release;
 `readelf` confirmed both forwarding symbols are HIDDEN. The final Linux Host/Plugin,
@@ -449,8 +466,8 @@ are dropped. The final Debug/Release stress passed without permanent FD growth.
 `shutdown_until()` 當作執行緒 join 或動態庫安全卸載屏障；需另行設計才可增加這種保證。
 測試中的 1 秒只用來觀察清理，不是新 Runtime 參數，也沒有放寬等待子程序退出的期限。
 
-**本輪結論限定 Windows／Linux 的已測範圍。** macOS CLOEXEC 修復的原生驗證待補；
-macOS 退出觀察根因仍屬第三階段，沒有加入輪詢或延長正式期限來掩蓋它。
+**上述原始結論限定當時 Windows／Linux 的已測範圍。** 後續 macOS CLOEXEC 原生驗證及
+退出觀察定位見 [Mac 報告](MACOS_FD_VALIDATION.md)；沒有加入輪詢或延長正式期限。
 乾淨 installed SDK、搬移部署與平台驗收結果見[第四階段](#stage-4-acceptance)。
 
 <a id="stage-4-acceptance"></a>
@@ -479,8 +496,8 @@ implied by this record.
 
 Both platforms build UI resources with Node 24.19.0. Separate fresh Debug/Release
 build directories enable tests and SDK installation. WSL builds on its native
-Linux filesystem, not the Windows-mounted checkout. Native macOS execution is
-explicitly deferred, not covered by WSL.
+Linux filesystem, not the Windows-mounted checkout. Native macOS was deferred
+in that Windows/WSL run; the subsequent native acceptance below is separate evidence.
 
 WSL core tests use its ordinary network environment. The remaining integration
 suite runs as the same non-root `vinc-test` user inside a fresh Linux network
@@ -494,7 +511,7 @@ remain serial within their own platform.
 | --- | --- | --- |
 | Windows | **122/122 covered and passed** | **122/122 passed** |
 | WSL Linux | **130/130 passed** | **130/130 passed** |
-| Native macOS | Pending / 待驗 | Pending / 待驗 |
+| Native macOS, subsequent `a19c0d4` acceptance | **132/132 passed** | **132/132 passed** |
 
 Windows Debug combines 109 unaffected non-SDK successes, the corrected
 `app.plugin` rerun and 12 SDK successes. The initial 109/110 run and the separate
@@ -514,8 +531,9 @@ still matched all 659 recorded inputs. These functional results do not establish
 a performance bound or replace the deferred native Mac acceptance.
 
 本輪 Windows／WSL 的來源建置、跨元件與安裝式 SDK 驗收完成。只補上測試接線與
-驗收文件，沒有因本輪結果再變更正式 Runtime；Mac 第二／四階段驗收及第三階段
-退出觀察調查仍未完成。
+驗收文件，沒有因該輪結果再變更正式 Runtime；當時 Mac 待驗的第二／四階段與
+退出調查後續已由 [Mac 報告](MACOS_FD_VALIDATION.md)補上；第三階段修復及 Mac 後續測試
+見 [目前驗收狀態](MACOS_EXIT_VALIDATION.md#current-acceptance-status)，Windows／Linux 修復後回歸仍待補。
 
 ### Maintained integration checks / 持續維護的整合測試
 
@@ -556,11 +574,14 @@ does not change the production Runtime.
 初次 Debug 驗收發現的是 App 測試少傳一個 fixture，不能當成已重現正式 Runtime
 故障。保留初次失敗紀錄，另記修正後結果；沒有用略過案例來達成通過。
 
-Native macOS must still run the stage 2 regressions and this stage's Debug/Release
-source/App/Plugin and moved-SDK checks on the same topic revision. Existing native
-Mac baseline reports remain valid evidence of the original defects, but cannot
-establish acceptance of this new repair. The stage 3 exit-observation investigation
-is a separate unresolved item in the [root TODO](../../../TODO.md#osal-macos-標準串流與退出觀察).
+The subsequent native Mac round at `a19c0d4` passed stage 2 maintained tests and
+Debug/Release source/App/Plugin and clean moved-SDK acceptance. Its source matches
+repair commit `49cbfea` outside Markdown; the exact Mac inventory, configuration,
+external controlled results and limitations are in the [Mac report](MACOS_FD_VALIDATION.md).
+The 132-case inventory includes installed Python tests; do not assume identical
+counts imply identical platform/configuration coverage. Separate unmodified exit
+stress still failed 4/3000 (Debug) and 1/3000 (Release). Stage 3 now has traced
+failure-mechanism evidence. Subsequent repair and controlled regressions are in [exit progress](PROCESS_EXIT_PROGRESS.md), with native/integration follow-up in the [step 3 report](MACOS_EXIT_VALIDATION.md); final acceptance remains open in the [root TODO](../../../TODO.md#osal-macos-退出事件後的回收進度).
 
 ### Reproduce / 重現方式
 
