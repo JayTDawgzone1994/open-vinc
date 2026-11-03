@@ -266,4 +266,6 @@ ctest --test-dir <build> --output-on-failure --output-junit <result.xml> --paral
 新版 Param 的乾淨 SDK consumer／application／python 矩陣仍待另輪驗證；
 Windows／Linux 仍須驗證本 PR 的退出修復與測試修訂，沒有 benchmark。
 原始輸出、命令、JUnit 與來源 hash 保存於 Git 外
-`/private/tmp/open-vinc-publication-20261103`。
+`/private/tmp/open-vinc-publication-20261103`；封存包位於
+`/Users/jay/Downloads/open-vinc-publication-20261103/evidence.tar.gz`，
+同目錄 `SHA256SUMS` 可驗證完整性，原始輸出不納入 Git。
