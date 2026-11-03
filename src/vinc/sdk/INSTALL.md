@@ -463,15 +463,27 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
   程序重啟仍保留此意圖；`recorder finish` 只結束錄製。一般 stop 被拒絕，整體 shutdown 仍停止兩者。
 
 
-Version requests use exact matching. The current package version follows the
-0.1.4 baseline; this does not publish a release/tag or promise compatibility with
+Version requests use exact matching. The source/package version is now 0.2.0;
+Git tags and Releases are published separately. This does not promise compatibility with
 every other binary carrying that version. Always use one matching SDK build.
 Do not edit its installed headers/configuration. Rebuild the SDK when changing
 layout settings; editing `config.hpp` is detected on the next package lookup.
 
-指定版本時採完全匹配；目前套件版本沿用 0.1.4 基準，沒有因此發布新 tag／Release，
+指定版本時採完全匹配；來源／套件版本已同步為 0.2.0，Git tag／Release 另行發布，
 也不承諾所有同版號的任意產物都相容。請整套使用同一次匹配的 SDK 建置。
 不要修改安裝目錄中的標頭／設定；調整布局設定須重建 SDK，修改 `config.hpp` 會在下次查找時遭拒。
+
+**0.2.0 version alignment validation (2026-11-03):** Windows x64/MSVC 19.44 and
+WSL Ubuntu 24.04/GCC 13.3 Release rebuilds and `sdk.installed_consumer` passed
+(1/1 top-level suite each, including its four nested native tests). Fresh separate
+prefixes report 0.2.0 in `vincConfigVersion.cmake`, `vinc_VERSION` and `profile.txt`;
+exact 0.2.0 lookup succeeds and exact 0.1.4 lookup is rejected. macOS and full
+Debug/Release regression were not rerun for this package-metadata-only change.
+
+**版本同步驗證：** 上述兩平台的 Release 重建、安裝／搬移 consumer 及 EXACT 版本接受／拒絕
+檢查均通過。初次探針使用了 consumer 拒絕測試刻意破壞的安裝標頭，正確遭完整性檢查拒絕；
+後改用全新 prefix 通過，沒有放寬防護。原始紀錄與重跑保存在 Git 外
+`build/release-v0.2.0/`，本輪未重新執行 Mac 或完整專案回歸。
 
 ## Matching-build checks / 相容性檢查
 
