@@ -9,11 +9,15 @@
 The [2026-11-03 Mac exit-repair report](../osal/MACOS_EXIT_VALIDATION.md) records
 Debug/Release App, Python and SDK verification, including the separate clean
 producer handoff and retained original integration failures. It does not establish
-Windows/Linux acceptance of the exit repair.
+Windows/Linux acceptance of the exit repair. The subsequent
+[Windows/WSL follow-up](../osal/WINDOWS_LINUX_EXIT_VALIDATION.md) now records
+Debug/Release source regression and all three fresh installed-SDK suites passing
+on each platform; it retains the separate mounted-source Tcl build failure.
 
 最新 Mac 退出修復、Plugin 與範例測試補驗見上述報告的
 [驗收總結](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)；
-原始整合失敗與定點補驗分開記錄，未宣稱三平台驗收完成。
+原始整合失敗與定點補驗分開記錄。後續 Windows／WSL Debug／Release 已完成同版來源與
+三套乾淨 installed SDK 補驗，見上述補驗文件；新版 Mac Param SDK 則已由本頁上方的獨立報告結案。
 
 Central application features use [Kconfig configuration](../../../tools/configure/README.md).
 This interpreter requirement applies to application composition, not plain SDK

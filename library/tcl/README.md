@@ -100,6 +100,19 @@ Ctrl+C 另外觸發框架完整關閉。標準 Tcl 的阻塞式 `after ms` 由�
 
 ## 待處理事項
 
+### WSL 掛載來源的並行部署鎖逾時（2026-11-03）
+
+本輪退出進度跨平台驗收使用 `9f0ec0b`、Ubuntu 24.04.5／WSL2、GCC 13.3。
+來源位於 `/mnt/d/code/open-vinc`、建置位於 WSL ext4，以 Ninja `--parallel 6`
+全新建置 Debug 時，Shell 測試的多個 Tcl resource target 解析到同一目的地；
+其中兩個在 `deploy.cmake:18` 回報 `Cannot acquire Tcl resource deployment lock: Timeout reached`。
+這是已重現的建置失敗，尚未證明檔案鎖或執行期 Tcl／OSAL 有功能缺陷。
+
+初次失敗與後續中止的單工建置另存於 Git 外 `build/exit-platform-validation/`；
+後續改用非文件輸入雜湊一致的 WSL 原生來源副本補驗，不改 60 秒上限或正式部署實作。
+建議另輪評估同一 resolved destination 的部署工作是否應合併，以及慢速來源的等待政策；
+目前只是待評估方向，不構成修正授權。跨平台驗收結果由 OSAL 的驗收文件維護。
+
 ### 增量建置與父專案整合（2026-10-06 CMake 重審）
 
 - **來源與生成建置圖確認，尚未做版本切換實測：** Windows ExternalProject 的 configure

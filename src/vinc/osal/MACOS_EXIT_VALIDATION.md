@@ -8,7 +8,9 @@
 
 ## Current acceptance status / 目前驗收狀態（2026-11-03）
 
-**macOS 退出修復及後續兩項測試修復已有原生證據；Windows／Linux 修復後驗證待補。**
+**macOS 退出修復及後續兩項測試修復已有原生證據；Windows／Linux 修復後補驗亦已完成。**
+後兩平台的 Debug／Release、Plugin／範例與乾淨 installed SDK 結果獨立維護於
+[跨平台補驗](WINDOWS_LINUX_EXIT_VALIDATION.md)，包含另行記錄的 WSL Tcl 部署建置問題。
 這是不同輪次結果的索引，不是一次全綠的完整 CTest 報告。最後的變更只修訂範例測試腳本，
 因此定點重驗該項；沒有在最後變更後重跑完整 154 項，也沒有做 benchmark。
 
@@ -23,7 +25,7 @@
 兩組輸出均確認全部 Module 退出，結束後的本案程序篩選沒有殘留。
 這些結果關閉本輪 Mac 發現的兩項測試缺口，不承諾任意排程、其他 CPU／工具鏈或三平台均已驗證。
 
-剩餘行動統一列於 [TODO](../../../TODO.md#osal-macos-退出事件後的回收進度)。
+其他剩餘行動統一列於 [TODO](../../../TODO.md)。
 已完成的資源建立／spawn 競爭驗收仍見 [原生 FD 報告](MACOS_FD_VALIDATION.md)，
 與後來的退出觀察缺口分開追蹤。Repository 保存本文件、元件報告及可重跑的測試；
 原始 logs、JUnit、外部診斷副本和壓縮包留在 Git 外。
@@ -225,10 +227,10 @@ runner 中的實際工具路徑與全部參數保存在對應 `*-results.json`�
 
 ## Limits and remaining work / 限制與剩餘工作
 
-- 第四步仍須在 Windows／Linux 原生建置及執行同一份退出修復與受控契約，並補整合回歸。
-  過去平台通過紀錄不能替代本輪私有 native 介面改動的驗證。
+- 第四步現已補上同版來源的 Windows／Linux Debug／Release、原生回歸與 installed SDK
+  驗收，見 [跨平台補驗](WINDOWS_LINUX_EXIT_VALIDATION.md)。本文件的 Mac 數字沒有改寫。
 - `module.plugin` 分類測試已修復並完成 macOS 驗證，中央順序及失敗清理另有受控契約；
-  Windows／Linux 重驗待補，見 [Module 紀錄](../module_system/README.md#macos-plugin-classification-follow-up)。
+  Windows／Linux 重驗現已完成，見 [Module 紀錄](../module_system/README.md#macos-plugin-classification-follow-up)。
   範例部署 fixture 也已修正並通過 Mac 定點補驗；本報告的原始全套失敗均保留。
 - 沒有驗證 Intel Mac、最低支援 macOS、其他 Python minor 或工具鏈組合。
 - 沒有強制取得真實 PID 重用；舊事件／新紀錄分離由受控契約及第一步 native token 證據支援。
@@ -265,7 +267,8 @@ ctest --test-dir <build> --output-on-failure --output-junit <result.xml> --paral
 這是整合後來源回歸，沒有重跑全部 CTest、6,624 案原生批次或乾淨 installed SDK。
 該輪尚未執行的新版 Param 乾淨 SDK consumer／application／python 矩陣，已由
 [後續獨立 Debug／Release 驗收](../sdk/MACOS_PARAM_VALIDATION.md)補齊；此處不增記為當輪執行。
-Windows／Linux 仍須驗證本 PR 的退出修復與測試修訂，沒有 benchmark。
+該輪尚未執行的 Windows／Linux 退出修復與測試修訂驗收，也已由
+[後續補驗](WINDOWS_LINUX_EXIT_VALIDATION.md)補齊；沒有 benchmark。
 原始輸出、命令、JUnit 與來源 hash 保存於 Git 外
 `/private/tmp/open-vinc-publication-20261103`；封存包位於
 `/Users/jay/Downloads/open-vinc-publication-20261103/evidence.tar.gz`，

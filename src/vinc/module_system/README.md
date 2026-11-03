@@ -43,7 +43,9 @@ tests now separate budgets, observe central saved-failure order and verify clean
 on assertion/error paths; production behavior is unchanged. The original full-suite
 failure omitted its fixture/actual error, so its unique retrospective cause remains unproven.
 
-**測試修復及 macOS Debug／Release 驗證完成，Windows／Linux 原生重驗待補：** 一般分類改用獨立 5 秒 setup 預算，loader stall 保留 600ms，
+**測試修復及三平台 Debug／Release 驗證完成：** Windows／Linux 的同版來源定點、
+回歸及乾淨 installed SDK 結果見 [跨平台補驗](../osal/WINDOWS_LINUX_EXIT_VALIDATION.md)。
+一般分類改用獨立 5 秒 setup 預算，loader stall 保留 600ms，
 並補足錯誤身分與失敗診斷。新增 `module.failure_order` 先觀察中央已保存的主要故障，
 才放行後續報告；驗證故障先保存／逾時先保存兩種次序及 cleanup 分開保存。
 Scope 保證 assertion unwind 也先確認停止與回收再刪檔；無法確認時保留檔案，
