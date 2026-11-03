@@ -33,14 +33,14 @@ Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
 }
 void NativeMonitor::wake() noexcept {
 }
-Result<void> NativeMonitor::wait(bool) noexcept {
+Result<ProcessExitEvents> NativeMonitor::wait(bool) noexcept {
     std::this_thread::sleep_for(fake_poll_interval);
     return {};
 }
 NativeProcess::NativeProcess(std::unique_ptr<ProcessImpl> impl) : impl_(std::move(impl)) {
 }
 NativeProcess::~NativeProcess() = default;
-Result<std::unique_ptr<NativeProcess>> NativeProcess::spawn(const SpawnOptions&, NativeMonitor&,
+Result<std::unique_ptr<NativeProcess>> NativeProcess::spawn(const SpawnOptions&, NativeMonitor&, ProcessId,
                                                           const ChildPipe*) {
     return std::unique_ptr<NativeProcess>(new NativeProcess(std::make_unique<ProcessImpl>()));
 }
