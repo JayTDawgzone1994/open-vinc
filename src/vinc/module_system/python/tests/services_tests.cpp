@@ -52,7 +52,16 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     const auto expected_publisher_id = mode == "identity-error" ? publisher_id + 1 : publisher_id;
     auto mid = take(manager->start_module(type.name,
         {"--name", "pythonNode", mode, std::to_string(expected_publisher_id)}));
-    take(manager->wait_started(mid));
+    const auto expected_operation = mode == "param-error" ? module_system::ErrorOperation::ParamCallback
+                                                          : module_system::ErrorOperation::SubscriptionCallback;
+    const bool expects_failure = mode != "normal" && mode != "same-id";
+    auto started = manager->wait_started(mid);
+    // Intentional callbacks may fault immediately after Ready, before the
+    // waiter observes Running. Validate that exact fault below as usual.
+    if (!started && !(expects_failure && started.error().is(module_system::ErrorCode::HookException) &&
+                      started.error().is_operation(expected_operation))) {
+        take(std::move(started));
+    }
     std::cout << "Identity case=" << mode << " Publisher=" << publisher_id << " Python MID=" << mid << '\n';
     if (mode == "same-id") {
         check(static_cast<std::uint64_t>(publisher_id) == mid, "fixture must reproduce equal Publisher ID and MID");
@@ -90,9 +99,7 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     } else {
         check(record && record->state == ModuleState::Failed && record->last_failure,
               "uncaught callback exception fails its module");
-        auto operation = mode == "param-error" ? module_system::ErrorOperation::ParamCallback
-                                               : module_system::ErrorOperation::SubscriptionCallback;
-        check(record->last_failure->error.is_operation(operation), "callback operation retained");
+        check(record->last_failure->error.is_operation(expected_operation), "callback operation retained");
         check(captured.find("services_module.py(") != std::string::npos,
               "callback traceback retains source location");
         if (mode == "identity-error") {

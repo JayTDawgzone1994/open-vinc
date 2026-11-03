@@ -1,6 +1,11 @@
 import os
 import vinc
 
+# Published Param error identities; reject permission failures specifically.
+PARAM_ERROR_DOMAIN = 10
+PARAM_NOT_FOUND = 4
+PARAM_PERMISSION_DENIED = 6
+
 
 class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
     def on_start(self, args):
@@ -11,12 +16,53 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
         self.changed = False
         self.publisher = self.context.advertise(vinc.messages.SdkPacket, "sdk/request")
         self.subscriber = self.context.subscribe(vinc.messages.SdkPacket, "sdk/reply", self.receive)
-        self.context.param.register_param("gain", vinc.param.Type.Int32, 7)
+        self.context.param.register_param("gain", vinc.param.Type.Int32, 7,
+                                         restart_hint=vinc.param.RestartHint.App)
+        self.context.param.register_param("plain", vinc.param.Type.Int32, 1)
+        plain = self.context.param.read_current("plain")
+        assert plain.permission == vinc.param.Permission.Limited
+        assert plain.restart_hint == vinc.param.RestartHint.None_
+        # No pump has run: current reads neither subscribe nor refresh the cache.
+        self.context.param.set("gain", vinc.param.Type.Int32, 7)
+        initial = self.context.param.read_current("gain")
+        assert initial.value == 7
+        assert initial.default_value == 7
+        assert initial.permission == vinc.param.Permission.Limited
+        assert initial.restart_hint == vinc.param.RestartHint.App
+        watches_before = len(self.context.param.watches())
+        native = self.context.param.read_current("native.fixed")
+        assert native.value == 7
+        assert native.restart_hint == vinc.param.RestartHint.Module
+        assert len(self.context.param.watches()) == watches_before
+        try:
+            self.context.param.update("gain", vinc.param.Type.Int32)
+        except vinc.VincError as error:
+            assert error.error.domain == PARAM_ERROR_DOMAIN
+            assert error.error.code == PARAM_NOT_FOUND
+        else:
+            raise AssertionError("read_current must not populate the pump cache")
+        try:
+            self.context.param.set("native.fixed", vinc.param.Type.Int32, 9)
+        except vinc.VincError as error:
+            assert error.error.domain == PARAM_ERROR_DOMAIN
+            assert error.error.code == PARAM_PERMISSION_DENIED
+        else:
+            raise AssertionError("foreign Limited writes must be rejected")
+        self.context.param.set("native.shared", vinc.param.Type.Int32, 9)
+        shared = self.context.param.read_current("native.shared")
+        assert shared.value == 9
+        assert shared.permission == vinc.param.Permission.Public
+        assert shared.restart_hint == vinc.param.RestartHint.None_
+        self.context.param.set("gain", vinc.param.Type.Int32, 8)
+        assert self.context.param.read_current("gain").value == 8
+        assert initial.value == 7
+        print("PYTHON_PARAM_CURRENT_OK", flush=True)
         self.context.param.on_change(self.changed_param)
         self.context.log.info("INSTALLED_PYTHON_LOG")
 
     def changed_param(self, snapshot):
-        self.changed = snapshot["py.gain"].value == 7
+        assert snapshot["py.gain"].restart_hint == vinc.param.RestartHint.App
+        self.changed = snapshot["py.gain"].value == 8
 
     def receive(self, message):
         assert message.publisher_name() == "native"
@@ -39,7 +85,8 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
                                   "native", "echo", message, self.completed)
             return 0
         if self.received and self.rpc_received and self.changed:
-            assert self.context.param.update("gain", vinc.param.Type.Int32) == 7
+            assert self.context.param.update("gain", vinc.param.Type.Int32) == 8
+            print("PYTHON_PARAM_RESTART_OK", flush=True)
             print(f"PYTHON_FLOW_REVISION={self.revision}", flush=True)
             return 0
         return 1

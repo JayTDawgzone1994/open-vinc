@@ -19,7 +19,7 @@ public:
     }
 
     Result<void> register_value(std::string name, param::Value defaults,
-                                param::Permission permission) override;
+                                param::RegisterOptions options) override;
     Result<void> set_value(std::string name, param::Value value) override;
     Result<void> watch_value(std::string name, param::Type type) override;
     Result<std::optional<param::Snapshot>> snapshot(std::uint64_t known_revision) override;
@@ -39,9 +39,12 @@ private:
     std::map<std::uint64_t, std::shared_ptr<Pending>> pending_;
     std::uint64_t next_request_ = 1;
     std::mutex read_mutex_;
+    std::condition_variable_any read_changed_;
+    bool reading_ = false;
     std::uint64_t lock_id_ = 0;
     osal::SharedMemoryMapping mapping_;
     control::Bytes buffer_;
+    Result<void> acquire_reader();
     Result<control::Bytes> request(std::uint16_t operation, control::Bytes payload);
     Result<void> attach();
     Result<void> map_image(std::string_view name);

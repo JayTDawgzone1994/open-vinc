@@ -23,9 +23,30 @@ enum class Type : std::uint32_t {
     String = 12
 };
 enum class Permission : std::uint32_t {
-    FrameworkOnly = 0,
-    Open = 1
+    // Zero belonged to the removed central-only policy; never reinterpret it.
+    Public = 1,
+    Limited = 2
 };
+
+// Advisory metadata only; None does not promise immediate application.
+enum class RestartHint : std::uint32_t {
+    None = 0,
+    Module = 1,
+    App = 2
+};
+
+struct RegisterOptions {
+    Permission permission = Permission::Limited;
+    RestartHint restart_hint = RestartHint::None;
+};
+
+constexpr bool valid_restart_hint(RestartHint hint) noexcept {
+    return hint == RestartHint::None || hint == RestartHint::Module || hint == RestartHint::App;
+}
+
+constexpr bool valid_permission(Permission permission) noexcept {
+    return permission == Permission::Limited || permission == Permission::Public;
+}
 using Value = std::variant<bool, std::int8_t, std::uint8_t, std::int16_t, std::uint16_t, std::int32_t,
                            std::uint32_t, std::int64_t, std::uint64_t, float, double, std::string>;
 template <class T>
@@ -48,9 +69,10 @@ Result<std::string> qualify(std::string_view module, std::string_view name);
 struct Entry {
     Value value;
     Value default_value;
-    Permission permission = Permission::FrameworkOnly;
+    Permission permission = Permission::Limited;
     std::uint64_t version = 0;
     std::uint64_t timestamp = 0; // Same-host steady-clock nanoseconds.
+    RestartHint restart_hint = RestartHint::None;
 
     template <ParamType T> Result<T> get() const {
         const auto* found = std::get_if<T>(&value);

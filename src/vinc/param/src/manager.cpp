@@ -46,6 +46,20 @@ std::string display_value(const Value& value) {
     output += '\"';
     return output;
 }
+
+// Registration metadata describes a requirement, not whether a running Module
+// has applied this value. Keep all Shell/Tcl presentations on the same path.
+std::string restart_target(std::string_view name, RestartHint hint) {
+    switch (hint) {
+    case RestartHint::Module:
+        return "Module '" + std::string(name.substr(0, name.find('.'))) + "'";
+    case RestartHint::App:
+        return "App";
+    case RestartHint::None:
+        return {};
+    }
+    return {};
+}
 }
 
 Result<std::unique_ptr<ParamManager>> ParamManager::create(std::unique_ptr<Storage> storage) {
@@ -121,6 +135,12 @@ Result<void> ParamManager::submit(std::uint64_t mid, std::shared_ptr<control::Se
         std::lock_guard lock(mutex_);
         const auto peer = peers_.find(mid);
         if (peer == peers_.end()) {
+            return std::unexpected(Error{ErrorCode::PermissionDenied, ErrorOperation::Receive});
+        }
+        // The Manager supplies the authenticated Session. A MID cannot transfer
+        // its parameter identity to another connection before confirmed exit.
+        const auto admitted_session = peer->second.session.lock();
+        if (admitted_session && admitted_session != session) {
             return std::unexpected(Error{ErrorCode::PermissionDenied, ErrorOperation::Receive});
         }
         if (frame.request <= peer->second.last_request) {
@@ -234,7 +254,9 @@ Result<control::Bytes> ParamManager::execute(std::uint64_t mid, const control::F
     Result<void> changed;
     if (request.operation == Register) {
         const auto permission = reader.u32();
-        if (!reader.done() || permission > 1 || !valid_segment(name)) {
+        const auto restart_hint = static_cast<RestartHint>(reader.u32());
+        if (!reader.done() || !valid_permission(static_cast<Permission>(permission)) ||
+            !valid_restart_hint(restart_hint) || !valid_segment(name)) {
             return std::unexpected(Error{ErrorCode::InvalidValue, ErrorOperation::Register});
         }
 
@@ -243,7 +265,7 @@ Result<control::Bytes> ParamManager::execute(std::uint64_t mid, const control::F
             return std::unexpected(full.error());
         }
         changed =
-            register_value(mid, std::move(*full), std::move(*value), static_cast<Permission>(permission));
+            register_value(mid, std::move(*full), std::move(*value), {static_cast<Permission>(permission), restart_hint});
     } else if (request.operation == Set && reader.done()) {
         changed = set_value(mid, name, std::move(*value));
     } else {
@@ -352,9 +374,13 @@ void ParamManager::persist_defaults() {
 }
 
 Result<void> ParamManager::register_value(std::uint64_t mid, std::string name, Value defaults,
-                                          Permission permission) {
+                                          RegisterOptions options) {
     if (!valid_name(name)) {
         return std::unexpected(Error{ErrorCode::InvalidName, ErrorOperation::Register});
+    }
+
+    if (!valid_permission(options.permission) || !valid_restart_hint(options.restart_hint)) {
+        return std::unexpected(Error{ErrorCode::InvalidValue, ErrorOperation::Register});
     }
 
     auto valid = validate_value(defaults);
@@ -389,7 +415,7 @@ Result<void> ParamManager::register_value(std::uint64_t mid, std::string name, V
             current = same_value(active->second.value, old_default) ? defaults : active->second.value;
         }
     }
-    next.entries.insert_or_assign(name, Entry{std::move(current), defaults, permission});
+    next.entries.insert_or_assign(name, Entry{std::move(current), defaults, options.permission, 0, 0, options.restart_hint});
     // Prepare all registry allocations before publishing shared state.
     auto registrations = registered_;
     registrations.insert_or_assign(name, mid);
@@ -418,7 +444,11 @@ Result<void> ParamManager::set_value(std::uint64_t mid, const std::string& name,
     if (found == live_.entries.end()) {
         return std::unexpected(Error{ErrorCode::NotFound, ErrorOperation::Set});
     }
-    if (mid != central_owner && found->second.permission != Permission::Open) {
+    // Only registration by this incarnation grants owner writes. A persisted
+    // name or a retired MID alone cannot grant access to a replacement Module.
+    const auto owner = registered_.find(name);
+    const bool owns_parameter = owner != registered_.end() && owner->second == mid;
+    if (mid != central_owner && !owns_parameter && found->second.permission != Permission::Public) {
         return std::unexpected(Error{ErrorCode::PermissionDenied, ErrorOperation::Set});
     }
     if (type_of(value) != type_of(found->second.value)) {
@@ -451,7 +481,7 @@ Result<void> ParamManager::load(std::filesystem::path path) {
     snapshot.revision = loaded->empty() ? 0 : 1;
     for (const auto& [name, entry] : *loaded) {
         snapshot.entries.emplace(name,
-                                 Entry{entry.value, entry.default_value, Permission::FrameworkOnly, 1, 0});
+                                 Entry{entry.value, entry.default_value, Permission::Limited, 1, 0});
     }
     auto written = storage_->publish(snapshot, worker_.get_stop_token());
     if (!written) {
@@ -488,15 +518,19 @@ Result<void> ParamManager::configure(std::filesystem::path path) {
         true);
 }
 
-Result<void> ParamManager::register_framework(std::string name, Value defaults) {
+Result<void> ParamManager::register_framework(std::string name, Value defaults, RestartHint restart_hint) {
     return call(
-        [this, name = std::move(name), defaults = std::move(defaults)] {
+        [this, name = std::move(name), defaults = std::move(defaults), restart_hint] {
             auto full = qualify("vinc", name);
             if (!full || !valid_segment(name)) {
                 return Result<void>(std::unexpected(Error{ErrorCode::InvalidName, ErrorOperation::Register}));
             }
 
-            return register_value(central_owner, *full, defaults, Permission::FrameworkOnly);
+            if (!valid_restart_hint(restart_hint) || restart_hint == RestartHint::Module) {
+                return Result<void>(std::unexpected(Error{ErrorCode::InvalidValue, ErrorOperation::Register}));
+            }
+
+            return register_value(central_owner, *full, defaults, {.restart_hint = restart_hint});
         },
         true);
 }
@@ -550,12 +584,24 @@ Result<std::string> ParamManager::execute_command(const std::vector<std::string>
             return std::unexpected(value.error());
         }
 
+        // Build the reply before commit: set_value replaces the snapshot and
+        // invalidates found. A failed write must never return this success text.
+        std::string reply = "Parameter committed (not saved)";
+        const auto hint = found->second.restart_hint;
+        const auto target = restart_target(args[1], hint);
+        if (!target.empty()) {
+            reply += "\nRestart hint: " + target + " must be restarted to apply this parameter.";
+        }
+        if (hint == RestartHint::App) {
+            reply += "\nUse 'param save' before restarting the App to keep this change.";
+        }
+
         auto updated = set_value(central_owner, args[1], std::move(*value));
         if (!updated) {
             return std::unexpected(updated.error());
         }
 
-        return std::string("Parameter committed (not saved)");
+        return reply;
     }
     const bool listing = args.size() == 1 && args[0] == "list";
     const bool getting = args.size() == 2 && args[0] == "get";
@@ -570,7 +616,12 @@ Result<std::string> ParamManager::execute_command(const std::vector<std::string>
         }
         found = true;
         text << name << " [" << type_name(type_of(entry.value)) << "] = " << display_value(entry.value)
-             << " (default " << display_value(entry.default_value) << ", version " << entry.version << ")\n";
+             << " (default " << display_value(entry.default_value) << ", version " << entry.version << ")";
+        const auto target = restart_target(name, entry.restart_hint);
+        if (!target.empty()) {
+            text << " [restart: " << target << "]";
+        }
+        text << '\n';
     }
     if (getting && !found) {
         return std::unexpected(Error{ErrorCode::NotFound, ErrorOperation::Update});

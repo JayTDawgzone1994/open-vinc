@@ -32,7 +32,7 @@ class Params {
     std::uint64_t watch_revision_ = 0;
     std::uint64_t applied_watch_revision_ = UINT64_MAX;
     Result<void> watch(std::string name, Type type);
-    Result<void> register_value(std::string name, Value defaults, Permission permission);
+    Result<void> register_value(std::string name, Value defaults, RegisterOptions options);
     Result<Value> read(std::string_view name) const;
     Result<std::uint64_t> pump();
 
@@ -42,8 +42,8 @@ public:
 
     template <ParamType T>
     Result<void> register_param(std::string name, T defaults,
-                                Permission permission = Permission::FrameworkOnly) {
-        return register_value(std::move(name), Value(std::move(defaults)), permission);
+                                RegisterOptions options = {}) {
+        return register_value(std::move(name), Value(std::move(defaults)), options);
     }
 
     template <ParamType T> Result<void> register_param(std::string name) {
@@ -68,6 +68,9 @@ public:
     }
 
     Result<void> set_value(std::string name, Value value);
+    // Independent committed snapshot; may wait/allocate. Does not watch, pump,
+    // or refresh the local cache. Safe alongside the single Context pump.
+    Result<Entry> read_current(std::string_view name) const;
     Result<void> on_change(std::function<void(const ParamMap&)> callback);
     std::vector<WatchStatus> watches() const;
 };

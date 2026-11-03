@@ -195,7 +195,8 @@ std::optional<std::string_view> CommandRouter::command_help(const std::vector<st
                 "       log show module <NAME|MID|all>\n"
                 "show affects this interactive session only, not saved logs."},
         {"param", "Usage: param list\n       param get <NAME>\n       param set <NAME> <VALUE>\n"
-                  "       param save\n       param status\nQuote values containing spaces."},
+                  "       param save\n       param status\nQuote values containing spaces.\n"
+                  "Restart hints are declarations, not pending-state tracking; no automatic restart or save."},
         {"debug", "Usage: debug start <ModuleType> [args...]\n       debug continue <MID>\n"
                   "       debug stop <MID>\nAttach a debugger to the reported PID before continuing."},
         {"srun", "Usage: srun <file.tcl> [args...]\nRun a Tcl script; following arguments belong to the script."},

@@ -13,6 +13,17 @@ public:
     NativePeer() : BaseModule("nativeNode") {
     }
     Result<void> on_start(const std::vector<std::string>& args) override {
+        auto limited = context.param.register_param<std::int32_t>("fixed", 7,
+            {.restart_hint = param::RestartHint::Module});
+        if (!limited) {
+            return limited;
+        }
+
+        auto shared = context.param.register_param<std::int32_t>("shared", 7, {.permission = param::Permission::Public});
+        if (!shared) {
+            return shared;
+        }
+
         // Consume one Bus ID without allocating another MID. The reply Publisher
         // can then share its numeric ID with the receiving Python Module.
         if (!args.empty() && args.front() == "same-id") {

@@ -451,6 +451,34 @@ is not replaced by these results; upstream support is not local test evidence.
 視覺驗收。該歷史輪次宣告最低 Python 3.9，但實測為 3.12／3.13；目前最低版本已依共用工具鏈規則更新。這些紀錄不取代先前平台驗證，
 也不把上游支援聲明當作本機測試證據。
 
+<a id="python-probe-diagnostic-wrapping"></a>
+
+## Test diagnostic wrapping / 測試診斷換行
+
+2026-11-03 Windows Debug full CTest (`codex/param-redesign-contract`, MSVC
+19.44.35229, CMake 4.3.2, official CPython 3.13.12) exposed a fixture failure in
+`tests/test_python_selection.py::test_probe_timeout_and_failure_report_app_and_reason`.
+The real probe correctly times out, but CMake wraps `limit 10s` between the two
+words when printing the longer interpreter path. The literal `assertIn` rejects
+this valid diagnostic. This evidence does not indicate a production timeout bug.
+Resolved on the same date: the assertion matches `\blimit\s+10s\b`, allowing
+whitespace between the words while retaining the exact limit, real probe timeout,
+App context and failure-reason checks. No runtime behavior or timeout was changed.
+The complete `sdk.python_selection` suite was rerun through Debug CTest:
+Windows **23 passed / 1 platform skip**, WSL Ubuntu 24.04 / CMake 3.28.3 /
+CPython 3.12.3 **24 passed**. Both CTest invocations passed 1/1 (17.86 s / 13.59 s).
+This targeted rerun does not replace the original full-suite failure record or
+claim another full-project run. Native macOS was not rerun.
+
+Windows Debug 全套驗證發現測試誤判：實際探測有正確逾時，但較長的 Python 路徑使
+CMake 把 `limit 10s` 自動換行，測試卻要求連續字串。同日已修正斷言，只接受兩詞之間的
+空白／換行差異，仍檢查 10 秒限制、真正逾時、App 與失敗原因；正式行為與期限未改。
+重跑整套 Python selection：Windows **23 通過、1 平台略過**，WSL **24 通過**，
+兩平台 CTest 各 **1/1**。未重跑完整專案或 Mac，不將原本失敗的全套紀錄改記為通過。
+證據：`build/param-full-validation/windows-ctest.log` 保留原始失敗；
+`windows-python-selection-fixed.log`／`linux-python-selection-fixed.log` 為修正後重驗
+（皆為本機、Git 忽略）。
+
 ## Redirected Unicode diagnostics / Unicode 重導診斷
 
 Resolved in the Kconfig Python selection work (2026-11-02): `configure.py`

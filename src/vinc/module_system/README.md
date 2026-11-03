@@ -6,11 +6,13 @@ Host notification ownership, Bus routes, notification-driven pumpLoop, bounded r
 Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
 preparation failure rejects only the affected Module; later notification failures retain the
 10 ms fallback. See the [pump wakeup contract](PUMP_WAKEUP.md) for policies and validation.
-Current bootstrap is **v16**, Plugin entry **11**, and Module query **v2**; rebuild connected artifacts.
+Current bootstrap is **v16**, Plugin entry **13**, and Module query **v2**; rebuild connected artifacts.
+Entry 13 rejects Plugins compiled before Param RegisterOptions/restart hints; see [Param](../param/README.md#restart-hints).
 
 已接通通知資源、Bus 路由、pumpLoop 喚醒、故障恢復與診斷；pumpOnce 行為不變。
 準備失敗只拒絕該 Module 啟動，運行中的通知故障保留 10 ms 補查。契約及驗證見上述連結。
-目前 bootstrap v16、Plugin entry 11、Module query v2，所有接線產物須一起重建。
+目前 bootstrap v16、Plugin entry 13、Module query v2，所有接線產物須一起重建。
+Entry 13 拒絕加入 RegisterOptions／重啟標記之前的 Plugin；參見 [Param 契約](../param/README.md#restart-hints)。
 
 **Stages 1–2 implemented:** the [OSAL FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md)
 records Host/Plugin coordination ownership, entry 11 initialization, rejection without
