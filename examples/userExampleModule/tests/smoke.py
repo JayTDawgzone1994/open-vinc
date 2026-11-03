@@ -148,9 +148,11 @@ def main():
         shutil.copytree(original.parent / "lib", root / "lib")
         shutil.copytree(original.parent / "python/vinc", root / "python/vinc")
         shutil.copytree(original.parent / "modules", root / "modules")
+        shutil.copytree(original.parent / "licenses", root / "licenses")
         # Copy UI assets only, never the developer's params/logs/instance records.
         for assets in (original.parent / "vinc_data").glob("*/ui"):
             shutil.copytree(assets, root / "vinc_data" / assets.parent.name / "ui")
+            assert (root / "vinc_data" / assets.parent.name / "ui/app/index.html").is_file(), "deployed UI entry is missing"
         shutil.copytree(examples / "python", root / "data/module")
 
         # Tcl catches deliberately failing commands. Unexpected failure still closes
@@ -190,7 +192,8 @@ def main():
         assert "CORRECT native" in output and "CORRECT peer" in output, output
         for name in ("native", "peer"):
             assert f"{name}.gain [double] = 1 (default 1," in output, output
-        for marker in ("READY native", "READY peer", "STORAGE_OK", "EXPECTED checked access",
+        for marker in ("[OK] Web UI ready", "[OK] Bag Recorder ready",
+                       "READY native", "READY peer", "STORAGE_OK", "EXPECTED checked access",
                        "EXPECTED capacity", "NESTED id=7 label=camera", "CACHE gain=3.5",
                        "CACHE gain=2.5", "TOPIC userExample/test", "RAW printf", "RAW print",
                        "MANUAL manualCpp", "MANUAL manualPy", "MANUAL loopPy",

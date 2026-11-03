@@ -326,7 +326,7 @@ void NativeMonitor::wake() noexcept {
     SetEvent(impl_->wake_event.get());
 }
 
-vinc::Result<void> NativeMonitor::wait(bool polling) noexcept {
+vinc::Result<ProcessExitEvents> NativeMonitor::wait(bool polling) noexcept {
     const auto result =
         WaitForSingleObject(impl_->wake_event.get(), polling ? fallback_poll_interval_ms : INFINITE);
     if (result == WAIT_OBJECT_0 || result == WAIT_TIMEOUT) {
@@ -515,7 +515,8 @@ vinc::Result<void> launch_process(ProcessImpl& owner, const SpawnOptions& option
 } // namespace
 
 vinc::Result<std::unique_ptr<NativeProcess>>
-NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const ChildPipe* child_pipe) {
+NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, ProcessId,
+                     const ChildPipe* child_pipe) {
     auto command = build_command_line(options);
     if (!command) {
         return std::unexpected(command.error());

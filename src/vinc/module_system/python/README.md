@@ -817,17 +817,28 @@ Linux／macOS 未實機驗證。
 
 ## Native macOS build-cleanup follow-up / macOS 建置整理補驗（2026-11-02）
 
+Subsequent exit-repair validation (2026-11-03) reran the four source Python suites,
+configuration/selection probes and installed delivery in Debug/Release; see the
+[step 3 report](../../osal/MACOS_EXIT_VALIDATION.md) for the separate clean-producer
+matrix and original integration failures. The earlier results below remain historical.
+
+後續退出修復的兩組 Python／選擇／SDK 驗證見上述第三步報告；完整套件的失敗仍保留，
+下方舊版本紀錄不取代本輪結果。
+
 The `627c409` follow-up passed the Publisher identity scenarios, shared ABI probe,
 System PATH selection and source/installed Python SDK acceptance in Debug and
 Release on macOS arm64/CPython 3.12.14. It supersedes the pending-macOS status of
 those changes above. The original full CTest remains **125/126** in each configuration
-because an example deployment fixture is incomplete; only its external comparison
-has passed. See the [macOS report](../../sdk/MACOS_VALIDATION.md) for the complete
-scope, clean Python-disabled producer matrix and unresolved fixture.
+because that run used an incomplete example deployment fixture; at that stage
+only its external comparison had passed. See the [macOS report](../../sdk/MACOS_VALIDATION.md) for the complete
+scope, clean Python-disabled producer matrix and the historical fixture failure.
+The maintained [example fixture](../../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap)
+was subsequently repaired and passed focused native Mac Debug/Release checks.
 
 本輪補齊上述 Python 身分／ABI／PATH 變更的 macOS 原生證據，兩種組態均通過。
 原始全套仍有範例 fixture 漏檔失敗；外部補齊資源後通過不等於已修正 repository。
-原始數字、乾淨 SDK 與限制統一維護於上方報告；其他平台歷史紀錄不變。
+上述為該輪結果；範例 fixture 後續已修復並通過 Mac Debug／Release 定點補驗，見上方範例連結。
+原始數字、乾淨 SDK 與限制統一維護於上述報告；其他平台歷史紀錄不變。
 
 <a id="待處理事項"></a>
 
@@ -880,10 +891,12 @@ SDK 保留「下游才啟用 Python」的能力；Linux／macOS 保留系統 Run
 The following records preserve each stage's scope. Subsequent formal-entry,
 multi-App and System Module acceptance is maintained in the
 [SDK integration results](../../sdk/INSTALL.md#runtime-final-acceptance);
-the [root TODO](../../../../TODO.md) tracks the owner's native macOS validation.
+subsequent [native Mac acceptance](../../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)
+records the completed checks, while the [root TODO](../../../../TODO.md) tracks remaining cross-platform work.
 
 以下保留各階段的實測範圍；後續正式建置入口、多 App 與 System Module 整合結果統一見
-[SDK 驗收紀錄](../../sdk/INSTALL.md#runtime-final-acceptance)，macOS 實機驗收進度見根目錄 TODO。
+[SDK 驗收紀錄](../../sdk/INSTALL.md#runtime-final-acceptance)，已完成的 macOS 實測見上述
+原生驗收總結；根目錄 TODO 只保留剩餘的跨平台補驗。
 下方保留初次阻塞紀錄與通知快照修正後的 Mac 實測。
 
 <a id="macos-runtime-validation-2026-11-02"></a>

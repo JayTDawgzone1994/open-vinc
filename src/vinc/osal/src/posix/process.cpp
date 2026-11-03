@@ -205,7 +205,8 @@ bool NativeProcess::event_driven() const noexcept {
 }
 
 vinc::Result<std::unique_ptr<NativeProcess>>
-NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const ChildPipe* child_pipe) {
+NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, ProcessId id,
+                     const ChildPipe* child_pipe) {
     // The embedding application must not auto-reap or independently wait for
     // OSAL-owned children. Do not replace a host's global SIGCHLD disposition.
     struct sigaction disposition{};
@@ -388,7 +389,7 @@ NativeProcess::spawn(const SpawnOptions& options, NativeMonitor& monitor, const 
     // No allocations after spawning. If event registration fails (including a
     // very fast exit on macOS), retain ownership and use waitpid/WNOHANG polling.
     // Only OSAL may reap these PIDs, so a live or unreaped child cannot be reused.
-    auto watch = watch_process(monitor.implementation(), native->impl_->pid);
+    auto watch = watch_process(monitor.implementation(), native->impl_->pid, id);
     if (watch) {
         native->impl_->watch = *watch;
         native->impl_->monitored = true;

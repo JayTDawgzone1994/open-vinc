@@ -14,8 +14,8 @@
 namespace vinc::osal::detail {
 namespace {
 // Maximum native readiness events collected in one wait.
-constexpr int max_events_per_wait = 32;
-// Poll children that could not obtain a native exit watch (50 ms).
+constexpr int max_events_per_wait = static_cast<int>(ProcessExitEvents::capacity);
+// Retry unregistered watches and consumed notifications still awaiting reaping (50 ms).
 constexpr long fallback_poll_interval_ns = 50'000'000;
 }
 
@@ -53,9 +53,9 @@ vinc::Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
     if (fcntl(impl->queue, F_SETFD, FD_CLOEXEC) < 0) {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
     }
-    struct kevent event;
-    EV_SET(&event, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
-    if (kevent(impl->queue, &event, 1, nullptr, 0, nullptr) < 0) {
+    struct kevent64_s event;
+    EV_SET64(&event, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, 0, 0, 0);
+    if (kevent64(impl->queue, &event, 1, nullptr, 0, 0, nullptr) < 0) {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::InitializeService, errno));
     }
 
@@ -63,19 +63,19 @@ vinc::Result<std::unique_ptr<NativeMonitor>> NativeMonitor::create() {
 }
 
 void NativeMonitor::wake() noexcept {
-    struct kevent event;
-    EV_SET(&event, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+    struct kevent64_s event;
+    EV_SET64(&event, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, 0, 0, 0);
     int result;
     do {
-        result = kevent(impl_->queue, &event, 1, nullptr, 0, nullptr);
+        result = kevent64(impl_->queue, &event, 1, nullptr, 0, 0, nullptr);
     } while (result < 0 && errno == EINTR);
 }
 
-vinc::Result<void> NativeMonitor::wait(bool polling) noexcept {
-    struct kevent events[max_events_per_wait];
+vinc::Result<ProcessExitEvents> NativeMonitor::wait(bool polling) noexcept {
+    struct kevent64_s events[max_events_per_wait];
     const timespec timeout{0, fallback_poll_interval_ns};
     const int count =
-        kevent(impl_->queue, nullptr, 0, events, max_events_per_wait, polling ? &timeout : nullptr);
+        kevent64(impl_->queue, nullptr, 0, events, max_events_per_wait, 0, polling ? &timeout : nullptr);
     if (count < 0) {
         if (errno == EINTR) {
             return {};
@@ -84,20 +84,29 @@ vinc::Result<void> NativeMonitor::wait(bool polling) noexcept {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::Observe, errno));
     }
 
+    ProcessExitEvents exits;
     for (int i = 0; i < count; ++i) {
+        // On a mixed error batch the service retains monitor_error and polls
+        // all owned children, including any consumed notifications not returned.
         if (events[i].flags & EV_ERROR) {
             return std::unexpected(
                 native_error(vinc::osal::ErrorOperation::Observe, static_cast<int>(events[i].data)));
         }
+        if (events[i].filter == EVFILT_PROC && (events[i].fflags & NOTE_EXIT)) {
+            exits.ids[exits.count++] = ProcessId{events[i].udata};
+        }
     }
 
-    return {};
+    return exits;
 }
 
-vinc::Result<int> watch_process(MonitorImpl& monitor, pid_t pid) noexcept {
-    struct kevent event;
-    EV_SET(&event, static_cast<uintptr_t>(pid), EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, nullptr);
-    if (kevent(monitor.queue, &event, 1, nullptr, 0, nullptr) < 0) {
+vinc::Result<int> watch_process(MonitorImpl& monitor, pid_t pid, ProcessId id) noexcept {
+    struct kevent64_s event;
+    // Include the non-reused service identity in the kernel watch key. A new
+    // registration for a reused PID must not retag an old queued notification.
+    EV_SET64(&event, static_cast<std::uint64_t>(pid), EVFILT_PROC,
+             EV_ADD | EV_ONESHOT | EV_UDATA_SPECIFIC, NOTE_EXIT, 0, id.value, 0, 0);
+    if (kevent64(monitor.queue, &event, 1, nullptr, 0, 0, nullptr) < 0) {
         return std::unexpected(native_error(vinc::osal::ErrorOperation::Observe, errno));
     }
 

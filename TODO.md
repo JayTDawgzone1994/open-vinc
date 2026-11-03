@@ -2,39 +2,43 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
-## Param 重啟標記：macOS 驗收
+## Param 重設計與重啟標記：macOS 乾淨 SDK 驗收
 
-- [ ] macOS：重啟標記版本的乾淨 installed SDK consumer／application／python 三套驗收。
-- [ ] macOS 重建 Plugin entry 13／Param wire v3，跑 Param 三套及 Plugin／Python 四套測試，
-  驗證預設 Limited + None、跨程序標記、callback、舊協定拒絕、重新註冊與 TOML 不保存標記。
-- [ ] macOS 補跑 Shell unit／integration／socket／tcl 與新版 C++／Python 範例 smoke，
-  包含重啟提示、非同步診斷交錯、啟動才套用 label、明確保存及未保存修改的 App 重啟行為。
+- [ ] 使用整合後同一 commit，製作新版 Plugin entry 13／Param wire v3 的乾淨 SDK producer，重跑 installed consumer／application／python 三套驗收。
 
-Windows／WSL Release 第三階段已通過全新 SDK 建置及三套 installed 驗收，各 **3/3**。
-本次契約、結果與 Mac 步驟統一見 [Param restart hints](src/vinc/param/README.md#restart-hints-stage-three)。
-既有 Mac 基線早於本次 ABI 變更，不代替新版 Mac 驗收。
+發布前整合 develop `f16da98` 後，Mac Debug／Release 已重建全部來源 targets，
+包含 Param 三套、Plugin／Python、Shell 與新版範例的來源回歸各 **96/96** 通過。
+來源檢查不取代乾淨 installed SDK 驗收；先前 SDK 基線早於此 ABI 變更。
+本次來源結果見 [發布前驗證](src/vinc/osal/MACOS_EXIT_VALIDATION.md#publication-validation)，
+乾淨 SDK 步驟及既有 Windows／WSL 證據見
+[Param restart hints](src/vinc/param/README.md#restart-hints-stage-three)與
+[Param 第四階段紀錄](src/vinc/param/README.md#param-redesign-stage-four)。
 
-## Param 重設計：macOS 同版原生驗收
+<a id="osalposix-fd-建立與-spawn-的並行競爭窗口"></a>
+<a id="osal-macos-標準串流與退出觀察"></a>
+<a id="osal-macos-退出事件後的回收進度"></a>
 
-- [ ] 在同一 topic branch／commit 重建中央、Plugin、Python binding，驗證 Limited／Public、read_current、啟動覆寫與保存契約。
-- [ ] 重跑來源 Param／Plugin／Python 測試、新版範例 smoke，以及乾淨 installed SDK 的 consumer／application／python 三個整合案例。
+## Windows／Linux：退出修復與測試修訂的原生補驗
 
-驗收步驟、環境要求及結果統一維護於 [Param 第四階段紀錄](src/vinc/param/README.md#param-redesign-stage-four)。
-Windows／WSL 結果不能代替 Mac；先前 macOS SDK 通過紀錄仍保留，但不涵蓋本次 Param 變更。
+**狀態（2026-11-03）：macOS 本輪工作已完成；同一份修復的 Windows／Linux 驗證尚未完成。**
+Mac 結果與歷史失敗的區分見 [驗收總結](src/vinc/osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)。
+既有 FD／spawn 的三平台紀錄不等於本輪退出修復已通過三平台，不能沿用為新變更的結案證據。
 
-## App 組裝：範例測試部署資源缺漏的 macOS 回歸
+- [ ] Windows Debug／Release：建置同一份退出修復，執行共用退出進度契約、Process／OSAL 原生回歸及 App／Python／SDK 整合。
+- [ ] Linux Debug／Release：完成上述同一範圍，驗證 Linux monitor／waitpid 路徑；記錄實際發行版、編譯器、標準函式庫及 runtime 相容範圍。
+- [ ] 兩平台驗證修訂後的 `module.plugin`、`module.failure_order`、`app.plugin`：中央先保存的主要故障不被覆寫，失敗路徑先回收再刪檔，無法確認時保留檔案。
+- [ ] 兩平台重跑修正後的 `examples.user_module`，確認 Plugin／UI 資源搬移、官方 Module Ready、C++／Python 範例與正常收尾。
 
-- [ ] 在 macOS 重跑已補齊 Plugin／UI 資源的 `examples.user_module` fixture。
+每組紀錄需包含相同來源 commit／必要的工作樹差異、OS／CPU／工具鏈／Python 版本、
+實際命令、通過／失敗／略過數與程序清理。各平台只執行適用的原生測試；
+`osal.process_exit_macos` 是 Mac 專用，不能要求 Windows／Linux 執行，也不能用共用假後端測試代替原生證據。
+保留失敗與重跑的不同輪次，不將定點補驗改寫為完整套件重跑。
 
-2026-11-02：`627c409` 的 macOS Debug／Release 原始 CTest 各 **125/126**；
-唯一失敗為此範例 fixture。外部副本補齊資源後兩組通過。2026-11-03 Param 第三階段已將
-部署修正套入正式 fixture，Windows／WSL 五次中央生命週期 smoke 通過；macOS 修正版仍待回歸。
-問題與後續方向由 [範例 README](examples/userExampleModule/README.md#macos-deployment-fixture-gap) 維護。
+契約及驗證主檔：
 
-原列 App 組裝、Python Publisher 身分、ABI 探測與 System Python 搜尋的
-macOS 功能驗證已完成；來源／installed SDK 及乾淨 SDK 下游矩陣皆有通過證據。
-環境、限制及原始失敗與外部對照的區分見
-[macOS 驗證報告](src/vinc/sdk/MACOS_VALIDATION.md)。不將原始全套改記為全綠。
+- [退出進度修復](src/vinc/osal/PROCESS_EXIT_PROGRESS.md)與 [FD／spawn 計畫](src/vinc/osal/FD_SPAWN_PLAN.md)。
+- [Plugin 分類及順序測試](src/vinc/module_system/README.md#macos-plugin-classification-follow-up)。
+- [範例部署測試](examples/userExampleModule/README.md#macos-deployment-fixture-gap)。
 
 ## OSAL：FileLock 解鎖失敗後的原生持鎖狀態
 
@@ -46,48 +50,6 @@ macOS 功能驗證已完成；來源／installed SDK 及乾淨 SDK 下游矩陣�
 （見 [Concurrency](src/vinc/components/concurrency/README.md)），不代表 FileLock 問題已修復。
 詳細分析及後續決策統一維護於
 [OSAL README 待處理事項](src/vinc/osal/README.md#待處理事項)。
-
-## OSAL：POSIX fd 建立與 spawn 的並行競爭窗口
-
-- [x] 完成第四階段 Windows／WSL Debug、Release 來源與安裝式 SDK 整合驗收。
-- [ ] 補驗第二階段 POSIX FD／spawn 修復的 macOS 原生行為，以及 macOS 第四階段跨元件／SDK 驗收。
-
-**第四階段結果（2026-11-03）：** Windows Debug／Release 各 122 項、WSL 各 130 項
-均有通過證據；Debug 的 App fixture 參數遺漏已修正並定點重驗，詳見
-[驗收紀錄](src/vinc/osal/FD_SPAWN_PLAN.md#stage-4-acceptance)。沒有遺留本輪測試子程序。
-macOS 仍須對同一 topic branch／commit 補驗來源 App／Host／Plugin、共用協調器、
-乾淨 installed SDK 與搬移 App、自訂訊息通訊、舊 Plugin entry 拒絕、啟動失敗隔離、
-重複啟停及回收。先前 Mac 基線與其他功能的 SDK 驗收不能代替本次 FD 修復驗收；
-Mac 完成前不將第四階段標記為三平台完成。
-
-**狀態（2026-11-02）：第二階段修復已實作並通過 Windows／WSL 驗證；macOS 新驗收待補。**
-Linux Debug／Release 的受控誤繼承、來源失效／重用與 Pipe EOF 延後案例均已通過修復後驗證。
-Windows HANDLE 路徑維持並通過回歸；不同機制的結果不能代替 macOS 原生驗證。
-2026-10-27 已修正 `osal.descriptor` 對繼承 fd 編號的測試假設，並完成 Ubuntu 24.04／WSL 2
-驗證；該修正未改動正式 OSAL 實作，不代表本項並行競爭已解決。
-修訂設計已確認：資源建立同步、標準串流副本，以及同 Host／Plugin 的 OSAL 共用協調器。
-使用者已接受初始化與第三方操作邊界；最多三個副本是固定串流數量，不是可調參數。
-證據與後續驗收方向見 [跨平台 FD 驗證報告](src/vinc/osal/FD_RACE_VALIDATION.md)。
-已確認契約、驗收要求與四階段進度統一維護於
-[FD／spawn 修訂計畫](src/vinc/osal/FD_SPAWN_PLAN.md)。共用協調器、Host／Plugin
-接線與原生 FD／spawn 已接通；第三階段 Mac 退出觀察及第四階段 Mac 原生驗收仍待執行。
-新增協調測試的原生 macOS 執行待補，不撤銷既有 Mac 基線證據。
-
-## OSAL：macOS 標準串流與退出觀察
-
-**狀態（2026-11-02）：使用者決定本輪先跳過，保留待辦。** 延後第二階段修復的
-macOS 原生驗收與第三階段退出觀察調查；不代表問題已解決，也不撤銷既有 Mac 重現證據。
-恢復時使用同一 topic branch／commit 驗證 Debug／Release，記錄工具鏈與測試結果。
-
-- [ ] 原生驗證第二階段 owned-stdio 修復是否排除 macOS Inherit＋CLOEXEC 串流消失。
-  Mac Debug／Release 各 69/144 組重現；Linux 對應矩陣各 144/144 通過。
-- [ ] 追查 macOS 子程序已為 zombie，`wait_until()` 仍逾時、`try_wait()` 才取得退出結果。
-  Mac 未修改 OSAL 的正常啟停控制組已重現；Windows／Linux 本輪各組態 3,000 次未重現。
-  尚未確認根因，不先用延長逾時或輪詢掩蓋。
-
-這兩項與 FD 競爭分開追蹤；Mac 為使用者提供的原生證據，本機不重複宣稱已執行 Mac 測試。
-詳細證據與原始碼位置見 [OSAL 驗證報告](src/vinc/osal/FD_RACE_VALIDATION.md)；
-macOS **退出觀察**根因調查及修復驗收為[修訂計畫](src/vinc/osal/FD_SPAWN_PLAN.md)第三階段。
 
 ## Socket Shell：背景輸出期間的遠端輸入列重繪
 

@@ -2,6 +2,10 @@
 
 # Param / 具型別參數服務
 
+**Mac source follow-up (2026-11-03):** after merging develop `f16da98`, Debug/Release source rebuilds and 96 selected tests per configuration passed, including Param/Plugin/Python, Shell and the expanded example. Clean installed-SDK acceptance remains pending; see the [publication validation](../osal/MACOS_EXIT_VALIDATION.md#publication-validation).
+
+**Mac 來源補驗：** 已通過上述整合後的 Debug／Release 來源回歸；下文各階段的「Mac 待驗」保留為當時紀錄，完整驗收仍缺新版乾淨 installed SDK，不能以舊 ABI 的 SDK 結果替代。
+
 **Restart-hint stages 1–3:** Registration wiring, Shell reminders, examples and clean installed-SDK acceptance passed on Windows/WSL. Native macOS remains pending. See [registration options](#restart-hints) and [SDK acceptance](#restart-hints-stage-three).
 
 **重啟標記第一至三階段：** 接線、Shell 提醒、範例及乾淨 installed SDK 已通過 Windows／WSL 驗收；Mac 原生仍待驗。見[註冊選項](#restart-hints)與[SDK 驗收](#restart-hints-stage-three)。
@@ -429,7 +433,7 @@ Module 自行解析及驗證 args，框架不生成 `--參數名稱`。建議順
 資源。覆寫不改 default，也不隱含 save；沒有覆寫時使用中央目前值，首次無紀錄時才
 由註冊提供預設。
 
-The [C++/Python user examples](../../../../examples/userExampleModule/README.md#startup-parameters)
+The [C++/Python user examples](../../../examples/userExampleModule/README.md#startup-parameters)
 implement `--gain` with finite range 0..10 and fixed default 1.0. Malformed or
 out-of-range startup args reject startup. Typed but unsuitable persisted/runtime
 values are diagnosed and replaced by the owner through normal `set()`. A failed
@@ -437,7 +441,7 @@ startup correction fails startup; a failed callback correction is reported and
 the example retains its last effective gain. Resource failure is separate: a
 valid port failing to bind is not grounds to rewrite that parameter.
 
-[C++／Python 範例](../../../../examples/userExampleModule/README.md#startup-parameters)
+[C++／Python 範例](../../../examples/userExampleModule/README.md#startup-parameters)
 示範 `--gain`、有限範圍 0..10、固定預設 1.0。錯誤啟動 args 拒絕啟動；已保存或執行中
 的值若型別正確但不適用，由擁有者回報原因並以普通 `set()` 修正。啟動修正失敗即啟動
 失敗；callback 修正失敗則回報並保留最後有效值。合法 port 遇 bind 失敗是資源問題，
@@ -667,7 +671,7 @@ Restart hint: Module 'camera' must be restarted to apply this parameter.
 
 The same text is shown by local Shell, Socket Shell and Tcl. Tcl prints command
 messages separately and still returns 0 on success; no return-value contract changes. Notices go to the requesting
-command, not a new broadcast/log channel. The [C++/Python label example](../../../../examples/userExampleModule/README.md#restart-hints)
+command, not a new broadcast/log channel. The [C++/Python label example](../../../examples/userExampleModule/README.md#restart-hints)
 shows explicit application on Module startup and the difference between Module
 and central restarts.
 本機、Socket、Tcl 顯示同一回覆文字；Tcl 分開輸出命令訊息，成功回傳仍為 0，不改回傳契約。
@@ -825,7 +829,7 @@ shutdown tests also run through the changed permissions.
 
 The Windows C++/Python user-example assertions also passed after completing the
 deployment in an external fixture variant. The original fixture still omits
-Plugin/UI resources; [its outstanding issue](../../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap)
+Plugin/UI resources; [its outstanding issue](../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap)
 records this distinction. It is not counted among the seven passing CTests.
 
 本次驗證權限、停止／重啟後接手、已排隊舊 MID 失效及 Session 不得冒用；

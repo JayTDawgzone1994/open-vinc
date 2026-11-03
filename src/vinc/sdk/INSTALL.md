@@ -576,13 +576,32 @@ validation evidence is maintained in the [App composition report](../../../apps/
 
 ## Validation / 驗證
 
-Latest macOS follow-up at `627c409`: Debug/Release source and clean installed-SDK
+Latest Mac exit-repair results are in the [step 3 report](../osal/MACOS_EXIT_VALIDATION.md).
+Original Python-enabled full CTest is Debug **151/153**, Release **152/153**;
+the SDK subset passed **14/14** each. The report separately records clean
+Python-disabled producers, downstream handoff, and retained integration failures.
+
+最新退出修復的 macOS 驗證由上方報告維護；SDK 子集通過不等於原始全套全綠，
+乾淨 producer／下游矩陣亦分開記錄，不沿用舊版本結果代替。
+
+Earlier native Mac FD-repair acceptance at `a19c0d4`: the default C++ producer's
+Debug/Release full CTest passed **132/132** each, including installed SDK/Python/App
+checks; additional clean SDK consumer and relocated App acceptance also passed.
+That revision's independent exit stress reproduced an observation gap; see the [Mac FD report](../osal/MACOS_FD_VALIDATION.md). Subsequent repair and acceptance are recorded above, without replacing that baseline failure evidence.
+This configuration does not register the older Python-enabled example fixture below.
+
+該輪 FD 修復補驗與退出調查見上述歷史報告；當時的一般整合通過不代表退出問題已修復，
+也不代表下方已知的範例部署 fixture 已解決。
+
+Earlier macOS follow-up at `627c409`: Debug/Release source and clean installed-SDK
 acceptance passed within the [recorded scope](MACOS_VALIDATION.md). Original full
 CTest is **125/126** per configuration; the example fixture's deployment omission
-is still unresolved in the repository. External corrected-deployment evidence is
-reported separately, not counted as an original-suite pass.
+was unresolved at that time. External corrected-deployment evidence is
+reported separately, not counted as an original-suite pass. The subsequent
+[maintained fixture repair](../../../examples/userExampleModule/README.md#macos-deployment-fixture-gap)
+passed focused native Mac Debug/Release checks; historical full-suite counts remain unchanged.
 
-最新 macOS 補驗見上方報告；兩組乾淨 SDK 下游矩陣通過，但原始全套各保留一項
+先前 `627c409` 的 macOS 補驗見相應報告；兩組乾淨 SDK 下游矩陣通過，但該輪原始全套各保留一項
 範例 fixture 失敗。下方歷史結果保留其原始版本與環境範圍。
 
 The native-only `sdk.installed_application` fixture inventories both the moved SDK
@@ -918,13 +937,14 @@ failure. No production waits or existing test timeouts were relaxed for that ret
 或既有測試期限。
 
 Evidence is under ignored `build/runtime-policy/final-*.log` and
-`final-windows-*.json`. Native macOS acceptance remains assigned to the project
-owner in the [root TODO](../../../TODO.md); existing macOS results retain their
-original scope. Passing this matrix does not promise arbitrary CPython minor ABI,
+`final-windows-*.json`. The subsequently completed
+[native Mac acceptance](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)
+retains each round's scope; the [root TODO](../../../TODO.md) tracks remaining
+cross-platform checks. Passing this matrix does not promise arbitrary CPython minor ABI,
 third-party native-library or cross-toolchain compatibility.
 
-證據位於上述 Git 忽略的檔案。macOS 由專案擁有者後續實機驗證，清單已寫入根目錄 TODO；
-既有 Mac 結果保留原適用範圍。不因本輪通過就承諾任意 Python minor ABI、第三方原生庫
+證據位於上述 Git 忽略的檔案。後續 macOS 實機驗證已完成，見上述驗收總結；
+根目錄 TODO 保留跨平台補驗，既有 Mac 結果維持各輪原適用範圍。不因本輪通過就承諾任意 Python minor ABI、第三方原生庫
 或不同工具鏈可以混用。
 
 ### Stage-one results (2026-10-29) / 第一輪實測結果（2026-10-29）

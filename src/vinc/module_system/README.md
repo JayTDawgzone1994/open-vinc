@@ -17,17 +17,40 @@ Entry 13 拒絕加入 RegisterOptions／重啟標記之前的 Plugin；參見 [P
 **Stages 1–2 implemented:** the [OSAL FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md)
 records Host/Plugin coordination ownership, entry 11 initialization, rejection without
 unsafe unload, POSIX FD acquisition/spawn wiring, and Windows/WSL evidence.
-RuntimeServices remains fatal-only. New native macOS acceptance and the separate
-macOS exit-observation investigation remain pending.
+RuntimeServices remains fatal-only. Subsequent [native macOS acceptance and investigation](../osal/MACOS_FD_VALIDATION.md)
+record passing App/Plugin/SDK suites and the original exit-observation gap. The subsequent [exit repair](../osal/PROCESS_EXIT_PROGRESS.md) and [Mac integration results](../osal/MACOS_EXIT_VALIDATION.md) retain original full-suite results of Debug 151/153 and Release 152/153. App/Python cases passed. The subsequent Plugin test repair and its separate acceptance results are documented below.
 
 Source App/Host/Plugin and moved-SDK integration results are maintained in the
 [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance), including
 the App test fixture correction and the separate macOS acceptance checklist.
 
 **前兩階段已實作：** Host／Plugin 共用協調接線、entry 11、失敗退出及 POSIX FD／spawn
-修復已接通；完整契約與 Windows／WSL 結果見上述計畫。新增 macOS 原生驗收及退出觀察調查仍待完成。
+修復已接通；完整契約與跨平台結果見上述計畫。Mac 退出修復及受控測試已完成，
+後續原生退出／整合證據見上方報告；原始全套失敗保留，Plugin 分類修復與跨平台補驗如下。
 第四階段另記來源 App／Host／Plugin、搬移 SDK 與測試接線修正結果；不以其他平台
 通過代替 Mac 原生驗收。
+
+<a id="macos-plugin-classification-follow-up"></a>
+
+### macOS Plugin classification follow-up / Plugin 分類修復與補驗（2026-11-03）
+
+The [follow-up investigation](MACOS_PLUGIN_CLASSIFICATION.md) reproduced
+StartupTimeout instead of Plugin rejection errors with unchanged fixtures at
+fresh paths. The original classification and deliberately stalled-loader cases shared a 600 ms
+startup policy. A finite-load experiment confirms that deadline expiry can precede
+fault reporting with both current and original parent-side OSAL. The maintained
+tests now separate budgets, observe central saved-failure order and verify cleanup
+on assertion/error paths; production behavior is unchanged. The original full-suite
+failure omitted its fixture/actual error, so its unique retrospective cause remains unproven.
+
+**測試修復及 macOS Debug／Release 驗證完成，Windows／Linux 原生重驗待補：** 一般分類改用獨立 5 秒 setup 預算，loader stall 保留 600ms，
+並補足錯誤身分與失敗診斷。新增 `module.failure_order` 先觀察中央已保存的主要故障，
+才放行後續報告；驗證故障先保存／逾時先保存兩種次序及 cleanup 分開保存。
+Scope 保證 assertion unwind 也先確認停止與回收再刪檔；無法確認時保留檔案，
+並有真實 Host 與受控錯誤探針。正式 Runtime／ModuleManager／OSAL 行為沒有改動。
+修復後的實際驗收與三平台覆蓋限制見上述報告文末；原始全套失敗與早期重跑仍保留於
+[退出驗收報告](../osal/MACOS_EXIT_VALIDATION.md#plugin-failure-classification--plugin-故障分類)，
+不由後續通過改寫。
 
 Each Module instance runs in an independent OS process. The central process manages its lifecycle through OSAL Process; both sides use the same vinc::control component over an OSAL local stream Socket. Authors inherit BaseModule without implementing sockets, packets, or heartbeat.
 

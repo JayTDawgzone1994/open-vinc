@@ -31,6 +31,7 @@ struct ProcessRecord {
     std::optional<ExitStatus> exit;
     std::optional<vinc::Error> error;
     bool starting = true;
+    bool exit_notification_pending = false;
 };
 
 struct ServiceState {
@@ -114,10 +115,12 @@ void observe(ProcessRecord& record) noexcept {
         // reused PID. Other observation failures retain the native owner.
         if (result.error().is(vinc::osal::ErrorCode::ObservationLost)) {
             record.native.reset();
+            record.exit_notification_pending = false;
         }
     } else if (*result) {
         record.exit = **result;
         record.native.reset();
+        record.exit_notification_pending = false;
     } else {
         return;
     }
@@ -126,6 +129,7 @@ void observe(ProcessRecord& record) noexcept {
 
 void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
     bool polling = false;
+    ProcessExitEvents events;
     for (;;) {
         bool observation_failed = false;
         {
@@ -134,11 +138,20 @@ void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
             polling = state->monitor_error.has_value();
             for (const auto& record : state->records) {
                 std::lock_guard record_lock(record->mutex);
+                // A watch can fire before spawn publishes the native owner. Keep
+                // that notification on the reserved starting record. Completed or
+                // forgotten identities cannot transfer it to a reused OS PID.
+                const auto events_end = events.ids.begin() + events.count;
+                if ((record->starting || record->native) && !record->exit &&
+                    std::find(events.ids.begin(), events_end, record->id) != events_end) {
+                    record->exit_notification_pending = true;
+                }
                 observe(*record);
                 active |= record->starting || static_cast<bool>(record->native);
                 if (record->native) {
                     observation_failed |= record->error.has_value();
-                    polling |= !record->native->event_driven() || record->error.has_value();
+                    polling |= record->exit_notification_pending ||
+                               !record->native->event_driven() || record->error.has_value();
                 }
             }
             state->changed.notify_all();
@@ -154,6 +167,7 @@ void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
         if (observation_failed) {
             std::this_thread::sleep_for(monitor_failure_retry_interval);
         }
+        events = {};
         auto result = state->monitor->wait(polling);
         if (!result) {
             {
@@ -163,6 +177,8 @@ void run_monitor(const std::shared_ptr<ServiceState>& state) noexcept {
             // Broken native event infrastructure must not cause a hot loop or
             // abandon owned children. Expose the error and continue reaping.
             std::this_thread::sleep_for(monitor_failure_retry_interval);
+        } else {
+            events = *result;
         }
     }
 }
@@ -378,7 +394,7 @@ vinc::Result<Process> ProcessService::spawn_impl(const SpawnOptions& options,
     // remain controllable while another executable is being launched.
     vinc::Result<std::unique_ptr<detail::NativeProcess>> native;
     try {
-        native = detail::NativeProcess::spawn(options, *state_->monitor, child_pipe);
+        native = detail::NativeProcess::spawn(options, *state_->monitor, record->id, child_pipe);
     } catch (...) {
         {
             std::lock_guard lock(state_->mutex);

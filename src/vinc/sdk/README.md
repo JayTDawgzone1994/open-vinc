@@ -2,6 +2,15 @@
 
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
+The [2026-11-03 Mac exit-repair report](../osal/MACOS_EXIT_VALIDATION.md) records
+Debug/Release App, Python and SDK verification, including the separate clean
+producer handoff and retained original integration failures. It does not establish
+Windows/Linux acceptance of the exit repair.
+
+最新 Mac 退出修復、Plugin 與範例測試補驗見上述報告的
+[驗收總結](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)；
+原始整合失敗與定點補驗分開記錄，未宣稱三平台驗收完成。
+
 Central application features use [Kconfig configuration](../../../tools/configure/README.md).
 This interpreter requirement applies to application composition, not plain SDK
 lookup/linking; Python Module bindings remain a separate capability.
@@ -310,7 +319,8 @@ entry is **13** after [Param RegisterOptions/restart hints](../param/README.md#r
 depends on OSAL; its component install rules carry the new header/archive and the
 existing Plugin helper carries the new entry. Static linking and ABI/CRT requirements
 remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance)
-owns current source/moved-SDK results and the outstanding native macOS checks.
+owns the earlier source/moved-SDK results. Mac exit-repair evidence is in the
+[current summary](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status); newer Param entry-13 SDK acceptance remains separate.
 該第一階段以 entry 11 接上共用協調器；目前 Param RegisterOptions／重啟標記已升為 entry 13，
 中央與 SDK 消費端需一起重建，一般 Module 作者無須管理鎖。
 來源與乾淨安裝式 SDK 的本輪驗收結果、環境及 Mac 待驗範圍統一見第四階段紀錄。
@@ -468,15 +478,16 @@ Windows x64／MSVC／Ninja 驗證：
   [integration acceptance](INSTALL.md#runtime-final-acceptance), including
   installed multi-App/System Module checks and an explicit native macOS handoff.
   後續 Python Runtime 政策的整合驗收另見上述紀錄，包含安裝式多 App／System Module
-  與明確列出的 macOS 待驗證範圍。
+  與當時列出的 macOS 待驗證範圍；後續 Mac 實測見下方連結。
   Linux installed composition, Windows Debug/Release complete multi-App retries,
   and both platforms' Runtime regressions passed. The Windows port-8080 conflict
-  was resolved through an authorized preview pause and restoration; new multi-App
-  macOS and interactive editor coverage remain pending. Do not
-  infer missing platform evidence from a successful build or erase older validation.
+  was resolved through an authorized preview pause and restoration. Subsequent
+  [native Mac acceptance](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status)
+  includes source/moved multi-App and clean installed-SDK evidence. Interactive
+  editor coverage remains pending; do not expand these results beyond their recorded scope.
   多 App 驗收見計畫：Linux 安裝式組裝、Windows Debug／Release 完整多 App 重驗及兩平台
-  Runtime 回歸通過；已經授權暫停並恢復網站，解除 8080 衝突。macOS 新能力與編輯器互動
-  驗證仍待補，不改寫既有歷史證據。
+  Runtime 回歸通過；已經授權暫停並恢復網站，解除 8080 衝突。Mac 來源／搬移多 App
+  與乾淨 SDK 後續已有上述原生證據；編輯器互動驗證仍待補，不改寫既有歷史結果。
 - Reproduced Windows Tcl build-root spaces break unquoted upstream rules/mkdir even with relative-path attempts. No upstream patches; a build-location strategy needs separate design. Spaced deployment/output paths are distinct and tested. See [Tcl issues](../../../library/tcl/README.md#待處理事項).
 - Source add_subdirectory remains supported. [Installed SDK](INSTALL.md) provides C++ app composition and optional consumer-built Python bindings; multi-config support remains pending. Platform evidence is scoped separately.
 - The 2026-11-02 WSL `/mnt/d` run exceeded `installed_consumer.cmake`'s default
@@ -495,7 +506,7 @@ Windows x64／MSVC／Ninja 驗證：
   執行檔輸出與部署目錄含空白是不同情境，已加入本輪回歸。
   證據及平台限制見 [Tcl 待處理事項](../../../library/tcl/README.md#待處理事項)。
 - 原始碼套件以 add_subdirectory 整合；[安裝式 SDK](INSTALL.md) 已提供 C++ 應用及 Python 綁定組裝，單組態以外的建置
-  仍待完成。安裝式 SDK 的 Windows／WSL 驗證見上述文件；本輪尚未驗證 macOS 套件。
+  仍待完成。Windows／WSL 與後續 macOS 安裝式 SDK 驗證見上述文件，範圍依各輪紀錄。
 
 <a id="plugin-連結集合2026-10-06"></a>
 

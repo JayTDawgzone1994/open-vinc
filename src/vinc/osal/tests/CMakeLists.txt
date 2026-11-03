@@ -24,6 +24,28 @@ target_link_libraries(osal_process_fault_tests PRIVATE vinc::osal)
 add_test(NAME osal.process_faults COMMAND osal_process_fault_tests)
 set_tests_properties(osal.process_faults PROPERTIES TIMEOUT 15)
 
+# Deterministic one-shot notification contracts use the real common observer.
+add_executable(osal_process_exit_progress_tests process_exit_progress_tests.cpp)
+target_link_libraries(osal_process_exit_progress_tests PRIVATE vinc::osal Threads::Threads)
+if(MSVC)
+    target_compile_options(osal_process_exit_progress_tests PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(osal_process_exit_progress_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+foreach(case IN ITEMS one-shot repeated-empty immediate early-publication failed-publication
+        stale-retained stale-forgotten batches waiters monitor-error poll-error ownership-lost shutdown record-state)
+    add_test(NAME osal.process_exit_progress.${case} COMMAND osal_process_exit_progress_tests ${case})
+    set_tests_properties(osal.process_exit_progress.${case} PROPERTIES TIMEOUT 20)
+endforeach()
+
+if(APPLE)
+    add_executable(osal_process_exit_macos_tests process_exit_macos_tests.cpp)
+    target_link_libraries(osal_process_exit_macos_tests PRIVATE vinc::osal Threads::Threads)
+    target_compile_options(osal_process_exit_macos_tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME osal.process_exit_macos COMMAND osal_process_exit_macos_tests)
+    set_tests_properties(osal.process_exit_macos PROPERTIES TIMEOUT 15)
+endif()
+
 add_executable(osal_operation_error_tests operation_error_tests.cpp)
 target_link_libraries(osal_operation_error_tests PRIVATE vinc::osal)
 add_test(NAME osal.operation_error COMMAND osal_operation_error_tests)

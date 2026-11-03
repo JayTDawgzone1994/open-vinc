@@ -9,7 +9,7 @@
 namespace vinc::osal::detail {
 // Private platform boundary. A successful Linux watch owns a pidfd; macOS
 // registers NOTE_EXIT and returns a sentinel. No native types reach public API.
-vinc::Result<int> watch_process(MonitorImpl&, pid_t) noexcept;
+vinc::Result<int> watch_process(MonitorImpl&, pid_t, ProcessId) noexcept;
 void release_watch(int) noexcept;
 vinc::Result<TerminateResult> kill_process(pid_t, int) noexcept;
 }
