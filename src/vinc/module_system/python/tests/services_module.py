@@ -206,9 +206,19 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.Manual):
         print("PYTHON_SERVICES_PASSED")
 
     def check_loans(self):
+        default_publisher = self.context.advertise(vinc.messages.test, "python/defaults")
+        assert default_publisher.stats().requested_slots == 5
+        assert default_publisher.stats().max_message_bytes == 4096
+        default_publisher.close()
         options = vinc.message_bus.PublisherOptions()
+        assert options.slots is None and options.max_message_bytes is None
         options.max_message_bytes = MESSAGE_LIMIT_BYTES
         publisher = self.context.advertise(vinc.messages.test, "python/loans", options)
+        assert publisher.stats().requested_slots == self.context.param.read_current("vinc.pub_default_slots").value
+        assert publisher.stats().max_message_bytes == MESSAGE_LIMIT_BYTES
+        options.slots = 0
+        raises(vinc.VincError, lambda: self.context.advertise(vinc.messages.test, "python/zero", options))
+        options.slots = None
         loan = publisher.get_next()
         array = loan.data().y
         array.assign([1, 2, 3])

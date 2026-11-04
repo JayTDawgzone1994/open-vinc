@@ -35,6 +35,8 @@ void run(const std::filesystem::path& python, const std::filesystem::path& boots
     // Resolve the existing temp root before appending this fixture's directory.
     const auto root = std::filesystem::canonical(std::filesystem::temp_directory_path()) / test::instance_name();
     take(detail::ManagerAccess::configure_params(*manager, root));
+    take(detail::ManagerAccess::param_command(*manager, {"set", "vinc.pub_default_slots", "5"}));
+    take(detail::ManagerAccess::param_command(*manager, {"set", "vinc.pub_default_message_bytes", "4096"}));
     take(detail::ManagerAccess::configure_log(*manager, root));
     ModuleType native{"nativePeer", plugin, {}};
     take(manager->register_module_type(native));

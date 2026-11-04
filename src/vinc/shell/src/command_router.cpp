@@ -189,7 +189,7 @@ std::optional<std::string_view> CommandRouter::command_help(const std::vector<st
         {"shell", "Usage: shell -e | --error\nShow this session's last failure. Success does not clear it."},
         {"help", "Usage: help [--verbose]\nShow commands, user ModuleTypes and Modules.\n"
                  "--verbose also shows System Modules and retained fault diagnostics."},
-        {"log", "Usage: log status\n       log reopen\n"
+        {"log", "Usage: log status\n       log reopen (retry file output with this run's settings)\n"
                 "       log level <MODULE|MID|all> <error|warn|info|debug>\n"
                 "       log show <on|off|error|warn|info|debug>\n"
                 "       log show module <NAME|MID|all>\n"
@@ -249,6 +249,22 @@ Result<CommandReply> CommandRouter::execute(const std::vector<std::string>& argu
             if (!result) {
                 return std::unexpected(wrap_error(ErrorCode::CommandFailed, ErrorOperation::Execute, result.error()));
             }
+
+            if (network_params_ && arguments.size() == 4 && arguments[1] == "set" &&
+                (arguments[2] == "vinc.shell_ip" || arguments[2] == "vinc.shell_port")) {
+                // Limited central settings can only be changed through central
+                // operations. All local/remote/Tcl routers share this consumer.
+                auto refreshed = network_params_->refresh();
+                if (!refreshed) {
+                    return std::unexpected(wrap_error(ErrorCode::CommandFailed, ErrorOperation::Execute,
+                                                      refreshed.error()));
+                }
+
+                if (!refreshed->empty()) {
+                    *result += "\n" + *refreshed;
+                }
+            }
+
             return CommandReply{0, false, std::move(*result)};
         }
         if (builtin_entry->second == Builtin::Debug) {

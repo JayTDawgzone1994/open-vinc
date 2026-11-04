@@ -1,5 +1,6 @@
 #include "../../../../tests/support/manager.hpp"
 #include <vinc/osal/path.hpp>
+#include <vinc/osal/socket.hpp>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include <future>
@@ -245,9 +246,23 @@ int main(int argc, char** argv) {
         client.set_read_timeout(operation_budget);
         const auto response = client.Get("/api/ui");
         check(response && response->status == 200, "ModuleHost serves HTTP");
+        const auto parameters = take(vinc::detail::ManagerAccess::read_params(*manager, {"ui.port"}));
+        const auto& port_entry = parameters.at("ui.port");
+        check(take(port_entry.get<std::uint16_t>()) == 0, "UI CLI overrides live Param");
+        check(std::get<std::uint16_t>(port_entry.default_value) == 31411, "UI default stays fixed");
+        check(port_entry.restart_hint == vinc::param::RestartHint::Module &&
+              port_entry.permission == vinc::param::Permission::Limited, "ordinary UI owner contract");
         check(take(manager->command(mid, {"status"}, deadline)) == 0, "Shell hook works through pump");
         monitor(*manager, client, argv[3], argv[4]);
         graph(*manager, client, argv[5]);
+        auto reservation = take(vinc::osal::Socket::open(vinc::osal::AddressFamily::IPv4,
+                                                        vinc::osal::SocketType::Stream));
+        take(reservation.bind(vinc::osal::IpEndpoint{vinc::osal::IPv4Address::loopback(), 0}));
+        const auto new_port = std::get<vinc::osal::IpEndpoint>(take(reservation.local_address())).port;
+        take(vinc::detail::ManagerAccess::param_command(*manager, {"set", "ui.port", std::to_string(new_port)}));
+        check(bool(client.Get("/api/ui")), "port edit does not stop old listener");
+        check(!vinc::detail::ManagerAccess::param_command(*manager, {"set", "ui.port", "65536"}),
+              "UI invalid port rejected without mutation");
         const auto old_headers = authorize(client);
         const auto forbidden = manager->stop_module(mid, Clock::now() + operation_budget);
         check(!forbidden && forbidden.error().is(vinc::module_system::ErrorCode::SystemModuleProtected),
@@ -269,6 +284,7 @@ int main(int argc, char** argv) {
               "expired toggle is not sent");
         check(manager->inspect(mid)->system_enabled == false, "rejected toggles preserve disabled intent");
         output.take();
+        take(reservation.close());
         take(vinc::detail::ManagerAccess::set_system_enabled(*manager, "ui", true,
             Clock::now() + operation_budget));
         trace.clear();
@@ -281,6 +297,7 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(observe_interval);
         }
         const auto enabled_port = std::stoi(trace.substr(trace.find(prefix) + prefix.size()));
+        check(enabled_port == new_port, "explicit re-enable reads newly committed port");
         httplib::Client enabled_client("127.0.0.1", enabled_port);
         enabled_client.set_read_timeout(operation_budget);
         const auto expired = enabled_client.Get("/api/topics", old_headers);
@@ -296,6 +313,22 @@ int main(int argc, char** argv) {
         check(!invalid_manager->wait_started(failed), "bad option is a Module startup error");
         invalid_manager->begin_shutdown();
         take(invalid_manager->wait_shutdown(Clock::now() + operation_budget));
+
+        auto occupied = take(vinc::osal::Socket::open(vinc::osal::AddressFamily::IPv4,
+                                                     vinc::osal::SocketType::Stream));
+        take(occupied.bind(vinc::osal::IpEndpoint{vinc::osal::IPv4Address::loopback(), 0}));
+        take(occupied.listen(1));
+        const auto occupied_port = std::get<vinc::osal::IpEndpoint>(take(occupied.local_address())).port;
+        auto conflict_manager = take(vinc::test::create_manager());
+        take(conflict_manager->register_module_type(type));
+        const auto conflict = take(conflict_manager->start_module("webUi",
+            {"--root", root, "--port", std::to_string(occupied_port)}));
+        check(!conflict_manager->wait_started(conflict), "occupied UI port fails startup");
+        const auto retained = take(vinc::detail::ManagerAccess::read_params(*conflict_manager, {"ui.port"}));
+        check(take(retained.at("ui.port").get<std::uint16_t>()) == occupied_port,
+              "bind failure preserves requested configuration");
+        conflict_manager->begin_shutdown();
+        take(conflict_manager->wait_shutdown(Clock::now() + operation_budget));
         std::cout << "UI module tests passed\n";
         return 0;
     } catch (const std::exception& error) {

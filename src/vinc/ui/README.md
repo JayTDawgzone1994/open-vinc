@@ -2,10 +2,17 @@
 
 # Web UI / 瀏覽器工作區
 
-The official webUi Module provides a browser workspace, tab lifecycle, and plugin SDK. It is built/registered by default and **automatically started before startup Tcl**. Default listener is 127.0.0.1:8080. Browsers need no Node; central/Host/general Module SDK do not link HTTP/JSON implementations.
+The official Module registers `ui.port` through ordinary Context Param, with
+Limited permission and a Module restart hint. Changes apply on the next HTTP
+start (`ui disable` / `ui enable`), not immediately. Status distinguishes the
+actual and configured port. See [service network parameters](../shell/NETWORK_PARAMS.md).
+官方 Module 用一般 Context 註冊 `ui.port`，Limited 權限與 Module 重啟標記。
+修改不立即換綁；下次 HTTP 啟動（disable／enable）套用。status 分開顯示實際與設定埠。
+
+The official webUi Module provides a browser workspace, tab lifecycle, and plugin SDK. It is built/registered by default and **automatically started before startup Tcl**. Default listener is 127.0.0.1:31411. Browsers need no Node; central/Host/general Module SDK do not link HTTP/JSON implementations.
 
 第一版提供官方 `webUi` Module、瀏覽器工作區、分頁生命週期及 UI plugin SDK。
-預設建置並登記 ModuleType，**隨中央自動啟動，先於啟動 Tcl**；預設監聽 `127.0.0.1:8080`。
+預設建置並登記 ModuleType，**隨中央自動啟動，先於啟動 Tcl**；預設監聽 `127.0.0.1:31411`。
 瀏覽器不需要 Node.js。中央、ModuleHost 與一般 Module SDK 不連入 HTTP／JSON 實作。
 
 Official vinc.topics provides read-only topic lists, publication Hz, collision/loss diagnostics, and latest-message previews. Official vinc.graph adds a manually refreshed Module/Topic relationship view. Param/Log/Module management, 3D panels, and central administration RPC remain unwired. Topic Monitor uses ordinary read-only Context Bus services, without parameter-write or Module-control authority.
@@ -78,10 +85,10 @@ reported without terminating central. Query the default instance in Shell or Tcl
 ui status
 ```
 
-Open http://127.0.0.1:8080/. UI is a protected **System Module**. Use the central
+Open http://127.0.0.1:31411/. UI is a protected **System Module**. Use the central
 commands to toggle HTTP without stopping its process:
 
-用瀏覽器開啟 `http://127.0.0.1:8080/`。UI 現在是受保護的 **System Module**；
+用瀏覽器開啟 `http://127.0.0.1:31411/`。UI 現在是受保護的 **System Module**；
 透過中央命令切換 HTTP，程序仍保持運作：
 
 ```tcl
@@ -228,7 +235,7 @@ Settings live in vinc/config.hpp (browser settings in web/workspace/runtime.ts):
 
 | Setting | Default/behavior |
 | --- | --- |
-| ui_port | 8080 |
+| ui_port | 31411 |
 | ui_file_bytes / ui_snapshot_bytes | 8 MiB/file, 64 MiB startup bytes; indices/allocator/HTTP copies extra |
 | ui_package_entries / ui_plugin_limit | 1024 entries/package,64 plugin directory entries |
 | ui_manifest_bytes / ui_panels_per_plugin | 16 KiB /16 types |
@@ -241,7 +248,7 @@ Settings live in vinc/config.hpp (browser settings in web/workspace/runtime.ts):
 
 | 設定 | 預設／行為 |
 | --- | --- |
-| ui_port | 8080 |
+| ui_port | 31411 |
 | ui_file_bytes / ui_snapshot_bytes | 單檔 8 MiB／啟動讀入累計 64 MiB；不包含索引、allocator、HTTP 回覆副本 |
 | ui_package_entries / ui_plugin_limit | 每套件 1024 個目錄項目／最多 64 個 plugin 目錄項目 |
 | ui_manifest_bytes / ui_panels_per_plugin | 16 KiB／每套件最多 16 個 panel types |
@@ -292,6 +299,36 @@ Debug 既有 `module.shell`、`message_bus.shell`、`bag.shell` 亦通過。
 <a id="待處理事項"></a>
 
 ## Outstanding work / 待處理事項
+
+<a id="local-windows-port-validation"></a>
+
+### Local Windows port validation (2026-11-04) / 本機端口驗收與後續結果
+
+During Publisher-default validation, `ui.shell` could not bind loopback 8080.
+An independent CPython socket bind also returned Windows error **10013**;
+netstat showed no listener. The reservation/policy source is unconfirmed.
+No process was stopped and no firewall/reservation setting was changed.
+That historical failure was not replaced by an ephemeral-port test or a
+dedicated Publisher SDK App result. Raw failed run: ignored
+`build/publisher-param/windows-regression.log`.
+
+Publisher 預設驗收期間，預設 8080 綁定失敗；Vinc 外的 Python Socket 亦回 10013，
+netstat 未見監聽。尚未確認保留／政策來源，未停止其他程序或修改防火牆／保留設定。
+當時沒有以臨時端口 UI 測試或專用 Publisher SDK App 通過替代。原始失敗保留於上述 log。
+
+The later [service-network migration](../shell/NETWORK_PARAMS.md#validation--驗證)
+sets the approved default to 31411. Windows Release `ui.shell`, `app.system_services`
+and the clean installed consumer/application tests now pass, including real HTTP,
+custom-message preview and graph access after relocation. This closes acceptance
+of the current default; it does **not** diagnose or repair Windows' refusal of 8080.
+No host networking policy was changed.
+
+後續依核准契約改為預設 31411；Windows Release 的 ui.shell、app.system_services
+及乾淨 installed consumer／application 均通過，包含搬移後真實 HTTP、自訂訊息
+preview 與 graph。現行預設驗收已補齊，但不表示找出或修復 Windows 對 8080 的拒絕原因，
+也沒有修改主機網路政策。
+
+### Remaining product work / 其餘產品待辦
 
 - **Confirmed next stage:** official management panels/central bridge must authorize official UI MID/Session, never name ui or self-declared official status. Ordinary Param permissions stay unchanged. Before write endpoints, design user login/central command authorization; read-only capability is not administrative authority.
 - **Not implemented:** administrative streams, remaining feature plugins, relocatable installer, Electron; no placeholder RPC.

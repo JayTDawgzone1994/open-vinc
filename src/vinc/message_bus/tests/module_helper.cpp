@@ -212,6 +212,56 @@ public:
             return static_cast<int32_t>(publisher_->stats().effective_slots);
         }
 
+        if (command == "bytes") {
+            return static_cast<int32_t>(publisher_->stats().max_message_bytes);
+        }
+
+        if (command == "requested-slots") {
+            return static_cast<int32_t>(publisher_->stats().requested_slots);
+        }
+
+        if (command == "compact-bytes") {
+            auto message = vinc::make_message<vinc::Frame>();
+            auto filled = fill(*message, 42, default_payload_bytes);
+            if (!filled) {
+                return std::unexpected(filled.error());
+            }
+
+            auto usage = message->usage();
+            if (!usage) {
+                return std::unexpected(usage.error());
+            }
+
+            return static_cast<int32_t>(usage->compact_bytes);
+        }
+
+        if (command == "default-slots") {
+            auto entry = context.param.read_current("vinc.pub_default_slots");
+            if (!entry) {
+                return std::unexpected(entry.error());
+            }
+
+            auto value = entry->get<std::uint32_t>();
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+
+            return static_cast<int32_t>(*value);
+        }
+
+        if (command == "write-default") {
+            auto result = context.param.set<std::uint32_t>("vinc.pub_default_slots", 17);
+            if (result) {
+                return 99;
+            }
+
+            const auto causes = result.error().causes();
+            const bool denied = result.error().is(vinc::param::ErrorCode::PermissionDenied) ||
+                (!causes.empty() && causes.back().domain == vinc::ErrorDomain::Param &&
+                 causes.back().code == static_cast<std::int32_t>(vinc::param::ErrorCode::PermissionDenied));
+            return denied ? 0 : -1;
+        }
+
         if (command == "published") {
             return static_cast<int32_t>(publisher_->stats().published);
         }

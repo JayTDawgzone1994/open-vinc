@@ -19,6 +19,12 @@ public:
     Result<void> submit(std::uint64_t mid, std::shared_ptr<control::Session> session, control::Frame frame);
     Result<void> configure(std::filesystem::path path);
     Result<void> register_framework(std::string name, Value defaults, RestartHint restart_hint = RestartHint::None);
+    // Copies only the selected entries in one worker action; no borrowed state
+    // survives the call, including when the caller times out.
+    Result<ParamMap> read_current(std::vector<std::string> names);
+    Result<void> set_framework(std::string name, Value value);
+    // Framework consumers share the existing bounded Shell diagnostic channel.
+    void report_framework(Error error, std::string message);
     Result<std::string> command(std::vector<std::string> args, std::stop_token stop = {});
     Result<Snapshot> inspect();
     std::string diagnostic(std::uint64_t& cursor);

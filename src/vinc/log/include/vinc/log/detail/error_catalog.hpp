@@ -12,7 +12,9 @@ inline constexpr std::array error_entries{ErrorCodeEntry{ErrorCode::InvalidArgum
                                           ErrorCodeEntry{ErrorCode::Protocol, "Protocol"},
                                           ErrorCodeEntry{ErrorCode::FileFailed, "FileFailed"},
                                           ErrorCodeEntry{ErrorCode::CapacityExceeded, "CapacityExceeded"},
-                                          ErrorCodeEntry{ErrorCode::ResourceExhausted, "ResourceExhausted"}};
+                                          ErrorCodeEntry{ErrorCode::ResourceExhausted, "ResourceExhausted"},
+                                          ErrorCodeEntry{ErrorCode::FileDisabled, "File output disabled by startup settings"},
+                                          ErrorCodeEntry{ErrorCode::ConfigurationUnavailable, "File output configuration unavailable"}};
 inline constexpr std::array operation_entries{ErrorOperationEntry{ErrorOperation::Create, "Create"},
                                               ErrorOperationEntry{ErrorOperation::Write, "Write"},
                                               ErrorOperationEntry{ErrorOperation::Connect, "Connect"},

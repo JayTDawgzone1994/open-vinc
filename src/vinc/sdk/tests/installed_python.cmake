@@ -80,6 +80,7 @@ function(verify_app root revision extra)
             OR NOT output MATCHES "NATIVE_SELF_HOST_OK"
             OR NOT output MATCHES "NATIVE_PARAM_CURRENT_OK"
             OR NOT output MATCHES "PYTHON_PARAM_CURRENT_OK"
+            OR NOT output MATCHES "INSTALLED_PYTHON_PUBLISHER_DEFAULTS_OK"
             OR NOT output MATCHES "NATIVE_PARAM_RESTART_OK"
             OR NOT output MATCHES "PYTHON_PARAM_RESTART_OK"
             OR NOT output MATCHES "All module processes exited")

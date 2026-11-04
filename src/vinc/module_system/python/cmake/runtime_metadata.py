@@ -99,13 +99,24 @@ def imported_runtimes(compiler, native, debug):
 
 
 def validate_static_imports(names):
-    # CPython owns its own runtime and allocator. Other imports must stay in the
-    # reviewed Windows API boundary; an added third-party DLL needs a new audit.
-    system_libraries = {"kernel32.dll", "ws2_32.dll", "advapi32.dll", "bcrypt.dll"}
+    # Inspect this image's imports, not DLLs loaded by Python or other packages.
+    # Non-CRT dependencies are diagnostic data, not an approval list. Their own
+    # dependencies and runtime LoadLibrary calls are outside this static check.
+    names = sorted({name.lower() for name in names})
+    crt_pattern = (
+        r"(?:msvcp[0-9]+[a-z0-9_]*|msvcr[0-9]+[a-z0-9_]*|"
+        r"vcruntime[0-9]+[a-z0-9_]*|concrt[0-9]+[a-z0-9_]*|"
+        r"msvcp_win|msvcrtd?|ucrtbased?|api-ms-win-crt-[a-z0-9-]+)\.dll"
+    )
+    dynamic_crt = [name for name in names if re.fullmatch(crt_pattern, name)]
+    if dynamic_crt:
+        raise RuntimeError(
+            "VINC static Python image directly imports dynamic CRT: " + ", ".join(dynamic_crt) +
+            ". Build the extension and its linked static libraries with /MT (Debug: /MTd).")
+
     python_libraries = [name for name in names if re.fullmatch(r"python3[0-9]+(?:_d)?\.dll", name)]
-    unexpected = set(names) - system_libraries - set(python_libraries)
-    if unexpected or len(python_libraries) != 1:
-        raise RuntimeError(f"Static Python image has unreviewed DLL imports: {names}")
+    if len(python_libraries) != 1:
+        raise RuntimeError(f"Static Python image requires exactly one CPython DLL import: {python_libraries}")
 
 
 def static_metadata(compiler, native, config):
@@ -124,6 +135,8 @@ def static_metadata(compiler, native, config):
         "header_version": header_version,
         "required": {},
         "debug": config.lower() == "debug",
+        # Local build diagnostics only: sorted DLL basenames, no process scan,
+        # DLL paths, uploads or separate log collection.
         "imports": names,
         "native": {"filename": native.name, "sha256": digest},
     }

@@ -148,6 +148,7 @@ detail::Descriptor descriptor() {
 
 control::Bytes advertisement(const detail::Descriptor& value) {
     control::Bytes body;
+    control::put_u32(body, fixture_slots);
     ok(detail::encode_descriptor(body, value));
     control::put_u32(body, 0); // No callback destinations in this synthetic reply.
     return body;
@@ -230,6 +231,7 @@ void test_publication_notification_failure() {
         return connection.client->advertise<Frame>("notification-test");
     });
     control::Bytes body;
+    control::put_u32(body, fixture_slots);
     ok(detail::encode_descriptor(body, source));
     control::put_u32(body, 2);
     control::put_u64(body, 2);
@@ -473,10 +475,12 @@ detail::Descriptor register_publisher(detail::BusManager& manager, Connection& c
     control::Bytes payload;
     ok(control::put_string(payload, topic));
     control::put_u64(payload, Frame::schema().hash);
+    control::put_u32(payload, detail::publisher_options_mask);
     control::put_u32(payload, fixture_slots);
     control::put_u64(payload, message_bytes);
     auto body = take(manager_request(manager, connection, owner, detail::Advertise, std::move(payload)));
     control::Reader reader(body);
+    check(reader.u32() == fixture_slots, "Advertise resolved request count");
     auto value = detail::decode_descriptor(reader);
     const auto routes = reader.u32();
     check(routes == expected_routes, "Advertise route count");
@@ -520,6 +524,117 @@ void process_release(detail::BusManager& manager, Connection& connection, std::u
     check(event.kind == control::Kind::Event && event.operation == operation, "expected rollback event");
     ok(manager.submit(owner, "rollback-owner", connection.central, std::move(event)));
     ok(manager.drain_until(deadline()));
+}
+
+void test_publisher_defaults() {
+    Connection connection;
+    constexpr std::uint64_t owner = 31;
+    constexpr std::uint32_t initial_slots = 3;
+    constexpr std::uint32_t changed_slots = 4;
+    constexpr std::uint64_t changed_bytes = 2048;
+    std::atomic<std::uint32_t> slots{initial_slots};
+    std::atomic<std::uint64_t> bytes{message_bytes};
+    std::atomic<std::size_t> reads{0};
+    std::atomic<bool> failed{false};
+    auto manager = take(detail::BusManager::create({}, {}, [&]() -> Result<detail::PublisherDefaults> {
+        ++reads;
+        if (failed.load()) {
+            return std::unexpected(Error{osal::ErrorCode::PermissionDenied, osal::ErrorOperation::OpenSharedMemory});
+        }
+
+        return detail::PublisherDefaults{slots.load(), bytes.load()};
+    }));
+    const auto advertise = [&](std::string name, bus::PublisherOptions options = {}) {
+        return client_request(*manager, connection, owner, [&] {
+            return connection.client->advertise<Frame>(std::move(name), options);
+        });
+    };
+    auto original = take(advertise("defaults/original"));
+    check(original.stats().requested_slots == initial_slots && original.stats().max_message_bytes == message_bytes,
+          "omitted options resolve at registration");
+
+    slots.store(changed_slots);
+    bytes.store(changed_bytes);
+    auto bytes_only = take(advertise("defaults/bytes", {.max_message_bytes = message_bytes}));
+    auto slots_only = take(advertise("defaults/slots", {.slots = initial_slots}));
+    check(bytes_only.stats().effective_slots == changed_slots && bytes_only.stats().max_message_bytes == message_bytes,
+          "explicit bytes retain dynamic default slots");
+    check(slots_only.stats().effective_slots == initial_slots && slots_only.stats().max_message_bytes == changed_bytes,
+          "explicit slots retain dynamic default bytes");
+    check(original.stats().effective_slots == initial_slots && original.stats().max_message_bytes == message_bytes,
+          "changing defaults never resizes an existing ring");
+
+    const auto reads_before_explicit = reads.load();
+    failed.store(true);
+    auto explicit_options = take(advertise("defaults/explicit", {.slots = 1, .max_message_bytes = message_bytes}));
+    check(explicit_options.stats().requested_slots == 1 && explicit_options.stats().effective_slots == 2,
+          "explicit one-slot request keeps its original statistics and two-slot minimum");
+    auto local = make_message<Frame>();
+    ok(explicit_options.push(*local));
+    check(reads.load() == reads_before_explicit, "explicit options and publications never read Param");
+
+    const auto invalid_slots = advertise("defaults/zero-slots", {.slots = 0});
+    const auto invalid_bytes = advertise("defaults/zero-bytes", {.max_message_bytes = 0});
+    const auto oversized_bytes = advertise("defaults/oversized-bytes",
+        {.max_message_bytes = config::message_bus_default_shared_bytes + 1});
+    check(!invalid_slots && invalid_slots.error().is(bus::ErrorCode::InvalidArgument) &&
+          !invalid_bytes && invalid_bytes.error().is(bus::ErrorCode::InvalidArgument) &&
+          !oversized_bytes && oversized_bytes.error().is(bus::ErrorCode::InvalidArgument),
+          "invalid explicit dimensions never resolve defaults");
+    check(reads.load() == reads_before_explicit, "invalid explicit fields fail before consulting defaults");
+
+    const auto unavailable = advertise("defaults/unavailable");
+    check(!unavailable && unavailable.error().is(bus::ErrorCode::Io) &&
+          unavailable.error().is_operation(bus::ErrorOperation::Advertise) &&
+          unavailable.error().causes().size() == 1 &&
+          unavailable.error().causes().front().domain == ErrorDomain::Osal,
+          "default-source failure retains the public Bus operation and its cause");
+    failed.store(false);
+    auto retried = take(advertise("defaults/unavailable"));
+    check(retried.stats().effective_slots == changed_slots, "a failed defaults read can be retried");
+
+    // Raw requests have their own monotonically increasing request identity;
+    // never reuse Client's authenticated owner with an independent counter.
+    Connection malformed_connection;
+    constexpr std::uint64_t malformed_owner = owner + 1;
+    auto malformed = [&](control::Bytes payload) {
+        const auto before = reads.load();
+        auto result = manager_request(*manager, malformed_connection, malformed_owner,
+            detail::Advertise, std::move(payload));
+        check(!result && result.error().is(bus::ErrorCode::InvalidArgument), "malformed options rejected");
+        check(reads.load() == before, "malformed input must not read or repair defaults");
+    };
+    control::Bytes prefix;
+    ok(control::put_string(prefix, "defaults/malformed"));
+    control::put_u64(prefix, Frame::schema().hash);
+    malformed(prefix);
+    auto unknown = prefix;
+    constexpr auto unknown_flag = detail::publisher_options_mask + 1;
+    control::put_u32(unknown, unknown_flag);
+    malformed(std::move(unknown));
+    auto truncated = prefix;
+    control::put_u32(truncated, detail::publisher_options_mask);
+    control::put_u32(truncated, fixture_slots);
+    malformed(std::move(truncated));
+    auto trailing = prefix;
+    control::put_u32(trailing, 0);
+    control::put_u32(trailing, fixture_slots);
+    malformed(std::move(trailing));
+    for (const auto old_operation : {std::uint16_t{0x0201}, std::uint16_t{0x0301}}) {
+        const auto rejected = manager->submit(malformed_owner, "fixture", malformed_connection.central,
+            {control::Kind::Request, detail::message_bus_domain, old_operation,
+             malformed_connection.next_request++, prefix});
+        check(!rejected && rejected.error().is(bus::ErrorCode::Protocol), "old option wire is never reinterpreted");
+    }
+    // Every handle is local and idle before simulating confirmed owner exit.
+    original.close();
+    bytes_only.close();
+    slots_only.close();
+    explicit_options.close();
+    retried.close();
+    manager->exited(owner);
+    manager->exited(malformed_owner);
+    ok(manager->drain_until(deadline()));
 }
 
 void test_topic_discovery() {
@@ -613,6 +728,7 @@ void test_manager_topic_separators() {
             ok(control::put_string(payload, name));
             control::put_u64(payload, Frame::schema().hash);
             if (operation == detail::Advertise) {
+                control::put_u32(payload, detail::publisher_options_mask);
                 control::put_u32(payload, fixture_slots);
                 control::put_u64(payload, message_bytes);
             } else {
@@ -932,6 +1048,8 @@ int main(int argc, char** argv) {
         test_publication_times();
         phase = "test_topic_discovery()";
         test_topic_discovery();
+        phase = "test_publisher_defaults()";
+        test_publisher_defaults();
         phase = "test_malformed_discovery()";
         test_malformed_discovery();
         phase = "test_client_topic_separators()";

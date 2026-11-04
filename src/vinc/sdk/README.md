@@ -2,6 +2,24 @@
 
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
+The [Publisher-default migration](../message_bus/PUBLISHER_DEFAULTS.md) changes
+PublisherOptions ABI and uses Bus v4 / Plugin entry 14. Rebuild connected artifacts;
+the older acceptance records below apply only to their recorded revisions.
+Publisher 預設搬移改變選項 ABI，使用 Bus v4／Plugin entry 14，所有接線產物須一起重建；
+下方較早驗收仍僅適用其記錄版本，不能替本次改動背書。
+
+Current migration acceptance is recorded in the [Publisher report](../message_bus/PUBLISHER_DEFAULTS.md#validation--驗證):
+Windows native C++ consumer/dedicated App passed; WSL consumer/application/Python
+and the dedicated App passed. The subsequent [Windows import-policy validation](../module_system/python/README.md#msvc-1951-static-import-review)
+also passed the clean installed-Python flow with old MSVCP preloaded. Subsequent
+[service-network acceptance](../shell/NETWORK_PARAMS.md#validation--驗證) passed
+Windows and WSL installed consumer/application, including HTTP at the new default 31411.
+Native Mac coverage for these migrations remains pending.
+本次 Windows C++ consumer／專用 App，以及 WSL consumer／application／Python／專用 App
+已通過；後續 Windows 靜態匯入政策修正也通過舊 MSVCP 預載的乾淨 installed Python
+驗收。後續服務網路接線已補驗 Windows／WSL installed consumer／application，包含
+新預設 31411 的 HTTP；這些搬移的 Mac 驗收仍待完成。
+
 新版 Param／重啟標記的 [macOS 乾淨 SDK 驗收](MACOS_PARAM_VALIDATION.md) 已於
 `9f0ec0b` 完成：全新 Debug／Release producer 及 installed consumer／application／python
 各 3/3 通過。來源、舊版 SDK 和原始整合失敗保留各自紀錄，不混成一次完整驗收。
@@ -666,6 +684,14 @@ in the [Param stage 4 record](../param/README.md#param-redesign-stage-four).
 <a id="log-api2026-10-08"></a>
 
 ## Log API（2026-10-08） / Log 介面（2026-10-08）
+
+File output settings are now selected by the framework entry through
+[three Log Params](../log/FILE_PARAMS.md). The installed App uses the same
+load-before-open and restart contracts as a source-built App. Rebuild consumers
+for the added `FileOptions::enabled` member; Log's wire protocol is unchanged.
+
+框架入口以三項 Log Param 決定寫檔；安裝式 App 與來源版共用先載入、再開檔及重啟契約。
+FileOptions 新增 enabled，使用端須重建；Log 傳輸協定未更動。驗收統一記於上述文件。
 
 Umbrella includes Log/context.log and fmt, not spdlog headers/definitions. Plugins gain no Log Host/Manager/Control ownership. The original Log stage used entry 5/v10; current versions follow [Module System](../module_system/README.md). See [Log](../log/README.md).
 

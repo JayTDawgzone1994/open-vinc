@@ -8,6 +8,13 @@ Python Module 由中央 Shell 啟停，每個實例使用一個系統 Python 程
 中央不連結或嵌入 Python，不附帶直譯器，也不自動安裝 Python／pip 套件。
 使用者程式透過 pybind11 原生擴充使用同一套 C++ Runtime；沒有另寫 Socket／共享記憶體協定。
 
+PublisherOptions now defaults to `None` in both fields, matching C++ optional
+options; omitted fields resolve centrally at registration. See
+[Publisher defaults](../../message_bus/PUBLISHER_DEFAULTS.md). Rebuild the extension
+with Bus v4 / Plugin entry 14.
+PublisherOptions 兩欄預設為 None，與 C++ optional 一致；省略欄位在中央建立時解析。
+契約見上述文件，擴充須與 Bus v4／Plugin entry 14 一起重建。
+
 The [single-App entry](../../../../apps/vinc/SINGLE_EXECUTABLE.md) changes native
 Module launches only: C++ Hosts execute the App image, while Python Modules still
 execute the selected system interpreter and bootstrap. Central never imports the
@@ -339,9 +346,16 @@ the [Common runtime policy](../../common/README.md#macos-system-runtime-decision
 **macOS 已確認維持現狀：** 使用系統動態 C++ Runtime，不因 Windows 的舊 DLL
 衝突改為靜態；原因與尚待驗證的相容性界線統一記錄於上述 Common 政策。
 
-- Static builds verify actual imports after linking. Only the selected CPython
-  DLL and reviewed Windows API DLLs are allowed; CRT imports (including UCRT and
-  sidecars) or another native DLL fail generation and require review.
+- Static builds check the extension's own imports after linking. Direct dynamic
+  CRT imports (MSVC CRT/STL, UCRT, Debug and sidecar names) fail with a specific
+  diagnostic. Exactly one CPython DLL import is required. Other DLL names are
+  not an approval list: Windows API-sets and other non-CRT imports do not fail
+  merely because their names are new. This does not certify third-party binary
+  compatibility or recursively inspect their dependencies/LoadLibrary calls.
+- The existing local `_msvc_runtime.json` keeps a compact `imports` list of
+  sorted, unique DLL basenames for debugging. It contains no dependency paths
+  or process-module inventory. Generation performs no upload; there is no new
+  telemetry, background collector or separate accumulating log.
 - Static format 3 records mode, native filename and SHA-256. `_build.py` selects
   the expected mode. Preflight checks the manifest, Python's actual extension
   selection and image hash before importing `_native`; stale/missing/mixed
@@ -357,7 +371,11 @@ the [Common runtime policy](../../common/README.md#macos-system-runtime-decision
 - Static CRT security updates require rebuilding/redeploying VINC's extension;
   updating the system Redistributable cannot patch its embedded CRT.
 
-靜態建置逐一檢查實際 DLL 相依，拒絕 CRT／UCRT／sidecar 或未審查 DLL。Format 3 保存
+靜態建置檢查擴充本身的匯入，直接連回動態 CRT／UCRT／Debug／sidecar 時明確拒絕，
+並維持恰一個 CPython DLL 的要求；其他 DLL 不再因名稱陌生而被拒絕。不遞迴掃描
+第三方 DLL 的相依或 LoadLibrary 行為，也不宣稱其 ABI 已相容。既有本機
+`_msvc_runtime.json` 的 `imports` 僅保留排序、去重的 DLL 檔名供除錯，不含相依路徑
+或程序已載入模組清單；不主動上傳、不新增遙測、背景蒐集或累積日誌。Format 3 保存
 模式、檔名與 SHA-256；匯入前核對 Python 選中的檔案，混搭、缺檔、損壞均拒絕。
 雜湊防止誤部署，不是簽章或安全沙箱；簽署／修改映像後也需重新產生相符 metadata。
 靜態路徑不檢查、不預載 MSVC DLL，不替換 Python／WinRT 的舊檔。Python minor ABI
@@ -850,7 +868,7 @@ was subsequently repaired and passed focused native Mac Debug/Release checks.
 
 <a id="msvc-1951-static-import-review"></a>
 
-### MSVC 19.51 static import review / 靜態匯入清單待核對
+### MSVC 19.51 static import review / 靜態匯入檢查修正
 
 During Param stage-one validation on Windows x64, a Release binding built with
 MSVC 19.51.36257 (toolset 14.51.36231) and CPython 3.13.12 was rejected by
@@ -868,7 +886,66 @@ Release binding 被 `cmake/runtime_metadata.py` 拒絕：產物包含目前靜�
 不是 Param 或 CRT 崩潰證據。同條測試流程改用 MSVC 19.44.35229 已通過；
 後續應追查匯入來源並核對 Windows API-set 支援契約，本輪未放寬防護。
 
-Current pending validation is tracked in the [root TODO](../../../../TODO.md).
+The paragraphs above and immediately below preserve the original blocked runs;
+the follow-up validation supersedes their pending status.
+上述與下段保留當時的阻擋紀錄；後續驗收取代其中待驗狀態。
+
+**Publisher-default follow-up (2026-11-04):** the same MSVC 19.51.36257 /
+14.51.36231, CPython 3.13.12 Release check rejected imports
+`api-ms-win-core-synch-l1-2-0.dll`, `kernel32.dll`, `python313.dll`, `ws2_32.dll`.
+Dumpbin identifies `WaitOnAddress` and `WakeByAddressAll` in the API-set entry.
+This matches the earlier blocker; it does not establish safety or a Param
+regression. No import policy was relaxed and no compiler was installed. Native
+C++ validation uses the same compiler; Windows Python runtime acceptance remains
+pending. Raw evidence: ignored `build/publisher-param/windows-build-3.log`.
+
+**Publisher 預設補驗：** 本輪以同一 19.51 工具集再次遇到既有阻擋，匯入符號如上。
+未據此宣稱 DLL 安全或 Param 回歸，也未放寬清單或安裝工具鏈。Windows 原生 C++
+沿用同一編譯器驗證，Python 執行期仍待驗；原始 log 位於上述 Git 忽略路徑。
+
+**Import-policy follow-up (2026-11-04):** removed the four-name system-DLL
+allowlist. The build rejects direct dynamic CRT imports in the VINC extension,
+while other DLL names remain compact local diagnostics in `_msvc_runtime.json`.
+This does not inspect Python's loaded DLLs or certify third-party transitive
+dependencies. The current contract is [above](#windows-msvc-runtime-preflight).
+
+Windows 11 x64 build 26200, MSVC 19.51.36257 / toolset 14.51.36231,
+CPython 3.13.12, CMake 4.3.2 and Ninja 1.13.2: the Release source build and
+`vinc_check_python_runtime` passed. The actual extension imports the synchronization
+API set, `kernel32.dll`, `python313.dll` and `ws2_32.dll`, without direct CRT imports.
+The selected CTests passed **9/9**, including metadata (**11** unit tests),
+loader (**21** tests), Python lifecycle/messages/services/RPC and Publisher defaults.
+Old MSVCP 14.29 and WinRT 3.2.1 import-order tests ran without skips; WinRT Array
+and message operations were exercised, not OCR. `PYTHONMALLOC=debug` and
+faulthandler were enabled. No system DLL was replaced or unloaded.
+
+The maintained `sdk.installed_python` script also passed against a clean, moved
+SDK and fresh consumer: custom messages, Bus/RPC/Param, Publisher defaults,
+normal shutdown, schema changes, ABI failure isolation, metadata repair and
+disabled-feature cleanup. Its fixture preloaded the old MSVCP 14.29 before Vinc
+for the real service flows. No existing consumer build or source SDK was available
+to the relocated App. This acceptance does not assert default-port UI availability.
+
+WSL2 Ubuntu 24.04, GCC/libstdc++ 13.3, glibc 2.39 and CPython 3.12.3:
+metadata **11/11**, loader **15 passed / 6 Windows-only skipped**, and real Python
+lifecycle/messages/services/RPC **4/4** passed. This reused the preceding native
+Release build with the synchronized Python scripts; Linux runtime linkage is unchanged.
+Windows Debug and native macOS were not rerun for this Windows import-policy change.
+These selections are not a complete-project CTest run.
+
+**匯入政策修正補驗：** 已移除四個系統 DLL 名稱的白名單，只拒絕 VINC 擴充本身
+直接匯入動態 CRT。其他相依名稱留在本機 metadata，不蒐集程序 DLL 或主動上傳。
+同一 MSVC 19.51 的 Release 建置、靜態連結檢查及九組選定測試全過，包含舊 DLL
+與 WinRT 先載入。這輪測 WinRT Array／訊息，不宣稱重跑 OCR。WSL 四組實際服務
+測試全過；Windows Debug、原生 Mac 與全專案測試不在本次補驗範圍。
+乾淨 installed Python SDK 腳本亦完整通過，涵蓋搬移、自訂訊息、Bus／RPC／Param、
+Publisher 預設、失敗隔離、修復與清理；實際服務流程先載入舊 MSVCP 14.29。
+這不代表預設端口 UI 驗收完成。收尾確認 Windows／WSL 無本輪測試程序殘留，
+WSL 的 717 個非 Markdown 來源檔與工作樹一致。
+Raw local evidence / 本機原始證據：ignored `build/python-import-policy/`, containing
+build/test logs, JUnit and result summaries. An initial sandbox-only unit run hit
+temporary-directory permissions; rerunning with normal test permissions passed.
+
 The records below preserve completed rollout stages and historical diagnosis;
 they are not an uncompleted implementation checklist. Current Windows bindings
 use static CRT; the retained dynamic-mode guard does not impose its DLL version

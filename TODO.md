@@ -2,6 +2,31 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## 檔案 Log Param：macOS 原生驗收
+
+- [ ] 同一分支驗證三項 Log Param 的來源與乾淨 installed SDK。
+
+涵蓋 Limited／App、最後合法容量修正、save／重啟、reopen 不套用新 Param、停用時
+無檔案操作／假遺失計數且 raw／structured 顯示仍可用、設定讀取失敗及檔案故障隔離。
+案例、契約與 Windows／WSL 證據見 [檔案 Log 參數](src/vinc/log/FILE_PARAMS.md)。
+
+## 服務網路 Param：macOS 原生驗收
+
+- [ ] 同一分支驗證 Shell IP／port、UI port 的來源與乾淨 installed SDK。
+
+涵蓋新預設 31410／31411、CLI 與保存優先序、非法 IP 修正、port 0、IPv6、
+埠衝突保留設定、現有連線不中斷及 UI disable／enable 套用新值。
+契約與 Windows／WSL 證據見 [服務網路參數](src/vinc/shell/NETWORK_PARAMS.md)。
+
+## Publisher 預設容量 Param：macOS 原生驗收
+
+- [ ] 在同一分支完成 macOS Debug／Release 原生與乾淨 installed SDK 驗收。
+
+本輪為 Bus v4／Plugin entry 14，先前 Param wire v3／entry 13 的 Mac 報告不能替本輪背書。
+驗收涵蓋兩項預設、部分／完整覆寫、最後有效值修正、原有 Publisher 不變、真實預算耗盡、
+Python None／整數選項及安裝後自訂訊息 App。案例與平台紀錄見
+[Publisher 預設契約](src/vinc/message_bus/PUBLISHER_DEFAULTS.md#validation--驗證)。
+
 ## Tcl：WSL 掛載來源的並行資源部署
 
 - [ ] 評估共用目的地的重複部署工作及慢速來源下的鎖等待政策。

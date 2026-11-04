@@ -10,6 +10,7 @@
 #include <chrono>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace vinc::message_bus {
@@ -17,8 +18,10 @@ namespace vinc::message_bus {
 // max_message_bytes is the complete encoded size of one message, including layout
 // metadata/alignment. Each Publisher gets its own ring buffer; a requested one slot becomes two.
 struct PublisherOptions {
-    std::uint32_t slots = config::message_bus_default_slots;
-    std::uint64_t max_message_bytes = config::message_bus_default_message_bytes;
+    // Resolve omitted fields when registering, not when constructing this object.
+    // Explicit zero remains invalid; it is not a request for a default.
+    std::optional<std::uint32_t> slots = std::nullopt;
+    std::optional<std::uint64_t> max_message_bytes = std::nullopt;
 };
 // OldestRetained permits existing data; NewOnly starts each attached source cursor
 // at its current head. get_last() is independent of this callback cursor.

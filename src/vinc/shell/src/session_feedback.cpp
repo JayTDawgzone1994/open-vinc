@@ -65,6 +65,12 @@ std::string_view known_reason(const Error& error) {
     if (error.is(log::ErrorCode::InvalidArgument)) {
         return "Invalid log arguments or target. Type 'log --help'.";
     }
+    if (error.is(log::ErrorCode::FileDisabled)) {
+        return "File Log is disabled for this run. Set vinc.log_file_enabled, save, and restart the App.";
+    }
+    if (error.is(log::ErrorCode::ConfigurationUnavailable)) {
+        return "File Log configuration is unavailable. Check startup diagnostics and restart the App.";
+    }
     if (error.is(module_system::ErrorCode::NameExists)) {
         return "Module name already exists.";
     }

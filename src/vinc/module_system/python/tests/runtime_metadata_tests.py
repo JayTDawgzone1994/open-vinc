@@ -105,22 +105,60 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result["mode"], "static")
         self.assertEqual(result["required"], {})
         self.assertFalse(result["debug"])
+        self.assertEqual(result["imports"], ["kernel32.dll", "python313.dll"])
         self.assertEqual(result["native"]["filename"], native.name)
         self.assertEqual(len(result["native"]["sha256"]), 64)
         self.assertFalse((self.vc / "Redist").exists())
 
-    def test_static_rejects_crt_sidecars_ucrt_and_unreviewed_dependencies(self):
+    def test_import_diagnostics_are_sorted_unique_basenames(self):
+        output = (
+            b"Dump of file D:\\private-build\\_native.pyd\n"
+            b"  Image has the following dependencies:\n"
+            b"    PYTHON313.dll\n    KERNEL32.dll\n    kernel32.DLL\n"
+            b"  Image has the following delay load dependencies:\n"
+            b"    api-ms-win-core-synch-l1-2-0.dll\n    foreign.dll\n"
+            b"  Summary\n"
+        )
+        completed = metadata.subprocess.CompletedProcess([], 0, stdout=output)
+        with patch.object(metadata.subprocess, "run", return_value=completed):
+            names = metadata.imported_libraries(self.compiler, Path("_native.pyd"))
+        self.assertEqual(names, ["api-ms-win-core-synch-l1-2-0.dll", "foreign.dll",
+                                 "kernel32.dll", "python313.dll"])
+
+    def test_static_accepts_non_crt_dependencies_without_an_allowlist(self):
         baseline = ["kernel32.dll", "ws2_32.dll", "python313.dll"]
         metadata.validate_static_imports(baseline)
-        for name in ("msvcp140.dll", "msvcp140d.dll", "msvcp140_atomic_wait.dll",
-                     "vcruntime140_1.dll", "concrt140.dll", "ucrtbase.dll",
-                     "api-ms-win-crt-runtime-l1-1-0.dll", "foreign.dll"):
+        for name in ("api-ms-win-core-synch-l1-2-0.dll", "user32.dll", "foreign.dll"):
             with self.subTest(name=name):
-                with self.assertRaisesRegex(RuntimeError, "unreviewed"):
+                metadata.validate_static_imports(baseline + [name])
+        metadata.validate_static_imports(["KERNEL32.DLL", "PYTHON313.DLL"])
+        metadata.validate_static_imports(["kernel32.dll", "python313_d.dll"])
+
+    def test_static_rejects_direct_crt_imports(self):
+        baseline = ["kernel32.dll", "ws2_32.dll", "python313.dll"]
+        for name in ("msvcp140.dll", "msvcp140d.dll", "msvcp140_atomic_wait.dll",
+                     "vcruntime140_1.dll", "VCRUNTIME140_1D.DLL", "concrt140.dll",
+                     "ucrtbase.dll", "ucrtbased.dll", "msvcr120.dll", "msvcrt.dll",
+                     "msvcrtd.dll", "msvcp_win.dll", "api-ms-win-crt-runtime-l1-1-0.dll"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(RuntimeError, "directly imports dynamic CRT") as raised:
                     metadata.validate_static_imports(baseline + [name])
+                self.assertIn(name.lower(), str(raised.exception))
+
+    def test_static_requires_one_cpython_import(self):
+        baseline = ["kernel32.dll", "ws2_32.dll", "python313.dll"]
         for names in ([], ["kernel32.dll"], baseline + ["python311.dll"]):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "exactly one CPython"):
                 metadata.validate_static_imports(names)
+
+    def test_static_metadata_keeps_non_crt_imports_as_local_diagnostics(self):
+        native = Path(self.temporary.name) / "_native.cp313-win_amd64.pyd"
+        write_pe(native)
+        imports = ["api-ms-win-core-synch-l1-2-0.dll", "foreign.dll", "kernel32.dll", "python313.dll"]
+        with patch.object(metadata, "imported_libraries", return_value=imports):
+            result = metadata.static_metadata(self.compiler, native, "Release")
+        self.assertEqual(result["imports"], imports)
+        self.assertEqual(result["required"], {})
 
 
 if __name__ == "__main__":

@@ -171,7 +171,7 @@ def main():
             # Prior HTTP checks leave TIME_WAIT sockets, not live listeners.
             # POSIX reuse permits rebinding those while still rejecting a listener.
             occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        occupied.bind(("127.0.0.1", 8080))
+        occupied.bind(("127.0.0.1", 31411))
         occupied.listen()
         environment = dict(os.environ, VINC_TEST_UI_UNAVAILABLE="1")
         output = run([str(first), "--shell-port", "0"], env=environment, timeout=APP_TIMEOUT_SECONDS)

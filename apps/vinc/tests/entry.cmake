@@ -126,3 +126,19 @@ if(NOT "${result}" STREQUAL "2" OR NOT error MATCHES "fixed embedded startup scr
     message(FATAL_ERROR "Embedded CLI rejection changed: ${output}${error}")
 endif()
 message(STATUS "App role dispatch, self-host paths and embedded isolation passed")
+
+# Exercise production startup ordering, CLI -> live Param, and the shared Tcl
+# correction path. This fixture's identity is isolated and runs serially.
+file(WRITE "${work}/network.tcl" "param get vinc.shell_port\nparam get vinc.shell_ip\nparam set vinc.shell_ip invalid\nparam get vinc.shell_ip\nexit\n")
+execute_process(COMMAND "${plain}" --shell-port 0 --shell-ip 127.0.0.1 -S "${work}/network.tcl"
+    WORKING_DIRECTORY "${work}" TIMEOUT ${launch_timeout_seconds}
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+file(WRITE "${work}/network.log" "${output}\n${error}")
+if(NOT "${result}" STREQUAL "0" OR NOT output MATCHES "vinc.shell_port \\[uint16\\] = 0"
+        OR NOT output MATCHES "restored 127.0.0.1" OR NOT output MATCHES "\\[restart: App\\]")
+    message(FATAL_ERROR "Network Param startup/Tcl flow failed: ${result}: ${output}${error}")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/../../../src/vinc/log/tests/app_settings.cmake")
+verify_log_settings("${plain}" "${app_directory}/vinc_data/entry-test"
+    "${work}/log-settings" "${launch_timeout_seconds}")

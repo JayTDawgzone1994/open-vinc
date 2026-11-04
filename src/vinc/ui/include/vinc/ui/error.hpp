@@ -13,7 +13,8 @@ enum class ErrorCode : std::int32_t {
     ModuleFailed = 9,
     Busy = 10,
     Timeout = 11,
-    Closing = 12
+    Closing = 12,
+    ParamFailed = 13
 };
 enum class ErrorOperation : std::int32_t {
     Load = 1,
@@ -22,7 +23,8 @@ enum class ErrorOperation : std::int32_t {
     InspectTopics = 4,
     Preview = 5,
     Session = 6,
-    Graph = 7
+    Graph = 7,
+    ConfigurePort = 8
 };
 }
 namespace vinc {

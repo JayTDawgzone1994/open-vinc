@@ -4,6 +4,11 @@
 add_executable(shell_unit_tests unit_tests.cpp)
 target_link_libraries(shell_unit_tests PRIVATE vinc_shell vinc_test_manager)
 
+add_executable(shell_network_params_tests network_params_tests.cpp)
+target_link_libraries(shell_network_params_tests PRIVATE vinc_shell vinc_test_manager)
+add_test(NAME shell.network_params COMMAND shell_network_params_tests)
+set_tests_properties(shell.network_params PROPERTIES TIMEOUT 30)
+
 add_executable(shell_startup_report_tests startup_report_tests.cpp)
 target_link_libraries(shell_startup_report_tests PRIVATE vinc_shell)
 add_test(NAME shell.startup_report COMMAND shell_startup_report_tests)
@@ -79,7 +84,7 @@ endif()
 # Compile private Shell implementations with deterministic I/O fault hooks.
 # No production Shell object is linked into this fixture.
 add_executable(shell_fault_tests fault_tests.cpp
-    ../src/command_line.cpp ../src/command_router.cpp
+    ../src/command_line.cpp ../src/command_router.cpp ../src/network_params.cpp
     ../src/script_service.cpp ../src/tcl_runtime.cpp
     ../src/startup_report.cpp ../src/session_feedback.cpp)
 target_include_directories(shell_fault_tests PRIVATE ../include "${CMAKE_CURRENT_SOURCE_DIR}")

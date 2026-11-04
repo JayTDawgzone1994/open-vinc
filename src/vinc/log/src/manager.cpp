@@ -97,6 +97,10 @@ struct Manager::Impl {
     FileOptions options;
     bool reconfigure = false;
     bool configured = false;
+    // Admission policy is independent of file health. Intentional disabling
+    // must not look like I/O loss or be bypassed by reopen.
+    enum class FilePolicy { Pending, Enabled, Disabled, Unavailable };
+    FilePolicy file_policy = FilePolicy::Pending;
     bool enabled = false;
     bool closing = false;
     bool writer_failed = false;
@@ -135,17 +139,19 @@ struct Manager::Impl {
         const bool urgent = item->level && *item->level <= Level::Warn;
         const auto records_limit = config::log_queue_records - (urgent ? 0 : config::log_reserved_records);
         const auto bytes_limit = config::log_queue_bytes - (urgent ? 0 : config::log_reserved_bytes);
-        if (pending.size() >= records_limit || pending_bytes > bytes_limit ||
-            bytes > bytes_limit - pending_bytes) {
-            ++dropped;
-            if (auto peer = peers.find(item->mid); peer != peers.end()) {
-                ++peer->second->disk_dropped;
+        if (file_policy == FilePolicy::Enabled) {
+            if (pending.size() >= records_limit || pending_bytes > bytes_limit ||
+                bytes > bytes_limit - pending_bytes) {
+                ++dropped;
+                if (auto peer = peers.find(item->mid); peer != peers.end()) {
+                    ++peer->second->disk_dropped;
+                }
+                ++revision;
+            } else {
+                pending.push_back({item, bytes});
+                pending_bytes += bytes;
+                changed.notify_one();
             }
-            ++revision;
-        } else {
-            pending.push_back({item, bytes});
-            pending_bytes += bytes;
-            changed.notify_one();
         }
         // Shell is a separate lossy observer; it cannot retain or block the disk queue.
         while (!history.empty() && (history.size() >= config::log_queue_records ||
@@ -407,12 +413,14 @@ struct Manager::Impl {
     }
 
     void write_loop() {
-        Files files;
+        // No filesystem owner exists until policy explicitly permits files.
+        std::optional<Files> files;
         auto flush_at = std::chrono::steady_clock::now() + config::log_flush_interval;
         std::uint64_t last_written = 0;
         for (;;) {
             std::unique_lock lock(mutex);
-            changed.wait_until(lock, flush_at, [&] {
+            const auto wait_deadline = enabled ? flush_at : (Deadline::max)();
+            changed.wait_until(lock, wait_deadline, [&] {
                 return closing || reconfigure || !pending.empty();
             });
             if (reconfigure) {
@@ -420,17 +428,26 @@ struct Manager::Impl {
                 auto limits = options;
                 reconfigure = false;
                 lock.unlock();
-                auto configured_result = files.configure(path, limits);
+                Result<void> configured_result;
+                if (limits.enabled) {
+                    if (!files) {
+                        files.emplace();
+                    }
+                    configured_result = files->configure(path, limits);
+                } else if (files) {
+                    configured_result = files->flush();
+                    files.reset();
+                }
                 lock.lock();
                 configured = true;
-                enabled = bool(configured_result);
+                enabled = limits.enabled && bool(configured_result);
                 if (!configured_result) {
                     fail(configured_result.error());
                 } else {
                     failure.reset();
                     ++revision;
                 }
-                file_bytes = files.bytes();
+                file_bytes = files ? files->bytes() : 0;
                 changed.notify_all();
             }
             if (!pending.empty()) {
@@ -445,12 +462,12 @@ struct Manager::Impl {
                     if (last_written && item.record->sequence != last_written + 1) {
                         encoded = "[disk gap after seq=" + std::to_string(last_written) + "] " + encoded;
                     }
-                    result = files.append(date_folder(item.record->received), encoded);
+                    result = files->append(date_folder(item.record->received), encoded);
                     if (result) {
                         last_written = item.record->sequence;
                     }
                     if (result && item.record->level == Level::Error) {
-                        result = files.flush();
+                        result = files->flush();
                     }
                 }
                 lock.lock();
@@ -461,11 +478,12 @@ struct Manager::Impl {
                     enabled = false;
                     fail(result.error());
                 }
-                file_bytes = files.bytes();
+                file_bytes = files ? files->bytes() : 0;
             }
-            if (std::chrono::steady_clock::now() >= flush_at || (closing && pending.empty())) {
+            if (files && enabled &&
+                (std::chrono::steady_clock::now() >= flush_at || (closing && pending.empty()))) {
                 lock.unlock();
-                auto flushed = files.flush();
+                auto flushed = files->flush();
                 lock.lock();
                 if (!flushed) {
                     enabled = false;
@@ -538,8 +556,14 @@ Result<void> Manager::configure(std::filesystem::path root, FileOptions options)
     if (impl_->writer_failed) {
         return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Configure});
     }
+
+    if (!options.max_file_bytes || options.max_total_bytes < options.max_file_bytes) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Configure});
+    }
+
     impl_->root = std::move(root);
     impl_->options = options;
+    impl_->file_policy = options.enabled ? Impl::FilePolicy::Enabled : Impl::FilePolicy::Disabled;
     impl_->configured = false;
     impl_->reconfigure = true;
     impl_->changed.notify_all();
@@ -549,6 +573,20 @@ Result<void> Manager::configure(std::filesystem::path root, FileOptions options)
     if (impl_->failure) {
         return std::unexpected(*impl_->failure);
     }
+    return {};
+}
+
+Result<void> Manager::configuration_unavailable(const Error& cause) {
+    std::lock_guard lock(impl_->mutex);
+    // Only startup may fail closed this way. Do not race a writer that has
+    // already adopted a policy or silently replace active settings.
+    if (impl_->configured || impl_->reconfigure) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Configure});
+    }
+
+    impl_->file_policy = Impl::FilePolicy::Unavailable;
+    impl_->configured = true;
+    impl_->fail(wrap_error(ErrorCode::ConfigurationUnavailable, ErrorOperation::Configure, cause));
     return {};
 }
 
@@ -610,12 +648,24 @@ void Manager::diagnostic(std::string text, Level level) {
 Result<std::string> Manager::command(const std::vector<std::string>& args) {
     std::lock_guard lock(impl_->mutex);
     if (args == std::vector<std::string>{"status"}) {
+        std::string_view file_state = "unconfigured";
+        if (impl_->file_policy == Impl::FilePolicy::Disabled) {
+            file_state = "disabled";
+        } else if (impl_->file_policy == Impl::FilePolicy::Unavailable) {
+            file_state = "unavailable";
+        } else if (impl_->file_policy == Impl::FilePolicy::Enabled) {
+            file_state = impl_->enabled ? "enabled" : "failed";
+        }
         std::string status = fmt::format(
             "Log file={} bytes={} queued={} dropped={} raw_lost_chunks={} raw_lost_bytes={} "
             "transport_dropped={} source_rejected={} uncertain_sessions={} file_lost={}\n",
-            impl_->enabled ? "enabled" : "disabled", impl_->file_bytes, impl_->pending.size(), impl_->dropped,
+            file_state, impl_->file_bytes, impl_->pending.size(), impl_->dropped,
             impl_->raw_lost_events, impl_->raw_lost_bytes, impl_->transport_dropped, impl_->source_rejected,
             impl_->uncertain_sessions, impl_->file_lost);
+        if (impl_->configured && impl_->file_policy != Impl::FilePolicy::Unavailable) {
+            status += fmt::format("Startup file_bytes={} total_bytes={}; Param changes require App restart.\n",
+                                  impl_->options.max_file_bytes, impl_->options.max_total_bytes);
+        }
         if (impl_->failure) {
             status += error_to_string(*impl_->failure);
         }
@@ -629,6 +679,14 @@ Result<std::string> Manager::command(const std::vector<std::string>& args) {
         return status;
     }
     if (args == std::vector<std::string>{"reopen"}) {
+        if (impl_->file_policy == Impl::FilePolicy::Disabled) {
+            return std::unexpected(Error{ErrorCode::FileDisabled, ErrorOperation::Command});
+        }
+
+        if (impl_->file_policy != Impl::FilePolicy::Enabled) {
+            return std::unexpected(Error{ErrorCode::ConfigurationUnavailable, ErrorOperation::Command});
+        }
+
         if (impl_->writer_failed || impl_->root.empty()) {
             return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Configure});
         }

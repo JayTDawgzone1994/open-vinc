@@ -14,7 +14,12 @@ public:
         bool truncated = false;
     };
 
-    explicit ScriptService(ModuleManager& manager) : router_(manager) {
+    explicit ScriptService(ModuleManager& manager, std::shared_ptr<NetworkParams> network_params = {})
+        : network_params_(std::move(network_params)), router_(manager, false, network_params_) {
+    }
+
+    const std::shared_ptr<NetworkParams>& network_params() const noexcept {
+        return network_params_;
     }
 
     Result<void> initialize() {
@@ -36,6 +41,7 @@ public:
 private:
     void poll(); // mutex held; finish only a ready future.
     std::mutex mutex_;
+    std::shared_ptr<NetworkParams> network_params_;
     CommandRouter router_;
     std::uint64_t owner_ = 0;
     bool stopping_ = false;

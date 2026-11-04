@@ -34,7 +34,8 @@ enum class ErrorCode : std::int32_t {
     Timeout = 28,
     TimeoutOutcomeUnknown = 29,
     CancelledOutcomeUnknown = 30,
-    OutcomeUnknown = 31
+    OutcomeUnknown = 31,
+    ParamFailed = 32
 };
 
 enum class ErrorOperation : std::int32_t {
@@ -70,7 +71,8 @@ enum class ErrorOperation : std::int32_t {
     Receive = 30,
     CloseSocket = 31,
     Accept = 32,
-    WriteTerminal = 33
+    WriteTerminal = 33,
+    ConfigureNetwork = 34
 };
 }
 

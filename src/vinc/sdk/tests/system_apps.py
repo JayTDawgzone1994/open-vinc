@@ -29,7 +29,7 @@ def verify(first, second, work):
         first_app.wait_log("VINC ready")
         first_ui = services.wait_running(first_app, "ui")
         first_recorder = services.wait_running(first_app, "recorder")
-        first_graph = graph(8080)
+        first_graph = graph(31411)
         require(first_ui[1] in {int(row["mid"]) for row in first_graph["modules"]}, "First graph identity")
         duplicate = run([str(first), "--shell-port", "0"], success=False, timeout=WAIT_SECONDS)
         require("A Vinc with this name is already running" in duplicate, duplicate)
@@ -60,7 +60,7 @@ def verify(first, second, work):
         require(services.snapshot(first_app, "ui")[:3] == first_ui[:3], "Disable terminated First UI")
         recovered = services.wait_running(second_app, "ui", limited[1])
         require(recovered[1] > limited[1], "Recovery reused MID")
-        second_graph = graph(8080)
+        second_graph = graph(31411)
         # MIDs are App-local. The recovered UI now has a distinct MID from A's
         # initial UI, so this observation can detect accidentally querying A.
         ui_mids = {int(row["mid"]) for row in second_graph["modules"] if row["name"] == "ui"}
