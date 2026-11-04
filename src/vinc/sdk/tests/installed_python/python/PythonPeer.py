@@ -15,6 +15,16 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
         self.rpc_received = False
         self.changed = False
         self.publisher = self.context.advertise(vinc.messages.SdkPacket, "sdk/request")
+        assert self.publisher.stats().requested_slots == 4
+        assert self.publisher.stats().max_message_bytes == 8192
+        options = vinc.message_bus.PublisherOptions()
+        assert options.slots is None and options.max_message_bytes is None
+        options.max_message_bytes = 4096
+        partial = self.context.advertise(vinc.messages.SdkPacket, "sdk/partial", options)
+        assert partial.stats().requested_slots == 4
+        assert partial.stats().max_message_bytes == 4096
+        partial.close()
+        print("INSTALLED_PYTHON_PUBLISHER_DEFAULTS_OK", flush=True)
         self.subscriber = self.context.subscribe(vinc.messages.SdkPacket, "sdk/reply", self.receive)
         self.context.param.register_param("gain", vinc.param.Type.Int32, 7,
                                          restart_hint=vinc.param.RestartHint.App)

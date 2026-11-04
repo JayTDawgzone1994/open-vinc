@@ -11,7 +11,9 @@ enum class ErrorCode : std::int32_t {
     Protocol = 6,
     FileFailed = 7,
     CapacityExceeded = 8,
-    ResourceExhausted = 9
+    ResourceExhausted = 9,
+    FileDisabled = 10,
+    ConfigurationUnavailable = 11
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,

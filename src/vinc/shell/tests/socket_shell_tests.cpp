@@ -181,12 +181,14 @@ void test_sessions_and_backpressure(Files& files) {
     }
 
     auto& manager = **manager_owner;
-    shell::ScriptService scripts(manager);
+    auto network_params = std::make_shared<shell::NetworkParams>(manager);
+    shell::ScriptService scripts(manager, network_params);
     check(scripts.initialize(), "initialize script service");
     shell::SocketShellOptions options;
     options.port = 0;
     options.disconnect_timeout = 1200ms;
     options.send_timeout = 300ms;
+    options = take(network_params->configure(options, {}, std::uint16_t{0}));
     auto server_owner = checked_value(shell::SocketShell::create(manager, scripts, options));
     auto& server = *server_owner;
     check(server.endpoint().port != 0 &&
@@ -202,6 +204,12 @@ void test_sessions_and_backpressure(Files& files) {
           "bind conflict preserves OSAL cause");
     Client owner_client(server.endpoint());
     Client observer_client(server.endpoint());
+    check(owner_client.command("param set vinc.shell_ip invalid").find("restored 127.0.0.1") != std::string::npos,
+          "remote Param repair uses the central consumer");
+    check(owner_client.command("param set vinc.shell_port 31410").find("Restart hint: App") != std::string::npos,
+          "remote port change requests restart");
+    check(observer_client.command("param get vinc.shell_port").find("= 31410") != std::string::npos,
+          "existing sessions survive a desired endpoint change");
     check(owner_client.code != observer_client.code, "sessions have distinct recovery tokens");
     check(owner_client.command("shell -e").find("No recorded error.") != std::string::npos,
           "new remote session has no error");

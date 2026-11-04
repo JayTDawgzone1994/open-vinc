@@ -1,5 +1,7 @@
 if {[catch {
     puts "CENTRAL_PID=[pid]"
+    param set vinc.pub_default_slots 4
+    param set vinc.pub_default_message_bytes 8192
     if {[NativePeer [info nameofexecutable]] != 0} { error "Native startup failed" }
     if {[PythonPeer --name py @REVISION@] != 0} { error "Python startup failed" }
     py send

@@ -274,9 +274,12 @@ struct Transport {
 
             if (!response->failure && frame.operation == Advertise) {
                 control::Reader publication_reader(response->body);
+                const auto requested_slots = publication_reader.u32();
                 auto descriptor = decode_descriptor(publication_reader);
                 auto targets = decode_notification_targets(publication_reader);
-                if (!descriptor.id || !targets || notification_routes.contains(descriptor.id)) {
+                if (!requested_slots || requested_slots > maximum_ring_buffer_slots ||
+                    !publication_reader.done() || !descriptor.id || !targets ||
+                    notification_routes.contains(descriptor.id)) {
                     receive_failure = Error{ErrorCode::Protocol, ErrorOperation::Receive};
                     fail_locked();
                     return false;
@@ -954,7 +957,6 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
         // Allocate local ownership before the remote mutation so failures can clean up.
         auto core = std::make_shared<detail::PublisherCore>();
         core->transport = impl_->transport;
-        core->requested = options.slots;
         control::Bytes payload;
         auto encoded = control::put_string(payload, topic);
         if (!encoded) {
@@ -962,8 +964,20 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
                 vinc::wrap_error(ErrorCode::InvalidArgument, ErrorOperation::Advertise, encoded.error()));
         }
         control::put_u64(payload, schema);
-        control::put_u32(payload, options.slots);
-        control::put_u64(payload, options.max_message_bytes);
+        std::uint32_t present = 0;
+        if (options.slots) {
+            present |= detail::publisher_slots_present;
+        }
+        if (options.max_message_bytes) {
+            present |= detail::publisher_bytes_present;
+        }
+        control::put_u32(payload, present);
+        if (options.slots) {
+            control::put_u32(payload, *options.slots);
+        }
+        if (options.max_message_bytes) {
+            control::put_u64(payload, *options.max_message_bytes);
+        }
         auto result = impl_->transport->request(detail::Advertise, std::move(payload));
         if (!result) {
             return std::unexpected(result.error());
@@ -974,11 +988,18 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
 #ifdef VINC_MESSAGE_BUS_TESTING
         detail::testing::checkpoint(detail::testing::FaultPoint::DescriptorDecode);
 #endif
+        const auto requested_slots = reader.u32();
         auto descriptor = detail::decode_descriptor(reader);
         auto targets = detail::decode_notification_targets(reader);
-        if (!targets || !reader.done() || !descriptor.id || descriptor.schema != schema) {
+        const bool valid_request = requested_slots != 0 && requested_slots <= detail::maximum_ring_buffer_slots;
+        const bool matching_request = !options.slots || requested_slots == *options.slots;
+        const bool matching_slots = descriptor.slots == (std::max)(detail::minimum_ring_buffer_slots, requested_slots);
+        const bool matching_bytes = !options.max_message_bytes || descriptor.bytes == *options.max_message_bytes;
+        if (!targets || !reader.done() || !descriptor.id || descriptor.schema != schema ||
+            !valid_request || !matching_request || !matching_slots || !matching_bytes) {
             return std::unexpected(vinc::make_error(ErrorCode::Protocol, ErrorOperation::Advertise));
         }
+        core->requested = requested_slots;
         cleanup.id = descriptor.id;
         {
             std::lock_guard lock(impl_->transport->mutex);

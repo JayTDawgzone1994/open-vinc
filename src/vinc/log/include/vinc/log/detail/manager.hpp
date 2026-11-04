@@ -15,6 +15,8 @@ public:
                                                    std::string instance);
     ~Manager();
     Result<void> configure(std::filesystem::path root, FileOptions options = {});
+    // Startup-only failure path: retain diagnostics without guessing a file policy.
+    Result<void> configuration_unavailable(const Error& cause);
     Result<void> listen(std::uint64_t mid, std::string endpoint, control::Options options);
     void identify(std::uint64_t mid, std::string name, std::uint64_t pid);
     void exited(std::uint64_t mid);

@@ -28,6 +28,10 @@ public:
     Result<void> run_source(shell::ScriptSource startup_script, std::vector<std::string> script_args = {});
     // Central-only startup presentation; call before run, on the Shell control thread.
     void set_startup_report(shell::StartupReport report);
+    // Load registered settings and apply explicit CLI overrides to live Param.
+    // Does not bind, save, or mutate an already running listener.
+    Result<shell::SocketShellOptions> configure_socket_params(shell::SocketShellOptions options,
+        std::optional<std::string> ip = {}, std::optional<std::uint16_t> port = {});
     // Bind before deployment; failures preserve the Socket/OSAL cause.
     Result<osal::IpEndpoint> start_socket_shell(shell::SocketShellOptions options = {});
     // Synchronous command entry. Does not parse Tcl. Nonzero application exit codes

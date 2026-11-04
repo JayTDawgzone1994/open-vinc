@@ -193,7 +193,8 @@ struct SocketShell::Impl {
 
     Impl(ModuleManager& module_manager, ScriptService& script_service, SocketShellOptions socket_options,
          osal::SocketPoller socket_poller)
-        : manager(module_manager), scripts(script_service), router(module_manager, true),
+        : manager(module_manager), scripts(script_service),
+          router(module_manager, true, script_service.network_params()),
           options(std::move(socket_options)), poller(std::move(socket_poller)) {
     }
 

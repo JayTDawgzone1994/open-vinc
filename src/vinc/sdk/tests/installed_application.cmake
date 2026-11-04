@@ -45,8 +45,13 @@ function(verify_run root revision embedded)
         WORKING_DIRECTORY "${work}/unrelated cwd" RESULT_VARIABLE result
         OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 35)
     file(WRITE "${root}/test-output.txt" "${output}\n${errors}")
+    if(WITH_UI AND (NOT output MATCHES "vinc.shell_port \\[uint16\\] = 0"
+            OR NOT output MATCHES "ui.port \\[uint16\\] = 31411"))
+        message(FATAL_ERROR "Installed App did not register service parameters: ${output}\n${errors}")
+    endif()
     if(NOT result STREQUAL "0" OR output MATCHES "APPLICATION_FLOW_FAILED"
             OR NOT output MATCHES "APPLICATION_FLOW_OK"
+            OR NOT output MATCHES "INSTALLED_PUBLISHER_DEFAULTS_OK"
             OR NOT output MATCHES "RECEIVED=${revision} publisher=sender"
             OR NOT output MATCHES "CALLBACK=${revision}"
             OR NOT output MATCHES "written=[1-9][0-9]*"
@@ -127,6 +132,9 @@ if(EXISTS "${work}/consumer/vinc_generated/include/vinc_messages/Extra.hpp")
 endif()
 run_checked("${CMAKE_COMMAND}" --install "${work}/consumer" --prefix "${work}/plain app")
 verify_run("${work}/plain app/PackageApp" 42 FALSE)
+include("${CMAKE_CURRENT_LIST_DIR}/../../log/tests/app_settings.cmake")
+verify_log_settings("${work}/plain app/PackageApp/PackageApp${suffix}"
+    "${work}/plain app/PackageApp/vinc_data/sdk-package-app" "${work}/log-settings" 35)
 foreach(case IN ITEMS DUPLICATE_MODULE MISSING_MESSAGES)
     if(case STREQUAL "DUPLICATE_MODULE")
         set(expected "Duplicate ModuleType")

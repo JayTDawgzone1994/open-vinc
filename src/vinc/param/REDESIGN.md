@@ -1,5 +1,9 @@
 # Param Redesign Implementation Record / Param 重設計實作紀錄
 
+Later work migrates only the two [Publisher defaults](../message_bus/PUBLISHER_DEFAULTS.md).
+The exclusions below describe this earlier redesign, not the later migration.
+後續另輪僅搬移上述兩項 Publisher 預設；下文排除範圍保留原輪次的事實，不否定後續接線。
+
 This record predates the subsequent [restart-hint work](README.md#restart-hints),
 which advances wire/Plugin versions and has its own acceptance stages.
 本紀錄早於後續重啟標記工作；新版 wire／Plugin 與其驗收階段見上方連結。

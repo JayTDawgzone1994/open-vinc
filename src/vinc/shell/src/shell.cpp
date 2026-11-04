@@ -39,6 +39,7 @@ struct Shell::Impl {
     std::ostream& output;
     output_hub::Subscription captured_output;
     output_hub::TextRenderer output_renderer;
+    std::shared_ptr<shell::NetworkParams> network_params;
     shell::CommandRouter router;
     shell::SessionFeedback feedback;
     shell::LineEditor editor;
@@ -71,7 +72,9 @@ struct Shell::Impl {
     std::unique_ptr<shell::SocketShell> remote; // Join before destroying the shared script service.
 
     Impl(ModuleManager& module_manager, std::ostream& output_stream)
-        : manager(module_manager), output(output_stream), router(module_manager), script(module_manager) {
+        : manager(module_manager), output(output_stream),
+          network_params(std::make_shared<shell::NetworkParams>(module_manager)),
+          router(module_manager, false, network_params), script(module_manager, network_params) {
     }
 
     Result<void> initialize() {
@@ -777,6 +780,15 @@ Result<osal::IpEndpoint> Shell::start_socket_shell(shell::SocketShellOptions opt
 
     impl_->remote = std::move(*created);
     return impl_->remote->endpoint();
+}
+
+Result<shell::SocketShellOptions> Shell::configure_socket_params(shell::SocketShellOptions options,
+    std::optional<std::string> ip, std::optional<std::uint16_t> port) {
+    if (impl_->remote) {
+        return std::unexpected(Error{ErrorCode::AlreadyStarted, ErrorOperation::ConfigureNetwork});
+    }
+
+    return impl_->network_params->configure(std::move(options), std::move(ip), port);
 }
 
 Result<std::int32_t> Shell::process_line(const std::string& line) {

@@ -26,6 +26,7 @@ public:
 
     vinc::Result<void> on_start(const std::vector<std::string>& args) override {
         auto& options = options_;
+        std::optional<std::uint16_t> port_override;
         auto root = vinc::osal::path_from_utf8(vinc_ui_default_root);
         if (!root) {
             return std::unexpected(vinc::wrap_error(vinc::ui::ErrorCode::InvalidArgument,
@@ -61,7 +62,7 @@ public:
                     return invalid_argument();
                 }
 
-                options.port = static_cast<std::uint16_t>(port);
+                port_override = static_cast<std::uint16_t>(port);
             } else if (args[index] == "--root") {
                 auto path = vinc::osal::path_from_utf8(value);
                 if (!path) {
@@ -75,6 +76,11 @@ public:
             }
         }
 
+        auto parameters = initialize_port(port_override);
+        if (!parameters) {
+            return parameters;
+        }
+
         if (!enabled_) {
             return {};
         }
@@ -82,6 +88,12 @@ public:
     }
 
     vinc::Result<void> start_server() {
+        auto configured = read_port();
+        if (!configured) {
+            return std::unexpected(configured.error());
+        }
+
+        options_.port = *configured;
         // Each enable takes a fresh asset/plugin snapshot. Context work stays on
         // this Module's pump thread; the HTTP workers only access bounded caches.
         auto options = options_;
@@ -153,8 +165,14 @@ public:
                                               vinc::ui::ErrorOperation::Command});
         }
 
+        auto configured = read_port();
+        if (!configured) {
+            return std::unexpected(configured.error());
+        }
+
         std::cout << "UI running=" << (server_ && server_->running())
                   << " port=" << (server_ ? server_->port() : options_.port)
+                  << " configured_port=" << *configured
                   << " enabled=" << enabled_ << '\n' << std::flush;
         return 0;
     }
@@ -165,6 +183,77 @@ public:
     }
 
 private:
+    vinc::Error parameter_failure(const vinc::Error& cause) const {
+        return vinc::wrap_error(vinc::ui::ErrorCode::ParamFailed,
+                               vinc::ui::ErrorOperation::ConfigurePort, cause);
+    }
+
+    vinc::Result<void> initialize_port(std::optional<std::uint16_t> override) {
+        auto registered = context.param.register_param<std::uint16_t>(
+            "port", vinc::config::ui_port, {.restart_hint = vinc::param::RestartHint::Module});
+        if (!registered) {
+            return std::unexpected(parameter_failure(registered.error()));
+        }
+
+        if (override) {
+            auto changed = context.param.set("port", *override);
+            if (!changed) {
+                return std::unexpected(parameter_failure(changed.error()));
+            }
+        }
+
+        auto current = read_port();
+        if (!current) {
+            return std::unexpected(current.error());
+        }
+
+        auto watched = context.param.on_change([this](const vinc::param::ParamMap& values) {
+            const auto found = values.find(get_module_name() + ".port");
+            if (found == values.end()) {
+                return;
+            }
+
+            auto accepted = accept_port(found->second);
+            if (!accepted) {
+                std::cerr << "UI parameter rejected: " << vinc::error_to_string(accepted.error()) << '\n';
+            }
+            // A valid update is desired configuration, not permission to stop
+            // the active server or invalidate browser sessions.
+        });
+        if (!watched) {
+            return std::unexpected(parameter_failure(watched.error()));
+        }
+
+        return {};
+    }
+
+    vinc::Result<std::uint16_t> accept_port(const vinc::param::Entry& entry) {
+        // The declared uint16 type bounds ports; zero explicitly requests an
+        // OS-selected endpoint. Resource/bind failures must not rewrite Param.
+        auto port = entry.get<std::uint16_t>();
+        if (!port) {
+            auto restored = context.param.set("port", accepted_port_);
+            if (!restored) {
+                return std::unexpected(parameter_failure(restored.error()));
+            }
+
+            return std::unexpected(parameter_failure(port.error()));
+        }
+
+        accepted_port_ = *port;
+        return accepted_port_;
+    }
+
+    vinc::Result<std::uint16_t> read_port() {
+        // Registration/set acknowledge central commit, not local pump cache.
+        auto current = context.param.read_current("port");
+        if (!current) {
+            return std::unexpected(parameter_failure(current.error()));
+        }
+
+        return accept_port(*current);
+    }
+
     void stop_server() {
         if (graph_) {
             graph_->stop();
@@ -179,6 +268,7 @@ private:
     }
     std::unique_ptr<vinc::ui::Server> server_;
     vinc::ui::Options options_;
+    std::uint16_t accepted_port_ = vinc::config::ui_port;
     bool enabled_ = true;
     std::optional<vinc::Error> start_failure_;
     std::shared_ptr<vinc::ui::detail::TopicMonitor> monitor_;

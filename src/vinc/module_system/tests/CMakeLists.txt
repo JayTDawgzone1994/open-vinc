@@ -48,6 +48,11 @@ add_executable(module_instance_tests instance_tests.cpp)
 target_link_libraries(module_instance_tests PRIVATE vinc_test_manager)
 add_test(NAME module.instance COMMAND module_instance_tests)
 set_tests_properties(module.instance PROPERTIES TIMEOUT 45)
+add_executable(module_publisher_defaults_tests publisher_defaults_tests.cpp)
+target_link_libraries(module_publisher_defaults_tests PRIVATE
+    vinc::module_manager vinc::param_manager vinc::concurrency vinc::errors)
+add_test(NAME module.publisher_defaults COMMAND module_publisher_defaults_tests)
+set_tests_properties(module.publisher_defaults PROPERTIES TIMEOUT 45)
 # Build real child fixtures, including a silent peer, for session/lifecycle failure tests.
 vinc_add_module_plugin(module_lock_helper lock_helper.cpp)
 add_executable(module_lock_tests lock_tests.cpp)

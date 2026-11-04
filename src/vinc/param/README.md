@@ -6,9 +6,9 @@
 
 **Mac 驗收已完成：** 新版 Plugin entry 13／Param wire v3 的來源及乾淨 installed SDK 已有原生證據，範圍依上述報告。下文歷史階段表格的 Mac Pending／待驗保留當輪結果，後續驗收由新報告補齊，不代表目前仍待驗，也不把不同輪次合計為一次完整 CTest。
 
-**Restart-hint stages 1–3 and earlier redesign stages 1–4:** implementation and Windows/WSL acceptance are recorded below; native Mac follow-up is linked above. This README owns the current contracts; [the implementation record](REDESIGN.md) indexes decisions and evidence. System-setting migration remains excluded.
+**Restart-hint stages 1–3 and earlier redesign stages 1–4:** implementation and Windows/WSL acceptance are recorded below; native Mac follow-up is linked above. This README owns the current contracts; [the implementation record](REDESIGN.md) indexes decisions and evidence. Those rounds excluded system-setting migration; the later Publisher-default integration is linked below.
 
-**重啟標記及先前重設計：** 實作、Windows／WSL 原始驗收見下方各階段，後續 Mac 驗收見上述報告。本文維護正式契約，實作紀錄保留索引；不包含系統設定搬移。
+**重啟標記及先前重設計：** 實作、Windows／WSL 原始驗收見下方各階段，後續 Mac 驗收見上述報告。本文維護正式契約，實作紀錄保留索引；原輪次不包含系統設定搬移，後續 Publisher 預設接線見下方。
 
 Param is a centrally managed typed parameter service. Modules use inherited context.param with approved name/MID, not self-created Contexts, shared regions, or Guards. Updates may be delayed/coalesced; Param neither replaces Bus nor synchronizes application across Modules.
 
@@ -16,10 +16,17 @@ Param 是中央維護的具型別參數服務。Module 使用繼承的 `context.
 名稱與 MID 決定身分，不自行建立 Context、共享區或持鎖物件。參數允許延遲與版本合併，
 不取代 Message Bus，也不保證多個 Module 同時套用更新。
 
-**Existing config.hpp settings are not automatically connected to Param.** Socket Shell IP/port/timeouts keep their CLI/config path; the vinc namespace only provides integration for later framework parameters.
+**Existing config.hpp settings are not automatically connected to Param.** The two
+[Publisher defaults](../message_bus/PUBLISHER_DEFAULTS.md) are explicitly wired
+through a framework consumer. The [service network settings](../shell/NETWORK_PARAMS.md)
+also connect Socket Shell IP/port and UI port; other settings, including Shell timeouts,
+keep their existing CLI/config path. The three [file Log settings](../log/FILE_PARAMS.md)
+use Limited/App declarations and take effect only on the next App startup.
 
-**本輪沒有將既有 `config.hpp` 設定改接 Param。** Socket Shell 的 IP、port、timeout
-仍依原有 CLI／config 流程；`vinc` 命名空間只提供框架後續接線能力。
+**既有 `config.hpp` 設定不會自動接 Param。** 目前將上述兩項 Publisher 預設由
+框架消費端明確接入；另有上述服務網路設定接上 Shell IP／port 與 UI port。
+另有三項 [檔案 Log 設定](../log/FILE_PARAMS.md) 使用 Limited／App，下次 App 啟動套用；
+其餘設定（包括 Shell timeout）維持原有 CLI／config 流程。
 
 <a id="module-api"></a>
 
@@ -485,10 +492,10 @@ set 成功代表中央提交，不代表已套用或已保存。
 
 System Modules use the same Context and permissions as ordinary Modules. Their
 parameters belong to their approved instance name (for example, `ui.port`), not
-a nested `vinc.ui` namespace. These names illustrate ownership, not migrated settings.
+a nested `vinc.ui` namespace. UI port is wired as described in the network contract above.
 
 System Module 與一般 Module 使用相同 Context／權限，不加專用寫入後門；其參數歸屬
-自己的實例名稱（例如 `ui.port`），不增加 `vinc.ui` 巢狀命名。此為歸屬示意，尚未搬移設定。
+自己的實例名稱（例如 `ui.port`），不增加 `vinc.ui` 巢狀命名。UI port 已依上述網路契約接線。
 
 <a id="pump快取與-callback"></a>
 
@@ -539,11 +546,15 @@ Central reads the following after startup and before Modules/deployment scripts:
 <Vinc executable directory>/vinc_data/<INSTANCE_NAME>/params.toml
 ```
 
-Paths are executable-relative, not cwd, with one directory per INSTANCE_NAME. First writable startup creates an empty file; build generates none. Custom composition uses private ManagerAccess::configure_params before Module startup/registration.
+Paths are executable-relative, not cwd, with one directory per INSTANCE_NAME.
+First writable startup creates the file before registration adds framework
+Publisher defaults; build generates none. Private ManagerAccess::configure_params
+loads persistence and registers those defaults before Module startup/registration.
 
 路徑相對執行檔位置，不依啟動時 current directory。不同 INSTANCE_NAME 使用不同目錄。
-正常可寫環境首次執行即建立空檔，不由 build 產生。框架自訂組裝使用私有
-`ManagerAccess::configure_params` 接入根目錄；它必須在 Module 啟動與參數登記前呼叫。
+正常可寫環境首次執行建立檔案，再註冊並加入框架 Publisher 預設，不由 build 產生。
+私有 `ManagerAccess::configure_params` 接入根目錄、載入及註冊框架預設；
+它必須在 Module 啟動與使用者參數登記前呼叫。
 
 ```toml
 format = 1

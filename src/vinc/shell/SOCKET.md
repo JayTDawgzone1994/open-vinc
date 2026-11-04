@@ -1,6 +1,15 @@
 # Socket Shell
 
-Vinc 每次啟動都開啟 TCP Shell，預設 `127.0.0.1:5500`。沒有 Vinc 客戶端模式。
+The [service-network Params](NETWORK_PARAMS.md) own `vinc.shell_ip` and
+`vinc.shell_port`. Explicit CLI arguments override the live values without saving;
+changes apply on the next App startup, without disconnecting existing sessions.
+Previously saved custom endpoints are not forcibly moved to the new defaults.
+
+IP／port 已接入 [服務網路 Param](NETWORK_PARAMS.md)：`vinc.shell_ip` 與
+`vinc.shell_port`，CLI 覆寫本次 live 值但不自動 save。修改後下次 App 啟動生效，
+不自動斷開遠端連線；現有自訂保存值不強制換埠。
+
+Vinc 每次啟動都開啟 TCP Shell，預設 `127.0.0.1:31410`。沒有 Vinc 客戶端模式。
 本層使用共用 CommandRouter、ScriptService、OutputHub 與 OSAL Socket／SocketPoller；
 模組仍經既有控制通道進入 BaseModule hook，Message Bus 訊息內容不經 Shell。
 
@@ -9,13 +18,13 @@ Vinc 每次啟動都開啟 TCP Shell，預設 `127.0.0.1:5500`。沒有 Vinc 客
 ```powershell
 .\build\windows-msvc-debug\Vinc.exe
 .\build\windows-msvc-debug\Vinc.exe --shell-ip 127.0.0.1 --shell-port 5501
-.\build\windows-msvc-debug\Vinc.exe --shell-ip 0.0.0.0 --shell-port 5500 --shell-disconnect-timeout 30 -S examples/scripts/startup.tcl
+.\build\windows-msvc-debug\Vinc.exe --shell-ip 0.0.0.0 --shell-port 31410 --shell-disconnect-timeout 30 -S examples/scripts/startup.tcl
 ```
 
 | 參數 | 預設 | 說明 |
 | --- | --- | --- |
 | `--shell-ip` | `127.0.0.1` | 數字 IPv4／IPv6，例如 `::1`；不做 DNS 查詢 |
-| `--shell-port` | `5500` | 0–65535；0 由 OS 配置，啟動時印出實際 port |
+| `--shell-port` | `31410` | 0–65535；0 由 OS 配置，啟動時印出實際 port |
 | `--shell-disconnect-timeout` | `30` | 斷線後保留 Session 的秒數，0–86400 |
 | `--shell-send-timeout` | `30` | 有待送資料卻沒有送出進度的秒數，1–86400 |
 | `--shell-max-connections` | `8` | 同時連線上限，1–8 |
@@ -29,7 +38,7 @@ bind/listen 失敗時印出錯誤並結束啟動，部署腳本尚未執行；�
 
 ## PuTTY
 
-- Connection type 選 **Raw**，Host `127.0.0.1`、Port `5500`（或自行設定的值）。
+- Connection type 選 **Raw**，Host `127.0.0.1`、Port `31410`（或自行設定的值）。
 - Terminal → **Local echo: Force on**、**Local line editing: Force on**。
 - 字元編碼使用 UTF-8，按 Enter 送出整行。
 

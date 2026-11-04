@@ -7,9 +7,9 @@ Shell is central control. Commands route Manager→control Socket→BaseModule h
 Shell 是中央的操作介面，模組命令仍經 `ModuleManager → control Socket → BaseModule virtual hook`。
 訊息 Message Bus payload 不經 Shell 或 Socket 傳遞。
 
-Default [Socket Shell](SOCKET.md) listens 127.0.0.1:5500 for PuTTY Raw. That guide owns CLI/recovery/capacity.
+Default [Socket Shell](SOCKET.md) listens 127.0.0.1:31410 for PuTTY Raw. That guide owns CLI/recovery/capacity.
 
-Vinc 預設開啟 `127.0.0.1:5500` 的 [Socket Shell](SOCKET.md)，可用 PuTTY Raw 連入；
+Vinc 預設開啟 `127.0.0.1:31410` 的 [Socket Shell](SOCKET.md)，可用 PuTTY Raw 連入；
 啟動參數、Session 恢復與容量限制見該文件。
 
 <a id="元件與中央程式"></a>

@@ -241,9 +241,9 @@ exampleNode status
 ui status
 ```
 
-Open `http://127.0.0.1:8080/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. The included UI starts before startup Tcl; Bag also starts and stays idle until commanded. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
+Open `http://127.0.0.1:31411/`, then select **Topics → Topic Monitor** or **Module Graph → Module Graph**. The included UI starts before startup Tcl; Bag also starts and stays idle until commanded. In the local Vinc Shell, `exit` or Ctrl+C requests complete shutdown and waits for managed processes.
 
-開啟 `http://127.0.0.1:8080/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。包含的 UI 會在啟動 Tcl 前自動啟動；Bag 同時啟動待命，收到命令才錄製。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
+開啟 `http://127.0.0.1:31411/`，選擇 **Topics → Topic Monitor** 或 **Module Graph → Module Graph**。包含的 UI 會在啟動 Tcl 前自動啟動；Bag 同時啟動待命，收到命令才錄製。在本機 Vinc Shell 使用 `exit` 或 Ctrl+C，要求完整關閉並等待受管理程序結束。
 
 <a id="develop-a-module"></a>
 
@@ -321,9 +321,9 @@ Schema、排序、交付、所有權，以及生成器失敗／復原與獨立�
 
 ### Shell and startup / Shell 與啟動
 
-Vinc initializes Tcl and starts Socket Shell automatically at `127.0.0.1:5500` by default. PuTTY can connect in Raw mode. There is no authentication or encryption. Use `--shell-ip`/`--shell-port` for configuration; see [Socket Shell](src/vinc/shell/SOCKET.md) before exposing it beyond localhost.
+Vinc initializes Tcl and starts Socket Shell automatically at `127.0.0.1:31410` by default. PuTTY can connect in Raw mode. There is no authentication or encryption. Use `--shell-ip`/`--shell-port` for configuration; see [Socket Shell](src/vinc/shell/SOCKET.md) before exposing it beyond localhost.
 
-Vinc 自動初始化 Tcl 並啟動 Socket Shell，預設為 `127.0.0.1:5500`，可用 PuTTY Raw 模式連入，目前沒有登入驗證或加密。以 `--shell-ip`／`--shell-port` 調整位址與埠；對 localhost 以外開放前，請閱讀 [Socket Shell 契約](src/vinc/shell/SOCKET.md)。
+Vinc 自動初始化 Tcl 並啟動 Socket Shell，預設為 `127.0.0.1:31410`，可用 PuTTY Raw 模式連入，目前沒有登入驗證或加密。以 `--shell-ip`／`--shell-port` 調整位址與埠；對 localhost 以外開放前，請閱讀 [Socket Shell 契約](src/vinc/shell/SOCKET.md)。
 
 Use `Vinc -S startup.tcl` for startup scripts, `srun file.tcl` within Shell, and Ctrl+D to cancel the foreground script. `vinc_add_app(MyApp INSTANCE_NAME my-app VINC_BUILD_CONFIG app.config STARTUP_SCRIPT startup.tcl)` embeds an application's default startup script; those applications reject `-S`. See [Shell](src/vinc/shell/README.md) and [application packaging](apps/vinc/README.md).
 
