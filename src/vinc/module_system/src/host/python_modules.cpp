@@ -5,6 +5,7 @@
 #include <vinc/param/types.hpp>
 #include <algorithm>
 #include <cstdlib>
+#include <set>
 
 namespace vinc {
 namespace {
@@ -14,6 +15,16 @@ using module_system::ErrorOperation;
 Error discovery_error(const std::error_code& error) {
     return Error{ErrorCode::PythonDiscoveryFailed, ErrorOperation::DiscoverPython,
                  osal::native_error(error)};
+}
+
+std::string deployment_key(std::string name) {
+    // Module identifiers are ASCII; fold explicitly without locale dependence.
+    for (char& character : name) {
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+    }
+    return name;
 }
 
 Result<std::filesystem::path> system_python() {
@@ -124,6 +135,10 @@ Result<PythonDiscoveryReport> discover_python_modules(ModuleManager& manager,
 
     std::sort(entries.begin(), entries.end());
     PythonDiscoveryReport report;
+    std::set<std::string> registered_names;
+    for (const auto& name : manager.get_registered_module_type_names()) {
+        registered_names.insert(deployment_key(name));
+    }
     for (const auto& directory : entries) {
         const auto status = std::filesystem::symlink_status(directory, error);
         if (error) {
@@ -139,6 +154,12 @@ Result<PythonDiscoveryReport> discover_python_modules(ModuleManager& manager,
         auto name = osal::path_to_utf8(directory.filename());
         if (!name || !param::valid_segment(*name)) {
             report.issues.push_back({directory, Error{ErrorCode::InvalidName, ErrorOperation::DiscoverPython}});
+            continue;
+        }
+
+        const auto key = deployment_key(*name);
+        if (registered_names.contains(key)) {
+            report.issues.push_back({directory, Error{ErrorCode::NameExists, ErrorOperation::DiscoverPython}});
             continue;
         }
 
@@ -158,6 +179,7 @@ Result<PythonDiscoveryReport> discover_python_modules(ModuleManager& manager,
             report.issues.push_back({script, registered.error()});
             continue;
         }
+        registered_names.insert(key);
         ++report.registered;
     }
 

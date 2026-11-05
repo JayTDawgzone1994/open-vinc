@@ -54,6 +54,13 @@ bindings. Stage 3 adds independent deployment/install and official startup; see 
 第二階段隔離 catalog／腳本／UI 接線，共用相容的 Module 與 Python 綁定。
 第三階段已接上獨立部署、安裝與官方 Module 自動啟動；組裝契約見上方連結。
 
+App packages default to `<top-level-build>/output/<App>/<configuration>/` for
+both source and installed SDK builds. Runtime data in previous output directories
+is not migrated automatically; see the composition contract above.
+
+來源版與 installed SDK 的 App 預設集中到 `<最上層 build>/output/<App>/<組態>/`；
+舊輸出目錄的執行期資料不會自動搬移，完整契約見上方組裝指南。
+
 Public convenience entry is `<vinc/vinc.hpp>`/vinc::sdk, aggregating existing APIs/dependencies without an extra runtime or implicit startup. Components retain API ownership; OSAL/Common can be used independently. The umbrella includes time.hpp/Deadline and contract.hpp fatal entries.
 
 對外整合入口是 `<vinc/vinc.hpp>`，CMake target 為 `vinc::sdk`。
@@ -180,7 +187,22 @@ add_module(camera_module
     SOURCES camera.cpp camera_driver.cpp
 )
 target_include_directories(camera_module PRIVATE include)
+
+add_python_module(detector_python
+    MODULE_TYPE_NAME detector
+    SOURCES detector.py helpers.py resources/rules.json
+)
 ```
+
+`add_python_module()` registers explicit source/resource files for per-App Kconfig
+selection and deployment to `modules/python/<ModuleType>/`. Native Modules deploy
+to `modules/native/<ModuleType>/`. Manual Python discovery remains available in
+the new directory; `data/module` is retired. See the
+[Python deployment contract](../module_system/python/README.md#declaring-and-selecting-modules--宣告與選擇-module).
+
+`add_python_module()` 明列來源及資源，各 App 由 Kconfig 選入後自動 build／install 部署。
+原生與 Python Module 各有獨立類型目錄；仍可手動放入新 Python 目錄，舊 `data/module`
+不再搜尋。檔案路徑、入口、更新與清理規則見上述 Python 契約。
 
 - add_module(target MODULE_TYPE_NAME name SOURCES...) creates a MODULE library with SDK/messages/C++23/visibility/CRT contracts. It is an ordinary target supporting further target-scoped options. Type matches REGISTER_MODULE; duplicates are rejected.
 - No MODULE_BASE_NAME. The Plugin uses a no-argument constructor; source supplies a default BaseModule name or on_name(args). Central validates names, rejects duplicates, and preserves restart naming.

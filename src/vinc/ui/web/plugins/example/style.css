@@ -1,6 +1,6 @@
 section {
     padding: 54px 60px;
-    color: #dce6ed;
+    color: var(--vinc-ui-text);
     font:
         15px/1.6 system-ui,
         sans-serif;
@@ -8,7 +8,7 @@ section {
 .eyebrow {
     font-size: 11px;
     letter-spacing: 0.14em;
-    color: #7dd8bd;
+    color: var(--vinc-ui-accent-text);
     font-weight: 600;
 }
 h1 {
@@ -18,7 +18,7 @@ h1 {
     margin: 14px 0;
 }
 .intro {
-    color: #98a7b7;
+    color: var(--vinc-ui-muted);
     margin-bottom: 34px;
 }
 .card {
@@ -26,8 +26,8 @@ h1 {
     align-items: center;
     justify-content: space-between;
     max-width: 540px;
-    background: #141e29;
-    border: 1px solid #283543;
+    background: var(--vinc-ui-surface);
+    border: 1px solid var(--vinc-ui-border);
     border-radius: 12px;
     padding: 26px 30px;
 }
@@ -38,8 +38,8 @@ h1 {
     font-variant-numeric: tabular-nums;
 }
 button {
-    color: #071b15;
-    background: #80d9bb;
+    color: var(--vinc-ui-on-brand);
+    background: var(--vinc-ui-brand);
     border: 0;
     border-radius: 7px;
     padding: 12px 20px;
@@ -47,10 +47,14 @@ button {
     cursor: pointer;
 }
 button:hover {
-    background: #a3efd4;
+    background: var(--vinc-ui-brand-hover);
+}
+button:focus-visible {
+    outline: 2px solid var(--vinc-ui-focus);
+    outline-offset: 3px;
 }
 .hint {
-    color: #8192a4;
+    color: var(--vinc-ui-muted);
     font-size: 13px;
 }
 .details {
@@ -59,15 +63,15 @@ button:hover {
     font-size: 12px;
 }
 .details div {
-    border-top: 1px solid #23303c;
+    border-top: 1px solid var(--vinc-ui-border);
     padding: 13px 0;
     display: flex;
     justify-content: space-between;
     gap: 16px;
-    color: #8495a7;
+    color: var(--vinc-ui-muted);
 }
 .details span {
-    color: #bdcbd8;
+    color: var(--vinc-ui-text);
     overflow-wrap: anywhere;
 }
 @media (max-width: 700px) {

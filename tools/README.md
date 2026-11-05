@@ -12,6 +12,27 @@ old files. CMake remains responsible for messages, UI assets and App composition
 不安裝相依、不更新 submodule、不執行 npm 安裝、不改 Kconfig、不執行測試或 App、
 不安裝產物、不清除舊檔；訊息生成、UI 編譯與 App 組裝仍完全交由 CMake。
 
+Open-VINC's source CMake entry defaults `BUILD_TESTING` to `OFF` for fresh build
+directories. Enable it with `build.bat -DBUILD_TESTING=ON` or
+`sh build.sh -DBUILD_TESTING=ON`, then run CTest separately. Existing caches retain
+their setting; pass `-DBUILD_TESTING=OFF` to disable tests without deleting old
+test binaries. The wrapper does not impose this default on external projects.
+
+Open-VINC 來源 CMake 入口對全新目錄預設 `BUILD_TESTING=OFF`；需要時在入口指令加上
+`-DBUILD_TESTING=ON`，再另行執行 CTest。既有快取保留原設定，可明確傳入
+`-DBUILD_TESTING=OFF` 關閉，不會刪除舊測試檔。腳本不替外部專案指定此預設。
+
+Validation (2026-11-05): Windows x64, MSVC 19.51.36257, CMake 4.3.2, Ninja,
+Debug. A fresh wrapper build without `BUILD_TESTING` completed the App with no
+test target directories and zero registered CTests; the App's `--help` ran.
+An existing ON cache remained ON after explicit configuration, SDK consumer/header
+targets built, and `common.time`, `common.error`, `sdk.consumer` passed **3/3**.
+Logs: ignored `build/tests-opt-in-*.log`. No full-suite, Linux or macOS rerun.
+
+驗證（2026-11-05）：Windows／MSVC 19.51／Debug 的全新預設建置成功，無測試 targets、
+CTest 為 0 項，App `--help` 正常。既有 ON 快取保留，明確啟用後 SDK consumer／標頭
+檢查建置成功，上述三項測試 **3/3** 通過；本輪未重跑完整套件、Linux 或 macOS。
+
 Explicit `--install-vinc-sdk` is the exception: it builds a Release SDK by default,
 validates it, installs it and optionally registers it. See the
 [SDK installation contract](../src/vinc/sdk/INSTALL.md#sdk-install-command).

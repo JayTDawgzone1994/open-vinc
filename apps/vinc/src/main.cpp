@@ -280,7 +280,7 @@ vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupRep
     }
     report.entries.push_back({"Module Catalog", "built-in ModuleTypes registered", {}});
 
-    auto discovered = vinc::discover_python_modules(manager, *directory / "data" / "module",
+    auto discovered = vinc::discover_python_modules(manager, *directory / "modules" / "python",
         *directory / "python" / "vinc" / "bootstrap.py", options.python);
     if (!discovered) {
         report.entries.push_back({"Python discovery", "unable to scan Module sources", discovered.error()});

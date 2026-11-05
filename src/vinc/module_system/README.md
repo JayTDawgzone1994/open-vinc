@@ -2,6 +2,16 @@
 
 # Module System / 模組系統
 
+App packages group native Plugins under `modules/native/<ModuleType>/` and Python
+Modules under `modules/python/<ModuleType>/`. `add_python_module()` participates
+in per-App selection and managed deployment, while startup still discovers
+manually added Python Modules. The old `data/module` search is removed; see the
+[Python deployment contract](python/README.md#declaring-and-selecting-modules--宣告與選擇-module).
+
+App 部署依種類分為 `modules/native` 與 `modules/python`，每個 ModuleType 各有目錄。
+Python 可用 `add_python_module()` 交由 App 選擇及部署，也保留新路徑手動放入／啟動掃描；
+舊 `data/module` 不再搜尋。完整入口與部署契約見上述文件。
+
 Host notification ownership, Bus routes, notification-driven pumpLoop, bounded recovery and
 Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
 preparation failure rejects only the affected Module; later notification failures retain the

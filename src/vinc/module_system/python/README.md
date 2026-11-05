@@ -27,6 +27,113 @@ Python extension merely because Python support is packaged.
 
 ## Build and deploy / 建置與部署
 
+### Declaring and selecting Modules / 宣告與選擇 Module
+
+Source and installed SDK consumers use the same function from a Module's
+`CMakeLists.txt`. It registers availability; each App selects its own membership:
+
+來源整合與安裝式 SDK 共用以下函式。於 Module 的 `CMakeLists.txt` 宣告可用的類型，
+再由各 App 的 Kconfig 決定是否部署：
+
+```cmake
+add_python_module(detector_python
+    MODULE_TYPE_NAME detector
+    SOURCES detector.py helpers.py resources/rules.json
+)
+```
+
+```ini
+CONFIG_VINC_APP_PYTHON=y
+CONFIG_VINC_MODULE_detector=y
+```
+
+- `SOURCES` explicitly lists files relative to the calling source directory;
+  preserve subdirectories under `modules/python/detector/`. No recursive copy.
+  Missing files, absolute/traversing paths, escaping symlinks and duplicate
+  destinations (including case-only differences) fail configuration.
+- Require the root entry `detector.py`. This is a deployable-file target, not a
+  native extension: no user Python execution, interpreter bundling or pip install.
+- Selected Python Modules require Python enabled. Unselected Modules are not
+  deployed. Compatible Apps share the framework binding but own separate copies
+  of their selected Module files. Native Plugins live in `modules/native/<type>/`.
+- Native/Python ModuleTypes share one namespace; case-only names and the official
+  `webUi`/`bagRecorder` names are rejected at build registration.
+- Building the App updates declared files; install uses the same source manifest.
+  Removing a declaration/selection cleans formerly managed, unchanged files.
+  Modified obsolete files and unrelated manual files are preserved. Active
+  managed files are refreshed from source: edit sources, not generated copies.
+- Startup still scans `modules/python/<type>/<type>.py` once. Manually adding a
+  correctly named Module there remains supported; it is not an install input.
+  Discovery does not execute user code. Case collisions with registered native
+  or Python types are reported without replacing the existing type.
+  Kconfig controls managed packaging, not a runtime allowlist: preserved/manual
+  entry files may still be discovered after a selection is removed.
+- The retired `data/module/` path is not searched or automatically deleted.
+  Move intended manual Modules to the new path. Do not update a running package.
+
+- `SOURCES` 明列相對於呼叫端的檔案並保留子目錄，不遞迴整包複製；缺檔、絕對路徑、
+  越界／逃出來源根目錄的連結、重複目的地（含大小寫差異）會在配置時報錯。
+- 入口必須是根層 `<ModuleType>.py`；target 只描述部署檔，不執行使用者 Python、
+  不附帶直譯器、不安裝 pip 套件。選入 Python Module 卻未啟用 Python 時明確報錯。
+- 各 App 只部署選中的 Module，原生庫位於 `modules/native/<type>/`；Python 位於
+  `modules/python/<type>/`。兩者共用名稱空間，拒絕大小寫撞名與官方保留名稱。
+- Build／install 共用清單；來源改動會更新副本，取消選用或刪除宣告只清理原本管理且
+  未被修改的檔案。已修改的過時檔與手動加入的其他檔案保留；仍在清單內的檔案會由
+  來源覆寫，因此請修改來源，不要編輯自動部署的副本。
+- 保留新路徑的啟動掃描與手動放入能力，手動檔不會反向納入 install。舊 `data/module/`
+  不再搜尋、不自動刪除；請自行搬移需保留的 Module。更新部署前先關閉 App。
+  Kconfig 是自動打包清單，不是執行期白名單；取消選用後若保留了手動或已修改的入口，
+  下一次啟動仍可能掃描到它。
+
+<a id="module-deployment-validation"></a>
+
+### Module deployment validation (2026-11-05) / Module 部署驗收
+
+| Environment / 環境 | Result / 結果 |
+| --- | --- |
+| Windows 11 x64, MSVC 19.51.36257, CMake 4.3.2, CPython 3.13.12, Debug | App/SDK targets built; clean installed-SDK consumer plus configuration/selection/ownership CTests **4/4** passed. Registration suite **12 passed, 1 symlink-permission skip**. Fresh source multi-App and final discovery/lifecycle script passed. / App／SDK 建置、乾淨安裝式使用端、多 App 來源與掃描／生命週期通過。 |
+| WSL2 Ubuntu 24.04 x86_64, GCC/libstdc++ 13.3, CMake 3.28.3, CPython 3.12.3, Release | Fresh ext4 producer build; installed-SDK/configuration/selection/ownership CTests **5/5** passed. Final registration suite **13/13**; fresh source multi-App and final discovery/lifecycle script passed. / ext4 乾淨建置、安裝式使用端、多 App 與掃描驗證通過。 |
+
+Both platforms exercised deployed native paths, selected Python entries/helper
+imports/resources, real custom-message Bus/RPC/Param, normal shutdown, App/SDK
+relocation, changed/added/removed declared files, exclusion of unlisted files,
+Python-disable cleanup and preservation of manual files. Source multi-App checks
+also covered shared bindings, independent copies, simultaneous Apps, same-identity
+exclusion, official-Module failures, ownership rejection and sibling isolation.
+Discovery checks cover manually placed Modules, ignored legacy directories,
+case collision with native types, PATH/venv selection and ABI/import failures.
+No user Python executes during CMake registration.
+
+兩平台均實際驗證 native 新路徑、選入的 Python 入口／helper／資源、自訂訊息 Bus／RPC／Param、
+正常退出、SDK／App 搬移、明列檔案增刪更新、未列檔排除、停用清理及保留手動檔。
+多 App 亦驗證共用 binding、各自部署、並行與同名排他、官方 Module 故障隔離、所有權拒絕及
+不誤刪其他 App。掃描包含手動 Module、忽略舊目錄、與 native 撞名、PATH／venv 及 ABI／匯入失敗。
+
+The first Windows source run lacked the full MSVC environment required by Tcl
+nmake; the rerun initialized VsDevCmd and passed. The discovery fixture formerly
+omitted official Plugins/UI assets, producing a Windows shutdown timeout during
+missing-Plugin retries. It now copies the complete required package and cleans
+its own process tree on timeout. A separate first invocation used a Custom-Python
+App for System-PATH assertions; final validation used System mode. These failed
+attempts are not passing evidence and did not change Runtime policy.
+
+Windows 首輪來源測試缺 Tcl nmake 所需的完整 MSVC 環境，初始化 VsDevCmd 後通過。
+舊掃描 fixture 缺官方 Plugin／UI 資源，Windows 曾在缺 Plugin 的重試期間退出逾時；
+已補齊套件並加入測試程序樹的逾時清理。另一次以 Custom App 執行 System PATH 斷言，
+最終改用符合前提的 System App 通過。失敗嘗試不計入通過證據，也未修改 Runtime 政策。
+
+Local evidence (not committed): `build/python-module-windows-tests.log`,
+`build/python-module-source-multi-app-final.log`,
+`build/python-module-discovery-system.log`; WSL evidence under
+`/home/vinc-test/python-module-deploy-20261105/` (`tests.log`,
+`source-multi-app.log`, `discovery-final.log`). Windows reused the existing Debug
+SDK producer but installed into a new prefix; the WSL producer was fresh. This
+round did not run the complete project CTest set, Windows Release, Linux Debug or
+native macOS. macOS acceptance remains in the root TODO.
+
+本輪沒有宣稱完整專案 CTest、Windows Release、Linux Debug 或 macOS 原生驗證完成；
+Windows 重用 Debug producer、全新安裝目錄，WSL producer 為全新建置。macOS 項目見根目錄 TODO。
+
 For the CPython 3.11 minimum-policy environment, results and remaining limits,
 see [CPython 3.11 validation](PYTHON311_VALIDATION.md). The shared
 [toolchain policy](../../common/README.md#build-toolchain-policy) owns the minimum;
@@ -84,7 +191,7 @@ python/vinc/
         THIRD_PARTY_NOTICES.txt
 licenses/open-vinc/                    # Central binary's shared notices
 licenses/pybind11/LICENSE
-data/module/<ModuleType>/<ModuleType>.py
+modules/python/<ModuleType>/<ModuleType>.py
 ```
 
 Keep the complete `python/vinc` package, including its internal `licenses/open-vinc` directory,
@@ -96,9 +203,9 @@ See [SDK license delivery](../../sdk/README.md#license-delivery) for binary pack
 其中附帶 Open-VINC 條款／署名及原生相依聲明，含完整 pybind11 授權。
 二進位打包契約見 [SDK 授權交付](../../sdk/README.md#license-delivery)。
 
-User code lives in data/module, distinct from vinc_data persistence. Editing existing Python Modules does not rebuild central. Compiled vinc_messages type lists define vinc.messages; new .msg requires regenerating/rebuilding consumers/native extension, without runtime schema parsing. --python selects interpreter/venv; relative paths become absolute on central startup. Otherwise Kconfig Custom uses its absolute path, while System searches the deployment PATH for Windows python.exe/POSIX python3 without silently trying another environment.
+User code lives in modules/python, distinct from vinc_data persistence. Editing existing Python Modules does not rebuild central. Compiled vinc_messages type lists define vinc.messages; new .msg requires regenerating/rebuilding consumers/native extension, without runtime schema parsing. --python selects interpreter/venv; relative paths become absolute on central startup. Otherwise Kconfig Custom uses its absolute path, while System searches the deployment PATH for Windows python.exe/POSIX python3 without silently trying another environment.
 
-`data/module` 是使用者程式的位置，與 Param／Log 的 `vinc_data` 不同。
+`modules/python` 是使用者程式的位置，與 Param／Log 的 `vinc_data` 不同。
 只修改既有 Python Module 程式不需編譯中央。`vinc.messages` 由 `vinc_messages` 的
 編譯期型別清單建立；新增 `.msg` 後須重新生成並建置所有使用它的程式及 Python 擴充。
 不提供 runtime `.msg` 解析器或動態訊息型別。
@@ -267,14 +374,16 @@ Build/install deploy only declared package files, including the selected extensi
 ABI/CRT metadata and licenses, rather than sweeping the build directory for stale
 extensions from another ABI. Ownership records remove obsolete unchanged files
 when Python is disabled or the extension filename changes; untracked/modified
-files are preserved. User `.py` Modules and extra dependencies remain application-
-owned deployment inputs under `data/module`. Never overlay a running application.
+files are preserved. Selected `add_python_module()` files deploy under
+`modules/python`; manually added Modules are not installation inputs. Third-party
+Python dependencies remain application-owned. Never overlay a running application.
 Use separate build directories when changing Python environments to avoid stale
 CMake discovery. Runtime follows the consumer App's Kconfig default or `--python`, never the SDK producer's Python path.
 
 build／install 僅部署明確列出的擴充、ABI／CRT 資訊與授權，不掃描並複製另一 ABI
 遺留的擴充。功能關閉或檔名改變時清理未被修改的舊產物，保留未納管／修改過檔案。
-使用者 `.py` 與額外相依仍由應用自行部署到 `data/module`。不要覆蓋執行中的程式；
+選入的 `add_python_module()` 程式與資源會自動部署到 `modules/python`；手動檔不反向納入
+安裝，第三方 Python 套件仍由應用管理。不要覆蓋執行中的程式；
 切換 Python 環境建議使用不同 build 目錄，避免沿用 CMake 探測快取。
 執行時使用消費端 App 的 Kconfig 預設／`--python`，不使用 SDK 製作者路徑。
 
@@ -566,7 +675,7 @@ Metadata 只保留逐檔版本、工具鏈／組態、供診斷的 Header 版本
 
 ## Discovery and ModuleTypes / 掃描與 ModuleType
 
-- After Shell reservations/compiled catalog, scan executable-adjacent data/module once.
+- After Shell reservations/compiled catalog, scan executable-adjacent modules/python once.
 - Sorted direct physical subdirectories only, no recursion/symlink following.
 - Same-name .py entry with valid Module naming; discovery never imports/executes it.
 - Missing root is empty success; read/name/entry/duplicate issues diagnose/continue.
@@ -574,7 +683,7 @@ Metadata 只保留逐檔版本、工具鏈／組態、供診斷的 Header 版本
 - Default on_name consumes --name, without numeric suffixes; authors may override.
 - Type/instance names cannot collide; instances have unique names/central MIDs.
 
-- 中央在保留 Shell 命令、登記編譯期 catalog 後，掃描執行檔旁的 `data/module` 一次。
+- 中央在保留 Shell 命令、登記編譯期 catalog 後，掃描執行檔旁的 `modules/python` 一次。
 - 只處理一層實體子目錄，依目錄名排序；不遞迴掃描、不跟隨目錄 symlink。
 - 每個子目錄必須有同名 `.py`，名稱遵守 Module 命名規則。掃描不 import 或執行 Python。
 - 無此根目錄是正常空集合。讀取失敗、名稱不合法、缺入口、重複種類只回報問題；中央繼續運作。

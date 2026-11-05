@@ -1,4 +1,4 @@
-"""Copy to <Vinc directory>/data/module/pythonExample/pythonExample.py."""
+"""Copy to <Vinc directory>/modules/python/pythonExample/pythonExample.py."""
 import vinc
 
 
