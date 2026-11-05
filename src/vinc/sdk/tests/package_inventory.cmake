@@ -28,7 +28,7 @@ function(verify_package_inventory root kind executable report)
         if(magic MATCHES "^(4d5a|7f454c46|feedface|cefaedfe|feedfacf|cffaedfe|cafebabe|bebafeca|cafebabf|bfbafeca)")
             if(relative STREQUAL executable)
                 set(entry_found TRUE)
-            elseif(kind STREQUAL "app" AND relative MATCHES "^modules/[^/]+/[^/]+\\.(dll|so|dylib)$")
+            elseif(kind STREQUAL "app" AND relative MATCHES "^modules/native/[^/]+/[^/]+\\.(dll|so|dylib)$")
                 # Native Plugins are libraries in their catalog-owned directories.
             else()
                 message(FATAL_ERROR "Unexpected native image in ${kind}: ${relative}")

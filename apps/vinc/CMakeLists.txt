@@ -43,12 +43,6 @@ endif()
 
 if(VINC_APP_PYTHON)
     if(VINC_MODULE_userExampleModule AND VINC_MODULE_userManualModule)
-        # Explicit deployment avoids overwriting user-edited scripts on every build.
-        add_custom_target(user_examples_python
-            COMMAND "${CMAKE_COMMAND}" -E copy_directory
-                "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/python"
-                "$<TARGET_FILE_DIR:Vinc>/data/module"
-            DEPENDS Vinc VERBATIM)
         if(BUILD_TESTING)
             get_property(python_example_executable GLOBAL PROPERTY VINC_PYTHON_TEST_EXECUTABLE)
             add_test(NAME examples.user_module COMMAND "${python_example_executable}"

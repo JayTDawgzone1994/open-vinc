@@ -45,38 +45,34 @@ Python 互動命令捕捉預期的 SDK／輸入例外；未處理的 callback �
 
 ## Build and deploy / 建置與部署
 
-Select userExampleModule/userManualModule and enable Python in App Kconfig:
+Select the native and Python examples in the App configuration, then build the App.
+The Python examples use `add_python_module()`; no separate copy target is needed.
 
-在 App Kconfig 選入 userExampleModule／userManualModule，並在 App Kconfig 設定 `CONFIG_VINC_APP_PYTHON=y` 後：
+在 App Kconfig 選入所需的 C++／Python 範例後直接建置 App，不需要額外複製 target：
 
-```sh
-cmake --build build/windows-msvc-debug --target user_examples_python
+```ini
+CONFIG_VINC_MODULE_userExampleModule=y
+CONFIG_VINC_MODULE_userManualModule=y
+CONFIG_VINC_APP_PYTHON=y
+CONFIG_VINC_MODULE_userExamplePython=y
+CONFIG_VINC_MODULE_userManualPython=y
 ```
 
-This explicit target builds central/C++ Plugins and copies two Python Modules beside Vinc:
-
-這個明確執行的 target 建置中央及 C++ Plugin，再複製兩個 Python Module 到執行檔旁：
+```sh
+cmake --build build/my-build --target Vinc
+```
 
 ```text
-data/module/userExamplePython/userExamplePython.py
-data/module/userManualPython/userManualPython.py
+modules/python/userExamplePython/userExamplePython.py
+modules/python/userManualPython/userManualPython.py
 ```
 
-**Rerunning the deployment target overwrites those two Python examples.** Ordinary shell builds do not. Preserve edits under different type/directory/filenames; discovery runs only on central startup. Each Python example has one entry file without extra import-path configuration.
+Build and install deploy the selected files. Edit the source files; rebuilding
+refreshes their deployed copies. Unrelated manually added Modules are preserved.
+Central discovers Python Modules once at startup.
 
-**再次執行此部署 target 會覆寫這兩個 Python 範例檔案。** 一般 `Vinc` 建置不覆寫它們。
-若要保留自己的修改，另取 ModuleType／目錄／檔名；中央啟動時才掃描一次。
-Python 主範例全部在單一入口檔，不需要另外配置 import 路徑。
-
-New-build configuration in an appropriate compiler environment:
-
-新建置目錄的設定範例（在適用的編譯器環境執行）：
-
-```sh
-# Enable CONFIG_VINC_APP_PYTHON=y and choose System/Custom in apps/vinc/vinc.conf first.
-cmake -S src -B build/my-build
-cmake --build build/my-build --target user_examples_python
-```
+Build／install 自動部署選中的檔案；請編輯來源，重新建置會更新副本。
+其他手動加入的 Module 保留，中央仍只在啟動時掃描一次。
 
 Python ABI must match build CPython; Windows MSVC needs official Windows CPython, not MinGW Python. Without runtime --python, PATH wins, not the build interpreter. The following uses a placeholder: replace it with your compatible CPython executable and build directory.
 
@@ -85,7 +81,7 @@ Python ABI 必須符合建置使用的 CPython；Windows MSVC 使用官方 Windo
 下例使用通用佔位路徑，請換成自己的建置目錄與相容 CPython 執行檔：
 
 ```powershell
-.\build\windows-msvc-debug\apps\vinc\Vinc\Debug\Vinc.exe --python C:/path/to/python.exe
+.\build\windows-msvc-debug\output\Vinc\Debug\Vinc.exe --python C:/path/to/python.exe
 ```
 
 C++-only use needs no Python. Building shell registers userExampleModule/userManualModule as Plugin libraries launched in separate Hosts, not executables. Added .msg types still require regeneration/rebuild; no dynamic schemas.

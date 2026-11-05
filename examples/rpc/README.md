@@ -2,6 +2,15 @@
 
 # C++ / Python RPC example / C++／Python RPC 範例
 
+The example CMake files register **rpcPython** through `add_python_module()`.
+Enable Python and select the matching `CONFIG_VINC_MODULE_<ModuleType>=y` options
+in the App config, then build the App to deploy them automatically. Manual copying
+to the new paths below remains supported; there is no fallback to `data/module`.
+
+範例已用 `add_python_module()` 登記；App 啟用 Python 並選入對應 ModuleType 後，
+建置 App 即自動部署。也可沿用下方的新路徑手動放入，不再搜尋舊 `data/module`。
+
+
 Both Modules register `echo<int3, int3>` and can call each other or themselves.
 The C++ ModuleType is `rpcExample`, with instance name `rpcCpp`.
 
@@ -9,10 +18,10 @@ The C++ ModuleType is `rpcExample`, with instance name `rpcCpp`.
 
 Select `CONFIG_VINC_MODULE_rpcExample=y` in App Kconfig. For Python, also set `CONFIG_VINC_APP_PYTHON=y` in App Kconfig,
 install a compatible system Python, and copy `rpcPython.py` to
-`data/module/rpcPython/rpcPython.py` beside Vinc before launching it.
+`modules/python/rpcPython/rpcPython.py` beside Vinc before launching it.
 This follows the normal Python discovery contract; no interpreter is embedded.
 
-在 App Kconfig 選入 `CONFIG_VINC_MODULE_rpcExample=y`。Python 另需在 App Kconfig 設定 CONFIG_VINC_APP_PYTHON=y 與相容系統 Python，於啟動前把 rpcPython.py 放到 Vinc 旁 data/module/rpcPython/rpcPython.py。沿用一般啟動掃描，不嵌入直譯器。
+在 App Kconfig 選入 `CONFIG_VINC_MODULE_rpcExample=y`。Python 另需在 App Kconfig 設定 CONFIG_VINC_APP_PYTHON=y 與相容系統 Python，於啟動前把 rpcPython.py 放到 Vinc 旁 modules/python/rpcPython/rpcPython.py。沿用一般啟動掃描，不嵌入直譯器。
 
 In the Vinc Shell:
 

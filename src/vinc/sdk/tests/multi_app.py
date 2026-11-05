@@ -96,6 +96,15 @@ def main():
     def recorded(name, extension="path"):
         return (build / f"{name}-{args.config}.{extension}").read_text(encoding="utf-8").strip()
 
+    # Each App is declared in a sibling subdirectory. Its package must still
+    # belong to the consuming project's output root, including with an SDK.
+    for app in ("First", "Second", "Third"):
+        executable = Path(recorded(app))
+        expected_directory = build / "output" / app / args.config
+        require(executable.parent == expected_directory,
+                f"{app} output directory: expected {expected_directory}, got {executable.parent}")
+    print("Verified shared output root and independent App directories", flush=True)
+
     run(build_command + ["--target", "First"])
     print("Built First without Second's Module or Python binding", flush=True)
     require(not Path(recorded("SecondModule")).exists(), "First built Second's Module")
@@ -122,7 +131,7 @@ def main():
         catalog = (generated / "module_catalog.hpp").read_text(encoding="utf-8")
         require(f'"{expected}"' in catalog and f'"{excluded}"' not in catalog, "Catalog isolation failed")
         require('"webUi"' in catalog and '"bagRecorder"' in catalog, "Official Modules missing")
-        require(f"modules/SharedModule/{shared.name}" in catalog, "Shared Plugin is missing")
+        require(f"modules/native/SharedModule/{shared.name}" in catalog, "Shared Plugin is missing")
         require(shared.as_posix() not in catalog, "Catalog retains build-tree paths")
         require(f"{app}_vinc_ui" in recorded(app, "selection"), "App-local UI missing")
         ui_header = (generated / "vinc_ui_paths.hpp").read_text(encoding="utf-8")
@@ -130,9 +139,11 @@ def main():
         executable = Path(recorded(app))
         destination = executable.parent
         if app != "First":
-            module = destination / "data/module/ScriptPeer/ScriptPeer.py"
-            module.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source / "ScriptPeer.py", module)
+            module = destination / "modules/python/ScriptPeer/ScriptPeer.py"
+            require(module.is_file(), "Selected Python Module was not deployed")
+        else:
+            require(not (destination / "modules/python/ScriptPeer").exists(),
+                    "Python-disabled App received a Python Module")
         output = run([str(executable), "--shell-port", "0"], timeout=APP_TIMEOUT_SECONDS)
         require(f"{app}_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
         require(f"{expected} SELF_HOST_OK 42" in output, output)
@@ -156,8 +167,9 @@ def main():
     output = run([str(first), "--shell-port", "0"],
                  env=dict(os.environ, VINC_TEST_STOP_UI="1"), timeout=APP_TIMEOUT_SECONDS)
     require("First_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
-    require(not (moved / "Second/data/module/ScriptPeer").exists(), "Install copied user Python Modules")
-    peer = moved / "Second/data/module/ScriptPeer/ScriptPeer.py"
+    require((moved / "Second/modules/python/ScriptPeer/ScriptPeer.py").is_file(),
+            "Install omitted selected Python Module")
+    peer = moved / "Second/modules/python/ManualPeer/ManualPeer.py"
     peer.parent.mkdir(parents=True)
     shutil.copy2(source / "ScriptPeer.py", peer)
     second = moved / "Second" / Path(recorded("Second")).name
@@ -179,7 +191,7 @@ def main():
     require("First_SCRIPT_OK" in output and "bag: idle" in output and "APP_TEST_FAILED" not in output, output)
 
     # Missing official Plugin is also isolated, without disguising command failure.
-    recorder = next((first.parent / "modules/bagRecorder").iterdir())
+    recorder = next((first.parent / "modules/native/bagRecorder").iterdir())
     hidden = recorder.with_suffix(recorder.suffix + ".hidden")
     recorder.rename(hidden)
     try:
@@ -191,7 +203,7 @@ def main():
         hidden.rename(recorder)
     print("PASS: isolated installation, relocation, UI bind and Bag load failure", flush=True)
 
-    ui_plugin = next((first.parent / "modules/webUi").iterdir())
+    ui_plugin = next((first.parent / "modules/native/webUi").iterdir())
     backup = ui_plugin.with_suffix(ui_plugin.suffix + ".backup")
     ui_plugin.rename(backup)
     try:
@@ -242,12 +254,14 @@ def main():
     run(configure)
     run(build_command + ["--target", "Second"])
     run([args.cmake, "--install", str(build), "--prefix", str(moved), "--component", "VincApp_Second"])
-    require(not (second.parent / "modules/SharedModule" / shared.name).exists(), "Stale Plugin retained")
+    require(not (second.parent / "modules/native/SharedModule" / shared.name).exists(), "Stale Plugin retained")
     require(not (second.parent / "python/vinc" / native.name).exists(), "Stale binding retained")
     require(modified.read_text(encoding="utf-8").startswith("# User modified"), "User edit deleted")
     require(peer.is_file(), "User Python Module deleted")
+    require(not (second.parent / "modules/python/ScriptPeer/ScriptPeer.py").exists(),
+            "Deselected Python Module retained")
     require(digest(first_owned) == before, "Updating Second changed First's manifest")
-    require((first.parent / "modules/SharedModule" / shared.name).is_file(), "Sibling Plugin deleted")
+    require((first.parent / "modules/native/SharedModule" / shared.name).is_file(), "Sibling Plugin deleted")
     output = run([str(second), "--shell-port", "0"], timeout=APP_TIMEOUT_SECONDS)
     require("Second_SCRIPT_OK" in output and "APP_TEST_FAILED" not in output, output)
     print("PASS: ownership/path rejection, resource repair and isolated selection cleanup", flush=True)

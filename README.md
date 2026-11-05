@@ -229,14 +229,21 @@ directories; direct CMake users substitute their `-B` directory):
 
 ```powershell
 # Windows PowerShell
-.\build\windows-msvc-debug\apps\vinc\Vinc\Debug\Vinc.exe
+.\build\windows-msvc-debug\output\Vinc\Debug\Vinc.exe
 ```
 
 ```sh
 # Linux / GCC
-./build/linux-gcc-debug/apps/vinc/Vinc/Debug/Vinc
-# macOS: ./build/macos-clang-debug/apps/vinc/Vinc/Debug/Vinc
+./build/linux-gcc-debug/output/Vinc/Debug/Vinc
+# macOS: ./build/macos-clang-debug/output/Vinc/Debug/Vinc
 ```
+
+Complete Apps live under `<build>/output/<App>/<configuration>/`. The bundled
+Vinc App's compilation and test workspace is `<build>/intermediate/vinc/`;
+the source directory `apps/vinc/` is unchanged.
+
+完整 App 放在 `<build>/output/<App>/<組態>/`；內建 Vinc 的編譯與測試工作資料放在
+`<build>/intermediate/vinc/`，原始碼目錄 `apps/vinc/` 維持原位。
 
 Enter the following in the **Vinc Shell**, not the OS terminal. `exampleModule` must be selected in App Kconfig; `ui status` requires the included UI Module to have started successfully.
 
@@ -295,9 +302,9 @@ Enable `CONFIG_VINC_APP_PYTHON=y` in the App's Kconfig file. Select System Pytho
 
 在 App 的 Kconfig 啟用 `CONFIG_VINC_APP_PYTHON=y`，並選擇 System（PATH）或 Custom 絕對路徑，建置與執行預設共用此設定。`Vinc --python PATH` 僅覆寫本次執行；`Python_EXECUTABLE` 不再選擇 VINC 的直譯器，但不禁止其他 CMake 元件使用。Vinc 不嵌入 Python、不安裝套件。
 
-Place Modules beside Vinc as `data/module/<ModuleType>/<ModuleType>.py`. Vinc scans once at startup; use the ModuleType name in the same Shell as C++ Modules. Python ABI must match the native extension. Current Windows bindings use static MSVC CRT; before loading, Vinc checks the metadata and selected extension's filename/SHA-256, without inspecting or preloading MSVC Runtime DLLs. See the [Python guide](src/vinc/module_system/python/README.md#windows-msvc-runtime-載入前檢查) for the current policy and retained legacy dynamic-mode guard.
+Place Modules beside Vinc as `modules/python/<ModuleType>/<ModuleType>.py`. Vinc scans once at startup; use the ModuleType name in the same Shell as C++ Modules. Python ABI must match the native extension. Current Windows bindings use static MSVC CRT; before loading, Vinc checks the metadata and selected extension's filename/SHA-256, without inspecting or preloading MSVC Runtime DLLs. See the [Python guide](src/vinc/module_system/python/README.md#windows-msvc-runtime-載入前檢查) for the current policy and retained legacy dynamic-mode guard.
 
-將 Module 放在 Vinc 旁的 `data/module/<ModuleType>/<ModuleType>.py`。中央啟動時掃描一次，在同一個 Shell 以 ModuleType 名稱啟動，與 C++ Module 操作一致。Python ABI 必須符合原生擴充。目前 Windows 綁定使用靜態 MSVC CRT；載入前檢查 metadata 與所選擴充的檔名／SHA-256，不檢查或預載 MSVC Runtime DLL。現行政策與保留的舊動態防護見 [Python 指南](src/vinc/module_system/python/README.md#windows-msvc-runtime-載入前檢查)。
+將 Module 放在 Vinc 旁的 `modules/python/<ModuleType>/<ModuleType>.py`。中央啟動時掃描一次，在同一個 Shell 以 ModuleType 名稱啟動，與 C++ Module 操作一致。Python ABI 必須符合原生擴充。目前 Windows 綁定使用靜態 MSVC CRT；載入前檢查 metadata 與所選擴充的檔名／SHA-256，不檢查或預載 MSVC Runtime DLL。現行政策與保留的舊動態防護見 [Python 指南](src/vinc/module_system/python/README.md#windows-msvc-runtime-載入前檢查)。
 
 <a id="messages-and-communication"></a>
 

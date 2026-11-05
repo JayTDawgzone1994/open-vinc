@@ -2,11 +2,13 @@
 from pathlib import Path
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 
 TIMEOUT_SECONDS = 30
+CLEANUP_TIMEOUT_SECONDS = 10
 
 
 def use_default_windows_error_mode():
@@ -29,14 +31,23 @@ def run(executable, script, cwd, python=None, environment=None):
     if python is not None:
         command += ["--python", str(python)]
     command += ["-S", str(script)]
-    try:
-        result = subprocess.run(command, cwd=cwd, env=environment, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, timeout=TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired as error:
-        captured = (error.output or b"").decode("utf-8", errors="replace")
-        raise AssertionError("Central did not finish within the test deadline:\n" + captured) from error
-    text = result.stdout.decode("utf-8", errors="replace")
-    if result.returncode != 0:
+    with subprocess.Popen(command, cwd=cwd, env=environment, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, start_new_session=os.name != "nt") as process:
+        try:
+            output, _ = process.communicate(timeout=TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as error:
+            # Only this test's App/process group is owned by this cleanup path.
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               capture_output=True, timeout=CLEANUP_TIMEOUT_SECONDS)
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.kill()
+            output, _ = process.communicate(timeout=CLEANUP_TIMEOUT_SECONDS)
+            captured = output.decode("utf-8", errors="replace")
+            raise AssertionError("Central did not finish within the test deadline:\n" + captured) from error
+    text = output.decode("utf-8", errors="replace")
+    if process.returncode != 0:
         raise AssertionError(text)
     assert "CENTRAL_STILL_ALIVE" in text, text
     return text
@@ -53,10 +64,24 @@ def main():
         for library in original.parent.glob("*.dll"):
             shutil.copy2(library, root / library.name)
         shutil.copytree(original.parent / "lib", root / "lib")
+        # Exercise an actual App package, including supervised official Modules.
+        # Omitting these resources tests repeated startup failure, not discovery.
+        shutil.copytree(original.parent / "modules", root / "modules")
+        shutil.copytree(original.parent / "licenses", root / "licenses")
+        for ui in (original.parent / "vinc_data").glob("*/ui"):
+            shutil.copytree(ui, root / "vinc_data" / ui.parent.name / "ui")
         shutil.copytree(original.parent / "python" / "vinc", root / "python" / "vinc")
-        modules = root / "data" / "module"
+        modules = root / "modules" / "python"
         target = modules / "framework"
         shutil.copytree(fixture / "framework", target)
+        # The retired path must not register a type or execute its entry.
+        legacy = root / "data/module/LegacyOnly"
+        legacy.mkdir(parents=True)
+        (legacy / "LegacyOnly.py").write_text("raise RuntimeError('legacy entry executed')", encoding="utf-8")
+        # A different-case directory must not alias an existing registered type.
+        collision = modules / "WEBUI"
+        collision.mkdir()
+        (collision / "WEBUI.py").write_text("raise RuntimeError('collision entry executed')", encoding="utf-8")
         (modules / "missingEntry").mkdir()
         (modules / "invalid.name").mkdir()
         # A nonrecursive scanner must not discover this inner directory.
@@ -65,7 +90,7 @@ def main():
         (nested / "nested.py").write_text("raise RuntimeError('must not run')", encoding="utf-8")
         script = root / "smoke.tcl"
         commands = ["framework --name front", "front status", "front caught", "front invalid",
-                    "framework --name second", "second status"]
+                    "framework --name second", "second status", "help"]
         # Tcl normally stops on a nonzero command. These scenarios deliberately
         # exercise failures, so catch them and always request central shutdown.
         script.write_text("".join("catch {" + command + "} result; puts $result\n"
@@ -78,6 +103,10 @@ def main():
         assert "PYTHON_STOPPED" in output, output
         assert "PYTHON_CONTEXT_REVOKED" in output, output
         assert "missingEntry" in output and "invalid.name" in output, output
+        assert "WEBUI" in output and "collision entry executed" not in output, output
+        assert "unable to register " + str(collision).replace("\\", "/") in output.replace("\\", "/"), output
+        assert "LegacyOnly" not in output and "legacy entry executed" not in output, output
+        assert (legacy / "LegacyOnly.py").is_file(), "Discovery deleted legacy user files"
         # Default means PATH, not the Python selected when VINC was built.
         environment = dict(os.environ)
         environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment.get("PATH", "")

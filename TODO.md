@@ -2,6 +2,24 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## App output 目錄：macOS 原生驗收
+
+- [ ] 驗證來源版與乾淨 installed SDK 的 App 皆位於 `<build>/output/<App>/<組態>/`。
+- [ ] 來源版內建 App 的工作資料位於 `<build>/intermediate/vinc/`；重新配置後測試及部署正常，乾淨 build 不產生舊 `apps/vinc/` 工作目錄。
+
+涵蓋不同子目錄宣告、多 App、Debug／Release 分離、C++／Python Module、UI／Tcl／授權
+資源、搬移部署、正常關閉及自訂輸出位置；確認舊目錄資料未被搬移或刪除。
+契約與本輪平台結果見 [SDK 安裝指南](src/vinc/sdk/INSTALL.md#app-output-validation)。
+
+## Module 分類部署：macOS 原生驗收
+
+- [ ] 同一分支驗證 `add_python_module()`、`modules/native`／`modules/python` 的來源與乾淨 installed SDK。
+
+涵蓋各 App 的 Kconfig 選擇、共用 Python Module 各自部署、入口／資源檔案、搬移套件、
+增量更新及取消選用清理、保留手動 Module、大小寫撞名、舊 `data/module` 不再搜尋，
+以及 C++／Python 通訊與正常退出。契約及本輪平台結果由
+[Python README](src/vinc/module_system/python/README.md#module-deployment-validation) 維護。
+
 ## 檔案 Log Param：macOS 原生驗收
 
 - [ ] 同一分支驗證三項 Log Param 的來源與乾淨 installed SDK。

@@ -1,5 +1,6 @@
 import os
 import vinc
+from helpers import greeting
 
 # Published Param error identities; reject permission failures specifically.
 PARAM_ERROR_DOMAIN = 10
@@ -9,6 +10,7 @@ PARAM_PERMISSION_DENIED = 6
 
 class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
     def on_start(self, args):
+        print(greeting(), flush=True)
         print(f"PYTHON_PID={os.getpid()}", flush=True)
         self.revision = int(args[0])
         self.received = False
