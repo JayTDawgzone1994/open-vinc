@@ -165,6 +165,14 @@ Windows 自動為本次建置準備 x64 MSVC 環境；預設輸出在 `build/win
 或對應平台／組態的目錄。外部專案用 `--source` 指定入口，`--target` 選擇 App；
 詳見上述工具說明。下方直接執行 CMake 的方式仍可使用。
 
+Fresh builds omit tests by default. To build tests explicitly, run
+`build.bat -DBUILD_TESTING=ON` or `sh build.sh -DBUILD_TESTING=ON`, then run CTest
+separately. Existing build directories retain their cached choice; use
+`-DBUILD_TESTING=OFF` once to disable tests there. This does not delete old test binaries.
+
+全新建置預設不編譯測試。需要測試時明確加上 `-DBUILD_TESTING=ON`，再另行執行 CTest。
+既有建置目錄保留快取選擇；若原本已開啟，需指定一次 `-DBUILD_TESTING=OFF`，不會刪除舊測試執行檔。
+
 To install a reusable SDK, explicitly run `py -3 build.py --install-vinc-sdk`
 on Windows or `./build.py --install-vinc-sdk` on Linux/macOS. SDK mode defaults
 to Release, verifies the installed package and registers it for CMake lookup.
@@ -182,7 +190,7 @@ Run from the repository root in a configured compiler environment. Restore pinne
 ```sh
 git submodule update --init --recursive
 npm ci --prefix src/vinc/ui/web
-cmake -S src -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake -S src -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
 cmake --build build/debug
 ctest --test-dir build/debug --output-on-failure
 ```
@@ -194,7 +202,7 @@ Release 請另用建置目錄並指定 `-DCMAKE_BUILD_TYPE=Release`。目前 Tcl
 | CMake option / 選項 | Default / 預設 | Purpose / 用途 |
 | --- | --- | --- |
 | `VINC_BUILD_APPS` | `ON` | Build the central Vinc application. / 建置中央 Vinc 應用。 |
-| `BUILD_TESTING` | `ON` | Configure CTest tests. / 配置 CTest 測試。 |
+| `BUILD_TESTING` | `OFF` | Build tests only when explicitly enabled; run them separately with CTest. / 明確啟用才建置測試，另用 CTest 執行。 |
 
 Python bindings are selected with `CONFIG_VINC_APP_PYTHON` in App Kconfig (default `n`).
 The old `VINC_BUILD_PYTHON` and `VINC_BUILD_BAG` CMake variables no longer affect VINC;
