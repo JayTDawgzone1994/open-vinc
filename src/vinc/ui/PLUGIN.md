@@ -80,6 +80,46 @@ CSS 放在自己的 container／ShadowRoot 範圍，可用相對 URL 的 stylesh
 JavaScript import cache 以整頁為生命週期，關閉分頁不等於卸載 JS。
 plugin 有完整同 origin JavaScript 能力，Shadow DOM **不是 sandbox**；不可信程式碼不能靠這個介面安全執行。
 
+## Theme tokens / 主題變數
+
+The workspace owns the following `--vinc-ui-*` CSS custom properties. They inherit
+through Shadow DOM, including nested roots. Official plugins consume them rather
+than force a color scheme. Third-party plugins may opt in; the workspace does not
+rewrite their CSS. This adds no PanelContext method or plugin API version change.
+
+工作區維護下列 CSS 變數，透過一般繼承穿過 Shadow DOM（含巢狀 root）。官方 Plugin
+共用它們，不固定暗色；第三方可自願採用，框架不覆寫其 CSS。不增加 PanelContext 方法
+或變更 Plugin API 版本。
+
+| Properties / 變數（prefix: `--vinc-ui-`） | Purpose / 用途 |
+| --- | --- |
+| `bg`, `surface`, `raised`, `hover` | Page, panels, controls and hover backgrounds / 背景層次 |
+| `text`, `muted`, `border` | Primary/secondary text and separators / 文字與分隔線 |
+| `brand`, `brand-hover`, `on-brand` | Brand button backgrounds and foreground / 品牌按鈕 |
+| `accent-text`, `focus`, `selected` | Readable accents, focus outlines, selected backgrounds / 強調、焦點、選取 |
+| `success`, `warning`, `danger`, `inactive` | Diagnostic foregrounds/borders; accompany with text or icons / 診斷語意 |
+| `warning-bg`, `grid`, `shadow`, `backdrop` | Warning surfaces, graph dots, dialog shadow/overlay / 輔助表面 |
+
+```css
+:host {
+    color-scheme: inherit;
+    color: var(--vinc-ui-text, #292929);
+}
+.panel {
+    background: var(--vinc-ui-surface, #faf9f6);
+    border: 1px solid var(--vinc-ui-border, #d8d7d2);
+}
+```
+
+Use fallbacks for standalone previews outside this workspace. Do not redefine the
+inherited tokens on `:host` unless deliberately choosing a custom theme: doing so
+blocks updates from the workspace. CSS resolves system changes; no JS listener,
+polling or panel recreation is needed. Color is not a substitute for status text.
+
+獨立預覽時使用 fallback；不要在 `:host` 重新指定繼承變數，除非刻意自訂主題，否則會
+擋住工作區更新。系統切換由 CSS 處理，不需要 JS listener、輪詢或重建面板。
+狀態不能只依賴顏色辨認。
+
 ## 唯讀 Topic API（2026-10-25）
 
 官方 `vinc.topics` 使用一般同 origin fetch，PanelContext v1 不新增中央管理能力。

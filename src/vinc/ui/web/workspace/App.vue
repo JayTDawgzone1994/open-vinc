@@ -235,7 +235,6 @@ onBeforeUnmount(() => {
                 v-if="!tabs.length"
                 class="welcome"
             >
-                <div class="welcome-grid"></div>
                 <div class="welcome-content">
                     <span class="eyebrow accent">OPEN-VINC / UI</span>
                     <h2>Your framework.<br /><span>Your workspace.</span></h2>

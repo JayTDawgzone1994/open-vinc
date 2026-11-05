@@ -1,12 +1,11 @@
 :root {
     font-family: Inter, "Segoe UI", system-ui, sans-serif;
-    color: #e6ebe9;
-    background: #101415;
+    color: var(--vinc-ui-text);
+    background: var(--vinc-ui-bg);
     font-synthesis: none;
-    color-scheme: dark;
-    --muted: #8e9b98;
-    --accent: #b3edcb;
-    --line: #293132;
+    --muted: var(--vinc-ui-muted);
+    --accent: var(--vinc-ui-accent-text);
+    --line: var(--vinc-ui-border);
 }
 * {
     box-sizing: border-box;
@@ -28,11 +27,11 @@ button {
     padding: 9px 14px;
 }
 button:hover {
-    background: #273232;
+    background: var(--vinc-ui-hover);
 }
 button:focus-visible,
 a:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--vinc-ui-focus);
     outline-offset: 3px;
 }
 .workspace {
@@ -48,7 +47,7 @@ a:focus-visible {
     align-items: center;
     padding: 0 24px;
     gap: 26px;
-    background: #161b1c;
+    background: var(--vinc-ui-bg);
 }
 .brand {
     color: inherit;
@@ -63,8 +62,8 @@ a:focus-visible {
     font-weight: 350;
 }
 .brand-mark {
-    color: #141b18;
-    background: var(--accent);
+    color: var(--vinc-ui-on-brand);
+    background: var(--vinc-ui-brand);
     width: 29px;
     height: 29px;
     display: grid;
@@ -96,15 +95,14 @@ a:focus-visible {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #dcae79;
+    background: var(--vinc-ui-warning);
 }
 .connection.online span {
-    background: var(--accent);
-    box-shadow: 0 0 0 3px #b3edcb10;
+    background: var(--vinc-ui-success);
 }
 .sidebar {
     padding: 28px 18px 24px;
-    background: #171c1d;
+    background: var(--vinc-ui-bg);
     border-right: 1px solid var(--line);
     display: flex;
     flex-direction: column;
@@ -154,16 +152,16 @@ h1 {
 }
 .badge.official {
     color: var(--accent);
-    background: #b3edcb09;
-    border-color: #b3edcb22;
+    background: var(--vinc-ui-selected);
+    border-color: var(--vinc-ui-border);
 }
 .open-panel {
     width: 100%;
     display: flex;
     align-items: center;
     gap: 10px;
-    border: 1px solid #34453e;
-    background: #202d28;
+    border: 1px solid var(--vinc-ui-border);
+    background: var(--vinc-ui-surface);
     font-size: 12px;
     text-align: left;
 }
@@ -177,7 +175,7 @@ h1 {
 }
 .plugin-version {
     font-size: 10px;
-    color: #84908c;
+    color: var(--vinc-ui-muted);
     margin-top: 8px;
     overflow-wrap: anywhere;
 }
@@ -186,12 +184,12 @@ h1 {
     padding-top: 42px;
 }
 .sidebar-footer .eyebrow {
-    color: #6f7e79;
+    color: var(--vinc-ui-muted);
 }
 .sidebar-footer p {
     font-size: 18px;
     line-height: 1.5;
-    color: #a2b1ab;
+    color: var(--vinc-ui-muted);
 }
 .sidebar-footer .muted {
     font-size: 10px;
@@ -207,7 +205,7 @@ h1 {
     align-items: stretch;
     border-bottom: 1px solid var(--line);
     overflow-x: auto;
-    background: #14191a;
+    background: var(--vinc-ui-bg);
 }
 .tab-placeholder {
     padding: 16px 24px;
@@ -224,7 +222,7 @@ h1 {
 }
 .tab.selected {
     border-top-color: var(--accent);
-    background: #1e2625;
+    background: var(--vinc-ui-surface);
 }
 .tab button {
     border: 0;
@@ -243,7 +241,7 @@ h1 {
 .tab-count {
     margin: auto 18px auto auto;
     padding-left: 16px;
-    color: #6e7b76;
+    color: var(--vinc-ui-muted);
     font: 10px monospace;
     white-space: nowrap;
 }
@@ -252,15 +250,6 @@ h1 {
     position: relative;
     overflow: hidden;
     min-height: 600px;
-}
-.welcome-grid {
-    position: absolute;
-    inset: 0;
-    background-image:
-        linear-gradient(#b3edcb05 1px, transparent 1px),
-        linear-gradient(90deg, #b3edcb05 1px, transparent 1px);
-    background-size: 48px 48px;
-    mask-image: linear-gradient(to bottom, #000, transparent);
 }
 .welcome-content {
     position: relative;
@@ -279,7 +268,7 @@ h1 {
     margin: 26px 0 22px;
 }
 .welcome h2 span {
-    color: #8eaba0;
+    color: var(--vinc-ui-muted);
 }
 .welcome-content > p {
     color: var(--muted);
@@ -287,13 +276,13 @@ h1 {
     line-height: 1.9;
 }
 .primary {
-    background: var(--accent);
-    color: #162c21;
-    border-color: var(--accent);
+    background: var(--vinc-ui-brand);
+    color: var(--vinc-ui-on-brand);
+    border-color: var(--vinc-ui-brand);
     font-weight: 600;
 }
 .primary:hover {
-    background: #d3f8e3;
+    background: var(--vinc-ui-brand-hover);
 }
 .welcome .primary {
     margin-top: 17px;
@@ -314,7 +303,7 @@ h1 {
 .welcome-notes span {
     display: block;
     font: 11px monospace;
-    color: #729280;
+    color: var(--vinc-ui-muted);
     margin-bottom: 13px;
 }
 .welcome-notes strong {
@@ -334,7 +323,7 @@ h1 {
     border-top: 1px solid var(--line);
     padding: 10px 20px;
     font-size: 10px;
-    color: #7d8a85;
+    color: var(--vinc-ui-muted);
 }
 .statusbar a {
     color: inherit;
@@ -355,8 +344,8 @@ h1 {
     line-height: 1.7;
 }
 .notice {
-    background: #26322b;
-    border-bottom: 1px solid #3e5145;
+    background: var(--vinc-ui-raised);
+    border-bottom: 1px solid var(--vinc-ui-border);
     padding: 8px 20px;
     display: flex;
     align-items: center;
@@ -371,20 +360,20 @@ h1 {
 .diagnostics,
 .empty-catalog {
     font-size: 11px;
-    color: #c6aa82;
+    color: var(--vinc-ui-warning);
     line-height: 1.7;
 }
 .trust-dialog {
     color: inherit;
-    background: #1b2321;
-    border: 1px solid #46584e;
+    background: var(--vinc-ui-surface);
+    border: 1px solid var(--vinc-ui-border);
     border-radius: 12px;
     padding: 32px;
     width: min(520px, calc(100vw - 32px));
-    box-shadow: 0 24px 100px #0009;
+    box-shadow: 0 24px 100px var(--vinc-ui-shadow);
 }
 .trust-dialog::backdrop {
-    background: #030908bb;
+    background: var(--vinc-ui-backdrop);
     backdrop-filter: blur(3px);
 }
 .trust-dialog h2 {

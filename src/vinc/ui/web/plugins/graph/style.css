@@ -1,5 +1,5 @@
 :host {
-    color: #dae6f1;
+    color: var(--vinc-ui-text);
     font:
         14px system-ui,
         sans-serif;
@@ -14,7 +14,7 @@
     flex-direction: column;
     gap: 12px;
     padding: 24px;
-    background: #0b1625;
+    background: var(--vinc-ui-surface);
 }
 h1,
 h2,
@@ -35,13 +35,13 @@ h3 {
     margin-top: 16px;
 }
 small {
-    color: #98b5cf;
+    color: var(--vinc-ui-muted);
     letter-spacing: 0.13em;
     font-size: 10px;
 }
 header p,
 .graph-note {
-    color: #9fb2c7;
+    color: var(--vinc-ui-muted);
     font-size: 12px;
     line-height: 1.6;
 }
@@ -53,15 +53,18 @@ header p,
 }
 button,
 input {
-    border: 1px solid #3b526d;
+    border: 1px solid var(--vinc-ui-border);
     border-radius: 6px;
-    color: #e3edf8;
-    background: #172a40;
+    color: var(--vinc-ui-text);
+    background: var(--vinc-ui-raised);
     font: inherit;
     padding: 8px 12px;
 }
 button {
     cursor: pointer;
+}
+button:hover:not(:disabled) {
+    background: var(--vinc-ui-hover);
 }
 button:disabled {
     opacity: 0.5;
@@ -69,7 +72,7 @@ button:disabled {
 }
 button:focus-visible,
 input:focus-visible {
-    outline: 2px solid #8bbafa;
+    outline: 2px solid var(--vinc-ui-focus);
     outline-offset: 2px;
 }
 label {
@@ -82,7 +85,7 @@ label {
     display: flex;
     flex: 1;
     min-height: 380px;
-    border: 1px solid #304357;
+    border: 1px solid var(--vinc-ui-border);
     border-radius: 10px;
     overflow: hidden;
 }
@@ -90,13 +93,13 @@ label {
     flex: 1;
     min-width: 0;
     min-height: 380px;
-    background: radial-gradient(#314153 1px, transparent 1px) 0 0 / 20px 20px;
+    background: radial-gradient(var(--vinc-ui-grid) 1px, transparent 1px) 0 0 / 20px 20px;
 }
 .graph-details {
     width: 250px;
-    background: #102033;
+    background: var(--vinc-ui-bg);
     padding: 18px;
-    border-left: 1px solid #304357;
+    border-left: 1px solid var(--vinc-ui-border);
     overflow: auto;
     max-height: 650px;
 }
@@ -113,46 +116,51 @@ label {
     overflow-wrap: anywhere;
 }
 .graph-error {
-    border: 1px solid #9b7351;
-    background: #35291e;
-    color: #f4d6b8;
+    border: 1px solid var(--vinc-ui-warning);
+    background: var(--vinc-ui-warning-bg);
+    color: var(--vinc-ui-warning);
     padding: 10px;
 }
 .graph-empty {
     position: absolute;
     inset: 40% 20px auto;
     text-align: center;
-    color: #9fb2c7;
+    color: var(--vinc-ui-muted);
 }
-.vue-flow__node-default {
+.graph-panel .vue-flow__node-default {
     width: 210px;
     min-height: 60px;
     padding: 15px;
-    color: #e4edf9;
-    background: #17334a;
-    border: 1px solid #6e96b8;
+    color: var(--vinc-ui-text);
+    background: var(--vinc-ui-raised);
+    border: 1px solid var(--vinc-ui-border);
     overflow-wrap: anywhere;
 }
-.vue-flow__node-default.topic-node {
+.graph-panel .vue-flow__node-default.topic-node {
     border-radius: 32px;
-    background: #2b2648;
-    border-color: #a698c8;
+    background: var(--vinc-ui-surface);
+    border-color: var(--vinc-ui-inactive);
 }
-.vue-flow__node-default.unresolved-node {
+.graph-panel .vue-flow__node-default.unresolved-node {
     border-style: dashed;
 }
-.vue-flow__node-default.selected {
-    box-shadow: 0 0 0 3px #acc9ed;
+.graph-panel .vue-flow__node-default.current-node {
+    outline: 2px solid var(--vinc-ui-focus);
+    outline-offset: 3px;
+}
+.graph-panel .vue-flow__node-default:focus-visible {
+    outline: 2px solid var(--vinc-ui-focus);
+    outline-offset: 3px;
 }
 .vue-flow__edge-text {
-    fill: #d5e3f1;
+    fill: var(--vinc-ui-text);
     font-size: 11px;
 }
 .vue-flow__edge-textbg {
-    fill: #142638;
+    fill: var(--vinc-ui-surface);
 }
 .vue-flow__edge-path {
-    stroke: #829bb4;
+    stroke: var(--vinc-ui-muted);
 }
 .vue-flow__handle {
     visibility: hidden;
@@ -173,7 +181,7 @@ label {
         width: 100%;
         max-height: 260px;
         border-left: 0;
-        border-top: 1px solid #304357;
+        border-top: 1px solid var(--vinc-ui-border);
     }
     label {
         margin-left: 0;
@@ -185,17 +193,22 @@ label {
     }
 }
 
-.vue-flow__node-default.notification-green {
-    border-color: #5bc48b;
+.graph-panel .vue-flow__node-default.notification-green {
+    border-color: var(--vinc-ui-success);
 }
-.vue-flow__node-default.notification-yellow {
-    border-color: #f0bd55;
+.graph-panel .vue-flow__node-default.notification-yellow {
+    border-color: var(--vinc-ui-warning);
     border-width: 3px;
 }
-.vue-flow__node-default.notification-red {
-    border-color: #ef7070;
+.graph-panel .vue-flow__node-default.notification-red {
+    border-color: var(--vinc-ui-danger);
     border-width: 3px;
 }
-.vue-flow__node-default.notification-gray {
-    border-color: #8b949e;
+.graph-panel .vue-flow__node-default.notification-gray {
+    border-color: var(--vinc-ui-inactive);
+}
+
+/* Override Vue Flow hover/focus defaults without hiding diagnostic borders. */
+.graph-panel .vue-flow__node-default.selectable {
+    box-shadow: none;
 }

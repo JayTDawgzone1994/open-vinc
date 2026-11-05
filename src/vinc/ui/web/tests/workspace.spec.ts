@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -102,6 +102,178 @@ test.afterAll(async () => {
         await rm(root, { recursive: true, force: true });
     }
 });
+
+// Traverse ShadowRoot hosts as well as ordinary parents to measure actual
+// rendered text against the nearest opaque surface, rather than token strings.
+async function expectReadable(locator: Locator): Promise<void> {
+    const ratio = await locator.evaluate((element) => {
+        const channels = (color: string) => color.match(/[\d.]+/g)!.map(Number);
+        const luminance = (rgb: number[]) => {
+            const linear = rgb.slice(0, 3).map((channel) => {
+                const value = channel / 255;
+                return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+            });
+            return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+        };
+        let ancestor: Element | null = element;
+        let background = [255, 255, 255];
+        while (ancestor) {
+            const rgba = channels(getComputedStyle(ancestor).backgroundColor);
+            if (rgba.length === 3 || rgba[3] === 1) {
+                background = rgba;
+                break;
+            }
+            const root = ancestor.getRootNode();
+            ancestor = ancestor.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+        }
+        const foreground = luminance(channels(getComputedStyle(element).color));
+        const backing = luminance(background);
+        return (Math.max(foreground, backing) + 0.05) / (Math.min(foreground, backing) + 0.05);
+    });
+    expect(ratio, (await locator.textContent()) ?? undefined).toBeGreaterThanOrEqual(4.5);
+}
+
+for (const theme of ["light", "dark"] as const) {
+    test(`system ${theme} theme reaches mounted panels without reloading`, async ({ page }) => {
+        await page.emulateMedia({ colorScheme: theme });
+        await page.goto(url);
+        const background = theme === "dark" ? "rgb(24, 24, 24)" : "rgb(244, 243, 240)";
+        await expect(page.locator("html")).toHaveCSS("background-color", background);
+        await expectReadable(page.locator(".welcome-content > p"));
+        await expectReadable(page.getByRole("button", { name: "Open example panel" }));
+        await page.screenshot({ path: path.join(build, `ui-theme-${theme}-workspace.png`), fullPage: true });
+
+        await page.getByRole("button", { name: /test.lifecycle/ }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await expectReadable(page.getByRole("dialog").locator("p").first());
+        await page.screenshot({ path: path.join(build, `ui-theme-${theme}-trust.png`), fullPage: true });
+        await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+        await page.getByRole("button", { name: "Open example panel" }).click();
+        await page.getByRole("button", { name: "Increment" }).click();
+        const counter = await page.locator(".count").elementHandle();
+        const opposite = theme === "dark" ? "light" : "dark";
+        await page.emulateMedia({ colorScheme: opposite });
+        await expect(page.locator("html")).not.toHaveCSS("background-color", background);
+        await expect(page.locator(".count")).toHaveText("1");
+        expect(await counter!.evaluate((element) => element.isConnected)).toBe(true);
+        await expectReadable(page.locator(".count"));
+        await page.emulateMedia({ colorScheme: theme });
+        await expect(page.locator("html")).toHaveCSS("background-color", background);
+
+        await page.screenshot({ path: path.join(build, `ui-theme-${theme}-example.png`), fullPage: true });
+
+        await page.route("**/api/topics", (route) =>
+            route.fulfill({
+                json: {
+                    apiVersion: 1,
+                    available: true,
+                    topics: ["green", "yellow", "red", "gray"].map((status) => ({
+                        name: `camera/${status}`,
+                        type: "Frame",
+                        schema: "1",
+                        known_type: true,
+                        hz: 30,
+                        status,
+                        reason: "Diagnostic sample",
+                        subscribers: 1,
+                        lost: "0",
+                        oversized: "0",
+                        publishers: [],
+                    })),
+                },
+            }),
+        );
+        await page.route("**/api/topics/preview?*", (route) =>
+            route.fulfill({
+                json: {
+                    apiVersion: 1,
+                    state: "ready",
+                    publisher: "camera",
+                    count: "1",
+                    utc: "2026-11-05T00:00:00Z",
+                    text: "{sequence: 1}",
+                },
+            }),
+        );
+        await page.locator(".open-panel").filter({ hasText: "Topic Monitor" }).click();
+        await expect(page.locator("tbody tr")).toHaveCount(4);
+        for (const light of await page.locator(".light").all()) {
+            await expectReadable(light);
+        }
+        await page.getByRole("button", { name: "camera/green", exact: true }).click();
+        await expect(page.locator(".payload")).toContainText("sequence");
+        await expectReadable(page.locator(".payload"));
+        await page.getByPlaceholder("Topic or message type").focus();
+        await expect(page.getByPlaceholder("Topic or message type")).toHaveCSS("outline-style", "solid");
+        await page.screenshot({ path: path.join(build, `ui-theme-${theme}-topics.png`), fullPage: true });
+
+        const health = () => ({
+            degraded: false,
+            targetMid: "0",
+            failures: "0",
+            reopenAttempts: "0",
+            recoveries: "0",
+            firstFailure: "0",
+            lastError: "",
+        });
+        let graphReads = 0;
+        await page.route("**/api/graph", (route) => {
+            graphReads += 1;
+            return route.fulfill({
+                json: {
+                    apiVersion: 2,
+                    atomicSnapshot: false,
+                    capturedAt: 1793836800000,
+                    modules: [
+                        {
+                            mid: "1",
+                            name: "camera",
+                            type: "Camera",
+                            state: 2,
+                            notifications: {
+                                observed: true,
+                                receiver: health(),
+                                localSender: health(),
+                                publisherRoutes: health(),
+                            },
+                        },
+                    ],
+                    connections: [
+                        { mid: "1", topic: "camera/frames", role: "publish", id: "1", schema: "1" },
+                    ],
+                },
+            });
+        });
+        await page.locator(".open-panel").filter({ hasText: "Module Graph" }).click();
+        await expect(page.locator(".vue-flow__node")).toHaveCount(2);
+        const node = page.locator(".vue-flow__node").first();
+        await node.click();
+        await expect(node).toHaveCSS("outline-style", "solid");
+        await expect(node).toHaveCSS(
+            "border-top-color",
+            theme === "dark" ? "rgb(120, 198, 152)" : "rgb(35, 115, 69)",
+        );
+        await expectReadable(node);
+        const handle = await node.elementHandle();
+        const position = await node.getAttribute("style");
+        const panel = page.locator(".graph-panel");
+        const surface = theme === "dark" ? "rgb(32, 32, 32)" : "rgb(250, 249, 246)";
+        await expect(panel).toHaveCSS("background-color", surface);
+        await page.emulateMedia({ colorScheme: opposite });
+        await expect(panel).not.toHaveCSS("background-color", surface);
+        await expectReadable(node);
+        expect(await handle!.evaluate((element) => element.isConnected)).toBe(true);
+        expect(await node.getAttribute("style")).toBe(position);
+        expect(graphReads).toBe(1);
+        await page.emulateMedia({ colorScheme: theme });
+        await expect(panel).toHaveCSS("background-color", surface);
+        await page.screenshot({ path: path.join(build, `ui-theme-${theme}-graph.png`), fullPage: true });
+        await page.setViewportSize({ width: 390, height: 844 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await page.screenshot({ path: path.join(build, `ui-theme-${theme}-mobile.png`), fullPage: true });
+    });
+}
 
 test("official panels, independent state and responsive workspace", async ({ page }) => {
     await page.goto(url);

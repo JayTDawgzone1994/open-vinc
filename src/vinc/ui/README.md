@@ -24,6 +24,40 @@ Topic Monitor 使用一般 Context 的唯讀 Bus 能力，不取得修改參數�
 
 <a id="建置與啟動"></a>
 
+## System theme / 系統主題
+
+The workspace follows the browser's `prefers-color-scheme`: neutral carbon grays
+in dark mode, warm paper whites in light mode (also the fallback). Theme changes
+apply to already mounted official panels through inherited CSS tokens, without
+reloading panels, querying services or storing a separate preference. Native
+controls use the same color scheme. `#246BDF` remains the brand color; lighter
+blue text/focus in dark mode keeps controls readable. Green/yellow/red/gray retain
+their diagnostic meanings. Graph health borders and blue selection outlines are
+independent; Module/Topic shapes remain distinct.
+
+工作區跟隨瀏覽器回報的系統主題：暗色採中性碳灰，淡色及未指定暗色時採微暖紙白。
+切換透過 CSS 變數直接更新已開啟的官方面板及原生控制項，不重建面板、不增加資料查詢，
+也不另存主題設定。品牌藍為 `#246BDF`，暗底文字／焦點另用較亮色階。
+綠／黃／紅／灰仍只表示診斷狀態；關係圖狀態邊框與藍色選取外框並存，節點形狀區分
+Module／Topic。主題來源為 `web/workspace/theme.css`；Plugin 使用方式見
+[主題契約](PLUGIN.md#theme-tokens--主題變數)。
+
+Validation (2026-11-05): Windows 11 x64, MSVC 19.51, Node 24.19.0, Debug UI
+assets/server build and TypeScript checking passed. Chromium workspace tests
+passed **8/8**, including explicit light/dark media emulation, live switches
+through nested Shadow DOM, retained counter/node identity/position, no graph
+refetch, sampled text contrast >= 4.5:1, keyboard focus, dialog and 390px layout.
+Native `ui.server` passed **1/1** against the rebuilt assets and official hashes.
+Screenshots of workspace/example/trust/topics/graph/mobile and logs are local in
+`build/windows-msvc-debug/ui-theme-*.png` and `build/ui-theme-*.log`.
+These are Windows Chromium/media-emulation checks, not native macOS/Linux,
+Safari/Firefox, a full-project suite or fresh installed-SDK acceptance.
+
+驗證（2026-11-05）：Windows Debug UI 建置、型別檢查通過；Chromium **8/8**，
+原生 `ui.server` **1/1**。涵蓋暗／淡色模擬、即時切換、巢狀 Plugin 繼承、保留計數與
+節點／位置、不重抓關係圖、抽樣文字對比、焦點、對話框與手機寬度；已檢視實際截圖。
+本輪不是 macOS／Linux、Safari／Firefox、全專案或全新 installed SDK 驗收。
+
 ## Build and start / 建置與啟動
 
 The source-build instructions below build the frontend. An [installed SDK](../sdk/INSTALL.md)
