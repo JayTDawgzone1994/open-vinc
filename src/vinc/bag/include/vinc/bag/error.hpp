@@ -14,7 +14,8 @@ enum class ErrorCode : std::int32_t {
     StorageFailed = 9,
     AlreadyExists = 10,
     WorkerFailed = 11,
-    TimestampUnavailable = 12
+    TimestampUnavailable = 12,
+    WaitFailed = 13
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,
@@ -23,7 +24,8 @@ enum class ErrorOperation : std::int32_t {
     Inspect = 4,
     Discover = 5,
     Command = 6,
-    Enqueue = 7
+    Enqueue = 7,
+    Wait = 8
 };
 }
 

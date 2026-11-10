@@ -2,6 +2,36 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## Parallel pump：macOS 與後續觀察
+
+Windows Debug／Release 與 WSL Release 的乾淨 SDK／搬移驗收已完成；兩平台各 48 組成本對照亦完成。證據見下方契約，不代表 Mac 或所有偶發問題已解決；Recorder 未自動啟用 worker。
+
+- [ ] macOS 同分支、Plugin entry 19 原生 Debug／Release 驗證 `module.topic_scheduler`、`module.parallel`、`module.parallel_stop`、`module.runtime_faults`、`module.context`、`module.context_wait`、`module.plugin` 與 Param／RPC 回歸；另重建 Python binding，驗證 `module.python_parallel`、既有 `module.python*`／`rpc.python`。重點是 Host／Plugin 跨 image 等待、Manual main 返回時的 callback drain／期限、同 Topic 重註冊、GIL 等待／join／引用銷毀、訊息保留及 C++／Python 範例互通。
+- [ ] macOS 第四階段：重建 `sdk_header_smoke`（含 `pump_options.hpp`）；用新目錄建立 Debug／Release SDK，執行 `sdk.installed_consumer`、`sdk.installed_python`、`sdk.installed_application`，確認搬移並隱藏原 SDK／consumer 後仍可執行、雙 Topic 的原生／Python worker 交會與保留副本及正常關閉。用原生 Release 的 `src/vinc/module_system/tests/pump_cost` 分別量測 1／4 Topics、0／1／2／4 workers、輕／CPU-heavy callbacks，每組三次；記錄 latency、吞吐、delivery/loss/collision、process CPU／peak RSS 與實際工具鏈。Windows／WSL 或舊 Mac entry 的結果不能替代這輪原生驗收。
+
+範圍與進度見 [多執行緒 pump 契約](src/vinc/module_system/PARALLEL_PUMP.md)。
+
+- [ ] Host 收尾修復：**macOS 原生 Debug／Release 待驗**。依 [交付文件](src/vinc/module_system/MACOS_CONTEXT_SHUTDOWN_HANDOFF.md)，在同一修復版本完成受控案例、Context／生命週期／故障／停止／多 worker 回歸，並確認短命 Module 無非預期重啟、退出碼正確及回收完成。Windows Debug 156/156、Release 149/149；WSL 首輪 170/171（Node PATH 缺漏），補正測試環境後該項 1/1 通過。三組各通過 Context 5 次、受控案例 10 輪、自然短命 Module 100 次。完整配置與證據見 [第三階段驗收](src/vinc/module_system/CONTEXT_SHUTDOWN_VALIDATION.md)；舊順序對照及原始失敗限制保留於 [調查報告](src/vinc/module_system/CONTEXT_SHUTDOWN_INVESTIGATION.md)。不能以 Windows／WSL 結果代替 Mac 原生驗收。
+- [ ] 成本後續評估（提案，未授權改排程）：profile `Context::dispatch_parallel()` 空 Topic batch 重建與 `TopicScheduler::finish()` 全員喚醒的成本；若要量化 Windows 閒置增量，需更長的獨立取樣。不能因此直接取消 10ms fallback、縮弱快照／同 Topic 序列／停止契約。實測方法與限制見 [成本報告](src/vinc/module_system/PUMP_COST_VALIDATION.md)。
+
+## Context waitForWork 與 Recorder：macOS 原生驗收
+
+- [ ] 同一分支、目前 Plugin entry 19，驗證 `module.context_wait`、`module.context`、`module.runtime_faults`、Plugin／RPC 回歸、Python timeout／GIL／生命週期及乾淨 installed SDK C++／Python 搬移接線；Debug／Release 都需記錄實際結果。等待功能原始 entry 17 證據保留於元件文件。
+- [ ] Recorder 通知等待接線：原生 macOS Debug／Release 驗證 `bag.loop`、`bag.module`、`bag.storage`、`bag.shell` 與 `sdk.installed_recorder`。涵蓋忙碌不睡、空閒等待、探索／故障不餓死、待命與排空、512 筆內容／順序核對及 SDK 搬移錄製；不能用 Windows／WSL 證據代替。見 [Bag 契約與驗收](src/vinc/bag/README.md#recorder-wait-validation)。
+
+契約與平台證據見 [Manual 等待](src/vinc/module_system/PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面)。
+
+## RPC Client：macOS 原生驗收
+
+- [ ] macOS 在同一分支重建目前 Plugin entry 19，驗證全部 `rpc.*`（含同步傳輸、真實 Plugin 防護、target exit、同名重啟／MID 隔離）、Context／Plugin／故障回歸、Python GIL／callback／生命週期及 `sdk_header_smoke`；再完成 Debug／Release 乾淨 installed SDK 的 consumer／application／python 三套驗收。
+
+第一至四階段已完成 Windows／WSL 接線及驗收；原生 Mac 不以其他平台結果代替。
+環境、案例、Release App 首輪失敗與成功重跑見 [RPC 驗收紀錄](src/vinc/rpc/README.md#integration-acceptance)。
+
+## Installed SDK：UI 測試埠隔離
+
+- [ ] `installed_application` 固定使用 31411；Windows Release 首輪曾出現 UI BindFailed／HTTP 401，listener 身分未確認，埠釋放後原設定完整重跑通過。後續拆開預設 port 驗證與 HTTP 流程隔離，避免連到非預期服務；詳見 [SDK 待辦](src/vinc/sdk/README.md#待處理事項)。正式 UI 與 RPC 行為本輪未改。
+
 ## App output 目錄：macOS 原生驗收
 
 - [ ] 驗證來源版與乾淨 installed SDK 的 App 皆位於 `<build>/output/<App>/<組態>/`。

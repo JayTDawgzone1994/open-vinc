@@ -16,14 +16,20 @@ Host notification ownership, Bus routes, notification-driven pumpLoop, bounded r
 Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
 preparation failure rejects only the affected Module; later notification failures retain the
 10 ms fallback. See the [pump wakeup contract](PUMP_WAKEUP.md) for policies and validation.
-Current bootstrap is **v16**, Plugin entry **14**, and Module query **v2**; rebuild connected artifacts.
-Entry 14 also covers optional Publisher capacities. Module System owns the
+Current bootstrap is **v16**, Plugin entry **19**, and Module query **v2**; rebuild connected artifacts.
+Entry 19 adds Context-owned cross-image drain synchronization to the entry-18
+C++ Topic workers; see [parallel pump evidence and remaining work](PARALLEL_PUMP.md).
+Entry 17 exposes deadline-aware Manual waiting through Context; see [Manual wait](PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
+Entry 16 adds revocable async-client ownership to the entry-15 synchronous RPC wiring; see the
+[RPC contract](../rpc/README.md#synchronous-calls). Entry 14 covered optional Publisher capacities. Module System owns the
 [Publisher-default consumer](../message_bus/PUBLISHER_DEFAULTS.md); Bus does not depend on Param.
 
 已接通通知資源、Bus 路由、pumpLoop 喚醒、故障恢復與診斷；pumpOnce 行為不變。
 準備失敗只拒絕該 Module 啟動，運行中的通知故障保留 10 ms 補查。契約及驗證見上述連結。
-目前 bootstrap v16、Plugin entry 14、Module query v2，所有接線產物須一起重建。
-Entry 14 包含可省略的 Publisher 容量；Module System 持有上述參數消費端，Bus 不依賴 Param。
+目前 bootstrap v16、Plugin entry 19、Module query v2，所有接線產物須一起重建。
+Entry 19 在 entry 18 的 Topic worker 布局加入 Context 持有的跨 image 收尾同步，見上述契約。
+Entry 17 加入 Context 的帶期限 Manual 等待入口，完整契約見上述 Manual 等待連結。
+Entry 16 加入可撤銷的非同步 Client 所有權，延續 Entry 15 同步 RPC／pump 防護；Entry 14 的可省略 Publisher 容量維持；Module System 持有上述參數消費端，Bus 不依賴 Param。
 先前 Entry 13 加入 RegisterOptions／重啟標記的拒絕邊界；目前仍保留該限制，參見 [Param 契約](../param/README.md#restart-hints)。
 
 **Stages 1–2 implemented:** the [OSAL FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md)
@@ -282,7 +288,7 @@ exampleModule demonstrates process lifecycle and command hooks; its default inst
 - Plugin factory calls the parameterless Module constructor, which supplies a name proposal or defers it to on_name. Framework holds it through unique_ptr with the Plugin destroy function; the name is not registered yet.
 - Framework assigns MID, calls on_name(args), obtains central approval, then calls on_start(args). Ready follows only a successful Result.
 - on_name may consume naming arguments; remaining arguments reach on_start. get_mid() exposes MID.
-- Construction, on_name/on_start/main/on_stop, and destruction execute on subprocess main. Commands, completion, and subscription callbacks execute on the pump caller. Manual applications with their own pump thread must synchronize shared state. Heartbeat/startup deadlines already protect naming.
+- Construction, on_name/on_start/main/on_stop, and destruction execute on subprocess main. Commands/completion use the pump caller; subscription callbacks use it by default or the explicitly enabled Topic workers. Shared application state needs synchronization. Heartbeat/startup deadlines already protect naming.
 - Failed naming does not call on_start/on_stop; normal unwinding still destroys the object. Do not start work requiring on_stop during naming.
 - Communication thread handles Socket I/O/heartbeat; another framework supervision thread receives control events and checks stop deadlines.
 - Normal stop calls on_stop and destroys the object; application-created threads must finish during this sequence.
@@ -293,7 +299,7 @@ exampleModule demonstrates process lifecycle and command hooks; its default inst
   框架以帶有 Plugin destroy 函式的 `unique_ptr` 持有它；此時名稱尚未登記。
 - 建構後框架設定 MID，呼叫 `on_name(args)` 取得名稱提案；中央核准後才呼叫 `on_start(args)`，Result 成功才送 Ready。
 - `on_name` 可修改參數列表以消化命名選項，剩餘參數傳給 `on_start`。MID 可透過 `get_mid()` 讀取。
-- 建構、`on_name`、`on_start`、`main`、`on_stop` 與解構在子程序主執行緒執行。命令／補全與訂閱 callback 在 pump 呼叫端執行；Manual 自建 pump thread 時，應用須同步與主執行緒共享的資料。命名期間已有 heartbeat 與啟動期限保護。
+- 建構、`on_name`、`on_start`、`main`、`on_stop` 與解構在子程序主執行緒執行。命令／補全在 pump 呼叫端；訂閱 callback 預設在同處，明確啟用後改由 Topic worker 執行。應用須同步共享資料；命名期間已有 heartbeat 與啟動期限保護。
 - 命名失敗不執行 `on_start`／`on_stop`，正常例外展開仍會解構物件；不可在命名階段啟動需要 `on_stop` 清理的工作。
 - Socket I/O 與 heartbeat 在通訊執行緒執行；另一個框架監督執行緒接收控制事件並監看停止期限。
 - 正常停止會呼叫 `on_stop` 並解構物件。使用者自行建立的執行緒必須在這段流程中結束。
@@ -344,12 +350,23 @@ Host 綁定既有認證 Session 的 Client 與本地 Runtime。C++ Context 物�
 
 ### pump and callback contracts / pump 與 callback 契約
 
+**Parallel pump C++/Python wiring implemented:** [Parallel pump contract](PARALLEL_PUMP.md)
+records opt-in Topic workers and stage-specific validation. Param, Shell and RPC
+stay on the control pump caller and may overlap Topic callbacks. Python options
+share the scheduler and honor the GIL; installed-SDK/performance acceptance remains stage 4. Single-thread descriptions
+below apply to the default; callback drain now precedes `on_stop()` in both modes.
+
+**多執行緒 pump 的 C++／Python 已接線：**[契約與驗收](PARALLEL_PUMP.md)記錄分階段證據。
+Param／Shell／RPC 仍由同一個控制 pump 執行，允許與 Topic callback 並行。
+兩種模式均先結束 callback 再進入 on_stop；Python 遵守 GIL，SDK／效能驗收留第四階段。
+
 The approved notification-wakeup direction, policies, and implementation steps are recorded in [Pump wakeup design](PUMP_WAKEUP.md). OSAL, central/Host ownership, Bus routes and Context notification waits are implemented; existing batch and callback contracts below remain unchanged.
 
 已同意的通知喚醒方向、政策與實作步驟見 [pump 喚醒設計](PUMP_WAKEUP.md)。OSAL、中央／Host 資源所有權、Bus 路由與 Context 通知等待已接線，下列 batch 與 callback 契約維持不變。
 
 - `Result<PumpStats>` pumpOnce() fixes the subscription set and each source publication ceiling, then handles retained data. Sources/subscriptions/publications added during callbacks wait until the next batch. Per-source boundaries are captured sequentially, not as a global atomic snapshot. Stop/errors can end the batch early; an empty batch succeeds.
 - `Result<void>` pumpLoop() repeats batches, waits when idle, and wakes/returns on stop. Bus publication uses direct OSAL notifications; config::module_pump_idle_interval keeps a 10 ms fallback scan, not a delivery deadline. See [wakeup](PUMP_WAKEUP.md).
+- `Result<void> waitForWork(Deadline = Deadline::max())` exposes Host waiting to Manual loops without dispatching. It shares pump admission and teardown protection; success can mean a hint, fallback timeout or stop. See [Manual wait](PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面) for deadlines, errors, Python and validation.
 - bool living() reports local Runtime permission to continue. Stop/detected faults make it false; it does not instantly observe remote central state.
 - Only one pump may be active per Context, including the whole pumpLoop. Concurrent/recursive use returns Busy. Manual may create a pump thread; FrameworkLoop creates none.
 - `subscribe<T>(topic, callback, options)` gives a void callback ownership of a writable local `std::unique_ptr<T>`, which it may modify or retain by move. The callback-free overload supports get_last only. Keep the Subscriber handle; close/destruction ends future dispatch and may occur inside its callback.
@@ -366,6 +383,7 @@ The approved notification-wakeup direction, policies, and implementation steps a
 - `bool living()`：本地 Runtime 是否仍允許繼續；停止或已偵測故障後為 false，
   不承諾即時得知遠端中央狀態。
 - 同一 Context 只允許一個 active pump（包含整段 pumpLoop），並行／遞迴呼叫回傳 Busy。
+- `waitForWork()` 與兩種 pump 共用 admission／收尾保護；不派送 callback，醒來後仍需 pump。完整契約與驗收見 [Manual 等待](PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面)。
   Manual 可自行建立 pump thread；FrameworkLoop 不另開 pump thread。
 - `context.subscribe<T>(topic, callback, options)` 的 callback 回傳 void，收到
   `std::unique_ptr<T>` 的本地訊息所有權，可修改或 move 留存。無 callback 的 overload 只供 get_last。
@@ -379,14 +397,14 @@ The approved notification-wakeup direction, policies, and implementation steps a
   Subscriber 保有累計覆蓋事件／筆數與目前來源的 Publisher ID 分項；不記錄無界歷史或逐筆洗版。
   RPC／Param 另有 pump 派送與統計，見下方對應契約。
 
-Callback registration/batch metadata allocate locally; payloads are copied one at a time, not as a whole pre-copied batch. config::module_callback_limit defaults to 256; later registration/pump removes closed entries. Bus integration uses designated message_bus/detail/dispatch.hpp without a reverse dependency. Multiple sources merge by monotonic_timestamp/Publisher rank, without global linear FIFO. [Param](../param/README.md) uses context.param and pump-driven version checks/callbacks; [RPC](../rpc/README.md) uses fixed pump batches. Timer registration and cross-process Bus data notifications remain unavailable.
+Callback registration/batch metadata allocate locally; payloads are copied one at a time, not as a whole pre-copied batch. config::module_callback_limit defaults to 256; later registration/pump removes closed entries. Bus integration uses designated message_bus/detail/dispatch.hpp without a reverse dependency. Multiple sources merge by monotonic_timestamp/Publisher rank, without global linear FIFO. [Param](../param/README.md) uses context.param and pump-driven version checks/callbacks; [RPC](../rpc/README.md) uses fixed pump batches. Timer registration remains unavailable; Bus notifications follow the linked pump wakeup contract.
 
 Context 的 callback 登記與批次 metadata 在本地配置，訊息逐筆複製，不預先複製整批 payload。
 登記上限 `config::module_callback_limit` 預設 256，closed 登記在後續註冊／pump 時移除。
 Bus 批次接線使用指定的 `message_bus/detail/dispatch.hpp`；Bus 不反向依賴 Module System。
 同 topic 多來源維持 monotonic_timestamp／Publisher rank 合併，沒有新增全域線性 FIFO 承諾。
 Param 已接入 `context.param`，共享版本補查與 callback 亦由 pump 派送，見 [Param README](../param/README.md)。
-RPC 亦接入固定 pump 批次，見 [RPC README](../rpc/README.md)。timer 註冊與 Message Bus 跨程序資料通知仍未提供。
+RPC 亦接入固定 pump 批次，見 [RPC README](../rpc/README.md)。timer 註冊仍未提供；Bus 跨程序通知依上述 pump 喚醒契約運作。
 
 <a id="正常完成故障及收尾"></a>
 
@@ -398,12 +416,19 @@ System Modules share the same completion proof, then apply their [restart mode](
 下方成功完成不重啟的規則適用於一般 Module。
 System Module 沿用相同完成判定，再套用其[重啟模式](#system-modules)。
 
-After main() succeeds, framework stops dispatch and starts the stop deadline, runs on_stop, waits for pump callers to leave, then destroys Module and callback wrappers. Plugin unload follows service shutdown. Application threads must stop/join during on_stop. Framework cannot safely preempt user callbacks; watchdog/central terminate a stuck process according to stop_timeout.
+After main() succeeds, framework stops dispatch and starts the stop deadline,
+wakes/cancels Host waits, waits for active pump callers and their Topic pools to
+drain, then runs on_stop. Module/callback destruction and service shutdown precede
+Plugin unload. The same order covers Manual main returning while another application
+thread pumps. on_stop joins application-created threads; it must not be the signal
+an admitted callback needs to return. Framework cannot preempt user callbacks;
+watchdog/central terminate a stuck process under the original stop_timeout.
 
-`main()` 成功返回後先停止 pump 派送並開始停止期限，再執行 on_stop，等待 pump 離開，
-銷毀 Module 與 callback wrapper；Plugin 在這些物件及 Host 服務結束後才卸載。
-應用須在 on_stop 中停止／join 自建執行緒；框架無法安全搶占正在執行的使用者 callback。
-若卡住，既有 watchdog 與中央依 stop_timeout 終止程序。
+`main()` 成功返回後先停止派送、開始停止期限並喚醒 Host 等待，等待 active pump 與
+Topic worker 完成後才執行 on_stop，再銷毀 Module／callback；服務結束後才卸載 Plugin。
+Manual 的 main 返回但另一條應用 thread 仍在 pump 時也適用。on_stop 仍負責停止／join
+自建執行緒；callback 不可等待只有 on_stop 才會提供的訊號。
+框架不能搶占 callback，卡住沿用 watchdog／中央的 stop_timeout，不另開或重設期限。
 
 Normal self-completion uses empty Lifecycle Finishing Request/Response = 7 and Completed = 8 with request ID UINT64_MAX on the authenticated Session. Finishing starts central cleanup timing; Completed follows on_stop/destruction, and the child waits for acknowledgment before exit. Only this protocol, no recorded fault, and a real normal OS exit code 0 produce Stopped without restart. Direct exit(0) is insufficient; primary/cleanup faults/crashes take priority. wait_started accepts confirmed normal completion so short jobs do not race observation of Running; wait_running still returns NotRunning afterward. The existing watchdog checks local entry stop/faults at config::module_runtime_poll_interval (20 ms by default), adding idle wakeups but no thread or hard scheduling guarantee.
 
@@ -417,7 +442,7 @@ Finishing 啟動中央收尾期限；on_stop／Module 解構完成後才送 Comp
 本地 watchdog 以 `config::module_runtime_poll_interval`（預設 20ms）檢查本地主入口停止／故障，
 會增加少量閒置喚醒；不新增執行緒，也不保證 OS 排程的硬期限。
 
-Host operates both BaseModule modes through internal non-template detail::ModuleObject, preserving paired Plugin create/destroy. Current Plugin entry version is 10; bootstrap is --vinc-module-v16. Old Plugins/Hosts reject explicitly; rebuild central, Host, Plugin, and SDK consumers together under matching toolchain/CRT. RuntimeServices remains fatal-only.
+Host operates both BaseModule modes through internal non-template detail::ModuleObject, preserving paired Plugin create/destroy. Current Plugin entry version is 18; bootstrap is --vinc-module-v16. Old Plugins/Hosts reject explicitly; rebuild central, Host, Plugin, and SDK consumers together under matching toolchain/CRT. RuntimeServices remains fatal-only.
 
 Host 經內部非模板 `detail::ModuleObject` 操作兩種公開 BaseModule，維持 Plugin 成對 create/destroy。
 Plugin entry version 為 10，bootstrap 標記為 `--vinc-module-v16`；舊 Plugin／Host 明確拒絕，
@@ -888,6 +913,61 @@ ModuleSnapshot.last_failure and cleanup_failure each hold {mid, error}; the firs
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
+
+### Parallel pump cost follow-up / 多執行緒 pump 成本後續
+
+Fresh installed SDK and Windows/WSL cost validation are recorded in
+[stage 4](PARALLEL_PUMP.md#stage-4-acceptance). Mac remains pending. The
+[cost report](PUMP_COST_VALIDATION.md) documents recurring empty Topic batch work
+and worker wakeups as profiling candidates; measurements do not attribute all
+idle cost to them. Windows short CPU samples cannot quantify a precise worker
+increment. Any optimization is a future proposal and must preserve the existing
+notification fallback and dispatch/stop contracts. Zero workers remains the default.
+
+SDK／搬移與成本已留下 Windows／WSL 證據；Mac 待驗。空 batch／喚醒值得後續 profile，
+但本輪沒有修改排程，也不能以短時間的 Windows CPU 零值宣稱沒有成本。
+
+### Context regression intermittency (2026-11-10) / Context 偶發驗收失敗
+
+During parallel-pump stage-4 validation, Windows Debug `module.context` failed
+once after `finish` and `batch`, in the following `loss` case, with
+`ModuleNotFound / WaitRunning`. A Log shutdown diagnostic also reported native
+10054; its relationship to the failure is unknown. The original test printed
+neither the retained MID nor its primary/cleanup failure before `wait_started`
+threw, so the original cause cannot be reconstructed from that log.
+
+The unchanged case passed alone; after adding diagnostics (no changed assertions,
+timeouts or Runtime behavior), ten consecutive runs passed in 151.83 s. The
+[subsequent investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md) now reproduces a
+real Host teardown race: RuntimeGuard retires Bus before joining its receiver;
+an in-flight NotificationRoutesChanged is rejected as Protocol and causes exit
+72, restart, then an obsolete-MID lookup. Diagnostic Host/Bus copies confirm
+receive-after-close while finished is already set. **Stage 2 repairs this order:**
+after existing cleanup/completion exchanges, RuntimeGuard cancels adapter waits,
+publishes finished, requests stop and joins the watchdog before retiring Bus/Session.
+No watchdog-required mutex is held across join. Adapters and Plugin code remain
+alive; real faults and existing stop deadlines are preserved. Closed Bus receive
+now reports Closed, while malformed input remains Protocol.
+The [staged repair contract](CONTEXT_SHUTDOWN_FIX.md) and
+[repair evidence](CONTEXT_SHUTDOWN_INVESTIGATION.md#stage-2-repair-validation) record
+9/9 focused tests and 10/10 controlled repetitions on each of Windows Debug and
+WSL Release. A Windows old-order mutation fails with receive-after-close / exit 72.
+Success-case tests disable retries and inspect the first generation before MID
+queries. Stage 3's broader results are recorded in the
+[shutdown regression report](CONTEXT_SHUTDOWN_VALIDATION.md); native macOS remains
+pending under the [handoff checklist](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md).
+Original logs remain preserved; their missing internal cause cannot be recovered
+retrospectively with certainty.
+
+第四階段 Windows Debug 首輪 `module.context` 在 `loss` 案例出現一次
+`ModuleNotFound / WaitRunning`；同份 log 的 native 10054 與它是否相關尚未確認。
+補診斷後曾連續十次通過；後續隔離調查已重現 Bus 先關閉、watchdog 尚在派送通知的
+收尾競爭，造成 exit 72／重啟，再被舊 MID 查詢遮住原故障。第二階段已改成先 join
+watchdog，再關閉 Bus／Session；已關閉與畸形封包分別回報 Closed／Protocol。
+正常完成測試不再自動重啟，先檢查原 MID 與退出／故障紀錄。Windows Debug／WSL
+Release 各 9/9 針對性測試、10/10 受控重跑通過，Windows 舊順序對照確實失敗。
+不拉長期限、不吞掉真正故障；第三階段完整回歸見上述驗收報告，Mac 依交付文件待驗。
+原始偶發紀錄的證據限制保留，詳細步驟見 [修復契約](CONTEXT_SHUTDOWN_FIX.md)。
 
 <a id="plugin-遷移後的限制"></a>
 
@@ -1608,9 +1688,9 @@ BaseMessage 新增單調發布時間，原 timestamp 改為 Unix 時間；當時
 
 ## RPC integration (2026-10-14) / RPC 接線（2026-10-14）
 
-Context adds register_rpc/call_rpc/rpc_stats; [RPC](../rpc/README.md) owns typed APIs, capacity/timeouts/faults, and Python contracts. Pump dispatches a fixed RPC batch without endlessly following new callbacks. Independent watchdog maintains heartbeat; escaping callback exceptions latch Module failure.
+Context adds register_rpc/rpc_client/call_rpc/rpc_stats; [RPC](../rpc/README.md) owns typed APIs, capacity/timeouts/faults, and Python contracts. Pump dispatches a fixed RPC batch without endlessly following new callbacks. Independent watchdog maintains heartbeat; escaping callback exceptions latch Module failure.
 
-Context 新增 register_rpc、call_rpc、rpc_stats；完整 typed API、容量／逾時／故障與 Python
+Context 提供 register_rpc、rpc_client、call_rpc、rpc_stats；完整 typed API、容量／逾時／故障與 Python
 契約見 [RPC README](../rpc/README.md)。RPC 控制事件在 pump 固定批次派送，新增 callback
 不在同一輪無限追送；heartbeat 仍由獨立 watchdog 維護。逃出 callback 的例外鎖定 Module 故障。
 
@@ -1668,3 +1748,29 @@ has been added.
 
 ContextRuntime 虛擬介面改變，中央、Host、Plugin、SDK consumer 與 Python 原生擴充均須重建。
 該次更新使用 Plugin entry 10／bootstrap v16；目前版本見本頁開頭，未新增 ABI 相容保證。
+
+### RPC synchronous Host wiring (2026-11-06) / 同步 RPC 接線
+
+Plugin entry 15 adds Context-owned pump-thread identity and `ContextRuntime::module_name()`.
+The guard rejects blocking RPC from the current pump thread before admission, including
+Host-dispatched command hooks that enter Plugin code. Other threads remain allowed. Host
+owns request-specific wait/cleanup records; no extra worker or Plugin control service exists.
+Full APIs, lifetime and validation are owned by the [RPC README](../rpc/README.md#synchronous-calls).
+
+Windows Debug/Release and WSL Release each passed the focused 13-test RPC/Context/Plugin/
+fault suite. Native macOS entry-15 regression remains in TODO; these runs do not replace
+Python or installed-SDK acceptance. Existing user-thread shutdown responsibilities remain.
+
+Plugin entry 15 加入 Context 本體的 pump 執行緒紀錄；Shell hook 跨 Host／Plugin 也會受防護。
+同步等待／回收由 Host 負責，未新增背景執行緒。Windows 兩組態與 WSL 各 13/13；
+原生 Mac 仍待驗，不表示 Python／installed SDK 已驗收。
+
+## Reusable RPC Context wiring / 可重複 RPC Context 接線
+
+Plugin entry 16 adds the revocable endpoint owned by Context's RPC facade. C++ and Python
+issue reusable RpcClients without owning another control service. Stage-3 Windows/WSL
+validation, Python GIL/exception behavior and subsequent installed-SDK/macOS acceptance
+are maintained in the [RPC record](../rpc/README.md#integration-acceptance).
+
+Plugin entry 16 加入 Context 持有的可撤銷端點，C++／Python 沿用 Host 單一通訊服務。
+實際驗證、installed SDK 結果及 Mac 待驗項目統一見 RPC 紀錄，避免重複維護。

@@ -3,10 +3,33 @@
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
 The [Publisher-default migration](../message_bus/PUBLISHER_DEFAULTS.md) changes
-PublisherOptions ABI and uses Bus v4 / Plugin entry 14. Rebuild connected artifacts;
+PublisherOptions ABI. Current builds use Bus v4 / Plugin entry 19 (Context-owned parallel-pump drain). Rebuild connected artifacts;
 the older acceptance records below apply only to their recorded revisions.
-Publisher 預設搬移改變選項 ABI，使用 Bus v4／Plugin entry 14，所有接線產物須一起重建；
+Publisher 預設搬移改變選項 ABI，目前使用 Bus v4／Plugin entry 19（Context 持有多執行緒 pump drain），所有接線產物須一起重建；
 下方較早驗收仍僅適用其記錄版本，不能替本次改動背書。
+
+`<vinc/module/pump_options.hpp>` is included in the installed header tree and
+the public first-include smoke check. `sdk.installed_python` now enables two
+Topic workers in both its native Plugin and Python peer, uses bounded rendezvous
+to require real cross-Topic overlap, and retains independent messages through
+shutdown. It still checks custom schemas, RPC/Param and rejected incompatible
+Python environments. Current integration/cost results and the Mac checklist are
+owned by [parallel pump acceptance](../module_system/PARALLEL_PUMP.md#stage-4-acceptance).
+
+SDK 已交付 PumpOptions 標頭並納入獨立 include 驗證；搬移 Python App 驗收同時要求
+C++／Python 雙 Topic callback 真正交會、持有獨立副本到停止及正常收尾。
+本輪結果與 Mac 待驗清單見上述共用紀錄，不以舊 SDK 驗收代替。
+
+`Context::waitForWork()` and Python `context.waitForWork(timeout=None)` are shipped
+through the normal SDK, using the Host-owned receiver and existing fallback.
+Contracts and this change's acceptance: [Manual wait](../module_system/PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
+SDK 提供 C++／Python Manual 等待入口，仍由 Host 持有接收資源；契約與本輪驗收見上述連結。
+
+The installed Recorder adapter also uses this wait. `sdk.installed_recorder`
+checks a relocated external App with custom messages, recording completion and
+normal shutdown. Its Windows/WSL evidence and macOS boundary are maintained in
+the [Bag validation](../bag/README.md#recorder-wait-validation).
+安裝式 Recorder 已接通知等待；搬移外部 App、自訂訊息錄製與關閉驗收及平台限制見上述 Bag 紀錄。
 
 Current migration acceptance is recorded in the [Publisher report](../message_bus/PUBLISHER_DEFAULTS.md#validation--驗證):
 Windows native C++ consumer/dedicated App passed; WSL consumer/application/Python
@@ -510,6 +533,22 @@ Windows x64／MSVC／Ninja 驗證：
 
 ## Outstanding issues / 待處理事項
 
+- **Installed application UI test isolation (2026-11-06):**
+  `tests/installed_application/startup.tcl` queries fixed port 31411. During RPC
+  stage-4 Windows Release acceptance, the plain App reported UI BindFailed and
+  HTTP 401 while Bus/Recorder and orderly shutdown succeeded. A listener with PID
+  24176 was observed, but it exited before process identity could be obtained;
+  its ownership is unknown. Do not attribute this to RPC or claim a confirmed
+  external process. Preserve the failure and retry evidence in the
+  [RPC acceptance record](../rpc/README.md#integration-acceptance). Follow-up:
+  separate default-port assertions from HTTP-flow isolation, and report endpoint
+  ownership/bind failure before making HTTP requests. This test-hardening proposal
+  is not a change to production UI behavior.
+
+  **安裝式 App UI 測試隔離：**fixture 固定查詢 31411；本輪 Release 出現 BindFailed／401，
+  當時 listener 的程序已退出，無法確認歸屬。不能直接歸因 RPC 或宣稱是外部程序。
+  建議後續拆開預設值驗證與 HTTP 流程的埠隔離，並提早輸出綁定失敗診斷；正式 UI 不變。
+
 - See the [Windows toolchain evaluation](WINDOWS_TOOLCHAIN.md) for the isolated
   historical 19.42/19.44 results and Runtime-floor diagnosis. Python now uses the
   [static SDK closure](INSTALL.md#static-python-sdk-validation) on MSVC; native C++
@@ -736,13 +775,17 @@ BaseMessage 的 Unix／單調發布時間變更需中央、Host、Plugin／SDK �
 
 ## RPC SDK（2026-10-14） / RPC 介面（2026-10-14）
 
-SDK/umbrella provide RPC types/errors/Context templates. Users register/call via inherited Context, not self-created central services. rpc is Plugin facade/image transport; rpc_host/rpc_manager are internal. Entry 8/v13 requires rebuilding all connected C++. See [RPC](../rpc/README.md) and [example](../../../examples/rpc/README.md).
+SDK/umbrella provide RpcClient, RpcMessages, RPC types/errors and Context templates. Users register/call via inherited Context, not self-created central services. rpc is Plugin facade/image transport; rpc_host/rpc_manager are internal. The original entry 8/bootstrap v13 integration has been superseded by entry 19/bootstrap v16; rebuild all connected C++. See [RPC](../rpc/README.md) and [example](../../../examples/rpc/README.md).
 
 vinc::sdk 與 vinc/vinc.hpp 提供 RPC 的型別、錯誤及 Context 模板 API。
-一般使用端以繼承的 Context register_rpc／call_rpc 使用，不能自行建立中央服務。
+一般使用端以繼承的 Context register_rpc／rpc_client／call_rpc 使用，不能自行建立中央服務。
 vinc::rpc 是 Plugin facade／映像讀寫 target；vinc::rpc_host 與 vinc::rpc_manager 僅供框架接線。
-ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件。
+原始 entry 8／bootstrap v13 接線已由 entry 19／bootstrap v16 取代，需重建所有相連 C++ 元件。
 完整契約見 [RPC](../rpc/README.md)，範例見 [examples/rpc](../../../examples/rpc/README.md)。
+
+Fresh SDK results for the synchronous/reusable API and custom-message C++/Python consumers
+are recorded in [RPC integration acceptance](../rpc/README.md#integration-acceptance).
+新版同步／可重複 Client 的乾淨 SDK、自訂訊息、跨語言與搬移驗收統一維護於上述紀錄。
 
 ### Notification integration rebuild / 通知整合重建
 

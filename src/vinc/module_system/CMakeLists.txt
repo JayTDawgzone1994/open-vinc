@@ -13,7 +13,8 @@ function(_vinc_build_module variant)
     target_include_directories(${vinc_module_contract} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     vinc_runtime_link_libraries(${vinc_module_contract} ${variant} PUBLIC vinc::osal)
 
-    add_library(${vinc_module} STATIC src/runtime/base_module.cpp src/runtime/context.cpp)
+    add_library(${vinc_module} STATIC src/runtime/base_module.cpp src/runtime/context.cpp
+        src/runtime/context_parallel.cpp src/runtime/topic_scheduler.cpp)
     vinc_apply_runtime(${vinc_module} ${variant})
 
     target_include_directories(${vinc_module} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

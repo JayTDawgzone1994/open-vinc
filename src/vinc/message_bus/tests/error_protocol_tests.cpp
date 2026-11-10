@@ -2,6 +2,7 @@
 #include <vinc/message_bus/detail/protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <vinc/message_bus/detail/error_catalog.hpp>
+#include <vinc/message_bus/detail/runtime.hpp>
 #include <vinc/osal/error.hpp>
 #include <iostream>
 #include <stdexcept>
@@ -32,6 +33,46 @@ void test_roundtrip() {
               text.find("ControlChannel") != std::string::npos &&
               text.find("-123456789") != std::string::npos,
           "static catalogs and foreign numeric diagnostics are available in receiver");
+}
+
+void test_receive_after_close() {
+    const auto valid_notification = [] {
+        control::Frame frame{control::Kind::Event, protocol::message_bus_domain,
+                             protocol::NotificationRoutesChanged};
+        control::put_u64(frame.payload, 1);
+        control::put_u32(frame.payload, 0);
+        return frame;
+    };
+    unsigned closes = 0;
+    protocol::ControlTransport transport;
+    transport.send = [](control::Frame) -> Result<void> {
+        return {};
+    };
+    transport.close = [&] {
+        ++closes;
+    };
+    auto client = protocol::RuntimeAccess::create(transport);
+    check(bool(client), "create receive classification fixture");
+    check(bool(protocol::RuntimeAccess::receive(**client, valid_notification())),
+          "late notification for a retired Publisher is valid while transport is open");
+    protocol::RuntimeAccess::shutdown(**client);
+    auto closed = protocol::RuntimeAccess::receive(**client, valid_notification());
+    check(!closed && closed.error().is(bus::ErrorCode::Closed) &&
+          closed.error().is_operation(bus::ErrorOperation::Receive),
+          "closed transport is not malformed protocol");
+
+    auto malformed_client = protocol::RuntimeAccess::create(transport);
+    check(bool(malformed_client), "create malformed receive fixture");
+    auto malformed = valid_notification();
+    malformed.payload.pop_back();
+    const auto prior_closes = closes;
+    auto rejected = protocol::RuntimeAccess::receive(**malformed_client, std::move(malformed));
+    check(!rejected && rejected.error().is(bus::ErrorCode::Protocol) &&
+          rejected.error().is_operation(bus::ErrorOperation::Receive) && closes > prior_closes,
+          "first malformed frame reports Protocol even though rejection closes the transport");
+    auto later = protocol::RuntimeAccess::receive(**malformed_client, valid_notification());
+    check(!later && later.error().is(bus::ErrorCode::Closed),
+          "subsequent receive observes closure without relabeling the original Protocol error");
 }
 
 void test_validation() {
@@ -133,6 +174,7 @@ void test_local_capacity() {
 int main() {
     try {
         test_roundtrip();
+        test_receive_after_close();
         test_validation();
         test_local_capacity();
         test_catalog_and_boundaries();

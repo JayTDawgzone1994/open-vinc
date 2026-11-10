@@ -92,6 +92,35 @@ record 選項：
 
 ## Component and dependencies / 元件與相依
 
+**Notification wait integration (2026-11-09):** Recorder retains Manual mode and
+uses [Context waiting](../module_system/PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
+After callbacks/commands it immediately returns through maintenance to the next
+pump. Only empty, non-stopped batches wait. Active recording supplies the next
+discovery deadline; idle/draining/finished recording supplies no extra deadline,
+so an old discovery timestamp cannot cause a spin. Host still applies its 10 ms
+fallback and notification recovery. No new thread or endpoint is introduced.
+
+The obsolete `bag_pump_interval` setting is removed. Discovery remains 500 ms,
+checked between batches rather than preempting a running callback. Worker failure
+and loss accounting are also checked between batches, including continuous input.
+SQLite's separate 100 ms batch interval, queue limits/DropNewest, ownership,
+finish/drain and shutdown policies are unchanged. A public wait failure becomes
+Bag `WaitFailed` (13), operation `Wait` (8), preserving the Context cause; it ends
+the Module main loop through normal lifecycle policy. Native notification faults
+that Host can recover remain diagnostics/fallback, not public wait errors.
+
+**已接上通知等待：** 每批有 callback／命令就回到維護檢查再繼續 pump，空批次才等待。
+錄製中帶入下次探索期限；待命／排空／完成後不用過期的探索時間。沿用 Host 10ms 補查
+及通知恢復，移除固定睡眠參數，不新增執行緒。持續流量也會在批次間檢查探索、故障及
+遺失統計；不搶占正在執行的 callback。SQLite 成批等待、滿載丟棄與收尾政策不變。
+公開等待失敗以 Bag WaitFailed／Wait 包裝並保留原因鏈；原生通知降級仍由 Host 處理。
+
+This removes unconditional receive-side sleep, not the finite capacity or cost
+of copying/serialization/storage. `bus_lost` and `queue_dropped` remain distinct;
+no universal zero-loss/Hz guarantee or Combat Bar workload result is implied.
+移除的是收訊端固定睡眠，不代表吞吐無限；Bus 覆寫與寫入佇列滿載仍分開計數，
+不保證任意流量零遺失，也不宣稱已驗證 Combat Bar 實際負載。
+
 - vinc::bag owns SQLite storage/metadata/bounded Recorder worker, with private SQLite dependency.
 - recorder_module.cpp is an ordinary Manual BaseModule using Context/pumpOnce/typed subscribe.
 - Ribosome generates message_types.hpp/visit_types for compile-time dispatch, without runtime schema registry or Bag dependencies in messages.
@@ -298,13 +327,13 @@ FULL is induced by page quota, not by filling a real disk. These tests are not r
 
 SQLite FULL 由 page quota 製造；未將測試磁碟實際寫滿。上述測試不構成錄製吞吐量 benchmark。
 
-- SQLite/filesystem/OSAL portability has not been natively validated on Linux/macOS in this round.
+- The initial round did not validate Linux/macOS. Later WSL evidence is recorded under [Recorder wait validation](#recorder-wait-validation); native macOS remains pending.
 - Main-database-only capacity, no directory-total hard cap.
 - No read-only hot-journal auto-repair or Bag repair command.
 - Player/speed/timing replay, file rotation, dynamic schemas remain unimplemented.
 - Tests do not cover actual power loss, hardware corruption, or every filesystem synchronization behavior; transactions are not a hardware durability guarantee.
 
-- 跨平台實作使用 SQLite／標準 filesystem／既有 OSAL；Linux、macOS 尚未實機驗證。
+- 初版未驗 Linux／macOS；後續 WSL 證據見下方通知等待驗收，原生 macOS 仍待驗。
 - 已確認邊界：只限制主資料庫；交易暫存空間另計，不提供目錄總容量硬限制。
 - 已知限制：唯讀查詢不自動修復 hot journal；未做 Bag 專用復原命令。
 - 尚未實作：Player、播放速度／重播時序、錄製切檔、動態 schema 擴充。
@@ -321,3 +350,62 @@ The quarter reserve was removed and failed batches are not split/retried. Record
 相關程式與 Module 已重新建置；本次未重跑全專案 70 個測試，Linux／macOS 未驗證。
 測試涵蓋超過舊四分之一容量、非整頁上限、超出支援範圍時不建目錄、整批回滾、
 丟棄等待中的資料，以及容量不足後 Recorder／中央／其他 Module 仍可操作。
+
+<a id="recorder-wait-validation"></a>
+
+### Recorder notification wait validation / Recorder 通知等待驗收
+
+2026-11-09: the Recorder adapter now uses `waitForWork()`; the Bag worker, SQLite
+format, queue budgets and public recording commands are unchanged. No further
+Plugin/Bus protocol bump is needed beyond Context's entry 17.
+
+2026-11-09：Recorder 已接等待介面，worker、SQLite 格式、佇列預算與錄製指令不變。
+沿用 Context 的 Plugin entry 17，本輪沒有再改協定。
+
+| Environment / 環境 | Validation / 驗證 |
+| --- | --- |
+| Windows x64, MSVC 19.51.36257, CMake 4.3.2, Ninja | Debug **5/5** (23.16 s), Release **5/5** (20.62 s): `bag.storage`, `bag.module`, `bag.loop`, `bag.shell`, `module.context_wait`. Final test-only lifetime/discovery additions rebuilt and `bag.module`/`bag.loop` passed **2/2** each (15.79/12.83 s). |
+| WSL Ubuntu 24.04.5 x64, GCC/libstdc++ 13.3.0, CMake 3.28.3, Release | The same five tests passed **5/5** (17.85 s); final `bag.module`/`bag.loop` passed **2/2** (11.52 s). |
+| Fresh Release installed SDK, Windows and WSL | `installed_recorder.cmake` passed on both: moved SDK, external custom message/Module build, moved App with original consumer/SDK paths hidden, unrelated working directory, 64-record capture with separate loss counters, finish and complete process shutdown. Windows final run: 102.82 s. |
+
+`bag.loop` compiles the real Recorder and uses actual Host attachment with a
+controlled Runtime. It checks busy batches never wait, empty batches do, stop
+skips waiting, only active recording supplies the discovery deadline, and busy
+traffic cannot skip failure or due-discovery checks. It does not use a short
+wall-clock threshold as a substitute for branch verification. Host services
+outlive the test Module, including assertion cleanup.
+
+`bag.module` now waits for an observable Subscriber before sending a **512-record
+burst**, with 1,024 slots and 8,192 bytes per slot. The 64-byte payload and nested
+message are recorded through the real Plugin/Bus/worker path. Every serialized
+record is decoded, checking sequence and payload bytes. Received/written are 512;
+`bus_lost`, `queue_dropped` and oversized are separately required to be zero for
+this bounded fixture. Existing cases cover late/restarted Publishers, oversized
+data, disk contention/quota, recovery, and normal queue drain.
+
+受控測試驗證忙碌不睡、空閒等待、停止跳出、探索期限與故障不餓死，不靠毫秒門檻猜測。
+跨程序案例先確認訂閱，再連發 512 筆，逐筆解碼核對順序及內容，分開核對 Bus 覆寫與
+佇列丟棄。既有晚出現／重啟 Publisher、過大訊息、磁碟故障、容量與排空案例維持通過。
+Windows／WSL 乾淨 Release SDK 也通過外部自訂訊息 App 建置與搬移錄製：隱藏原消費端
+build／SDK 路徑、由無關目錄啟動，核對 64 筆錄製計數、finish 及全程序正常退出。
+
+First attempts remain recorded: Windows loop assertions passed but its temporary
+directory cleanup comparison rejected a trailing separator; canonical comparison
+fixed the test. The WSL source mirror initially contained an older RPC example;
+syncing the current example fixed that build. Neither required a production
+Recorder/OSAL workaround. Installed SDK's first WSL script treated a nonzero Module
+command as a normal Tcl return; Shell actually raises an error. Its bounded poll
+now uses `catch`, matching the existing command contract.
+
+首次 Windows 測試清理路徑比較、WSL 副本舊 RPC 範例及 SDK Tcl 等待腳本的失敗紀錄
+保留；已修正各自測試／驗收環境，未為通過測試改動正式 OSAL 或 Shell 契約。
+
+Evidence is local generated output, not committed: Windows `build/recorder-*.log`
+and `build/recorder-sdk-release/`; WSL validation workspace `recorder-*.log` and
+`recorder-sdk-release/`. This is targeted functional acceptance, not full-project
+CTest, a throughput/CPU benchmark, or Combat Bar workload validation. Native macOS,
+minimum MSVC 19.44 and Debug installed SDK were not tested in this round; macOS
+acceptance is tracked in the root TODO.
+
+本輪是功能驗收，不宣稱全專案、CPU／吞吐基準或 Combat Bar 真實負載通過。
+原生 macOS、最低 MSVC 19.44 與 Debug installed SDK 未重驗，Mac 已列根目錄 TODO。

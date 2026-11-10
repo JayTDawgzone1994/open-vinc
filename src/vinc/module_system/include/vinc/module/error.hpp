@@ -138,7 +138,8 @@ enum class ErrorOperation : std::int32_t {
     PrepareNotification = 67,
     CloseNotification = 68,
     NotifyPump = 69,
-    WaitNotification = 70
+    WaitNotification = 70,
+    WaitForWork = 71
 };
 }
 

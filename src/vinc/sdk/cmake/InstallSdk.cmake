@@ -149,6 +149,12 @@ if(BUILD_TESTING)
         "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DGENERATOR=${CMAKE_GENERATOR}"
         -P "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_consumer.cmake")
     set_tests_properties(sdk.installed_consumer PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+    add_test(NAME sdk.installed_recorder COMMAND "${CMAKE_COMMAND}"
+        "-DSDK_BUILD=${VINC_BUILD_ROOT}"
+        "-DCOMPILER=${CMAKE_CXX_COMPILER}" "-DCONFIG=$<CONFIG>"
+        "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DGENERATOR=${CMAKE_GENERATOR}"
+        -P "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_recorder.cmake")
+    set_tests_properties(sdk.installed_recorder PROPERTIES TIMEOUT 900 RUN_SERIAL TRUE)
     add_test(NAME sdk.installed_publisher_defaults COMMAND "${CMAKE_COMMAND}"
         "-DSDK_BUILD=${VINC_BUILD_ROOT}"
         "-DFIXTURE=${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_publisher_defaults"

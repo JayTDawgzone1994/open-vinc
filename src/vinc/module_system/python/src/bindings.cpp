@@ -7,9 +7,11 @@
 #include <vinc/config.hpp>
 #include <vinc/time.hpp>
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <iostream>
 #include <mutex>
+#include <optional>
 
 namespace py = pybind11;
 namespace vinc::python {
@@ -46,6 +48,7 @@ void require_none(const py::object& result) {
 class PythonModule final : public detail::ModuleObject {
     py::object instance_;
     bool manual_ = false;
+    PumpOptions pump_options_;
     std::shared_ptr<ContextState> state_ = std::make_shared<ContextState>();
 
     template <class T, class Function>
@@ -94,6 +97,9 @@ public:
             instance_ = type.attr("__new__")(type);
             instance_.attr("_vinc_context") = py::cast(state_);
             require_none(instance_.attr("__init__")());
+            // Copy configuration while holding the GIL; native main never reads
+            // Python attributes while its coordinator/worker threads are running.
+            pump_options_ = instance_.attr("_vinc_pump_options").cast<PumpOptions>();
         });
     }
 
@@ -116,7 +122,7 @@ public:
 
     Result<void> main() override {
         if (!manual_) {
-            return context.pumpLoop();
+            return context.pumpLoop(pump_options_);
         }
 
         return invoke<void>(ErrorOperation::MainHook, [&] {
@@ -228,6 +234,11 @@ void bind_errors(py::module_& module) {
 }
 
 void bind_context(py::module_& module) {
+    py::class_<PumpOptions>(module, "PumpOptions")
+        .def(py::init([](std::uint32_t topic_workers) {
+            return PumpOptions{topic_workers};
+        }), py::arg("topic_workers") = 0)
+        .def_readonly("topic_workers", &PumpOptions::topic_workers);
     py::class_<PumpStats>(module, "PumpStats")
         .def_readonly("callbacks", &PumpStats::callbacks)
         .def_readonly("commands", &PumpStats::commands)
@@ -256,16 +267,41 @@ void bind_context(py::module_& module) {
 
             return unwrap(std::move(result));
         })
-        .def("pumpLoop", [](std::shared_ptr<ContextState> state) {
+        .def("pumpLoop", [](std::shared_ptr<ContextState> state, PumpOptions options) {
             ContextCall call(std::move(state));
             Result<void> result;
             {
                 py::gil_scoped_release release;
-                result = call.context().pumpLoop();
+                result = call.context().pumpLoop(options);
             }
 
             unwrap(std::move(result));
-        });
+        }, py::arg("options") = PumpOptions{})
+        .def("waitForWork", [](std::shared_ptr<ContextState> state, std::optional<double> timeout) {
+            ContextCall call(std::move(state), ErrorOperation::WaitForWork);
+            auto deadline = Deadline::max();
+            if (timeout) {
+                const auto now = std::chrono::steady_clock::now();
+                // Bound the conversion before duration_cast: floating-to-integral
+                // overflow is not an acceptable way to reject external input.
+                const auto maximum_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                    Deadline::max() - now).count();
+                if (!std::isfinite(*timeout) || *timeout < 0 || *timeout > maximum_seconds) {
+                    raise_error(Error{ErrorCode::InvalidArgument, ErrorOperation::WaitForWork});
+                }
+
+                deadline = now + std::chrono::duration_cast<Deadline::duration>(
+                    std::chrono::duration<double>{*timeout});
+            }
+
+            Result<void> result;
+            {
+                py::gil_scoped_release release;
+                result = call.context().waitForWork(deadline);
+            }
+
+            unwrap(std::move(result));
+        }, py::arg("timeout") = py::none());
 }
 }
 

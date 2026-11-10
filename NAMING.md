@@ -97,6 +97,10 @@ Supporting types remain in `vinc::shell`. Names such as `SocketShell` and `Comma
 
 `Context` is the service entry point approved by the central process and bound to BaseModule by the Host. Users access the inherited `context`. `pumpOnce()` processes one bounded batch of events; `pumpLoop()` repeatedly dispatches until the framework stops. `living()` queries whether the local runtime permits continued execution.
 
+`waitForWork()` waits for a hint, stop or fallback/deadline without dispatching.
+It is the Manual loop's waiting companion to `pumpOnce()`, not a guarantee of
+available work. See the [wait contract](src/vinc/module_system/PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
+
 Choose `RunMode::FrameworkLoop` or `RunMode::Manual` explicitly when inheriting BaseModule. See the [Module System README](src/vinc/module_system/README.md#context-與執行模式) for complete API, threading, and stop contracts.
 
 ## Confirmed Lock Layers
@@ -140,4 +144,9 @@ executable, not the central identity. See [installed SDK composition](src/vinc/s
 
 ## RPC
 
-RPC is the typed request/response service used by Modules through Context. RpcManager centrally manages service registration, fixed shared slots, and reclamation. RpcStatus is the application result, separate from framework Error. Service names and target Module names are passed separately. See the [RPC README](src/vinc/rpc/README.md) for complete contracts.
+RPC is the typed request/response service used by Modules through Context. RpcManager centrally manages service registration, fixed shared slots, and reclamation. RpcStatus is the application result, separate from framework Error. See the [RPC README](src/vinc/rpc/README.md) for current implementation contracts.
+
+The confirmed redesign names the reusable typed asynchronous caller **RpcClient**, and
+the local Request/Response ownership pair **RpcMessages**. The target public address is
+`module.service`; it identifies an owned RPC service, not a Topic or a Param. Both synchronous and reusable asynchronous calls use this address in C++ and Python. API behavior, replacement
+scope and implementation status belong to the [RPC client change contract](src/vinc/rpc/CLIENT_CONTRACT.md).

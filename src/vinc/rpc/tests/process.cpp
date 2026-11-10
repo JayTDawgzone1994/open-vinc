@@ -33,8 +33,10 @@ int main(int argc, char** argv) {
         take(manager->register_module_type({"rpcFixture", std::filesystem::absolute(argv[1]), {}}));
         auto server = take(manager->start_module("rpcFixture", {"server"}));
         take(manager->wait_started(server));
-        const bool target_exit = argc == 3;
-        auto caller = take(manager->start_module("rpcFixture", {target_exit ? argv[2] : "caller"}));
+        const std::string mode = argc == 3 ? argv[2] : "caller";
+        const bool target_exit = mode == "target-exit" || mode == "target-throw" || mode == "sync-exit";
+        take(manager->call_module_interface("rpcServer", {"guard"}));
+        auto caller = take(manager->start_module("rpcFixture", {mode}));
         take(manager->wait_started(caller));
         const auto deadline = std::chrono::steady_clock::now() + deadline_limit;
         bool passed = false;

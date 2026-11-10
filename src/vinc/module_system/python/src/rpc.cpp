@@ -1,10 +1,45 @@
 #include <vinc/python/detail/bridge.hpp>
 #include <vinc/module/detail/context_rpc.hpp>
 #include <vinc/rpc/client.hpp>
+#include <vinc/rpc/detail/async_call.hpp>
 #include <vinc/message/storage.hpp>
 
 namespace vinc::python {
 namespace {
+void validate_types(const py::object& request, const py::object& response) {
+    for (auto type : {request, response}) {
+        if (!PyType_Check(type.ptr()) || !py::hasattr(type, "_advertise") || !py::hasattr(type, "schema_hash")) {
+            throw py::type_error("RPC requires compiled VINC message types");
+        }
+    }
+}
+
+Result<message::Snapshot> snapshot(const py::object& request) {
+    try {
+        auto bytes = py::cast<std::string>(request.attr("_rpc_snapshot")(config::rpc_local_bytes));
+        return message::Snapshot::copy_from(std::as_bytes(std::span(bytes.data(), bytes.size())));
+    } catch (py::error_already_set& failure) {
+        if (!py::hasattr(failure.value(), "error")) {
+            throw;
+        }
+
+        return std::unexpected(py::cast<Error>(failure.value().attr("error")));
+    }
+}
+
+struct RpcMessages {
+    py::object request_type;
+    py::object response_type;
+    py::object request;
+    py::object response;
+    RpcMessages(py::object request_class, py::object response_class)
+        : request_type(std::move(request_class)), response_type(std::move(response_class)) {
+        validate_types(request_type, response_type);
+        request = request_type();
+        response = response_type();
+    }
+};
+
 struct RpcCallback final : PythonResource {
     std::weak_ptr<ContextState> state;
     py::object request_type;
@@ -131,7 +166,8 @@ struct RpcCallback final : PythonResource {
                 }
             }
 
-            if (!function(reply, error).is_none()) {
+            py::object active_function = function;
+            if (!active_function(reply, error).is_none()) {
                 throw py::type_error("RPC completion callbacks return None");
             }
         } catch (const py::builtin_exception& error) {
@@ -146,12 +182,7 @@ struct RpcCallback final : PythonResource {
 
 std::shared_ptr<RpcCallback> retained(const std::shared_ptr<ContextState>& state, py::object request,
                                       py::object response, py::object function) {
-    for (auto type : {request, response}) {
-        if (!PyType_Check(type.ptr()) || !py::hasattr(type, "_advertise") ||
-            !py::hasattr(type, "schema_hash")) {
-            throw py::type_error("RPC requires compiled VINC message types");
-        }
-    }
+    validate_types(request, response);
 
     if (!PyCallable_Check(function.ptr())) {
         throw py::type_error("RPC callback must be callable");
@@ -165,6 +196,29 @@ std::shared_ptr<RpcCallback> retained(const std::shared_ptr<ContextState>& state
     state->track(value);
     return value;
 }
+struct RpcClient {
+    std::weak_ptr<ContextState> state;
+    py::object request_type;
+    rpc::detail::AsyncCall call;
+
+    void submit(py::object request, std::optional<rpc::CallOptions> options) {
+        auto owner = state.lock();
+        if (!owner) {
+            raise_error(Error{rpc::ErrorCode::Closed, rpc::ErrorOperation::Call});
+        }
+        ContextCall entered(owner);
+        if (!py::isinstance(request, request_type)) {
+            throw py::type_error("request does not match its declared RPC type");
+        }
+        // Python serialization needs the GIL. Async admission does not wait for
+        // callbacks; completion dispatch on another pump acquires the GIL later.
+        auto make_image = [&]() {
+            return snapshot(request);
+        };
+        unwrap(options ? call.call(make_image, *options) : call.call(make_image));
+    }
+};
+
 }
 
 void bind_rpc(py::module_& module) {
@@ -215,48 +269,95 @@ void bind_rpc(py::module_& module) {
         },
         py::arg("request_type"), py::arg("response_type"), py::arg("name"), py::arg("handler"),
         py::arg("options") = rpc::ServiceOptions{});
-    context.def(
-        "call_rpc",
+    py::class_<rpc::CallOptions>(rpc_module, "CallOptions")
+        .def(py::init<>())
+        .def_property("timeout_ms",
+            [](const rpc::CallOptions& options) {
+                return options.timeout.count();
+            },
+            [](rpc::CallOptions& options, std::int64_t value) {
+                options.timeout = std::chrono::milliseconds(value);
+            });
+    py::class_<RpcMessages>(rpc_module, "RpcMessages")
+        .def(py::init<py::object, py::object>())
+        .def("request", [](RpcMessages& messages) {
+            return messages.request;
+        })
+        .def("response", [](RpcMessages& messages) {
+            return messages.response;
+        });
+    py::class_<RpcClient, std::shared_ptr<RpcClient>>(rpc_module, "RpcClient")
+        .def("make_request", [](RpcClient& client) {
+            return client.request_type();
+        })
+        .def("close", [](RpcClient& client) {
+            client.call.close();
+        })
+        .def("call", &RpcClient::submit, py::arg("request"), py::arg("options") = py::none());
+    context.def("rpc_client",
         [](std::shared_ptr<ContextState> state, py::object request_type, py::object response_type,
-           std::string target, std::string service, py::object request, py::object function,
-           std::int64_t timeout_ms) {
-            ContextCall call(state);
+           std::string address, py::object function, rpc::CallOptions options) {
+            ContextCall entered(state);
+            if (!entered.context().living()) {
+                raise_error(Error{rpc::ErrorCode::Closed, rpc::ErrorOperation::Create});
+            }
+
             auto callback = retained(state, request_type, response_type, std::move(function));
-            if (!py::isinstance(request, request_type)) {
-                throw py::type_error("request does not match its declared RPC type");
+            auto client = std::make_shared<RpcClient>();
+            client->state = state;
+            client->request_type = request_type;
+            client->call = unwrap(rpc::detail::AsyncCall::create(
+                rpc::detail::ClientAccess::endpoint(detail::ContextRpcAccess::client(entered.context())),
+                address, py::cast<std::uint64_t>(request_type.attr("schema_hash")),
+                py::cast<std::uint64_t>(response_type.attr("schema_hash")),
+                [callback](Result<rpc::detail::RawResult> reply) {
+                    callback->complete(std::move(reply));
+                }, options));
+            return client;
+        }, py::arg("request_type"), py::arg("response_type"), py::arg("address"),
+        py::arg("completion"), py::arg("options") = rpc::CallOptions{});
+    context.def("call_rpc",
+        [](std::shared_ptr<ContextState> state, std::string address, RpcMessages& messages,
+           rpc::CallOptions options) {
+            ContextCall entered(state);
+            auto target = unwrap(detail::ContextRpcAccess::prepare(entered.context(), address));
+            if (options.timeout.count() <= 0 || options.timeout > config::rpc_max_call_timeout) {
+                raise_error(Error{rpc::ErrorCode::InvalidOptions, rpc::ErrorOperation::Call});
             }
 
-            auto request_hash = py::cast<std::uint64_t>(request_type.attr("schema_hash"));
-            auto response_hash = py::cast<std::uint64_t>(response_type.attr("schema_hash"));
-            auto bytes = py::cast<std::string>(request.attr("_rpc_snapshot")(config::rpc_local_bytes));
-            if (bytes.size() > config::rpc_local_bytes) {
-                raise_error(Error{rpc::ErrorCode::CapacityExceeded, rpc::ErrorOperation::Call});
+            const auto deadline = std::chrono::steady_clock::now() + options.timeout;
+            auto image = snapshot(messages.request);
+            if (!image) {
+                raise_error(wrap_error(rpc::ErrorCode::StorageFailed, rpc::ErrorOperation::Call, image.error()));
             }
 
-            Result<void> result;
+            const auto request_hash = py::cast<std::uint64_t>(messages.request_type.attr("schema_hash"));
+            const auto response_hash = py::cast<std::uint64_t>(messages.response_type.attr("schema_hash"));
+            Result<rpc::detail::RawResult> result;
             {
                 py::gil_scoped_release release;
-                auto snapshot =
-                    message::Snapshot::copy_from(std::as_bytes(std::span(bytes.data(), bytes.size())));
-                if (!snapshot) {
-                    result = std::unexpected(wrap_error(rpc::ErrorCode::StorageFailed,
-                                                        rpc::ErrorOperation::Call, snapshot.error()));
-                } else {
-                    result = rpc::detail::ClientAccess::call_raw(
-                        detail::ContextRpcAccess::client(call.context()), std::move(target),
-                        std::move(service), request_hash, response_hash, std::move(*snapshot),
-                        {std::chrono::milliseconds(timeout_ms)},
-                        [callback](Result<rpc::detail::RawResult> reply) {
-                            callback->complete(std::move(reply));
-                        });
-                }
+                result = rpc::detail::ClientAccess::call_sync(
+                    detail::ContextRpcAccess::client(entered.context()), target,
+                    request_hash, response_hash, std::move(*image), options, deadline);
             }
 
-            unwrap(std::move(result));
-        },
-        py::arg("request_type"), py::arg("response_type"), py::arg("target"), py::arg("service"),
-        py::arg("request"), py::arg("completion"),
-        py::arg("timeout_ms") =
-            std::chrono::duration_cast<std::chrono::milliseconds>(config::rpc_call_timeout).count());
+            auto value = unwrap(std::move(result));
+            auto response = messages.response_type();
+            try {
+                // Serialized bytes are a copied image, never a Python/C++ object layout.
+                response.attr("deserialize")(
+                    py::bytes(reinterpret_cast<const char*>(value.image.data()), value.image.size()));
+            } catch (py::error_already_set& failure) {
+                if (!py::hasattr(failure.value(), "error")) {
+                    throw;
+                }
+
+                raise_error(wrap_error(rpc::ErrorCode::StorageFailed, rpc::ErrorOperation::Receive,
+                                      py::cast<Error>(failure.value().attr("error"))));
+            }
+
+            messages.response = std::move(response);
+            return value.status;
+        }, py::arg("address"), py::arg("messages"), py::arg("options") = rpc::CallOptions{});
 }
 }

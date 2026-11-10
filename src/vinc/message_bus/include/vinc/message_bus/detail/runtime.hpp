@@ -26,6 +26,8 @@ public:
     static vinc::Result<std::shared_ptr<Client>> create(std::shared_ptr<control::Session>);
     static vinc::Result<std::shared_ptr<Client>> create(ControlTransport);
     // Called only by the module's existing receive dispatcher; does not map/copy payload.
+    // Already closed reports Closed/Receive; malformed input reports Protocol/Receive.
+    // The owner must join its receiver before final shutdown, not suppress receive errors.
     static vinc::Result<void> receive(Client&, control::Frame);
     static void shutdown(Client&) noexcept;
     // Existing Host receive worker retries failed routes; it never invokes user code.

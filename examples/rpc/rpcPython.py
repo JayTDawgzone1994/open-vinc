@@ -3,6 +3,8 @@ import vinc
 
 class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
     def on_start(self, args):
+        self.client = None
+        self.address = None
         self.context.register_rpc(
             vinc.messages.int3, vinc.messages.int3, "echo", self.echo
         )
@@ -30,13 +32,17 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
             print(f"usage: {self.get_module_name()} <target-module>")
             return 1
 
-        request = vinc.make_message(vinc.messages.int3)
-        request.data().x = 42
         try:
-            self.context.call_rpc(
-                vinc.messages.int3, vinc.messages.int3,
-                args[0], "echo", request, self.completed
-            )
+            address = args[0] + ".echo"
+            if self.address != address:
+                if self.client is not None:
+                    self.client.close()
+                self.client = self.context.rpc_client(
+                    vinc.messages.int3, vinc.messages.int3, address, self.completed)
+                self.address = address
+            request = self.client.make_request()
+            request.data().x = 42
+            self.client.call(request)
         except vinc.VincError as error:
             print(f"RPC admission failed: {error}")
             return 1

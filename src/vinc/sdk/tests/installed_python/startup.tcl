@@ -4,6 +4,7 @@ if {[catch {
     param set vinc.pub_default_message_bytes 8192
     if {[NativePeer [info nameofexecutable]] != 0} { error "Native startup failed" }
     if {[PythonPeer --name py @REVISION@] != 0} { error "Python startup failed" }
+    if {[RpcProbe] != 0} { error "RPC probe startup failed" }
     py send
     set deadline [expr {[clock milliseconds] + 8000}]
     while {[catch {py check}]} {
@@ -11,6 +12,10 @@ if {[catch {
         after 20
     }
     native status
+    while {[catch {rpcProbe check}]} {
+        if {[clock milliseconds] > $deadline} { error "Installed C++ RPC timed out" }
+        after 20
+    }
     param get native.fixed
     param get py.gain
     param list
