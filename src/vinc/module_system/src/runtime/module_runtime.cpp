@@ -34,6 +34,9 @@
 #ifdef VINC_MODULE_TESTING
 #include "fault_hooks.hpp"
 #endif
+#ifdef VINC_SHUTDOWN_TESTING
+#include "shutdown_test_hooks.hpp"
+#endif
 
 namespace vinc {
 class detail::ModuleMessageBusAccess {
@@ -50,10 +53,13 @@ public:
     }
 
     static void quiesce(detail::ModuleObject& module) {
-        // on_stop must join application workers first. Supervision bounds a stuck pump.
-        while (module.context.pumping_.test()) {
-            module.context.pumping_.wait(true);
-        }
+        // Stop admission and wake waits before entering here. The active pump owns
+        // its Topic pool, so releasing this flag also proves its workers joined.
+        // on_stop may then join application threads without racing user callbacks.
+        std::unique_lock lock(module.context.pump_owner_mutex_);
+        module.context.pump_finished_.wait(lock, [&] {
+            return !module.context.pumping_.test();
+        });
     }
 
     static void identify(detail::ModuleObject& module, MID mid) {
@@ -106,7 +112,8 @@ struct Bootstrap {
 };
 
 // Host-only endpoints. Central owns name retirement; opening never creates or
-// unlinks resources. No Plugin can wait on this receiver through the SDK.
+// unlinks resources. Plugins can request a Context wait but never own/access
+// this native receiver; all callers share Host admission and recovery.
 struct HostNotification {
     osal::NotificationReceiver receiver;
     osal::NotificationSender sender;
@@ -240,9 +247,13 @@ struct HostNotification {
         wake();
     }
 
-    void wait() {
+    void wait(Deadline requested_deadline = Deadline::max()) {
         const auto now = control::Clock::now();
-        const auto deadline = now + config::module_pump_idle_interval;
+        const auto deadline = (std::min)(requested_deadline, now + config::module_pump_idle_interval);
+        if (deadline <= now || stop_source.stop_requested()) {
+            return;
+        }
+
         bool degraded;
         {
             std::lock_guard lock(diagnostics_mutex);
@@ -264,7 +275,19 @@ struct HostNotification {
             }
         }
         if (!degraded) {
+#ifdef VINC_MODULE_TESTING
+            module_system::test::checkpoint(module_system::test::Point::NotificationWait);
+#endif
             auto waited = receiver.wait_until(deadline, stop_source.get_token());
+#ifdef VINC_MODULE_TESTING
+            std::string_view outcome = "failure";
+            if (waited) {
+                outcome = "notified";
+            } else if (waited.error().is(osal::ErrorCode::Timeout)) {
+                outcome = "timeout";
+            }
+            module_system::test::checkpoint(module_system::test::Point::NotificationWaitFinished, nullptr, outcome);
+#endif
             std::lock_guard lock(diagnostics_mutex);
             if (waited || waited.error().is(osal::ErrorCode::Timeout)) {
                 recovered(wait_diagnostics);
@@ -418,6 +441,9 @@ Result<std::shared_ptr<control::Session>> connect_to_central(control::Service& s
 [[noreturn]] void watchdog_failure(const std::shared_ptr<control::Session>& session, RuntimeInbox& inbox,
                                    const Error& error, int exit_code, Deadline stop_deadline,
                                    std::uint32_t role = detail::primary_failure) noexcept {
+#ifdef VINC_SHUTDOWN_TESTING
+    shutdown_test::watchdog_failure(error, exit_code);
+#endif
     if (inbox.locks) {
         if (inbox.queries) {
             inbox.queries->stop();
@@ -524,6 +550,9 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
             if (inbox.finished.load()) {
                 return;
             }
+#ifdef VINC_SHUTDOWN_TESTING
+            shutdown_test::after_finished_check(frame);
+#endif
 
             if (control::Clock::now() >= stop_deadline) {
                 watchdog_failure(session, inbox, Error{ErrorCode::StopDeadlineExpired, ErrorOperation::Stop},
@@ -626,6 +655,9 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
             } else if (frame->domain == message_bus::detail::message_bus_domain) {
                 auto received =
                     message_bus::detail::RuntimeAccess::receive(message_bus_client, std::move(*frame));
+#ifdef VINC_SHUTDOWN_TESTING
+                shutdown_test::bus_result(received);
+#endif
                 if (!received) {
                     watchdog_failure(
                         session, inbox,
@@ -850,6 +882,9 @@ public:
                 RuntimeInbox& inbox, bool fatal_errors = false)
         : module_(module), session_(std::move(session)), inbox_(inbox), fatal_command_errors_(fatal_errors) {
     }
+    std::string_view module_name() const noexcept override {
+        return module_.get_module_name();
+    }
     Result<ModulePage> list_modules(MID after, Deadline deadline) override {
         return inbox_.queries->list_modules(after, deadline);
     }
@@ -886,15 +921,17 @@ public:
             inbox_.notification->wake();
         }
     }
-    void wait() override {
+    void wait(Deadline deadline) override {
         if (inbox_.notification) {
             if (!inbox_.stopping.load()) {
-                inbox_.notification->wait();
+                inbox_.notification->wait(deadline);
             }
             return;
         }
+        // The no-endpoint fixture path follows the same caller/fallback deadline.
+        deadline = (std::min)(deadline, control::Clock::now() + config::module_pump_idle_interval);
         std::unique_lock lock(inbox_.mutex);
-        inbox_.changed.wait_for(lock, config::module_pump_idle_interval, [&] {
+        inbox_.changed.wait_until(lock, deadline, [&] {
             return inbox_.stopping.load() || !inbox_.requests.empty() ||
                    (inbox_.rpc && inbox_.rpc->ready());
         });
@@ -953,12 +990,24 @@ struct RuntimeGuard {
             inbox.rpc->stop();
         }
         inbox.finished.store(true);
-        message_bus::detail::RuntimeAccess::shutdown(client);
-        session->close();
+        // An admitted receive/dispatch iteration may have passed finished already.
+        // Keep its adapters and transport alive until it has actually returned.
+        // No inbox/adapter mutex may be held while joining the sole receiver.
         watchdog.request_stop();
+#ifdef VINC_SHUTDOWN_TESTING
+        shutdown_test::before_watchdog_join();
+#endif
         if (watchdog.joinable()) {
             watchdog.join();
         }
+#ifdef VINC_SHUTDOWN_TESTING
+        shutdown_test::before_bus_shutdown();
+#endif
+        message_bus::detail::RuntimeAccess::shutdown(client);
+#ifdef VINC_SHUTDOWN_TESTING
+        shutdown_test::after_bus_shutdown();
+#endif
+        session->close();
     }
 };
 
@@ -1035,16 +1084,28 @@ Result<void> run_started_hooks(detail::ModuleObject& module, std::vector<std::st
     if (!running) {
         report(running.error(), detail::primary_failure);
     }
+    const bool primary_reported = !running;
+    // The stop deadline was started above, not after draining callbacks. Never
+    // hold inbox.mutex while waiting: a returning callback may report a failure.
+    detail::ModuleMessageBusAccess::quiesce(module);
+    {
+        std::lock_guard lock(inbox.mutex);
+        if (running && inbox.terminal_failure) {
+            running = std::unexpected(*inbox.terminal_failure);
+        }
+    }
+    if (!primary_reported && !running) {
+        report(running.error(), detail::primary_failure);
+    }
     auto stopped = invoke_hook(ErrorOperation::StopHook, [&] {
         return module.on_stop();
     });
     if (!stopped) {
         report(stopped.error(), detail::cleanup_failure);
     }
-    detail::ModuleMessageBusAccess::quiesce(module);
     {
         std::lock_guard lock(inbox.mutex);
-        if (inbox.terminal_failure) {
+        if (running && inbox.terminal_failure) {
             running = std::unexpected(*inbox.terminal_failure);
         }
     }
@@ -1082,6 +1143,9 @@ Result<void> run_hooks(const std::vector<std::string>& args, const Bootstrap& bo
     inbox.params->identify((*module)->get_module_name());
     detail::ModuleMessageBusAccess::attach(**module, client, context_runtime, *inbox.params, inbox.logs, *inbox.rpc);
     auto result = run_started_hooks(**module, startup_args, session, inbox);
+#ifdef VINC_SHUTDOWN_TESTING
+    shutdown_test::hooks_result(result);
+#endif
     // Destroy user state and callback closures while both Host adapter and Plugin exist.
     module->reset();
     if (!result) {
@@ -1184,6 +1248,9 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
         try {
             guard.watchdog = std::jthread([&](std::stop_token token) {
                 watch_central(session, **client, inbox, std::chrono::milliseconds(bootstrap->grace), token);
+#ifdef VINC_SHUTDOWN_TESTING
+                shutdown_test::watchdog_exited();
+#endif
             });
             auto result = [&]() -> Result<void> {
                 auto receiving = notification.open(args[detail::bootstrap::notification]);
@@ -1206,6 +1273,9 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
                 }
                 return run_hooks(args, *bootstrap, session, *client, inbox, source);
             }();
+#ifdef VINC_SHUTDOWN_TESTING
+            shutdown_test::runtime_result(result);
+#endif
             auto closed = notification.close();
             if (!result) {
                 // Already reported failures are not duplicated; early factory/name failures use this path.

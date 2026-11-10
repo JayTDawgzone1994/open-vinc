@@ -60,6 +60,37 @@ int main(int argc, char** argv) {
             std::cout << event->bytes;
         }
 
+        if (!done) {
+            throw std::runtime_error("Python reusable RPC scenario did not finish");
+        }
+
+        take(manager->stop_module(python, control::Clock::now() + deadline_limit));
+        const auto failed = take(manager->start_module(type.name,
+            {"--name", "rpcPython", "callback-failure"}));
+        take(manager->wait_started(failed));
+        const auto failure_deadline = control::Clock::now() + deadline_limit;
+        bool observed_failure = false;
+        while (control::Clock::now() < failure_deadline) {
+            const auto record = manager->inspect(failed);
+            if (record && record->state == ModuleState::Failed && record->last_exit) {
+                observed_failure = record->last_failure.has_value();
+                break;
+            }
+
+            std::this_thread::sleep_for(poll);
+        }
+        if (!observed_failure || take(manager->command(native, {},
+                control::Clock::now() + command_timeout)) != 1) {
+            throw std::runtime_error("callback exception must fail only its Python Module");
+        }
+        std::string diagnostics;
+        for (const auto& event : output.take().events) {
+            diagnostics += event->bytes;
+        }
+        if (diagnostics.find("intentional reusable RPC callback failure") == std::string::npos) {
+            throw std::runtime_error("Python callback traceback was not preserved: " + diagnostics);
+        }
+
         manager->begin_shutdown();
         take(manager->wait_shutdown(control::Clock::now() + deadline_limit));
         return done ? 0 : 1;

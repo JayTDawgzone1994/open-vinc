@@ -1,6 +1,7 @@
 #include "../../../../tests/support/manager.hpp"
 #include <vinc/bag/bag.hpp>
 #include <vinc/osal/path.hpp>
+#include <vinc_messages/Frame.hpp>
 #include <sqlite3.h>
 #include <iostream>
 #include <stdexcept>
@@ -12,6 +13,11 @@ using namespace std::chrono_literals;
 constexpr auto operation_budget = 20s;
 constexpr auto observe_interval = 50ms;
 constexpr auto discovery_grace = 1200ms;
+constexpr std::uint64_t burst_records = 512;
+constexpr std::size_t burst_payload_bytes = 64;
+constexpr std::uint32_t burst_ring_slots = 1024;
+constexpr std::uint64_t burst_message_bytes = 8192;
+constexpr unsigned payload_pattern_modulus = 251;
 std::function<void()> diagnostics;
 
 void check(bool condition, const char* text) {
@@ -90,6 +96,34 @@ void check_recorded_times(const std::filesystem::path& path) {
     check(count == 3, "all recorded messages retain both publication times");
 }
 
+void check_burst_payloads(const std::filesystem::path& path) {
+    sqlite3* raw_database = nullptr;
+    const auto filename = take(osal::path_to_utf8(path / "recording.sqlite"));
+    const auto opened = sqlite3_open_v2(filename.c_str(), &raw_database, SQLITE_OPEN_READONLY, nullptr);
+    std::unique_ptr<sqlite3, decltype(&sqlite3_close)> database(raw_database, sqlite3_close);
+    check(opened == SQLITE_OK, "open burst recording");
+    sqlite3_stmt* raw_statement = nullptr;
+    const auto prepared = sqlite3_prepare_v2(database.get(),
+        "SELECT payload FROM messages ORDER BY id", -1, &raw_statement, nullptr);
+    std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> statement(raw_statement, sqlite3_finalize);
+    check(prepared == SQLITE_OK, "read burst payloads");
+    std::uint64_t sequence = 0;
+    int step = SQLITE_OK;
+    while ((step = sqlite3_step(statement.get())) == SQLITE_ROW) {
+        // SQLite owns the BLOB through this step; from_bytes validates and copies.
+        const auto* bytes = static_cast<const std::byte*>(sqlite3_column_blob(statement.get(), 0));
+        const auto size = static_cast<std::size_t>(sqlite3_column_bytes(statement.get(), 0));
+        auto message = take(Frame::from_bytes({bytes, size}));
+        ++sequence;
+        check(message->data().sequence == sequence, "burst ordering/no duplicate or missing record");
+        check(message->data().payload.size() == burst_payload_bytes, "burst payload size");
+        for (auto byte : std::as_const(message->data().payload)) {
+            check(byte == sequence % payload_pattern_modulus, "burst payload integrity");
+        }
+    }
+    check(step == SQLITE_DONE && sequence == burst_records, "all burst records decoded");
+}
+
 int main(int argc, char** argv) {
     try {
         check(argc == 4, "plugin arguments");
@@ -143,6 +177,33 @@ int main(int argc, char** argv) {
         check(known.sources.size() == 3 &&
                   known.sources.front().publisher_id != known.sources.back().publisher_id,
               "restart preserves source identity");
+        // Retain the whole burst even if the consumer is descheduled. This is a
+        // functional check, not an OS timing threshold or a zero-loss promise.
+        start(*manager, "messageBusTest",
+              {"--name", "burstPublisher", "pub", "camera/burst", std::to_string(burst_ring_slots),
+               std::to_string(burst_message_bytes)});
+        command(*manager, "recorder", {"record", path_text("burst"), "--topic", "camera/burst"});
+        until([&] {
+            return take(manager->command("burstPublisher", {"subscribers"},
+                std::chrono::steady_clock::now() + operation_budget)) == 1;
+        });
+        command(*manager, "burstPublisher", {"burst", std::to_string(burst_records),
+                                             std::to_string(burst_payload_bytes)});
+        until([&] {
+            auto info = bag::inspect(root / "burst");
+            return info && info->counters.written == burst_records;
+        });
+        command(*manager, "recorder", {"finish"});
+        until([&] {
+            auto info = bag::inspect(root / "burst");
+            return info && info->completed;
+        });
+        const auto burst = take(bag::inspect(root / "burst"));
+        check(burst.counters.received == burst_records && burst.counters.queue_dropped == 0 &&
+              burst.counters.bus_lost == 0 && burst.counters.oversized == 0,
+              "burst received/written/loss counters remain distinct");
+        check_burst_payloads(root / "burst");
+        stop(*manager, "burstPublisher");
         command(*manager, "recorder",
                 {"record", path_text("bounded"), "--topic", "camera/data", "--message-bytes", "2048"});
         std::this_thread::sleep_for(discovery_grace);

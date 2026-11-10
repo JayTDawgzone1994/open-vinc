@@ -16,10 +16,14 @@ class BaseModule;
 template <>
 class BaseModule<RunMode::FrameworkLoop> : public detail::ModuleObject {
 public:
-    using ModuleObject::ModuleObject;
-    Result<void> main() final {
-        return context.pumpLoop();
+    explicit BaseModule(std::string name = {}, PumpOptions options = {})
+        : ModuleObject(std::move(name)), pump_options_(options) {
     }
+    Result<void> main() final {
+        return context.pumpLoop(pump_options_);
+    }
+private:
+    PumpOptions pump_options_;
 };
 
 template <>

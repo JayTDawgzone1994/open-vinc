@@ -20,7 +20,10 @@ inline constexpr std::array error_entries{
     ErrorCodeEntry{ErrorCode::TargetExited, "TargetExited"},
     ErrorCodeEntry{ErrorCode::CallbackFailed, "CallbackFailed"},
     ErrorCodeEntry{ErrorCode::IdExhausted, "IdExhausted"},
-    ErrorCodeEntry{ErrorCode::ResourceExhausted, "ResourceExhausted"}};
+    ErrorCodeEntry{ErrorCode::ResourceExhausted, "ResourceExhausted"},
+    ErrorCodeEntry{ErrorCode::Busy, "RPC client already has an outstanding call"},
+    ErrorCodeEntry{ErrorCode::BlockingCallInPump, "Synchronous RPC is not allowed on the Context pump thread"},
+    ErrorCodeEntry{ErrorCode::SynchronousSelfCall, "Synchronous RPC cannot target its own Module"}};
 inline constexpr std::array operation_entries{ErrorOperationEntry{ErrorOperation::Register, "Register"},
                                               ErrorOperationEntry{ErrorOperation::Call, "Call"},
                                               ErrorOperationEntry{ErrorOperation::Send, "Send"},

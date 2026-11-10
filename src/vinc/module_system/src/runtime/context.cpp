@@ -18,15 +18,58 @@ using module_system::ErrorOperation;
 
 struct PumpGuard {
     std::atomic_flag& active;
+    std::mutex& mutex;
+    std::condition_variable& finished;
+    std::thread::id& owner;
+    std::thread::id previous;
+    PumpGuard(std::atomic_flag& flag, std::mutex& lock, std::condition_variable& completion,
+              std::thread::id& thread)
+        : active(flag), mutex(lock), finished(completion), owner(thread) {
+        std::lock_guard guard(mutex);
+        previous = owner;
+        owner = std::this_thread::get_id();
+    }
     ~PumpGuard() {
-        active.clear();
-        active.notify_all();
+        {
+            std::lock_guard guard(mutex);
+            owner = previous;
+            active.clear();
+        }
+        // Use object-owned synchronization across Host/Plugin images. Some
+        // standard libraries implement atomic_flag waits through image-local pools.
+        finished.notify_all();
     }
 };
 }
 
 bool Context::living() const noexcept {
     return runtime_ && runtime_->living();
+}
+
+Result<rpc::detail::Address> Context::prepare_rpc_call(std::string_view address) {
+    {
+        std::lock_guard lock(pump_owner_mutex_);
+        const auto caller = std::this_thread::get_id();
+        const bool worker = std::find(pump_workers_.begin(), pump_workers_.end(), caller) != pump_workers_.end();
+        if (pump_owner_ == caller || worker) {
+            return std::unexpected(Error{rpc::ErrorCode::BlockingCallInPump, rpc::ErrorOperation::Call});
+        }
+    }
+
+    if (!living()) {
+        return std::unexpected(Error{rpc::ErrorCode::Closed, rpc::ErrorOperation::Call});
+    }
+
+    auto target = rpc::detail::parse_address(address);
+    if (!target) {
+        return std::unexpected(target.error());
+    }
+
+    if (target->module == runtime_->module_name()) {
+        return std::unexpected(Error{rpc::ErrorCode::SynchronousSelfCall, rpc::ErrorOperation::Call});
+    }
+
+    return target;
 }
 
 Result<std::reference_wrapper<message_bus::Client>> Context::client() {
@@ -103,35 +146,11 @@ Result<PumpStats> Context::pump_batch() {
         item.boundary = std::move(*captured);
     }
 
-    auto rpc_work = rpc_.pump();
-    if (!rpc_work) {
-        auto error = wrap_error(ErrorCode::RpcFailed, ErrorOperation::Pump, rpc_work.error());
-        runtime_->fail(error);
-        return std::unexpected(error);
+    auto control = pump_control();
+    if (!control) {
+        return std::unexpected(control.error());
     }
-    result.callbacks += rpc_work->requests + rpc_work->completions;
-
-    auto parameters = param.pump();
-    if (!parameters) {
-        if (!living()) {
-            result.stopped = true;
-            return result;
-        }
-        if (parameters.error().is(param::ErrorCode::CallbackFailed)) {
-            auto error = wrap_error(ErrorCode::HookException, ErrorOperation::ParamCallback, parameters.error());
-            runtime_->fail(error);
-            return std::unexpected(error);
-        }
-        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::Pump, parameters.error()));
-    }
-    result.callbacks += *parameters;
-
-    auto commands = runtime_->commands();
-    if (!commands) {
-        return std::unexpected(commands.error());
-    }
-
-    result.commands = *commands;
+    result = *control;
     for (auto& item : pending) {
         auto& subscription = *item.subscription;
         const auto before = message_bus::detail::stats(subscription.core);
@@ -170,6 +189,50 @@ Result<PumpStats> Context::pump_batch() {
     return result;
 }
 
+Result<PumpStats> Context::pump_control() {
+    PumpStats result;
+    if (!living()) {
+        result.stopped = true;
+        return result;
+    }
+    auto rpc_work = rpc_.pump();
+    if (!rpc_work) {
+        auto error = wrap_error(ErrorCode::RpcFailed, ErrorOperation::Pump, rpc_work.error());
+        runtime_->fail(error);
+        return std::unexpected(error);
+    }
+    result.callbacks += rpc_work->requests + rpc_work->completions;
+
+    if (!living()) {
+        result.stopped = true;
+        return result;
+    }
+
+    auto parameters = param.pump();
+    if (!parameters) {
+        if (parameters.error().is(param::ErrorCode::CallbackFailed)) {
+            auto error = wrap_error(ErrorCode::HookException, ErrorOperation::ParamCallback, parameters.error());
+            runtime_->fail(error);
+            return std::unexpected(error);
+        }
+        if (!living()) {
+            result.stopped = true;
+            return result;
+        }
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::Pump, parameters.error()));
+    }
+    result.callbacks += *parameters;
+
+    auto commands = runtime_->commands();
+    if (!commands) {
+        return std::unexpected(commands.error());
+    }
+
+    result.commands = *commands;
+    result.stopped = !living();
+    return result;
+}
+
 Result<PumpStats> Context::pumpOnce() {
     if (!runtime_) {
         return std::unexpected(Error{ErrorCode::ResourcesUnavailable, ErrorOperation::Pump});
@@ -179,11 +242,11 @@ Result<PumpStats> Context::pumpOnce() {
         return std::unexpected(Error{ErrorCode::Busy, ErrorOperation::Pump});
     }
 
-    PumpGuard guard{pumping_};
+    PumpGuard guard{pumping_, pump_owner_mutex_, pump_finished_, pump_owner_};
     return pump_batch();
 }
 
-Result<void> Context::pumpLoop() {
+Result<void> Context::pumpLoop(PumpOptions options) {
     if (!runtime_) {
         return std::unexpected(Error{ErrorCode::ResourcesUnavailable, ErrorOperation::Pump});
     }
@@ -192,7 +255,13 @@ Result<void> Context::pumpLoop() {
         return std::unexpected(Error{ErrorCode::Busy, ErrorOperation::Pump});
     }
 
-    PumpGuard guard{pumping_};
+    PumpGuard guard{pumping_, pump_owner_mutex_, pump_finished_, pump_owner_};
+    if (options.topic_workers > config::module_topic_worker_limit) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Pump});
+    }
+    if (options.topic_workers != 0) {
+        return pump_parallel(options);
+    }
     while (living()) {
         auto pumped = pump_batch();
         if (!pumped) {
@@ -200,8 +269,27 @@ Result<void> Context::pumpLoop() {
         }
 
         if (pumped->callbacks == 0 && pumped->commands == 0 && living()) {
-            runtime_->wait();
+            runtime_->wait(Deadline::max());
         }
+    }
+
+    return {};
+}
+
+Result<void> Context::waitForWork(Deadline deadline) {
+    if (!runtime_) {
+        return std::unexpected(Error{ErrorCode::ResourcesUnavailable, ErrorOperation::WaitForWork});
+    }
+
+    // Admission precedes both notification consumption and the stopped check.
+    // The same guard also keeps Host teardown from closing an active receiver.
+    if (pumping_.test_and_set()) {
+        return std::unexpected(Error{ErrorCode::Busy, ErrorOperation::WaitForWork});
+    }
+
+    PumpGuard guard{pumping_, pump_owner_mutex_, pump_finished_, pump_owner_};
+    if (living() && std::chrono::steady_clock::now() < deadline) {
+        runtime_->wait(deadline);
     }
 
     return {};

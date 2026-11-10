@@ -67,7 +67,8 @@ struct ContextState {
 class ContextCall {
     std::shared_ptr<ContextState> state_;
 public:
-    explicit ContextCall(std::shared_ptr<ContextState> state) : state_(std::move(state)) {
+    explicit ContextCall(std::shared_ptr<ContextState> state, ErrorOperation operation = ErrorOperation::Pump)
+        : state_(std::move(state)) {
         bool closed = false;
         {
             std::lock_guard lock(state_->mutex);
@@ -78,7 +79,7 @@ public:
         }
 
         if (closed) {
-            raise_error(Error{ErrorCode::ResourcesUnavailable, ErrorOperation::Pump});
+            raise_error(Error{ErrorCode::ResourcesUnavailable, operation});
         }
     }
     ~ContextCall() {

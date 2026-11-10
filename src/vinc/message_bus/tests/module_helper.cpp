@@ -298,6 +298,40 @@ public:
             return 0;
         }
 
+        if (command == "subscribers") {
+            auto page = context.inspect_topics();
+            if (!page) {
+                return failure(page.error());
+            }
+            for (const auto& topic : page->topics) {
+                if (topic.name == topic_) {
+                    return static_cast<std::int32_t>(topic.subscribers);
+                }
+            }
+            return 0;
+        }
+
+        if (command == "burst" && args.size() == 3) {
+            constexpr std::uint64_t maximum_burst_records = 4096;
+            const auto count = std::stoull(args[1]);
+            const auto bytes = std::stoull(args[2]);
+            if (count > maximum_burst_records) {
+                return -2;
+            }
+            auto message = vinc::make_message<vinc::Frame>();
+            for (std::uint64_t sequence = 1; sequence <= count; ++sequence) {
+                auto filled = fill(*message, sequence, static_cast<std::size_t>(bytes));
+                if (!filled) {
+                    return failure(filled.error());
+                }
+                auto published = publisher_->push(*message);
+                if (!published) {
+                    return failure(published.error());
+                }
+            }
+            return 0;
+        }
+
         if (command == "push" || command == "loan") {
             const auto value = std::stoull(args.at(1));
             const auto bytes = args.size() > 2 ? std::stoull(args[2]) : default_payload_bytes;

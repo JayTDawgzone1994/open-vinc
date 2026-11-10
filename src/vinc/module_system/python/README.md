@@ -11,9 +11,15 @@ Python Module 由中央 Shell 啟停，每個實例使用一個系統 Python 程
 PublisherOptions now defaults to `None` in both fields, matching C++ optional
 options; omitted fields resolve centrally at registration. See
 [Publisher defaults](../../message_bus/PUBLISHER_DEFAULTS.md). Rebuild the extension
-with Bus v4 / Plugin entry 14.
+with Bus v4 / Plugin entry 19 (including parallel-pump drain synchronization).
 PublisherOptions 兩欄預設為 None，與 C++ optional 一致；省略欄位在中央建立時解析。
-契約見上述文件，擴充須與 Bus v4／Plugin entry 14 一起重建。
+契約見上述文件，擴充須與 Bus v4／Plugin entry 19（含多執行緒 pump drain 同步）一起重建。
+
+Manual Modules can use `context.waitForWork(timeout=None)` after an empty
+`pumpOnce()` batch. Timeout is seconds; this releases the GIL but dispatches no
+callbacks. See the [shared wait contract and validation](../PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
+Manual Module 可在空批次後等待通知，timeout 單位為秒；等待釋放 GIL，不派送 callback。
+不要以重複等待代替 pump；期限、錯誤與驗收由上述共用契約維護。
 
 The [single-App entry](../../../../apps/vinc/SINGLE_EXECUTABLE.md) changes native
 Module launches only: C++ Hosts execute the App image, while Python Modules still
@@ -716,6 +722,18 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
 
 FrameworkLoop runs pumpLoop and forbids main override; Manual requires main, choosing pumpOnce/pumpLoop or a user pump thread. Lifecycle success returns None, failure raises. Shell hook returns int32, where nonzero is command failure rather than Module fault. Completion returns string lists; naming may consume mutable args. Other hook args are local lists excluding the Shell type/instance token.
 
+Optional parallel dispatch uses immutable `vinc.PumpOptions(topic_workers=N)`:
+FrameworkLoop subclasses pass `pump_options=...` beside `mode=...`; the native
+adapter copies it after construction. Manual passes it to `context.pumpLoop(options)`.
+Manual class-level options are rejected rather than ignored. Omission retains zero
+additional workers; the common Context validates the worker ceiling before dispatch.
+See the [shared contract and evidence](../PARALLEL_PUMP.md) and
+[runnable C++/Python tutorial](../../../../examples/userExampleModule/PARALLEL_PUMP.md).
+
+Python 使用不可變的 `PumpOptions(topic_workers=N)`。FrameworkLoop 在 class 宣告的
+`mode` 旁指定 `pump_options`；Manual 則傳給 `context.pumpLoop()`，不接受會被忽略的
+class 設定。省略即不加 worker，超過共用上限會明確失敗；詳細順序與驗收見上述連結。
+
 FrameworkLoop 由框架執行 `context.pumpLoop()`，不能覆寫 main。Manual 必須實作 main；
 可自行呼叫 pumpOnce／pumpLoop 或建立自己的 pump thread。
 生命週期 hooks 的成功回傳是 None；失敗使用 Python exception。Shell hook 明確回 int32，非零代表命令失敗，不是 Module 故障。
@@ -740,7 +758,7 @@ Context 無公開建構子，來自框架建立的 BaseModule；成功 import �
 - SDK never auto-recovers. Catch VincError/ValueError etc according to application policy.
 - Escaping hooks preserve traceback/PythonException and existing VincError causes, bounded by 32 KiB python_traceback_bytes.
 - Escaping Python Shell/completion exceptions latch Module failure even if Manual ignores pump Results; C++ Shell command failure remains distinct. Malformed external requests do not become hook exceptions.
-- Callbacks run on pump; native waits release GIL, Python access acquires it. Heartbeat/watchdog neither run Python nor acquire GIL; one native control service/process.
+- Default callbacks run on the pump caller. With Topic workers enabled, different Topics may overlap; same-Topic callbacks remain serial, while Param/Shell/RPC stay on the coordinator. Native waits/worker joins release GIL; Python calls and reference retirement acquire it. Heartbeat/watchdog never acquire GIL. Pure-Python CPU parallelism is not promised.
 - User-thread exceptions are not guaranteed detected; manage/join threads in on_stop.
 - Successful Manual main uses Finishing/Completed, no restart; failures follow ModulePolicy. Hook/call-drain/object cleanup stays supervised and may be terminated when stuck.
 - After supervised cleanup, os._exit avoids unbounded interpreter finalization. No atexit/final-GC promise; required cleanup belongs in on_stop. Python stdout/stderr are UTF-8/unbuffered. Before native import/local watchdog, central startup deadlines still protect launch.
@@ -753,7 +771,7 @@ Context 無公開建構子，來自框架建立的 BaseModule；成功 import �
   若原本是 VincError，同時保存其結構化原因鏈。診斷文字上限是 config::python_traceback_bytes（32 KiB）。
 - Python Shell 命令／補全的未處理例外會鎖定 Module 故障，即使 Manual 忽略 pump 失敗也會終止；
   C++ Shell hooks 保留原有命令失敗契約。外來畸形請求不因這項 Python 政策變成使用者 hook 例外。
-- callback 只在 pump 呼叫端執行；原生等待期間釋放 GIL，接觸 Python 物件時取得 GIL。
+- 預設 callback 在 pump 呼叫端執行；啟用 worker 後不同 Topic 可並行，同 Topic 序列，Param／Shell／RPC 留在協調端。原生等待／join 釋放 GIL，Python 呼叫與引用銷毀取得 GIL，不承諾純 Python CPU 平行加速。
   heartbeat 與 watchdog 不執行 Python、不取得 GIL；每個程序只有一份原生控制服務。
 - 使用者自建 Python thread 的未處理例外不保證被框架偵測；必須自行管理與在 on_stop 中 join。
 - main 正常返回走既有 Finishing／Completed 協定，不自動重啟；失敗依 ModulePolicy 處理。
@@ -820,7 +838,7 @@ loan.data().y.assign([4, 5])
 publisher.commit(loan)
 
 subscriber = self.context.subscribe(messages.test, "camera/samples", self.received)
-# self.received(message) returns None and runs on the pump caller.
+# Returns None; runs on the pump caller by default, or its Topic worker when opted in.
 latest = subscriber.get_last()
 ```
 
@@ -835,7 +853,7 @@ latest = subscriber.get_last()
 - message.copy retains content/metadata; assign retains destination metadata. Serialization images omit transport metadata. copy.copy(record view) makes a value copy without colliding with legal copy fields; constants are read-only mappings/raw bytes. Keywords use getattr/setattr.
 - Six metadata getters are read-only. Unix/monotonic unsigned 64 nanoseconds use Python int. format_utc rejects negative/>uint64 inputs. Framework fills metadata, with no setters; hash is compile-time.
 - Local views keep owners, not deleted/reused nodes. Python references do not extend shared writable leases. No raw pointer/memoryview/NumPy zero-copy API.
-- Concurrent operations on a Pub/Sub or messages during push/commit return OperationInProgress. Native waits release GIL without extra pump/heartbeat/control threads.
+- Concurrent operations on a Pub/Sub or messages during push/commit return OperationInProgress. Native waits release GIL. Only explicit PumpOptions adds Topic workers; no extra heartbeat/control service is created.
 
 - PublisherOptions／SubscriberOptions、StartPosition 位於 `vinc.message_bus`；傳給 advertise／subscribe 的 `options`。
   容量、至少兩個 slot、碰撞等待及丟失統計沿用 C++ Bus。`stats()` 回傳獨立統計物件。
@@ -866,7 +884,7 @@ latest = subscriber.get_last()
 - 本地訊息 view 保留其 owner；移除的巢狀節點不因索引再利用而復活。
   共享 loan 的 view 不因保存 Python 參照而延長發布有效期。沒有 raw pointer、memoryview 或 NumPy 零拷貝入口。
 - 單一 Publisher／Subscriber 的同時操作，以及 push／commit 進行中的訊息存取，回報 OperationInProgress。
-  原生等待釋放 GIL；沒有增加 pump、heartbeat 或控制服務執行緒。
+  原生等待釋放 GIL；只有明確指定 PumpOptions 才加 Topic worker，不增加 heartbeat／控制服務。
 
 <a id="param-與-log"></a>
 
@@ -1428,12 +1446,16 @@ Native macOS Debug/Release subsequently passed these six scenarios; see the
 
 ## Python RPC（2026-10-14） / Python RPC (2026-10-14)
 
-Context register_rpc/call_rpc/rpc_stats share native Host/shared-memory protocols. Immediate admission raises; completion gets reply/error: (RpcStatus, Response)/None or None/VincError. Handlers return RpcStatus, completions None. Pump runs callbacks; escaping exceptions retain diagnostics/fault the Module.
+Context provides register_rpc/rpc_client/call_rpc/rpc_stats. Reusable RpcClient callbacks
+run through pump; synchronous call_rpc uses RpcMessages and releases the GIL while waiting,
+without requiring caller pump. Both use module.service addresses. Immediate errors raise
+VincError; async callbacks receive reply/error. Closing suppresses future callbacks without
+cancelling remote work; teardown clears tracked captures. Escaping callbacks fault only that
+Module. See RPC for the complete signatures, Busy/timeout and response ownership rules.
 
-Context 現在提供 register_rpc、call_rpc、rpc_stats，與 C++ 共用 Host／共享記憶體協定。
-同步 admission 失敗拋 VincError，非同步完成使用 completed(reply, error)；框架失敗時 error
-是 VincError，成功 reply 為 (RpcStatus, Response)。Handler 回傳 RpcStatus，completion 回傳 None。
-Callback 都在 pump 執行；未處理 Python 例外保留診斷並使該 Module 失敗。
+Context 提供同步 RpcMessages 呼叫與可重複非同步 RpcClient，地址統一為 module.service。
+同步等待釋放 GIL、不需 caller pump；callback 仍由 pump 執行，進入前解除 Busy。
+錯誤沿用 VincError；未處理 callback 例外保留診斷並使該 Module 失敗。完整契約由 RPC 維護。
 
 See [RPC](../../rpc/README.md) and [comparison examples](../../../../examples/rpc/README.md).
 

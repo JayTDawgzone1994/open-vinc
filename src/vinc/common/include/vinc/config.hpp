@@ -118,6 +118,9 @@ inline constexpr std::chrono::milliseconds notification_report_interval{1000};
 inline constexpr std::chrono::milliseconds module_runtime_poll_interval{20};
 // 每個 Context 可保留的 callback 訂閱項目數上限，不是每輪 callback 執行次數。
 inline constexpr std::size_t module_callback_limit = 256;
+// Maximum additional Topic workers per Context; zero is the serial default.
+// 單一 Context 可額外建立的 Topic worker 上限；不是建議或預設 thread 數。
+inline constexpr std::uint32_t module_topic_worker_limit = 32;
 
 
 // 【致命錯誤監督】中央管理出錯 Module 的退出寬限。
@@ -387,8 +390,6 @@ inline constexpr std::size_t bag_batch_records = 256;
 inline constexpr auto bag_flush_interval = std::chrono::milliseconds{100};
 // Recorder 重新探索可錄製 Topic／Publisher 的間隔（毫秒）。
 inline constexpr auto bag_discovery_interval = std::chrono::milliseconds{500};
-// Recorder Module 的 Manual 主迴圈處理 pump 與錄製後的休眠間隔（毫秒）。
-inline constexpr auto bag_pump_interval = std::chrono::milliseconds{10};
 // Bag 錄製／檢視所允許的不同 Topic 數量上限。
 inline constexpr std::size_t bag_max_topics = 1024;
 // Bag 檢視查詢最多收集的不同發布來源數，依發布者名稱與 Publisher ID 彙整。

@@ -37,7 +37,9 @@ void take(Result<void> result) {
 void test_case(const std::filesystem::path& plugin, const std::string& mode, bool success, bool stop) {
     auto manager = take(vinc::test::create_manager());
     ModuleType type{"contextTest", plugin, {}};
-    type.policy.max_restarts = stop ? 0 : 1;
+    // A successful lifecycle case must expose its first fault, not retry it away.
+    // Dedicated failure cases below still exercise the one-restart policy.
+    type.policy.max_restarts = success ? 0 : 1;
     type.policy.restart_delay = restart_delay;
     type.policy.stop_timeout = stop_grace;
     take(manager->register_module_type(type));
@@ -69,8 +71,35 @@ void test_case(const std::filesystem::path& plugin, const std::string& mode, boo
     }
 
     check(final.has_value(), "retain completed record");
+    const bool abnormal_completion = !stop && (!final->last_exit ||
+        final->last_exit->kind != osal::ExitKind::Code || final->last_exit->value != 0);
+    if (success && (final->last_failure || final->cleanup_failure || final->restarts != 0 ||
+                    final->mid != mid || final->state != ModuleState::Stopped || abnormal_completion)) {
+        // Report the retained generation before wait_started rejects an old MID;
+        // otherwise a restart can hide the original failure behind ModuleNotFound.
+        std::cerr << "case=" << mode << " requested_mid=" << mid
+                  << " retained_mid=" << final->mid << " restarts=" << final->restarts
+                  << " state=" << static_cast<int>(final->state) << '\n';
+        if (final->last_exit) {
+            std::cerr << "exit_kind=" << static_cast<int>(final->last_exit->kind)
+                      << " exit_value=" << final->last_exit->value << '\n';
+        }
+        if (final->last_failure) {
+            std::cerr << "primary_mid=" << final->last_failure->mid
+                      << " primary=" << error_to_string(final->last_failure->error) << '\n';
+        }
+        if (final->cleanup_failure) {
+            std::cerr << "cleanup=" << error_to_string(final->cleanup_failure->error) << '\n';
+        }
+    }
     if (success) {
+        check(final->mid == mid && final->state == ModuleState::Stopped && final->restarts == 0,
+              "first generation must complete without restart; inspect diagnostics above");
         if (!stop) {
+            check(!final->last_failure && !final->cleanup_failure,
+                  "successful completion cannot retain a primary or cleanup fault");
+            check(final->last_exit && final->last_exit->kind == osal::ExitKind::Code &&
+                  final->last_exit->value == 0, "normal completion confirms OS exit");
             take(manager->wait_started(mid));
             auto running = manager->wait_running(mid, control::Clock::now() + request_timeout);
             check(!running && running.error().is(module_system::ErrorCode::NotRunning),
@@ -79,12 +108,6 @@ void test_case(const std::filesystem::path& plugin, const std::string& mode, boo
 
         if (final->last_failure) {
             std::cerr << error_to_string(final->last_failure->error) << '\n';
-        }
-
-        check(final->state == ModuleState::Stopped && final->restarts == 0, "normal completion must not restart");
-        if (!stop) {
-            check(final->last_exit && final->last_exit->kind == osal::ExitKind::Code &&
-                  final->last_exit->value == 0, "normal completion confirms OS exit");
         }
     } else {
         check(final->state == ModuleState::Failed && final->restarts == 1, "failed generation follows retry budget");
@@ -113,7 +136,7 @@ int main(int argc, char** argv) {
             test_case(argv[1], mode, false, false);
         }
 
-        for (const auto* mode : {"loop", "worker", "callback-stall"}) {
+        for (const auto* mode : {"loop", "worker", "wait-loop", "callback-stall"}) {
             test_case(argv[1], mode, true, true);
         }
     } catch (const std::exception& error) {

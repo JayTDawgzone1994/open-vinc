@@ -7,7 +7,6 @@
 #include <iostream>
 #include <map>
 #include <set>
-#include <thread>
 
 namespace {
 using namespace vinc;
@@ -22,6 +21,9 @@ struct Subscription {
 };
 
 class RecorderModule final : public BaseModule<RunMode::Manual> {
+#ifdef VINC_BAG_TESTING
+    friend struct RecorderTestAccess;
+#endif
     std::unique_ptr<Recorder> recorder_;
     std::map<std::string, Subscription> subscriptions_;
     std::set<std::string> selected_;
@@ -362,7 +364,27 @@ public:
                 return std::unexpected(*callback_failure_);
             }
 
-            std::this_thread::sleep_for(config::bag_pump_interval);
+            if (pumped->stopped || !context.living()) {
+                break;
+            }
+
+            // Busy batches return through maintenance before pumping again. Never
+            // sleep with a known batch of work, or starve discovery/fault checks.
+            if (pumped->callbacks != 0 || pumped->commands != 0) {
+                continue;
+            }
+
+            auto deadline = Deadline::max();
+            if (recorder_ && recorder_->status().accepting) {
+                deadline = next_discovery_;
+            }
+            // Inactive recordings may retain an expired discovery timestamp.
+            // Use the Host fallback then, rather than spinning on that old time.
+            auto waited = context.waitForWork(deadline);
+            if (!waited) {
+                callback_failure_ = wrap_error(ErrorCode::WaitFailed, ErrorOperation::Wait, waited.error());
+                return std::unexpected(*callback_failure_);
+            }
         }
 
         return {};

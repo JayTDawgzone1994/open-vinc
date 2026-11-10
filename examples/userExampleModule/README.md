@@ -18,6 +18,10 @@ API 契約以各元件 README 為準，不以範例取代契約。
 
 ## Suggested reading order / 建議閱讀順序
 
+For optional multi-Topic workers, see the runnable [parallel pump tutorial](PARALLEL_PUMP.md):
+ownership handoff, short application locks, control/Topic overlap and GIL limits.
+可選的多 Topic worker 範例與教學見上述連結，包含訊息所有權、共享狀態互斥及停止限制。
+
 **English**
 
 1. [C++ main Module](cpp/user_example_module.cpp) / [Python](python/userExamplePython/userExamplePython.py): startup, publish, subscription/Param callbacks, Shell hooks, shutdown.

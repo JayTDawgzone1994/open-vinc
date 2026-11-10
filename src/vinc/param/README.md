@@ -507,9 +507,16 @@ Central commit, local cache refresh, and persistence are separate events. Succes
 不表示本地快取立即變動；使用者在下次成功 pump 後才能從 update／callback 取得新值。
 只有 pump 更新快取。`10 → 20 → 30` 可合併成一次交付 30。
 
-Each pump fixes Bus batch boundaries, handles ready RPC work, refreshes Param/callbacks, then Shell hooks and Bus callbacks. No user timer API is added. FrameworkLoop uses its existing main thread; Manual chooses its pump thread. Only one pump may be active on a Context.
+The default serial pump fixes Bus batch boundaries, handles ready RPC work,
+refreshes Param/callbacks, then Shell hooks and Bus callbacks. With opt-in
+[parallel Topic workers](../module_system/PARALLEL_PUMP.md), RPC/Param/Shell remain
+mutually serial on the pump caller while Topics may overlap them. Only this caller
+mutates the Param cache. No user timer API is added; one public pump remains active.
 
-每輪 pump 先擷取 Bus 批次界線，再處理已就緒 RPC 工作、更新 Param 快取與派送 Param callback，接著執行 Shell hooks／Bus callback。沒有新增使用者 timer API。FrameworkLoop 使用既有主執行緒，Manual 自行決定 pump 執行緒；同一 Context 只允許一個 active pump。
+預設單執行緒 pump 先擷取 Bus 批次界線，再依序處理 RPC、Param、Shell、Bus callback。
+選用 Topic worker 後，控制 callback 仍在同一 pump caller 依序執行，只有它能改快取；
+Topic 可與控制 callback 並行。跨 thread 保留參數須複製，不保留借用 map。
+沒有新增 timer API，同一 Context 仍只允許一個公開 active pump。
 
 - Central hints only Modules watching changed names; hints contain no values and have no delivery guarantee. Every pump checks shared revision through Host; a successful pump begun after a change sees that version or later. No synchronized pumping or intermediate-version queue.
 - Callback receives const ParamMap& containing the complete currently existing watched cache; Entry holds value/default_value/permission/version/timestamp. At most one Param callback/pass, counted in PumpStats.callbacks.
@@ -721,7 +728,7 @@ Plugin Context.param (vinc::param)
 - Permission wire values are Public=1 and Limited=2; retired central-only value 0 is invalid. Param v1/v2 requests/snapshots and pre-entry-13 Plugins are incompatible. TOML format remains 1 because it stores defaults/values, not permissions or restart hints. Rebuild central, Host, Plugins and SDK consumers together.
 - Before queueing, central caps request size from fixed fields/name/string limits (default 536 bytes), not the entire generic frame allowance.
 - Changed carries revision hints only; shared checks recover missed hints. Unknown errors remain numeric.
-- Current Plugin entry=13/bootstrap v16. Central/Host/Plugin/SDK rebuild together with matching toolchain/stdlib/config/layout/CRT; the earlier Param-stage entry 4/v9 values are historical.
+- Current Plugin entry/bootstrap follow [Module System](../module_system/README.md). The Param metadata change originally used entry 13/bootstrap v16. Rebuild all connected artifacts with matching toolchain/stdlib/config/layout/CRT.
 - Reclaim mutexes only after OS-confirmed exit, never heartbeat timeout. Central crash invalidates the epoch; a new [Instance](../module_system/INSTANCE.md) creates new resources, not resets old mappings.
 
 - `vinc::param`：型別、Context facade 與無 thread 的 codec；不連入控制服務／TOML。
@@ -746,7 +753,7 @@ Plugin Context.param (vinc::param)
 - 中央在排入工作佇列前限制請求大小；上限依固定欄位與名稱／字串上限推導，預設 536 bytes。
   不讓單一畸形請求占用控制通道允許的最大 payload 容量。
 - Changed 僅包含 revision 提示；丟失提示由共享版本補查恢復。未知錯誤代碼保留數值。
-- 目前 **Plugin entry version=13、bootstrap v16**（Param 初次接入時的 entry 4／v9 已是歷史值）；中央、Host、Plugin、SDK
+- 目前 Plugin entry／bootstrap 以 [Module System](../module_system/README.md) 為準；此 Param metadata 改動當時為 entry 13／v16。中央、Host、Plugin、SDK
   須一起重建，仍不承諾跨工具鏈／CRT／Debug-Release ABI。
 - 上層只在 OS 確認 Module 退出後回收其鎖；heartbeat timeout 不足以回收。中央 crash
   使整世代失效，新中央依 [INSTANCE](../module_system/INSTANCE.md) 建新區，不重設舊映射。

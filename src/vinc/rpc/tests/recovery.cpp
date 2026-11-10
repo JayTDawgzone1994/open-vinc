@@ -149,6 +149,35 @@ struct ManagerTests {
         check(manager.occupied_ == 0, "all leases retired");
         check(bool(manager.transition(caller, frame(Release, original))),
               "stale release cannot mutate future slots");
+
+        auto restarted = std::make_shared<RpcManager::Peer>();
+        restarted->mid = 5;
+        restarted->name = server->name;
+        auto replacement = manager.register_service(restarted, frame(Register, 1, registration));
+        check(bool(replacement), "same name can register under a new MID");
+        auto next = acquire_slot();
+        check(bool(next), "new call resolves the live replacement");
+        auto next_transfer = decode_transfer(*next);
+        check(bool(next_transfer), "replacement transfer valid");
+        check(next_transfer->service != transfer->service && next_transfer->token != transfer->token,
+              "restart changes service identity and token");
+        check(bool(manager.transition(caller, frame(Submit, next_transfer->token, size))),
+              "submit to replacement");
+
+        // A delayed old-owner event cannot complete the new owner's live lease.
+        auto wrong_owner = manager.transition(server, frame(Complete, next_transfer->token, completed));
+        check(!wrong_owner && wrong_owner.error().is(ErrorCode::Protocol),
+              "old MID cannot complete replacement call");
+        check(bool(manager.transition(server, frame(Complete, transfer->token, completed))),
+              "retired completion is harmless");
+        check(bool(manager.transition(caller, frame(Release, transfer->token))),
+              "retired release is harmless");
+        check(manager.occupied_ == 1, "stale events preserve replacement lease");
+        check(bool(manager.transition(restarted, frame(Complete, next_transfer->token, completed))),
+              "replacement owner completes its call");
+        check(bool(manager.transition(caller, frame(Release, next_transfer->token))),
+              "replacement caller releases response");
+        check(manager.occupied_ == 0, "replacement leaves no occupied lease");
     }
 };
 }

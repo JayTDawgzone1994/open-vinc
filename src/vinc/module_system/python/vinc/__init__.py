@@ -14,7 +14,7 @@ if sys.platform == "win32" and _build.MSVC_RUNTIME:
     _prepare_runtime(_build.MSVC_RUNTIME_MODE)
     del _prepare_runtime
 
-from ._native import Error, ErrorRecord, NativeError, PumpStats, error_to_string, format_utc
+from ._native import Error, ErrorRecord, NativeError, PumpOptions, PumpStats, error_to_string, format_utc
 from ._native import messages, message_bus, param, log, rpc
 
 # Public package aliases for the statically bound extension submodules.
@@ -28,6 +28,11 @@ def make_message(message_type):
     if not isinstance(message_type, type) or not hasattr(message_type, "_advertise"):
         raise TypeError("expected a compiled VINC message type")
     return message_type()
+
+
+def make_rpc_messages(request_type, response_type):
+    """Create independent local request/response messages for synchronous RPC."""
+    return rpc.RpcMessages(request_type, response_type)
 
 
 class VincError(Exception):
@@ -46,11 +51,16 @@ class RunMode(Enum):
 class BaseModule:
     """Subclass with an explicit mode; VINC alone attaches the native Context."""
 
-    def __init_subclass__(cls, *, mode, **kwargs):
+    def __init_subclass__(cls, *, mode, pump_options=None, **kwargs):
         super().__init_subclass__(**kwargs)
         if not isinstance(mode, RunMode):
             raise TypeError("mode must be vinc.RunMode")
+        if pump_options is not None and not isinstance(pump_options, PumpOptions):
+            raise TypeError("pump_options must be vinc.PumpOptions")
+        if mode is RunMode.Manual and pump_options is not None:
+            raise TypeError("Manual passes PumpOptions to context.pumpLoop(options)")
         cls._vinc_mode = mode
+        cls._vinc_pump_options = pump_options if pump_options is not None else PumpOptions()
         if mode is RunMode.FrameworkLoop and "main" in cls.__dict__:
             raise TypeError("FrameworkLoop owns main(); use Manual to implement it")
 

@@ -18,6 +18,8 @@
 #include <vinc/param/types.hpp>
 #include <vinc/param/error.hpp>
 #include <vinc/rpc/client.hpp>
+#include <vinc/rpc/messages.hpp>
+#include <vinc/rpc/rpc_client.hpp>
 #include <vinc/rpc/types.hpp>
 #include <vinc/rpc/error.hpp>
 #include <vinc/module/mid.hpp>

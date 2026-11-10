@@ -27,6 +27,7 @@ set(public_headers
     vinc/time.hpp
     vinc/config.hpp
     vinc/module/base_module.hpp
+    vinc/module/pump_options.hpp
     vinc/log/log.hpp
     vinc/log/types.hpp
     vinc/log/error.hpp
@@ -34,6 +35,8 @@ set(public_headers
     vinc/param/types.hpp
     vinc/param/error.hpp
     vinc/rpc/client.hpp
+    vinc/rpc/messages.hpp
+    vinc/rpc/rpc_client.hpp
     vinc/rpc/types.hpp
     vinc/rpc/error.hpp
     vinc/module/context.hpp

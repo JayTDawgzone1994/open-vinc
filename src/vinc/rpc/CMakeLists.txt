@@ -2,7 +2,7 @@ function(_vinc_build_rpc variant)
     vinc_runtime_name(vinc_rpc vinc_rpc ${variant})
     vinc_runtime_name(vinc_rpc_host vinc_rpc_host ${variant})
 
-    add_library(${vinc_rpc} STATIC src/protocol.cpp src/storage.cpp src/client.cpp)
+    add_library(${vinc_rpc} STATIC src/protocol.cpp src/storage.cpp src/client.cpp src/address.cpp)
     vinc_apply_runtime(${vinc_rpc} ${variant})
 
     target_include_directories(${vinc_rpc} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

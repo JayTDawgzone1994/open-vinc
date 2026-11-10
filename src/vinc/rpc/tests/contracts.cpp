@@ -5,6 +5,8 @@
 #include <vinc_messages/Frame.hpp>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
+#include "async_support.hpp"
 
 namespace {
 using namespace vinc;
@@ -27,12 +29,17 @@ template <class T> auto take(Result<T> result) {
 }
 
 struct Access : rpc::detail::Access {
+    Result<std::unique_ptr<rpc::detail::BlockingCall>> start_call(
+        control::Frame, std::shared_ptr<rpc::detail::CallReservation>) override {
+        return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Call});
+    }
     std::deque<control::Frame> input;
     std::vector<control::Frame> output;
     std::uint64_t id = 1;
+    bool alive = true;
 
     bool living() const noexcept override {
-        return true;
+        return alive;
     }
 
     Result<std::uint64_t> reserve_request() override {
@@ -146,12 +153,37 @@ void storage_and_batch() {
           "overflowing descriptor rejected");
     check(!rpc::detail::pool_bytes({UINT64_MAX, 1, 1}), "capacity arithmetic rejects overflow");
 }
+
+void stop_during_expired_completions() {
+    Access access;
+    rpc::Client client;
+    rpc::detail::ClientAccess::bind(client, access);
+    rpc_test::Clients callers;
+    auto request = make_message<Frame>();
+    std::uint32_t callbacks = 0;
+    constexpr auto call_timeout = std::chrono::milliseconds{1};
+    for (std::uint32_t index = 0; index < 2; ++index) {
+        take(callers.send<Frame, Frame>(client, "remote", "echo", *request, {call_timeout},
+            [&](auto reply) {
+                check(!reply && reply.error().is(rpc::ErrorCode::TimeoutOutcomeUnknown), "expired call result");
+                ++callbacks;
+                access.alive = false;
+            }));
+    }
+    // Establish expired deadlines, not thread ordering: this fixture has no worker.
+    std::this_thread::sleep_until(std::chrono::steady_clock::now() + call_timeout);
+    take(client.pump());
+    check(callbacks == 1, "stop must suppress the remaining expired completion batch");
+    take(client.pump());
+    check(callbacks == 1, "stopped client dispatched another callback");
+}
 }
 
 int main() {
     try {
         error_protocol();
         storage_and_batch();
+        stop_during_expired_completions();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

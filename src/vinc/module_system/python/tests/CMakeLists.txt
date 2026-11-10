@@ -47,5 +47,17 @@ add_test(NAME module.python_services COMMAND module_python_services_tests "${Pyt
     "${CMAKE_CURRENT_SOURCE_DIR}/services_module.py" "$<TARGET_FILE:module_python_peer>")
 set_tests_properties(module.python_services PROPERTIES TIMEOUT 90)
 
+add_executable(module_python_parallel_tests parallel_tests.cpp)
+target_link_libraries(module_python_parallel_tests PRIVATE vinc_test_manager)
+vinc_add_module_plugin(module_parallel_example
+    "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/cpp/parallel_module.cpp")
+target_link_libraries(module_parallel_example PRIVATE vinc::sdk vinc_messages)
+add_dependencies(module_python_parallel_tests module_python_peer vinc_python_native module_parallel_example)
+add_test(NAME module.python_parallel COMMAND module_python_parallel_tests "${Python_EXECUTABLE}"
+    "${python_package}/bootstrap.py" "${CMAKE_CURRENT_SOURCE_DIR}" "$<TARGET_FILE:module_python_peer>"
+    "$<TARGET_FILE:module_parallel_example>"
+    "${VINC_REPOSITORY_ROOT}/examples/userExampleModule/python/parallelPython/parallelPython.py")
+set_tests_properties(module.python_parallel PROPERTIES TIMEOUT 120)
+
 # RPC owns its Python behavioral test; attach it only after the shared binding exists.
 include("${VINC_REPOSITORY_ROOT}/src/vinc/rpc/tests/Python.cmake")

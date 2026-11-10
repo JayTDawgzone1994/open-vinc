@@ -35,6 +35,130 @@ The 2026-10-28 investigation used source `91d26bca95d80a6354323c58bea3f5fab9f9fe
 | Manual mode | The caller still chooses when to invoke `pumpOnce()` or enter `pumpLoop()`. A notification cannot make absent pump calls happen. 不替使用者自訂迴圈自動呼叫 pump。 |
 | Scheduling | No hard real-time promise; OS scheduling and application callbacks still affect latency. 喚醒不等於立刻取得 CPU。 |
 
+## Manual wait API (2026-11-09) / Manual 等待介面
+
+`Result<void> Context::waitForWork(Deadline deadline = Deadline::max())` exposes
+the existing Host wait to Manual loops. It never dispatches callbacks, copies
+messages, advances cursors, or creates a thread/endpoint. Success only means the
+caller may check again; it does not prove work exists. `pumpOnce()` still runs one
+bounded batch; `pumpLoop()` shares the internal wait without reacquiring admission.
+
+`waitForWork()` 讓 Manual 迴圈使用既有 Host 通知等待；不派送 callback、不複製訊息、
+不推進游標、不建立 thread／端點。成功只表示可以重新檢查，不保證有工作。
+原有 pumpOnce 批次契約不變，pumpLoop 共用內部等待。
+
+- Deadlines use steady_clock. Wait ends on a hint, framework stop, or the earlier
+  of the supplied deadline and `now + module_pump_idle_interval` (10 ms).
+  `Deadline::max()` removes only the caller's extra deadline, not the fallback.
+  An expired deadline returns without consuming hints or entering native wait.
+  OS scheduling/native operations can exceed the requested interval.
+- Hint, ordinary timeout and framework stop return success; inspect `living()`.
+  Unbound Context returns `ResourcesUnavailable`; active pump/wait returns `Busy`.
+  Both errors use operation `WaitForWork` (71).
+- All three APIs share single-caller admission. Concurrent or recursive calls
+  fail before consuming hints, including callback calls with an expired deadline.
+  No permanent thread affinity is added. Host quiescence includes admitted waits;
+  application-created threads must still be joined before resource teardown.
+- Native wait failures retain existing diagnostics, stop-aware fallback and
+  receiver reopen policy, rather than becoming fatal public wait errors. Recovery
+  may allocate under the existing exception policy. Reopen does not promise to
+  recover hints lost while no receiver was available.
+- Do not clear hints after checking work. Earlier, coalesced, stale and spurious
+  hints are allowed. After returning, check lifecycle and pump again; repeated
+  waits alone never advance callbacks. This is not a timer or message counter.
+- No external cancellation token, user wake method, periodic scheduler or
+  parallel callback executor is introduced.
+
+期限取呼叫端與既有 10ms 補查中較早者；省略期限仍有補查，已到期則不消耗通知。
+通知、逾時與正常停止皆成功返回，使用 living() 判斷是否繼續。未接線回
+ResourcesUnavailable；並行／遞迴回 Busy／WaitForWork，包含 callback 內的零等待。
+三個 API 共用 admission 與收尾保護；不新增永久 thread 綁定。原生故障維持診斷、
+備援及低頻重建，不把降級視為 Module 必須退出，也不承諾補回無接收端時遺失的提示。
+不能在檢查後清空通知再睡眠。這輪不增加使用者取消／喚醒、週期排程或並行 callback。
+
+```cpp
+while (context.living()) {
+    // Run application maintenance when due, before starting the next batch.
+    auto batch = context.pumpOnce();
+    if (!batch) {
+        return std::unexpected(batch.error());
+    }
+
+    if (batch->callbacks == 0 && batch->commands == 0 && !batch->stopped) {
+        auto waited = context.waitForWork(); // Or pass the next maintenance deadline.
+        if (!waited) {
+            return std::unexpected(waited.error());
+        }
+    }
+}
+```
+
+Python provides `context.waitForWork(timeout=None)` in seconds. None uses the
+default policy; zero does not block. Negative/non-finite/unrepresentable values
+raise `VincError(InvalidArgument, WaitForWork)` before waiting. Context lifetime
+admission remains active; the binding releases the GIL during C++ waiting and
+restores it before return/error conversion. It invokes no Python callback.
+
+Python timeout 單位為秒；None 使用框架政策，0 不阻塞。負值、NaN、無限大及不可表示值
+在等待前明確拒絕。等待期間釋放 GIL，返回或轉換例外前恢復；Context 存活保護維持。
+
+Plugin entry **17** changes `ContextRuntime::wait(Deadline)`; rebuild Host, Plugins,
+SDK consumers and Python native extensions together. Bootstrap v16, Bus v4 and
+RPC wire v1 are unchanged. Recorder integration is a separate change documented
+in the [Bag README](../bag/README.md#元件與相依); its evidence is not supplied by
+the Context-only validation below.
+
+Plugin entry 17 須整套重建；bootstrap／Bus／RPC wire 不變。Recorder 後續接線與
+驗收由 Bag README 維護，下列 Context 驗收不代替 Recorder 負載驗證。
+
+### Manual wait validation / Manual 等待驗收
+
+Validated on 2026-11-09. `module.context_wait` checks actual native notification
+outcomes, deadlines, admission/quiescence, stop, degradation and reopen.
+`module.context` uses a real Plugin to verify no-dispatch waits, callback rejection
+and a Manual command/stop loop. `module.python` covers timeout conversion, GIL
+release and command reentrancy. Installed Python SDK tests exercise both C++ and
+Python wait linkage after relocation.
+
+| Environment / 環境 | Results / 結果 |
+| --- | --- |
+| Windows x64, MSVC 19.51.36257, CMake 4.3.2, Ninja | Debug and Release each passed 6/6: Context, Context wait, Runtime faults, Plugin, synchronous RPC and synchronous transport. SDK header smoke built. Debug CPython 3.13.12 passed 4/4 Python Module/message/service/RPC tests. |
+| WSL Ubuntu 24.04.5 x64, GCC/libstdc++ 13.3.0, CMake 3.28.3, CPython 3.12.3, Release | The same six native and four Python cases passed: nine passed the first run; Context wait passed after correcting its FIFO fixture assumption below. SDK header smoke built. |
+| Windows Debug, Windows Release, WSL Release | Final Context wait test repeated 20 times per configuration, all passed. Real cross-process `message_bus.module` also passed in each configuration. |
+| Fresh Release SDK producers on Windows and WSL | Both `installed_consumer` and `installed_python` passed on each platform, including relocated C++/Python wait calls, custom messages, Bus/RPC/Param, ABI failure isolation, incremental generation, deployment repair and cleanup. |
+
+Initial failures are retained rather than counted as successful runs:
+
+- Windows initially reused an ABI-16 RPC fixture; rebuilding the omitted fixture
+  target at entry 17 fixed the mismatch before the complete 6/6 rerun. A separate
+  Python build attempt correctly rejected PATH selecting a different interpreter;
+  using the existing CPython 3.13 environment restored the intended configuration.
+- The first WSL Context wait test assumed a hint survives closure of the last FIFO
+  reader. OSAL does not promise that. The corrected test signals at the native-wait
+  boundary **after reopen** and requires a notification result, not fallback timeout.
+  Production OSAL behavior was not changed to satisfy the test.
+
+Local evidence (generated, not committed): Windows `build/wait-tests-{debug,release}.log`,
+`build/wait-python-tests.log`, `build/wait-final-{debug,release}.log`,
+`build/wait-repeat-{debug,release}.log` and `build/wait-sdk-release/`;
+WSL validation workspace `wait-tests-first.log`, `wait-final-repeat.log`,
+`wait-bus-tests.log` and `wait-sdk-release/`. Installed flow logs include
+`INSTALLED_CPP_WAIT_OK` and `INSTALLED_PYTHON_WAIT_OK` before normal shutdown.
+
+本輪 Windows Debug／Release 各六項、Windows Python 四項及 WSL 十項相關案例已通過；
+WSL 首輪九項通過，修正 FIFO 測試假設後補過等待案例。最終等待測試三個組態各重跑
+20 次，真實跨程序 Bus 測試亦各通過。Windows／WSL 乾淨 Release SDK 的 consumer 與
+Python 兩套驗收完成，含搬移部署後 C++／Python 新介面及正常關閉。
+首次 ABI fixture、Python PATH 配置與 FIFO 假設失敗紀錄保留，不以成功重跑抹除。
+
+This is targeted acceptance, not a full-project CTest run or a new latency/CPU
+benchmark. Native macOS, minimum MSVC 19.44, and Debug installed SDK were not
+revalidated in this round. Recorder and Combat Bar workload acceptance remain
+separate; see the root TODO and Bag README.
+
+本輪為針對性驗收，未宣稱完整專案／新效能基準通過。原生 macOS、最低 MSVC 19.44
+及 Debug installed SDK 本輪未重驗；Recorder 與 Combat Bar 負載改善另行驗證。
+
 ## Confirmed first-release policy / 已確認的第一版政策
 
 The following policies were approved for this integration. / 以下政策已獲本輪實作授權。
