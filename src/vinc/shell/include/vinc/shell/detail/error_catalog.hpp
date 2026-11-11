@@ -36,6 +36,7 @@ inline constexpr auto error_entries = std::array{
     ErrorCodeEntry{ErrorCode::TimeoutOutcomeUnknown, "Command timed out; outcome is unknown"},
     ErrorCodeEntry{ErrorCode::CancelledOutcomeUnknown, "Command wait canceled; outcome is unknown"},
     ErrorCodeEntry{ErrorCode::OutcomeUnknown, "Command outcome is unknown"},
+    ErrorCodeEntry{ErrorCode::ParamFailed, "Shell parameter operation failed"},
 };
 inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::Create, "Create"},
@@ -71,6 +72,7 @@ inline constexpr auto operation_entries = std::array{
     ErrorOperationEntry{ErrorOperation::CloseSocket, "CloseSocket"},
     ErrorOperationEntry{ErrorOperation::Accept, "Accept"},
     ErrorOperationEntry{ErrorOperation::WriteTerminal, "WriteTerminal"},
+    ErrorOperationEntry{ErrorOperation::ConfigureNetwork, "ConfigureNetwork"},
 };
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::Shell, "Shell", error_entries, operation_entries};
 static_assert(valid_catalog(error_catalog));

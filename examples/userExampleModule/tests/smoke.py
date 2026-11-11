@@ -153,7 +153,8 @@ def main():
         for assets in (original.parent / "vinc_data").glob("*/ui"):
             shutil.copytree(assets, root / "vinc_data" / assets.parent.name / "ui")
             assert (root / "vinc_data" / assets.parent.name / "ui/app/index.html").is_file(), "deployed UI entry is missing"
-        shutil.copytree(examples / "python", root / "data/module")
+        shutil.copytree(examples / "python", root / "modules/python", dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("CMakeLists.txt", "__pycache__"))
 
         # Tcl catches deliberately failing commands. Unexpected failure still closes
         # the central, then becomes a test failure via the result file.

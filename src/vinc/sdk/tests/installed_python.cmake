@@ -58,8 +58,6 @@ if(WIN32)
     set(suffix .exe)
 endif()
 function(verify_app root revision extra)
-    file(MAKE_DIRECTORY "${root}/data/module/PythonPeer")
-    file(COPY "${work}/source/python/PythonPeer.py" DESTINATION "${root}/data/module/PythonPeer")
     run_checked("import-${revision}-${extra}" "${PYTHON}" -B "${work}/source/check_import.py" "${root}" "${revision}" "${extra}")
     file(READ "${work}/source/startup.tcl" script)
     string(REPLACE "@REVISION@" "${revision}" script "${script}")
@@ -75,11 +73,19 @@ function(verify_app root revision extra)
     file(WRITE "${work}/flow-${revision}.log" "${output}\n${errors}")
     if(NOT result STREQUAL "0" OR output MATCHES "INSTALLED_PYTHON_FAILED|INVALID_PYTHON_PAYLOAD"
             OR NOT output MATCHES "PYTHON_FLOW_REVISION=${revision}"
+            OR NOT output MATCHES "PYTHON_DEPLOYED_RESOURCE_OK"
             OR NOT output MATCHES "INSTALLED_PYTHON_OK"
+            OR NOT output MATCHES "INSTALLED_CPP_RPC_OK"
+            OR NOT output MATCHES "INSTALLED_PYTHON_SYNC_RPC_OK"
+            OR NOT output MATCHES "INSTALLED_CPP_WAIT_OK"
+            OR NOT output MATCHES "INSTALLED_PYTHON_WAIT_OK"
+            OR NOT output MATCHES "INSTALLED_CPP_PARALLEL_OK"
+            OR NOT output MATCHES "INSTALLED_PYTHON_PARALLEL_OK"
             OR NOT output MATCHES "NATIVE_ALIVE"
             OR NOT output MATCHES "NATIVE_SELF_HOST_OK"
             OR NOT output MATCHES "NATIVE_PARAM_CURRENT_OK"
             OR NOT output MATCHES "PYTHON_PARAM_CURRENT_OK"
+            OR NOT output MATCHES "INSTALLED_PYTHON_PUBLISHER_DEFAULTS_OK"
             OR NOT output MATCHES "NATIVE_PARAM_RESTART_OK"
             OR NOT output MATCHES "PYTHON_PARAM_RESTART_OK"
             OR NOT output MATCHES "All module processes exited")
@@ -179,7 +185,31 @@ if(NOT EXISTS "${metadata}")
     message(FATAL_ERROR "Missing Python deployment was not repaired")
 endif()
 run_checked(repaired_import "${PYTHON}" -B "${work}/source/check_import.py" "${build_app}" 42 no)
+
+# Deployment follows declared sources even if the native extension is up to date.
+file(WRITE "${work}/source/python/resources/greeting.txt" "PYTHON_DEPLOYED_RESOURCE_UPDATED\n")
+file(WRITE "${work}/source/python/unlisted.txt" "must not ship")
+run_checked(source_update "${CMAKE_COMMAND}" --build "${work}/consumer" --target PythonApp --parallel 2)
+file(READ "${build_app}/modules/python/PythonPeer/resources/greeting.txt" greeting)
+if(NOT greeting MATCHES "PYTHON_DEPLOYED_RESOURCE_UPDATED" OR
+        EXISTS "${build_app}/modules/python/PythonPeer/unlisted.txt")
+    message(FATAL_ERROR "Python explicit-file deployment did not update correctly")
+endif()
+file(WRITE "${work}/source/python/extra.txt" "temporary declared resource")
+file(READ "${work}/source/python/CMakeLists.txt" declaration)
+string(REPLACE "resources/greeting.txt)" "resources/greeting.txt extra.txt)" added "${declaration}")
+file(WRITE "${work}/source/python/CMakeLists.txt" "${added}")
+run_checked(source_add "${CMAKE_COMMAND}" --build "${work}/consumer" --target PythonApp --parallel 2)
+if(NOT EXISTS "${build_app}/modules/python/PythonPeer/extra.txt")
+    message(FATAL_ERROR "Newly declared Python resource was not deployed")
+endif()
+file(WRITE "${work}/source/python/CMakeLists.txt" "${declaration}")
+run_checked(source_remove "${CMAKE_COMMAND}" --build "${work}/consumer" --target PythonApp --parallel 2)
+if(EXISTS "${build_app}/modules/python/PythonPeer/extra.txt")
+    message(FATAL_ERROR "Removed Python resource was not cleaned")
+endif()
 file(WRITE "${build_app}/python/vinc/user-owned.txt" "keep")
+file(WRITE "${build_app}/modules/python/ManualPeer/ManualPeer.py" "# user-owned source\n")
 file(WRITE "${work}/source/vinc.conf" "CONFIG_VINC_MODULE_NativePeer=y\nCONFIG_VINC_APP_PYTHON=n\n")
 run_checked(disabled_build "${CMAKE_COMMAND}" --build "${work}/consumer" --target PythonApp --parallel 2)
 run_checked(disabled_install "${CMAKE_COMMAND}" --install "${work}/consumer" --prefix "${work}/moved app")
@@ -188,11 +218,14 @@ foreach(root "${build_app}" "${work}/moved app/PythonApp")
     if(native_files OR EXISTS "${root}/python/vinc/__init__.py")
         message(FATAL_ERROR "Disabled Python left managed package files")
     endif()
-    if(NOT EXISTS "${root}/data/module/PythonPeer/PythonPeer.py")
-        message(FATAL_ERROR "Python cleanup deleted user Module source")
+    if(EXISTS "${root}/modules/python/PythonPeer/PythonPeer.py")
+        message(FATAL_ERROR "Disabled Python left managed Module source")
     endif()
 endforeach()
 if(NOT EXISTS "${build_app}/python/vinc/user-owned.txt")
     message(FATAL_ERROR "Cleanup removed untracked file")
+endif()
+if(NOT EXISTS "${build_app}/modules/python/ManualPeer/ManualPeer.py")
+    message(FATAL_ERROR "Cleanup removed manually deployed Module")
 endif()
 message(STATUS "Installed Python: relocation, custom Bus/RPC/Param, schema incremental changes, ABI isolation, repair and cleanup passed")

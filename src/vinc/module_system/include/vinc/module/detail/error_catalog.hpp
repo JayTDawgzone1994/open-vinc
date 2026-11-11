@@ -77,6 +77,7 @@ inline constexpr auto operation_entries =
                ErrorOperationEntry{ErrorOperation::CloseNotification, "CloseNotification"},
     ErrorOperationEntry{ErrorOperation::NotifyPump, "NotifyPump"},
     ErrorOperationEntry{ErrorOperation::WaitNotification, "WaitNotification"},
+    ErrorOperationEntry{ErrorOperation::WaitForWork, "WaitForWork"},
                ErrorOperationEntry{ErrorOperation::Create, "Create"},
                ErrorOperationEntry{ErrorOperation::RegisterType, "RegisterType"},
                ErrorOperationEntry{ErrorOperation::UnregisterType, "UnregisterType"},

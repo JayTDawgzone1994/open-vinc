@@ -8,6 +8,8 @@
 #include <vinc/module/detail/instance.hpp>
 #include <vinc/module/detail/lock_registry.hpp>
 #include <vinc/module/detail/manager_access.hpp>
+#include <vinc/module/detail/publisher_defaults.hpp>
+#include <vinc/module/detail/log_settings.hpp>
 // Central module supervisor: allocate MIDs, approve names, launch through OSAL, wait for Ready,
 // route requests, and stop/reap each generation before retiring its Message Bus resources.
 
@@ -381,13 +383,14 @@ struct DataServices {
     std::unique_ptr<message_bus::detail::BusManager> bus;
 };
 
-Result<DataServices> create_data_services(message_bus::Limits limits, std::shared_ptr<detail::ResourceNames> resources) {
+Result<DataServices> create_data_services(message_bus::Limits limits,
+    std::shared_ptr<detail::ResourceNames> resources, message_bus::detail::PublisherDefaultsSource defaults) {
     auto output =
         output_hub::OutputHub::create(output_hub::Limits{.max_subscribers = output_subscriber_limit});
     if (!output) {
         return std::unexpected(wrap_error(ErrorCode::OutputFailed, ErrorOperation::Create, output.error()));
     }
-    auto bus = message_bus::detail::BusManager::create(limits, std::move(resources));
+    auto bus = message_bus::detail::BusManager::create(limits, std::move(resources), std::move(defaults));
     if (!bus) {
         return std::unexpected(wrap_error(ErrorCode::BusFailed, ErrorOperation::Create, bus.error()));
     }
@@ -425,8 +428,12 @@ struct ModuleManager::Impl {
     osal::ProcessService processes;
     // One local Shell plus eight connected remote Shell subscribers.
     std::unique_ptr<output_hub::OutputHub> output;
-    std::unique_ptr<message_bus::detail::BusManager> bus_manager;
     std::unique_ptr<param::detail::ParamManager> params;
+    std::unique_ptr<detail::PublisherDefaults> publisher_defaults;
+    std::unique_ptr<detail::LogSettings> log_settings;
+    // Reverse destruction also protects partial-create rollback: Bus joins
+    // before its defaults consumer and the Param worker it may be reading.
+    std::unique_ptr<message_bus::detail::BusManager> bus_manager;
     std::unique_ptr<rpc::detail::RpcManager> rpc;
     std::unique_ptr<log::detail::Manager> logs;
     std::string instance_name;
@@ -443,11 +450,8 @@ struct ModuleManager::Impl {
         });
     }
 
-    Impl(std::unique_ptr<control::Service> channel_service, osal::ProcessService process_service,
-         std::unique_ptr<output_hub::OutputHub> output_service,
-         std::unique_ptr<message_bus::detail::BusManager> bus_service)
-        : channels(std::move(channel_service)), processes(std::move(process_service)),
-          output(std::move(output_service)), bus_manager(std::move(bus_service)) {
+    Impl(std::unique_ptr<control::Service> channel_service, osal::ProcessService process_service)
+        : channels(std::move(channel_service)), processes(std::move(process_service)) {
     }
 
     ~Impl() {
@@ -1626,13 +1630,8 @@ Result<std::unique_ptr<ModuleManager>> detail::ManagerAccess::create(std::string
         if (!process_services) {
             return std::unexpected(process_services.error());
         }
-        auto data_services = create_data_services(limits, *instance);
-        if (!data_services) {
-            return std::unexpected(data_services.error());
-        }
         auto implementation = std::make_unique<ModuleManager::Impl>(
-            std::move(process_services->channels), std::move(process_services->processes),
-            std::move(data_services->output), std::move(data_services->bus));
+            std::move(process_services->channels), std::move(process_services->processes));
         implementation->instance = std::move(*instance);
         implementation->locks = std::make_unique<detail::LockRegistry>(implementation->instance);
         implementation->instance_name = std::move(name);
@@ -1642,6 +1641,18 @@ Result<std::unique_ptr<ModuleManager>> detail::ManagerAccess::create(std::string
                 wrap_error(ErrorCode::ParamFailed, ErrorOperation::Create, parameters.error()));
         }
         implementation->params = std::move(*parameters);
+        implementation->publisher_defaults = std::make_unique<detail::PublisherDefaults>(*implementation->params, limits);
+        implementation->log_settings = std::make_unique<detail::LogSettings>(*implementation->params);
+        auto data_services = create_data_services(limits, implementation->instance,
+            [defaults = implementation->publisher_defaults.get()] {
+                return defaults->read();
+            });
+        if (!data_services) {
+            return std::unexpected(data_services.error());
+        }
+
+        implementation->output = std::move(data_services->output);
+        implementation->bus_manager = std::move(data_services->bus);
         implementation->rpc = std::make_unique<rpc::detail::RpcManager>(implementation->instance);
         auto logs = log::detail::Manager::create(*implementation->channels, *implementation->output,
                                                  implementation->instance_name);
@@ -1683,23 +1694,64 @@ Result<detail::LockDescriptor> detail::ManagerAccess::create_lock(ModuleManager&
 
 Result<void> detail::ManagerAccess::configure_params(ModuleManager& manager, std::filesystem::path data_root) {
     auto result = manager.impl_->params->configure(data_root / manager.impl_->instance_name / "params.toml");
+    // Registration follows load even when file I/O failed: live settings remain
+    // available. Module admission begins only after this startup stage returns.
+    auto registered = manager.impl_->publisher_defaults->initialize();
+    if (!registered) {
+        return std::unexpected(registered.error());
+    }
+
     if (!result) {
         return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
     }
     return {};
 }
 Result<std::string> detail::ManagerAccess::param_command(ModuleManager& manager, std::vector<std::string> args, std::stop_token cancellation) {
+    const bool refresh_log = args.size() == 3 && args[0] == "set" &&
+        (args[1] == "vinc.log_file_enabled" || args[1] == "vinc.log_file_bytes" ||
+         args[1] == "vinc.log_total_bytes");
     auto result = manager.impl_->params->command(std::move(args), cancellation);
     if (!result) {
         return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
     }
+
+    if (refresh_log) {
+        // All current central Shell/Tcl writers share this validation point.
+        // A validated edit changes desired settings, never the active file sink.
+        auto refreshed = manager.impl_->log_settings->refresh();
+        if (!refreshed) {
+            return std::unexpected(refreshed.error());
+        }
+
+        if (!refreshed->empty()) {
+            *result += "\n" + *refreshed;
+        }
+    }
+
     return result;
 }
-Result<void> detail::ManagerAccess::register_param(ModuleManager& manager, std::string name, param::Value defaults) {
-    auto result = manager.impl_->params->register_framework(std::move(name), std::move(defaults));
+Result<void> detail::ManagerAccess::register_param(ModuleManager& manager, std::string name, param::Value defaults,
+                                                 param::RestartHint restart_hint) {
+    auto result = manager.impl_->params->register_framework(std::move(name), std::move(defaults), restart_hint);
     if (!result) {
         return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
     }
+    return {};
+}
+Result<param::ParamMap> detail::ManagerAccess::read_params(ModuleManager& manager, std::vector<std::string> names) {
+    auto result = manager.impl_->params->read_current(std::move(names));
+    if (!result) {
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
+    }
+
+    return result;
+}
+Result<void> detail::ManagerAccess::set_param(ModuleManager& manager, std::string name, param::Value value) {
+    auto result = manager.impl_->params->set_framework(std::move(name), std::move(value));
+    if (!result) {
+        return std::unexpected(wrap_error(ErrorCode::ParamFailed, ErrorOperation::AccessParam, result.error()));
+    }
+
     return {};
 }
 std::string detail::ManagerAccess::param_diagnostic(ModuleManager& manager, std::uint64_t& cursor) {
@@ -1754,6 +1806,11 @@ ModuleManager::~ModuleManager() {
         }
         close_listener(*record);
     }
+    // No provider call may outlive Param, including timed-out registration
+    // requests still queued on the Bus worker. Supervision has already joined.
+    impl_->bus_manager.reset();
+    impl_->publisher_defaults.reset();
+    impl_->log_settings.reset();
     impl_->params.reset();
     impl_->rpc.reset();
 
@@ -2390,6 +2447,39 @@ bool ModuleManager::has_micro_program(const std::string& name) const {
 } // namespace vinc
 
 namespace vinc::detail {
+Result<log::FileOptions> ManagerAccess::configure_log_from_params(ModuleManager& manager,
+                                                               std::filesystem::path root) {
+    auto selected = manager.impl_->log_settings->read();
+    if (!selected) {
+        if (manager.impl_->logs) {
+            auto unavailable = manager.impl_->logs->configuration_unavailable(selected.error());
+            if (!unavailable) {
+                return std::unexpected(wrap_error(module_system::ErrorCode::LogFailed,
+                    module_system::ErrorOperation::AccessLog, unavailable.error()));
+            }
+        }
+
+        return std::unexpected(wrap_error(module_system::ErrorCode::LogFailed,
+            module_system::ErrorOperation::AccessLog, selected.error()));
+    }
+
+    auto configured = configure_log(manager, std::move(root), selected->files);
+    if (!selected->correction.empty()) {
+        // File output may intentionally be disabled or unavailable. Always make
+        // startup repair visible without making diagnostic delivery a prerequisite.
+        std::cerr << selected->correction << '\n';
+        if (manager.impl_->logs) {
+            manager.impl_->logs->diagnostic(selected->correction);
+        }
+    }
+
+    if (!configured) {
+        return std::unexpected(configured.error());
+    }
+
+    return selected->files;
+}
+
 Result<void> ManagerAccess::configure_log(ModuleManager& manager, std::filesystem::path root,
                                           log::FileOptions options) {
     if (!manager.impl_->logs) {

@@ -105,15 +105,55 @@ Log 與 RPC 測試。`tests/support/manager.hpp` 的選擇方式只供測試，�
 介面；故障注入仍保留明確指定的測試 Host。
 
 The bundled `Vinc` target uses `vinc_add_app()` with identity `open-vinc` and
-[its own Kconfig file](vinc.conf). Output is `<build>/apps/vinc/Vinc/<configuration>/Vinc[.exe]`.
+[its own Kconfig file](vinc.conf). Output is `<build>/output/Vinc/<configuration>/Vinc[.exe]`.
+The bundled App's compilation, generated settings and test work directory is
+`<build>/intermediate/vinc/`. The source directory remains `apps/vinc/`.
 UI/Recorder are mandatory; registered example Modules are explicitly selected in that file.
 `VINC_BUILD_APPS=OFF` omits this demonstration App and its example registration;
 external consumers register their own Modules and Apps. All production catalogs use
 relative deployed Plugin paths. Build settings and editors follow [configuration](../../tools/configure/README.md).
 
 內建 `Vinc` target 與外部 App 共用建構器；身份為 `open-vinc`，產物採上方獨立目錄。
+內建 App 的編譯、生成設定與測試工作資料放在 `<build>/intermediate/vinc/`；
+原始碼目錄仍為 `apps/vinc/`。重新配置不會自動刪除舊 build 的 `apps/vinc/`，
+清理前須確認其中沒有需要保留的執行期資料。外部 SDK 使用者的 CMake 工作目錄仍由其專案管理。
 設定檔明確選入範例，UI／Recorder 固定提供。`VINC_BUILD_APPS=OFF` 只略過內建示範 App
 及其範例登記，不會禁止外部呼叫 `vinc_add_app()`。
+
+### Intermediate directory validation (2026-11-06) / 建置工作目錄驗收
+
+The bundled App now uses `<build>/intermediate/vinc/`. The two existing Windows
+Debug/Release `apps/vinc/` trees (including their old runtime data) were explicitly
+authorized for removal, inspected for running images and directory links, and
+deleted. Empty `apps/` parents were removed too. Both configurations rebuilt
+successfully without recreating `apps/`; the ready-to-run Apps remain in `output/`.
+This manual cleanup is not an automatic CMake migration policy.
+
+本輪經使用者明確授權，檢查程序與目錄連結後，清除 Windows Debug／Release 舊的
+`apps/vinc/`（含該目錄內的舊執行期資料）及空 `apps/` 父目錄。兩種組態重新建置成功，
+沒有重新產生 `apps/`；可執行 App 仍在 `output/`。這是本機清理，不是 CMake 自動刪除政策。
+
+Windows Debug (MSVC 19.51.36257 / CMake 4.3.2) and WSL Ubuntu 24.04 Release
+(GCC 13.3.0 / CMake 3.28.3) each passed **6/6**: `app.embedding`, `app.entry`,
+`app.system_services`, `module.shell`, `message_bus.shell`, and `bag.shell`.
+CTest and install scripts point at the new intermediate directory. The first WSL
+configure attempt found a missing example CMake file in the validation copy;
+after synchronizing the previously completed examples, rebuild and tests passed.
+Full-project CTest, Windows Release runtime tests, Python and native macOS were
+not rerun for this directory-only change. The installed SDK composer is unchanged;
+the preceding SDK acceptance remains recorded in the SDK installation guide.
+Native macOS follow-up is listed in the root TODO.
+
+Windows Debug also passed a fresh `VincApp_Vinc` install and execution from that
+package: official UI/Recorder initialized, `recorder status` reported idle, and
+all managed processes exited normally. See `build/intermediate-install.log` and
+`build/intermediate-package-run.log`.
+
+Windows Debug／WSL Release 上述六項各 **6/6 通過**；Windows Release 僅重建。
+另以 Windows Debug 全新安裝 App，通過 UI／Recorder 初始化、狀態查詢及完整關閉。
+WSL 首次配置因驗收副本缺少範例 CMake 檔失敗，同步後通過。
+本輪未重跑完整 CTest、Python 或原生 macOS；SDK 共用建構器未變動，沿用前輪紀錄。
+本機紀錄：`build/intermediate-windows-*.log`，以及 WSL 驗收目錄的 `intermediate-*.log`。
 
 <a id="打包應用程式的啟動腳本"></a>
 
@@ -199,9 +239,9 @@ link `vinc::module_runtime`; this does not start Runtime services in central.
 hook 中類似內部標記的參數仍是使用者資料。原始碼及安裝式 App target 均連結既有
 `vinc::module_runtime`，不因此在中央啟動 Runtime 服務。
 
-Startup scans executable-adjacent data/module/<ModuleType>/<ModuleType>.py without execution. Missing directories mean no Python Modules; individual issues diagnose/continue. --python PATH before -S overrides the Kconfig-selected default. CONFIG_VINC_APP_PYTHON=y in App Kconfig builds/deploys native package/bootstrap, not an interpreter; see [Python](../../src/vinc/module_system/python/README.md).
+Startup scans executable-adjacent modules/python/<ModuleType>/<ModuleType>.py without execution. Missing directories mean no Python Modules; individual issues diagnose/continue. --python PATH before -S overrides the Kconfig-selected default. CONFIG_VINC_APP_PYTHON=y in App Kconfig builds/deploys native package/bootstrap, not an interpreter; see [Python](../../src/vinc/module_system/python/README.md).
 
-- 中央啟動時亦掃描執行檔旁 `data/module/<ModuleType>/<ModuleType>.py`，不執行腳本。
+- 中央啟動時亦掃描執行檔旁 `modules/python/<ModuleType>/<ModuleType>.py`，不執行腳本。
   缺少目錄視為沒有 Python Module；個別登記問題回報後繼續啟動。
   `--python PATH` 指定系統 Python／venv，預設依 PATH 選取；放在 `-S` 之前。
   App Kconfig 的 `CONFIG_VINC_APP_PYTHON=y` 建置並部署 `python/vinc` 原生擴充與啟動腳本，不部署直譯器。

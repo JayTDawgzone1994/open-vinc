@@ -59,6 +59,43 @@ void socket_commands(ModuleManager& manager) {
     server->finish_shutdown();
 }
 
+void disabled_files(const std::filesystem::path& plugin) {
+    Directory directory;
+    const auto name = vinc::test::instance_name();
+    auto manager = take(detail::ManagerAccess::create(name, {}, vinc::test::host_path()));
+    take(detail::ManagerAccess::configure_log(*manager, directory.path, {.enabled = false}));
+    auto raw = take(manager->output_hub().subscribe());
+    take(manager->register_module_type({"logTest", plugin}));
+    const auto mid = take(manager->start_module("logTest"));
+    take(manager->wait_running(mid, deadline()));
+    log::View view;
+    view.enabled = true;
+    std::string displayed;
+    std::string raw_text;
+    const auto until = deadline();
+    while (std::chrono::steady_clock::now() < until) {
+        displayed += detail::ManagerAccess::log_take(*manager, view);
+        for (const auto& event : raw.take().events) {
+            raw_text += event->bytes;
+        }
+        if (displayed.find("structured-start 42") != std::string::npos &&
+            raw_text.find("raw-start") != std::string::npos) {
+            break;
+        }
+        std::this_thread::sleep_for(poll);
+    }
+    check(displayed.find("structured-start 42") != std::string::npos, "disabled files keep Context Log");
+    check(raw_text.find("raw-start") != std::string::npos, "disabled files keep stdout capture");
+    check(take(manager->command(mid, {"ping"}, deadline())) == 7, "disabled files keep Module control");
+    take(manager->stop_module(mid, deadline()));
+    const auto status = take(detail::ManagerAccess::log_command(*manager, {"status"}));
+    check(status.find("file=disabled") != std::string::npos &&
+          status.find("queued=0 dropped=0") != std::string::npos &&
+          status.find("file_lost=0") != std::string::npos, "disabled process flow has no fake disk loss");
+    manager.reset();
+    check(!std::filesystem::exists(directory.path / name / "logs"), "disabled process flow never creates logs");
+}
+
 int main(int argc, char** argv) {
     try {
         check(argc == 2, "plugin required");
@@ -74,7 +111,7 @@ int main(int argc, char** argv) {
         }
         check(!detail::ManagerAccess::configure_log(*manager, directory.path),
               "file failure does not kill central");
-        check(take(detail::ManagerAccess::log_command(*manager, {"status"})).find("file=disabled") !=
+        check(take(detail::ManagerAccess::log_command(*manager, {"status"})).find("file=failed") !=
                   std::string::npos,
               "file failure visible");
         std::filesystem::remove(blocked);
@@ -150,6 +187,7 @@ int main(int argc, char** argv) {
         check(saved.find("debug-enabled") != std::string::npos, "debug capture enabled");
         check(saved.find("module=camera mid=") != std::string::npos,
               "authenticated source assigned centrally");
+        disabled_files(take(osal::path_from_utf8(argv[1])));
         std::cout << "Log process tests passed\n";
         return 0;
     } catch (const std::exception& error) {

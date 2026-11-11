@@ -644,6 +644,22 @@ Message Bus implementation.
 
 標頭包含 Bus 槽位、訊息 byte、topic／參與者／共享記憶體預算、控制請求／佇列、請求逾時及 Reader 等待重試設定；集中設定時維持原有值。
 
+The two Publisher capacities serve as Param registration/standalone defaults;
+runtime resolution and last-effective correction belong to the
+[Bus contract](../message_bus/PUBLISHER_DEFAULTS.md).
+其中兩項 Publisher 容量已作為 Param 註冊／獨立使用的預設值，執行期解析與最後有效值
+修正由上述 Bus 契約維護。
+
+Socket Shell IP/port and UI port also provide Param registration defaults.
+Their current defaults are loopback, 31410 and 31411; startup overrides,
+validation, persistence and application timing belong to the
+[service-network contract](../shell/NETWORK_PARAMS.md). Port 31412 is only a
+documented future reservation, not an active setting or listener.
+
+Socket Shell IP／port 與 UI port 亦作為 Param 註冊預設，分別為 loopback、31410、
+31411；覆寫、檢查、保存及套用時機由上述服務網路契約維護。31412 僅記錄未來用途，
+沒有新增設定或監聽服務。
+
 OutputHub settings are also centralized here: queue/capture defaults, admission limits,
 read/completion budgets, poll/failure/shutdown intervals, and text presentation limits.
 Their original values are preserved. `Limits` and `QueueLimits` still accept caller
@@ -844,10 +860,13 @@ remain in config; adding Param does not migrate them or enable dynamic rebinding
 
 ## Log settings and error domain (2026-10-08) / Log 設定與錯誤分類（2026-10-08）
 
-`ErrorDomain::Log = 11`; [Log](../log/README.md) owns error/operation enums and the static catalog. The `log_*` budgets/intervals serve logging; existing settings were not migrated to Param.
+`ErrorDomain::Log = 11`; [Log](../log/README.md) owns error/operation enums and the static catalog.
+`log_file_enabled`, `log_file_bytes` and `log_total_bytes` now supply registration defaults for
+the [file Log Params](../log/FILE_PARAMS.md); other Log budgets/intervals remain in config.
 
 新增 ErrorDomain::Log = 11，錯誤／操作 enum 與靜態 catalog 由 [Log](../log/README.md) 維護。
-config 的 log_* 預算與間隔僅服務新功能；本輪未把既有設定遷入 Param。
+config 的 `log_file_enabled`、`log_file_bytes`、`log_total_bytes` 現為上述檔案 Log Param
+的註冊預設；其他 Log 預算與間隔仍由 config 管理。
 
 <a id="bag-設定與錯誤2026-10-12"></a>
 

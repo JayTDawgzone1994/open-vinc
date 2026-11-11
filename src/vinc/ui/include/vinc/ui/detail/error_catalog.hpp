@@ -15,7 +15,8 @@ inline constexpr std::array error_entries{
     ErrorCodeEntry{ErrorCode::ModuleFailed, "ModuleFailed"},
     ErrorCodeEntry{ErrorCode::Busy, "Busy"},
     ErrorCodeEntry{ErrorCode::Timeout, "Timeout"},
-    ErrorCodeEntry{ErrorCode::Closing, "Closing"}
+    ErrorCodeEntry{ErrorCode::Closing, "Closing"},
+    ErrorCodeEntry{ErrorCode::ParamFailed, "Parameter operation failed"}
 };
 inline constexpr std::array operation_entries{
     ErrorOperationEntry{ErrorOperation::Load, "Load"},
@@ -24,7 +25,8 @@ inline constexpr std::array operation_entries{
     ErrorOperationEntry{ErrorOperation::InspectTopics, "InspectTopics"},
     ErrorOperationEntry{ErrorOperation::Preview, "Preview"},
     ErrorOperationEntry{ErrorOperation::Session, "Session"},
-    ErrorOperationEntry{ErrorOperation::Graph, "Graph"}
+    ErrorOperationEntry{ErrorOperation::Graph, "Graph"},
+    ErrorOperationEntry{ErrorOperation::ConfigurePort, "ConfigurePort"}
 };
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::Ui, "Ui", error_entries, operation_entries};
 static_assert(valid_catalog(error_catalog));

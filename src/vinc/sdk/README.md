@@ -2,6 +2,47 @@
 
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
+The [Publisher-default migration](../message_bus/PUBLISHER_DEFAULTS.md) changes
+PublisherOptions ABI. Current builds use Bus v4 / Plugin entry 19 (Context-owned parallel-pump drain). Rebuild connected artifacts;
+the older acceptance records below apply only to their recorded revisions.
+Publisher 預設搬移改變選項 ABI，目前使用 Bus v4／Plugin entry 19（Context 持有多執行緒 pump drain），所有接線產物須一起重建；
+下方較早驗收仍僅適用其記錄版本，不能替本次改動背書。
+
+`<vinc/module/pump_options.hpp>` is included in the installed header tree and
+the public first-include smoke check. `sdk.installed_python` now enables two
+Topic workers in both its native Plugin and Python peer, uses bounded rendezvous
+to require real cross-Topic overlap, and retains independent messages through
+shutdown. It still checks custom schemas, RPC/Param and rejected incompatible
+Python environments. Current integration/cost results and the Mac checklist are
+owned by [parallel pump acceptance](../module_system/PARALLEL_PUMP.md#stage-4-acceptance).
+
+SDK 已交付 PumpOptions 標頭並納入獨立 include 驗證；搬移 Python App 驗收同時要求
+C++／Python 雙 Topic callback 真正交會、持有獨立副本到停止及正常收尾。
+本輪結果與 Mac 待驗清單見上述共用紀錄，不以舊 SDK 驗收代替。
+
+`Context::waitForWork()` and Python `context.waitForWork(timeout=None)` are shipped
+through the normal SDK, using the Host-owned receiver and existing fallback.
+Contracts and this change's acceptance: [Manual wait](../module_system/PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
+SDK 提供 C++／Python Manual 等待入口，仍由 Host 持有接收資源；契約與本輪驗收見上述連結。
+
+The installed Recorder adapter also uses this wait. `sdk.installed_recorder`
+checks a relocated external App with custom messages, recording completion and
+normal shutdown. Its Windows/WSL evidence and macOS boundary are maintained in
+the [Bag validation](../bag/README.md#recorder-wait-validation).
+安裝式 Recorder 已接通知等待；搬移外部 App、自訂訊息錄製與關閉驗收及平台限制見上述 Bag 紀錄。
+
+Current migration acceptance is recorded in the [Publisher report](../message_bus/PUBLISHER_DEFAULTS.md#validation--驗證):
+Windows native C++ consumer/dedicated App passed; WSL consumer/application/Python
+and the dedicated App passed. The subsequent [Windows import-policy validation](../module_system/python/README.md#msvc-1951-static-import-review)
+also passed the clean installed-Python flow with old MSVCP preloaded. Subsequent
+[service-network acceptance](../shell/NETWORK_PARAMS.md#validation--驗證) passed
+Windows and WSL installed consumer/application, including HTTP at the new default 31411.
+Native Mac source and fresh SDK deployment acceptance is now recorded in the 2026-11-11 follow-up below.
+本次 Windows C++ consumer／專用 App，以及 WSL consumer／application／Python／專用 App
+已通過；後續 Windows 靜態匯入政策修正也通過舊 MSVCP 預載的乾淨 installed Python
+驗收。後續服務網路接線已補驗 Windows／WSL installed consumer／application，包含
+新預設 31411 的 HTTP；這些搬移的 Mac 後續驗收見下方 2026-11-11 主報告。
+
 新版 Param／重啟標記的 [macOS 乾淨 SDK 驗收](MACOS_PARAM_VALIDATION.md) 已於
 `9f0ec0b` 完成：全新 Debug／Release producer 及 installed consumer／application／python
 各 3/3 通過。來源、舊版 SDK 和原始整合失敗保留各自紀錄，不混成一次完整驗收。
@@ -35,6 +76,13 @@ bindings. Stage 3 adds independent deployment/install and official startup; see 
 多 App 已接上來源／安裝式共用建構介面，各 App 必須明確提供設定檔。
 第二階段隔離 catalog／腳本／UI 接線，共用相容的 Module 與 Python 綁定。
 第三階段已接上獨立部署、安裝與官方 Module 自動啟動；組裝契約見上方連結。
+
+App packages default to `<top-level-build>/output/<App>/<configuration>/` for
+both source and installed SDK builds. Runtime data in previous output directories
+is not migrated automatically; see the composition contract above.
+
+來源版與 installed SDK 的 App 預設集中到 `<最上層 build>/output/<App>/<組態>/`；
+舊輸出目錄的執行期資料不會自動搬移，完整契約見上方組裝指南。
 
 Public convenience entry is `<vinc/vinc.hpp>`/vinc::sdk, aggregating existing APIs/dependencies without an extra runtime or implicit startup. Components retain API ownership; OSAL/Common can be used independently. The umbrella includes time.hpp/Deadline and contract.hpp fatal entries.
 
@@ -162,7 +210,22 @@ add_module(camera_module
     SOURCES camera.cpp camera_driver.cpp
 )
 target_include_directories(camera_module PRIVATE include)
+
+add_python_module(detector_python
+    MODULE_TYPE_NAME detector
+    SOURCES detector.py helpers.py resources/rules.json
+)
 ```
+
+`add_python_module()` registers explicit source/resource files for per-App Kconfig
+selection and deployment to `modules/python/<ModuleType>/`. Native Modules deploy
+to `modules/native/<ModuleType>/`. Manual Python discovery remains available in
+the new directory; `data/module` is retired. See the
+[Python deployment contract](../module_system/python/README.md#declaring-and-selecting-modules--宣告與選擇-module).
+
+`add_python_module()` 明列來源及資源，各 App 由 Kconfig 選入後自動 build／install 部署。
+原生與 Python Module 各有獨立類型目錄；仍可手動放入新 Python 目錄，舊 `data/module`
+不再搜尋。檔案路徑、入口、更新與清理規則見上述 Python 契約。
 
 - add_module(target MODULE_TYPE_NAME name SOURCES...) creates a MODULE library with SDK/messages/C++23/visibility/CRT contracts. It is an ordinary target supporting further target-scoped options. Type matches REGISTER_MODULE; duplicates are rejected.
 - No MODULE_BASE_NAME. The Plugin uses a no-argument constructor; source supplies a default BaseModule name or on_name(args). Central validates names, rejects duplicates, and preserves restart naming.
@@ -321,15 +384,17 @@ component/
 - RuntimeServices is internal, not in vinc.hpp; common_error only adds public classification. Host/Plugin lifetime belongs to their contracts; add_module builds a Plugin, not an executable.
 
 Stage 1 of the [FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md) adds separate
-Host/Plugin coordination wiring and introduced Plugin entry **11**. The current
-entry is **13** after [Param RegisterOptions/restart hints](../param/README.md#restart-hints).
+Host/Plugin coordination wiring and introduced Plugin entry **11**.
+[Param RegisterOptions/restart hints](../param/README.md#restart-hints) subsequently used entry **13**;
+current entry **19** follows [Module System](../module_system/README.md).
 `vinc::module` explicitly
 depends on OSAL; its component install rules carry the new header/archive and the
 existing Plugin helper carries the new entry. Static linking and ABI/CRT requirements
 remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance)
 owns the earlier source/moved-SDK results. Mac exit-repair evidence is in the
 [current summary](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status); newer Param entry-13 SDK acceptance remains separate.
-該第一階段以 entry 11 接上共用協調器；目前 Param RegisterOptions／重啟標記已升為 entry 13，
+該第一階段以 entry 11 接上共用協調器；Param RegisterOptions／重啟標記當時升為 entry 13，
+目前 entry 19 依 Module System 契約，
 中央與 SDK 消費端需一起重建，一般 Module 作者無須管理鎖。
 來源與乾淨安裝式 SDK 的本輪驗收結果、環境及 Mac 待驗範圍統一見第四階段紀錄。
 
@@ -469,6 +534,22 @@ Windows x64／MSVC／Ninja 驗證：
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
+
+- **Installed application UI test isolation (2026-11-06):**
+  `tests/installed_application/startup.tcl` queries fixed port 31411. During RPC
+  stage-4 Windows Release acceptance, the plain App reported UI BindFailed and
+  HTTP 401 while Bus/Recorder and orderly shutdown succeeded. A listener with PID
+  24176 was observed, but it exited before process identity could be obtained;
+  its ownership is unknown. Do not attribute this to RPC or claim a confirmed
+  external process. Preserve the failure and retry evidence in the
+  [RPC acceptance record](../rpc/README.md#integration-acceptance). Follow-up:
+  separate default-port assertions from HTTP-flow isolation, and report endpoint
+  ownership/bind failure before making HTTP requests. This test-hardening proposal
+  is not a change to production UI behavior.
+
+  **安裝式 App UI 測試隔離：**fixture 固定查詢 31411；本輪 Release 出現 BindFailed／401，
+  當時 listener 的程序已退出，無法確認歸屬。不能直接歸因 RPC 或宣稱是外部程序。
+  建議後續拆開預設值驗證與 HTTP 流程的埠隔離，並提早輸出綁定失敗診斷；正式 UI 不變。
 
 - See the [Windows toolchain evaluation](WINDOWS_TOOLCHAIN.md) for the isolated
   historical 19.42/19.44 results and Runtime-floor diagnosis. Python now uses the
@@ -667,6 +748,14 @@ in the [Param stage 4 record](../param/README.md#param-redesign-stage-four).
 
 ## Log API（2026-10-08） / Log 介面（2026-10-08）
 
+File output settings are now selected by the framework entry through
+[three Log Params](../log/FILE_PARAMS.md). The installed App uses the same
+load-before-open and restart contracts as a source-built App. Rebuild consumers
+for the added `FileOptions::enabled` member; Log's wire protocol is unchanged.
+
+框架入口以三項 Log Param 決定寫檔；安裝式 App 與來源版共用先載入、再開檔及重啟契約。
+FileOptions 新增 enabled，使用端須重建；Log 傳輸協定未更動。驗收統一記於上述文件。
+
 Umbrella includes Log/context.log and fmt, not spdlog headers/definitions. Plugins gain no Log Host/Manager/Control ownership. The original Log stage used entry 5/v10; current versions follow [Module System](../module_system/README.md). See [Log](../log/README.md).
 
 vinc/vinc.hpp 包含 Log；Module 透過繼承的 context.log 使用。SDK target 帶入 fmt，
@@ -688,13 +777,17 @@ BaseMessage 的 Unix／單調發布時間變更需中央、Host、Plugin／SDK �
 
 ## RPC SDK（2026-10-14） / RPC 介面（2026-10-14）
 
-SDK/umbrella provide RPC types/errors/Context templates. Users register/call via inherited Context, not self-created central services. rpc is Plugin facade/image transport; rpc_host/rpc_manager are internal. Entry 8/v13 requires rebuilding all connected C++. See [RPC](../rpc/README.md) and [example](../../../examples/rpc/README.md).
+SDK/umbrella provide RpcClient, RpcMessages, RPC types/errors and Context templates. Users register/call via inherited Context, not self-created central services. rpc is Plugin facade/image transport; rpc_host/rpc_manager are internal. The original entry 8/bootstrap v13 integration has been superseded by entry 19/bootstrap v16; rebuild all connected C++. See [RPC](../rpc/README.md) and [example](../../../examples/rpc/README.md).
 
 vinc::sdk 與 vinc/vinc.hpp 提供 RPC 的型別、錯誤及 Context 模板 API。
-一般使用端以繼承的 Context register_rpc／call_rpc 使用，不能自行建立中央服務。
+一般使用端以繼承的 Context register_rpc／rpc_client／call_rpc 使用，不能自行建立中央服務。
 vinc::rpc 是 Plugin facade／映像讀寫 target；vinc::rpc_host 與 vinc::rpc_manager 僅供框架接線。
-ABI 更新為 Plugin entry 8／bootstrap v13，需重建所有相連 C++ 元件。
+原始 entry 8／bootstrap v13 接線已由 entry 19／bootstrap v16 取代，需重建所有相連 C++ 元件。
 完整契約見 [RPC](../rpc/README.md)，範例見 [examples/rpc](../../../examples/rpc/README.md)。
+
+Fresh SDK results for the synchronous/reusable API and custom-message C++/Python consumers
+are recorded in [RPC integration acceptance](../rpc/README.md#integration-acceptance).
+新版同步／可重複 Client 的乾淨 SDK、自訂訊息、跨語言與搬移驗收統一維護於上述紀錄。
 
 ### Notification integration rebuild / 通知整合重建
 
@@ -766,3 +859,12 @@ restriction. See the [toolchain report](WINDOWS_TOOLCHAIN.md) for exact scope.
 **後續補驗（2026-11-01）：**19.44 Release 配合隔離的相容 Python／Runtime，完整
 `sdk.multi_app` 與 `sdk.system_apps` 通過，補到後續並行與故障案例。原始 Python 安裝當時仍
 被動態 CRT 防護拒絕；解決的是相容環境的驗證缺口，不是放寬部署限制。完整範圍見上述報告。
+
+## macOS entry-19 乾淨 SDK／部署補驗（2026-11-11）
+
+Debug／Release 均使用全新 SDK-only producer，製作時不編譯 Python binding／App，
+再完成外部 C++／Python／App、Recorder／Publisher、多 App、搬移部署、公開標頭與輸出目錄驗收。
+[第三階段主報告](MACOS_SDK_DEPLOYMENT_VALIDATION.md)統一維護方法、實際結果、證據與限制；
+來源 Python／GIL 由[第二階段](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)維護。
+上方歷史輪次的 Mac 待驗敘述由這些後續證據取代，不回溯擴大舊版的驗收範圍。
+本輪不做 benchmark，固定 HTTP 埠的測試隔離提案仍未實作。

@@ -27,6 +27,7 @@ set(public_headers
     vinc/time.hpp
     vinc/config.hpp
     vinc/module/base_module.hpp
+    vinc/module/pump_options.hpp
     vinc/log/log.hpp
     vinc/log/types.hpp
     vinc/log/error.hpp
@@ -34,6 +35,8 @@ set(public_headers
     vinc/param/types.hpp
     vinc/param/error.hpp
     vinc/rpc/client.hpp
+    vinc/rpc/messages.hpp
+    vinc/rpc/rpc_client.hpp
     vinc/rpc/types.hpp
     vinc/rpc/error.hpp
     vinc/module/context.hpp
@@ -110,6 +113,9 @@ set_tests_properties(sdk.owned_files PROPERTIES TIMEOUT 15)
 include("${VINC_REPOSITORY_ROOT}/src/vinc/common/cmake/VincPythonRequirements.cmake")
 vinc_find_python(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME sdk.python_module_registration COMMAND "${Python3_EXECUTABLE}" -B
+        "${CMAKE_CURRENT_SOURCE_DIR}/python_module_registration.py")
+    set_tests_properties(sdk.python_module_registration PROPERTIES TIMEOUT 180)
     add_test(NAME sdk.configuration COMMAND "${Python3_EXECUTABLE}" -B
         "${VINC_REPOSITORY_ROOT}/tools/configure/tests/test_configuration.py")
     set_tests_properties(sdk.configuration PROPERTIES TIMEOUT 60)

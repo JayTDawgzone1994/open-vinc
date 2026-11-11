@@ -149,6 +149,19 @@ if(BUILD_TESTING)
         "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DGENERATOR=${CMAKE_GENERATOR}"
         -P "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_consumer.cmake")
     set_tests_properties(sdk.installed_consumer PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+    add_test(NAME sdk.installed_recorder COMMAND "${CMAKE_COMMAND}"
+        "-DSDK_BUILD=${VINC_BUILD_ROOT}"
+        "-DCOMPILER=${CMAKE_CXX_COMPILER}" "-DCONFIG=$<CONFIG>"
+        "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DGENERATOR=${CMAKE_GENERATOR}"
+        -P "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_recorder.cmake")
+    set_tests_properties(sdk.installed_recorder PROPERTIES TIMEOUT 900 RUN_SERIAL TRUE)
+    add_test(NAME sdk.installed_publisher_defaults COMMAND "${CMAKE_COMMAND}"
+        "-DSDK_BUILD=${VINC_BUILD_ROOT}"
+        "-DFIXTURE=${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_publisher_defaults"
+        "-DCOMPILER=${CMAKE_CXX_COMPILER}" "-DCONFIG=${CMAKE_BUILD_TYPE}"
+        "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DGENERATOR=${CMAKE_GENERATOR}"
+        -P "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_publisher_defaults.cmake")
+    set_tests_properties(sdk.installed_publisher_defaults PROPERTIES TIMEOUT 420 RUN_SERIAL TRUE)
     add_test(NAME sdk.installed_application COMMAND "${CMAKE_COMMAND}"
         "-DSDK_BUILD=${VINC_BUILD_ROOT}"
         "-DFIXTURE=${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_application"
@@ -156,5 +169,7 @@ if(BUILD_TESTING)
         "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}" "-DGENERATOR=${CMAKE_GENERATOR}"
         "-DWITH_UI=ON"
         -P "${VINC_REPOSITORY_ROOT}/src/vinc/sdk/tests/installed_application.cmake")
-    set_tests_properties(sdk.installed_application PROPERTIES TIMEOUT 360 RUN_SERIAL TRUE)
+    # Multiple clean deployments and the saved Log policy's three App launches
+    # share this overall budget; individual build/run steps retain their limits.
+    set_tests_properties(sdk.installed_application PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
 endif()

@@ -1,4 +1,4 @@
-"""Copy this file to data/module/pythonBusExample/pythonBusExample.py."""
+"""Copy this file to modules/python/pythonBusExample/pythonBusExample.py."""
 import vinc
 
 

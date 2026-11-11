@@ -16,6 +16,7 @@ add_library(vinc_shell STATIC
     src/session_feedback.cpp
     src/script_service.cpp
     src/socket_shell.cpp
+    src/network_params.cpp
 )
 add_library(vinc::shell ALIAS vinc_shell)
 # Only immutable metadata enters the common catalog; no Tcl/runtime dependency.

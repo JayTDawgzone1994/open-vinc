@@ -6,9 +6,9 @@
 
 **Mac 驗收已完成：** 新版 Plugin entry 13／Param wire v3 的來源及乾淨 installed SDK 已有原生證據，範圍依上述報告。下文歷史階段表格的 Mac Pending／待驗保留當輪結果，後續驗收由新報告補齊，不代表目前仍待驗，也不把不同輪次合計為一次完整 CTest。
 
-**Restart-hint stages 1–3 and earlier redesign stages 1–4:** implementation and Windows/WSL acceptance are recorded below; native Mac follow-up is linked above. This README owns the current contracts; [the implementation record](REDESIGN.md) indexes decisions and evidence. System-setting migration remains excluded.
+**Restart-hint stages 1–3 and earlier redesign stages 1–4:** implementation and Windows/WSL acceptance are recorded below; native Mac follow-up is linked above. This README owns the current contracts; [the implementation record](REDESIGN.md) indexes decisions and evidence. Those rounds excluded system-setting migration; the later Publisher-default integration is linked below.
 
-**重啟標記及先前重設計：** 實作、Windows／WSL 原始驗收見下方各階段，後續 Mac 驗收見上述報告。本文維護正式契約，實作紀錄保留索引；不包含系統設定搬移。
+**重啟標記及先前重設計：** 實作、Windows／WSL 原始驗收見下方各階段，後續 Mac 驗收見上述報告。本文維護正式契約，實作紀錄保留索引；原輪次不包含系統設定搬移，後續 Publisher 預設接線見下方。
 
 Param is a centrally managed typed parameter service. Modules use inherited context.param with approved name/MID, not self-created Contexts, shared regions, or Guards. Updates may be delayed/coalesced; Param neither replaces Bus nor synchronizes application across Modules.
 
@@ -16,10 +16,17 @@ Param 是中央維護的具型別參數服務。Module 使用繼承的 `context.
 名稱與 MID 決定身分，不自行建立 Context、共享區或持鎖物件。參數允許延遲與版本合併，
 不取代 Message Bus，也不保證多個 Module 同時套用更新。
 
-**Existing config.hpp settings are not automatically connected to Param.** Socket Shell IP/port/timeouts keep their CLI/config path; the vinc namespace only provides integration for later framework parameters.
+**Existing config.hpp settings are not automatically connected to Param.** The two
+[Publisher defaults](../message_bus/PUBLISHER_DEFAULTS.md) are explicitly wired
+through a framework consumer. The [service network settings](../shell/NETWORK_PARAMS.md)
+also connect Socket Shell IP/port and UI port; other settings, including Shell timeouts,
+keep their existing CLI/config path. The three [file Log settings](../log/FILE_PARAMS.md)
+use Limited/App declarations and take effect only on the next App startup.
 
-**本輪沒有將既有 `config.hpp` 設定改接 Param。** Socket Shell 的 IP、port、timeout
-仍依原有 CLI／config 流程；`vinc` 命名空間只提供框架後續接線能力。
+**既有 `config.hpp` 設定不會自動接 Param。** 目前將上述兩項 Publisher 預設由
+框架消費端明確接入；另有上述服務網路設定接上 Shell IP／port 與 UI port。
+另有三項 [檔案 Log 設定](../log/FILE_PARAMS.md) 使用 Limited／App，下次 App 啟動套用；
+其餘設定（包括 Shell timeout）維持原有 CLI／config 流程。
 
 <a id="module-api"></a>
 
@@ -485,10 +492,10 @@ set 成功代表中央提交，不代表已套用或已保存。
 
 System Modules use the same Context and permissions as ordinary Modules. Their
 parameters belong to their approved instance name (for example, `ui.port`), not
-a nested `vinc.ui` namespace. These names illustrate ownership, not migrated settings.
+a nested `vinc.ui` namespace. UI port is wired as described in the network contract above.
 
 System Module 與一般 Module 使用相同 Context／權限，不加專用寫入後門；其參數歸屬
-自己的實例名稱（例如 `ui.port`），不增加 `vinc.ui` 巢狀命名。此為歸屬示意，尚未搬移設定。
+自己的實例名稱（例如 `ui.port`），不增加 `vinc.ui` 巢狀命名。UI port 已依上述網路契約接線。
 
 <a id="pump快取與-callback"></a>
 
@@ -500,9 +507,16 @@ Central commit, local cache refresh, and persistence are separate events. Succes
 不表示本地快取立即變動；使用者在下次成功 pump 後才能從 update／callback 取得新值。
 只有 pump 更新快取。`10 → 20 → 30` 可合併成一次交付 30。
 
-Each pump fixes Bus batch boundaries, handles ready RPC work, refreshes Param/callbacks, then Shell hooks and Bus callbacks. No user timer API is added. FrameworkLoop uses its existing main thread; Manual chooses its pump thread. Only one pump may be active on a Context.
+The default serial pump fixes Bus batch boundaries, handles ready RPC work,
+refreshes Param/callbacks, then Shell hooks and Bus callbacks. With opt-in
+[parallel Topic workers](../module_system/PARALLEL_PUMP.md), RPC/Param/Shell remain
+mutually serial on the pump caller while Topics may overlap them. Only this caller
+mutates the Param cache. No user timer API is added; one public pump remains active.
 
-每輪 pump 先擷取 Bus 批次界線，再處理已就緒 RPC 工作、更新 Param 快取與派送 Param callback，接著執行 Shell hooks／Bus callback。沒有新增使用者 timer API。FrameworkLoop 使用既有主執行緒，Manual 自行決定 pump 執行緒；同一 Context 只允許一個 active pump。
+預設單執行緒 pump 先擷取 Bus 批次界線，再依序處理 RPC、Param、Shell、Bus callback。
+選用 Topic worker 後，控制 callback 仍在同一 pump caller 依序執行，只有它能改快取；
+Topic 可與控制 callback 並行。跨 thread 保留參數須複製，不保留借用 map。
+沒有新增 timer API，同一 Context 仍只允許一個公開 active pump。
 
 - Central hints only Modules watching changed names; hints contain no values and have no delivery guarantee. Every pump checks shared revision through Host; a successful pump begun after a change sees that version or later. No synchronized pumping or intermediate-version queue.
 - Callback receives const ParamMap& containing the complete currently existing watched cache; Entry holds value/default_value/permission/version/timestamp. At most one Param callback/pass, counted in PumpStats.callbacks.
@@ -539,11 +553,15 @@ Central reads the following after startup and before Modules/deployment scripts:
 <Vinc executable directory>/vinc_data/<INSTANCE_NAME>/params.toml
 ```
 
-Paths are executable-relative, not cwd, with one directory per INSTANCE_NAME. First writable startup creates an empty file; build generates none. Custom composition uses private ManagerAccess::configure_params before Module startup/registration.
+Paths are executable-relative, not cwd, with one directory per INSTANCE_NAME.
+First writable startup creates the file before registration adds framework
+Publisher defaults; build generates none. Private ManagerAccess::configure_params
+loads persistence and registers those defaults before Module startup/registration.
 
 路徑相對執行檔位置，不依啟動時 current directory。不同 INSTANCE_NAME 使用不同目錄。
-正常可寫環境首次執行即建立空檔，不由 build 產生。框架自訂組裝使用私有
-`ManagerAccess::configure_params` 接入根目錄；它必須在 Module 啟動與參數登記前呼叫。
+正常可寫環境首次執行建立檔案，再註冊並加入框架 Publisher 預設，不由 build 產生。
+私有 `ManagerAccess::configure_params` 接入根目錄、載入及註冊框架預設；
+它必須在 Module 啟動與使用者參數登記前呼叫。
 
 ```toml
 format = 1
@@ -710,7 +728,7 @@ Plugin Context.param (vinc::param)
 - Permission wire values are Public=1 and Limited=2; retired central-only value 0 is invalid. Param v1/v2 requests/snapshots and pre-entry-13 Plugins are incompatible. TOML format remains 1 because it stores defaults/values, not permissions or restart hints. Rebuild central, Host, Plugins and SDK consumers together.
 - Before queueing, central caps request size from fixed fields/name/string limits (default 536 bytes), not the entire generic frame allowance.
 - Changed carries revision hints only; shared checks recover missed hints. Unknown errors remain numeric.
-- Current Plugin entry=13/bootstrap v16. Central/Host/Plugin/SDK rebuild together with matching toolchain/stdlib/config/layout/CRT; the earlier Param-stage entry 4/v9 values are historical.
+- Current Plugin entry/bootstrap follow [Module System](../module_system/README.md). The Param metadata change originally used entry 13/bootstrap v16. Rebuild all connected artifacts with matching toolchain/stdlib/config/layout/CRT.
 - Reclaim mutexes only after OS-confirmed exit, never heartbeat timeout. Central crash invalidates the epoch; a new [Instance](../module_system/INSTANCE.md) creates new resources, not resets old mappings.
 
 - `vinc::param`：型別、Context facade 與無 thread 的 codec；不連入控制服務／TOML。
@@ -735,7 +753,7 @@ Plugin Context.param (vinc::param)
 - 中央在排入工作佇列前限制請求大小；上限依固定欄位與名稱／字串上限推導，預設 536 bytes。
   不讓單一畸形請求占用控制通道允許的最大 payload 容量。
 - Changed 僅包含 revision 提示；丟失提示由共享版本補查恢復。未知錯誤代碼保留數值。
-- 目前 **Plugin entry version=13、bootstrap v16**（Param 初次接入時的 entry 4／v9 已是歷史值）；中央、Host、Plugin、SDK
+- 目前 Plugin entry／bootstrap 以 [Module System](../module_system/README.md) 為準；此 Param metadata 改動當時為 entry 13／v16。中央、Host、Plugin、SDK
   須一起重建，仍不承諾跨工具鏈／CRT／Debug-Release ABI。
 - 上層只在 OS 確認 Module 退出後回收其鎖；heartbeat timeout 不足以回收。中央 crash
   使整世代失效，新中央依 [INSTANCE](../module_system/INSTANCE.md) 建新區，不重設舊映射。

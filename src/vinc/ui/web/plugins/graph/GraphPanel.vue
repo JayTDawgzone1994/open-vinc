@@ -46,7 +46,12 @@ const displayedNodes = computed(() =>
             .toLowerCase()
             .includes(search.value.toLowerCase());
         const neighbour = !selected.value || related.value.has(node.id);
-        return { ...node, style: { opacity: matches && neighbour ? 1 : 0.25 } };
+        // Follow the details panel's selection without replacing health borders.
+        return {
+            ...node,
+            class: `${node.class ?? ""}${node.id === selected.value ? " current-node" : ""}`,
+            style: { opacity: matches && neighbour ? 1 : 0.25 },
+        };
     }),
 );
 const displayedEdges = computed(() =>

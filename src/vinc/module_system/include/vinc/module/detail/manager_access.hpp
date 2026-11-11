@@ -18,6 +18,8 @@ struct ManagerAccess {
     static Result<std::unique_ptr<ModuleManager>> create(std::string name,
         message_bus::Limits limits, std::filesystem::path host);
     static Result<void> configure_log(ModuleManager&, std::filesystem::path root, log::FileOptions = {});
+    // App startup only; Param is loaded first. Reopen keeps this applied snapshot.
+    static Result<log::FileOptions> configure_log_from_params(ModuleManager&, std::filesystem::path root);
     static Result<std::string> log_command(ModuleManager&, const std::vector<std::string>&);
     // Uses the existing bounded Log queues; acceptance does not promise disk persistence.
     static Result<void> log_diagnostic(ModuleManager&, std::string text);
@@ -26,7 +28,10 @@ struct ManagerAccess {
     static Result<LockDescriptor> create_lock(ModuleManager& manager);
     static Result<void> configure_params(ModuleManager& manager, std::filesystem::path data_root);
     static Result<std::string> param_command(ModuleManager& manager, std::vector<std::string> args, std::stop_token stop = {});
-    static Result<void> register_param(ModuleManager& manager, std::string name, param::Value defaults);
+    static Result<void> register_param(ModuleManager& manager, std::string name, param::Value defaults,
+                                       param::RestartHint restart_hint = param::RestartHint::None);
+    static Result<param::ParamMap> read_params(ModuleManager& manager, std::vector<std::string> names);
+    static Result<void> set_param(ModuleManager& manager, std::string name, param::Value value);
     static Result<param::Snapshot> param_snapshot(ModuleManager& manager);
     static std::string param_diagnostic(ModuleManager& manager, std::uint64_t& cursor);
 };

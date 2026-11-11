@@ -3,6 +3,45 @@
 #include <bit>
 
 namespace vinc::rpc {
+// Serializes only admission against destruction, never a callback or reply wait.
+// A retained application handle cannot retain or dereference a destroyed Client.
+class Client::Endpoint final : public detail::CallEndpoint {
+    std::mutex mutex_;
+    Client* owner_;
+
+public:
+    explicit Endpoint(Client& owner) : owner_(&owner) {
+    }
+
+    void revoke() {
+        std::lock_guard lock(mutex_);
+        owner_ = nullptr;
+    }
+
+    Result<void> submit(const detail::Address& address, std::uint64_t request_hash,
+        std::uint64_t response_hash, message::Snapshot image, CallOptions options,
+        detail::Completion completion) override {
+        std::lock_guard lock(mutex_);
+        if (!owner_) {
+            return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Call});
+        }
+
+        return owner_->call_raw(address.module, address.service, request_hash, response_hash,
+                                std::move(image), options, std::move(completion));
+    }
+};
+
+Client::Client() : endpoint_(std::make_shared<Endpoint>(*this)) {
+}
+
+Client::~Client() {
+    endpoint_->revoke();
+}
+
+std::weak_ptr<detail::CallEndpoint> detail::ClientAccess::endpoint(Client& client) {
+    return client.endpoint_;
+}
+
 Result<void> Client::register_raw(std::string name, std::uint64_t request_hash, std::uint64_t response_hash,
                                   ServiceOptions options, detail::Handler handler) {
     if (!detail::valid_name(name) || !handler) {
@@ -81,12 +120,13 @@ Result<void> Client::call_raw(std::string target, std::string service, std::uint
     control::put_u64(bytes, response_hash);
     control::put_u64(bytes, pending->image.bytes().size());
     std::lock_guard lock(mutex_);
-    const auto size = pending->image.bytes().size();
-    if (calls_.size() >= config::rpc_pending_limit || size > config::rpc_local_bytes - local_bytes_) {
+    auto reservation = detail::CallBudget::reserve(budget_, pending->image.bytes().size());
+    if (!reservation) {
         ++stats_.queue_full;
         return std::unexpected(Error{ErrorCode::QueueFull, ErrorOperation::Call});
     }
 
+    pending->reservation = std::move(*reservation);
     calls_.emplace(*id, pending);
     auto sent = access_->send(detail::frame(detail::Acquire, *id, std::move(bytes)));
     if (!sent) {
@@ -98,15 +138,68 @@ Result<void> Client::call_raw(std::string target, std::string service, std::uint
         return std::unexpected(sent.error());
     }
 
-    local_bytes_ += size;
     return {};
+}
+
+Result<detail::RawResult> Client::call_sync_raw(const detail::Address& address,
+    std::uint64_t request_hash, std::uint64_t response_hash, message::Snapshot image,
+    CallOptions, Deadline deadline) {
+    auto call = [&]() -> Result<std::unique_ptr<detail::BlockingCall>> {
+        // Preserve request ID submission order, but never hold admission while
+        // waiting for the target. Other callers and the pump remain independent.
+        std::lock_guard admission(admission_);
+        if (!access_ || !access_->living()) {
+            return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Call});
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return std::unexpected(Error{ErrorCode::TimeoutOutcomeUnknown, ErrorOperation::Call});
+        }
+
+        auto reservation = detail::CallBudget::reserve(budget_, image.bytes().size());
+        if (!reservation) {
+            return std::unexpected(reservation.error());
+        }
+
+        auto id = access_->reserve_request();
+        if (!id) {
+            return std::unexpected(id.error());
+        }
+
+        control::Bytes bytes;
+        control::put_u32(bytes, detail::version);
+        (void)control::put_string(bytes, address.module);
+        (void)control::put_string(bytes, address.service);
+        control::put_u64(bytes, request_hash);
+        control::put_u64(bytes, response_hash);
+        control::put_u64(bytes, image.bytes().size());
+        return access_->start_call(detail::frame(detail::Acquire, *id, std::move(bytes)),
+                                   std::move(*reservation));
+    }();
+    auto result = call ? (*call)->wait(image.bytes(), deadline)
+                       : Result<detail::RawResult>{std::unexpected(call.error())};
+    {
+        std::lock_guard lock(mutex_);
+        if (call) {
+            ++synchronous_stats_.completions;
+        }
+        if (!result && result.error().is(ErrorCode::QueueFull)) {
+            ++synchronous_stats_.queue_full;
+        }
+        if (!result && result.error().is(ErrorCode::TimeoutOutcomeUnknown)) {
+            ++synchronous_stats_.timeouts;
+        }
+    }
+    return result;
 }
 
 Stats Client::stats() const {
     std::lock_guard lock(mutex_);
     auto result = stats_;
-    result.pending = calls_.size();
-    result.request_bytes = local_bytes_;
+    result.completions += synchronous_stats_.completions;
+    result.timeouts += synchronous_stats_.timeouts;
+    result.queue_full += synchronous_stats_.queue_full;
+    budget_->inspect(result);
     return result;
 }
 
@@ -118,8 +211,8 @@ void Client::finish(std::uint64_t id, const std::shared_ptr<Pending>& pending,
                     Result<detail::RawResult> result) {
     {
         std::lock_guard lock(mutex_);
-        local_bytes_ -= pending->image.bytes().size();
         calls_.erase(id);
+        pending->reservation.reset();
         if (!pending->notified) {
             ++stats_.completions;
             if (!result && result.error().is(ErrorCode::QueueFull)) {
@@ -340,7 +433,11 @@ Result<PumpStats> Client::pump() {
     }
 
     auto batch = access_->take();
-    const auto before = this->stats();
+    Stats before;
+    {
+        std::lock_guard lock(mutex_);
+        before = stats_;
+    }
     std::vector<std::pair<std::uint64_t, std::shared_ptr<Pending>>> expired;
     const auto now = std::chrono::steady_clock::now();
     {
@@ -354,6 +451,9 @@ Result<PumpStats> Client::pump() {
 
     try {
         for (auto& [id, pending] : expired) {
+            if (!access_->living()) {
+                break;
+            }
             pending->notified = true;
             auto completion = std::move(pending->completion);
             {
@@ -387,7 +487,10 @@ Result<PumpStats> Client::pump() {
         return std::unexpected(Error{ErrorCode::CallbackFailed, ErrorOperation::Pump});
     }
 
-    const auto after = this->stats();
+    // Synchronous completions on other threads are not callbacks dispatched by
+    // this pump batch, and must not inflate its returned work count.
+    std::lock_guard lock(mutex_);
+    const auto after = stats_;
     stats.requests = after.requests - before.requests;
     stats.completions = after.completions - before.completions;
     return stats;

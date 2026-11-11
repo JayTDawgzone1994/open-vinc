@@ -119,7 +119,7 @@ def verify_coexistence(first, second, python, work, run, require):
 
         # Inspect each App's graph sequentially on the default HTTP port. Turning
         # HTTP off leaves First's protected UI process and central running.
-        first_types = {entry["type"] for entry in graph(8080)["modules"]}
+        first_types = {entry["type"] for entry in graph(31411)["modules"]}
         reply = first_app.command("ui disable")
         require("UI disable requested" in reply, reply)
 
@@ -127,7 +127,7 @@ def verify_coexistence(first, second, python, work, run, require):
         second_app.wait_log("Second_SCRIPT_OK")
         second_port = second_app.connect()
         require(first_port != second_port, "Shell listener isolation failed")
-        second_types = {entry["type"] for entry in graph(8080)["modules"]}
+        second_types = {entry["type"] for entry in graph(31411)["modules"]}
         require("FirstModule" in first_types and "SecondModule" not in first_types
                 and "ScriptPeer" not in first_types, str(first_types))
         require("SecondModule" in second_types and "FirstModule" not in second_types
@@ -138,7 +138,7 @@ def verify_coexistence(first, second, python, work, run, require):
                 "First did not confirm child cleanup")
         reply = second_app.command("recorder status")
         require("Error:" not in reply, reply)
-        require("SecondModule" in {entry["type"] for entry in graph(8080)["modules"]},
+        require("SecondModule" in {entry["type"] for entry in graph(31411)["modules"]},
                 "Stopping First affected Second")
 
         restarted = run([str(first), "--shell-port", "0"], timeout=WAIT_SECONDS,

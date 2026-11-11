@@ -9,11 +9,35 @@ Message Bus connects OSAL SharedMemory, generated messages, and process Modules.
 每個 Publisher 擁有獨立 RingBuffer，同一 topic 可有多個 Publisher。大量訊息留在共享記憶體，
 Socket 控制通道只交換註冊、退訂與 Publisher 增減資訊。
 
+Omitted Publisher capacities use two central Param values; explicit options and
+existing rings remain independent. See [Publisher defaults](PUBLISHER_DEFAULTS.md)
+for last-effective correction, standalone use and Bus v4 / Plugin entry 14.
+
+省略的 Publisher 容量改用兩項中央 Param，明確指定及既有 Ring 不受影響。
+最後有效值修正、獨立使用與 Bus v4／Plugin entry 14 見上述專題契約。
+
 Sequential delivery runs through Context pump callbacks; get_last reads the latest. No per-message data Socket notifications.
 
 依序接收透過 Context pump 派送 callback；`get_last()` 提供最新值。沒有額外資料 Socket 通知。
 
 Successful publications now signal callback destinations directly through OSAL notifications. Host pumpLoop waits on them with a 10 ms fallback; get_last-only readers create no route. Failure/retry/UI contracts and validation are maintained in [Pump wakeup](../module_system/PUMP_WAKEUP.md).
+
+**Host teardown repair (2026-11-10):** final Host teardown now joins the watchdog
+before retiring Bus/Session. Internal `RuntimeAccess::receive()` returns
+`Closed/Receive` when already closed; malformed input remains `Protocol/Receive`,
+including when that rejection itself closes the transport. Do not suppress receive
+failures during stopping. The [Module System investigation](../module_system/CONTEXT_SHUTDOWN_INVESTIGATION.md#stage-2-repair-validation)
+records Windows Debug / WSL Release focused validation. Current broader results
+are in the [shutdown regression report](../module_system/CONTEXT_SHUTDOWN_VALIDATION.md);
+native Mac C++ Host/Context Debug/Release results are in the
+[Mac report](../module_system/MACOS_CONTEXT_SHUTDOWN_VALIDATION.md).
+Source Python/GIL and SDK-only acceptance are separate stages. Payload layout
+and collision policy are unchanged.
+
+**Host 收尾已修正：** 先等待 watchdog 結束，再關閉 Bus／Session。已關閉的接收回報
+`Closed/Receive`；真正畸形封包仍回報 `Protocol/Receive`，不因處於收尾而忽略故障。
+Windows／WSL 原始驗收及後續 Mac C++ Host／Context Debug／Release 原生證據分別見上述報告；
+來源 Python／GIL 及 SDK-only 專項不由此結案。
 
 發布成功後直接透過 OSAL 通知 callback 所屬 Module；pumpLoop 等待通知並保留 10 ms 補查，純 get_last 不建路由。故障／重試／UI 契約及驗證見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
 
@@ -158,8 +182,9 @@ RingBuffer 的 acquisition helper 把成功取得的資源立即交回 RingBuffe
 Compile-time message_bus_* config centralizes capacities/budgets/control waits/retries and publicly propagates Common. Values were preserved during readability work; protocol/layout/test constants remain owned locally. This is not runtime Param rebinding.
 
 預設容量、中央預算、控制等待與重試設定集中到 `<vinc/config.hpp>` 的 `message_bus_*` 常數，
-`vinc::message_bus` 透過 CMake PUBLIC 相依提供 `vinc::common`。數值與可讀性整理前相同；
-協定／共享布局限制留在元件，測試負載與逾時留在測試。這尚不是動態 Param 設定。
+`vinc::message_bus` 透過 CMake PUBLIC 相依提供 `vinc::common`。集中時維持原有數值；
+協定／共享布局限制留在元件，測試負載與逾時留在測試。後續兩項 Publisher 預設已接
+[Param](PUBLISHER_DEFAULTS.md)，其餘仍為編譯期設定。
 
 Tests are scenario-grouped; conflicting control/data names check partial-create rollback without deleting existing resources.
 

@@ -17,7 +17,9 @@ enum class Point {
     ContractWriting,
     ContractCommitted,
     NotificationReserved,
-    NotificationReady
+    NotificationReady,
+    NotificationWait,
+    NotificationWaitFinished
 };
 // Defined only by fault-test executables; production has no hook or registry.
 void checkpoint(Point, osal::Process* = nullptr, std::string_view resource = {});

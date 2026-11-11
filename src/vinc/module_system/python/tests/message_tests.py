@@ -23,6 +23,17 @@ def raises(kind, action):
     raise AssertionError(f"expected {kind.__name__}")
 
 
+assert vinc.PumpOptions().topic_workers == 0
+assert vinc.PumpOptions(topic_workers=2).topic_workers == 2
+raises(TypeError, lambda: vinc.PumpOptions(topic_workers=-1))
+raises(TypeError, lambda: vinc.PumpOptions(topic_workers=2**32))
+raises(AttributeError, lambda: setattr(vinc.PumpOptions(), "topic_workers", 1))
+raises(TypeError, lambda: type("BadOptions", (vinc.BaseModule,), {},
+    mode=vinc.RunMode.FrameworkLoop, pump_options=2))
+raises(TypeError, lambda: type("ManualOptions", (vinc.BaseModule,), {},
+    mode=vinc.RunMode.Manual, pump_options=vinc.PumpOptions(topic_workers=2)))
+
+
 def check_arrays():
     message = vinc.make_message(fixtures.Frame)
     data = message.data()

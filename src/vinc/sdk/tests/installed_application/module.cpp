@@ -62,6 +62,21 @@ public:
     }
 
     vinc::Result<std::int32_t> module_interface(std::vector<std::string> args) override {
+        if (args.size() == 2 && args[1] == "defaults") {
+            auto published = context.advertise<Message>("installed/defaults");
+            if (!published) {
+                return std::unexpected(published.error());
+            }
+
+            const auto stats = published->stats();
+            if (stats.requested_slots != 3 || stats.max_message_bytes != 8192) {
+                return 1;
+            }
+
+            std::cout << "INSTALLED_PUBLISHER_DEFAULTS_OK\n" << std::flush;
+            return 0;
+        }
+
         if (args.size() == 2 && args[1] == "identity") {
             if (!self_path_verified_) {
                 return 1;

@@ -390,12 +390,16 @@ on the next build. The source and installed paths share this parser and schema.
 Legacy source deployment records generated Module/assets in `.vinc-owned-files`. A removed
 feature's formerly managed files are deleted only if their recorded hashes still
 match; modified files are preserved with diagnostics. Untracked files, user plugins,
-data/module, params, logs and recordings are never claimed by this manifest.
+manually added Python Modules, params, logs and recordings are never claimed by
+this manifest. Files declared with `add_python_module()` are managed deployment
+inputs when selected by the App; selected Python Modules require Python enabled.
 Pre-migration outputs without a record are not guessed or swept. Do not deploy
 over a running application. Source compiler caches/intermediates may remain.
 
 部署記錄生成檔及雜湊，功能關閉只刪除仍符合紀錄的舊檔。修改過的檔案保留並提示；
-未記錄檔案、使用者 plugin、data/module、參數、log、錄製資料不納管。
+未記錄檔案、使用者 plugin、手動放入的 Python Module、參數、log、錄製資料不納管。
+透過 `add_python_module()` 明列並由 App 選入的檔案則納入清單；選入 Python Module
+必須同時啟用 App 的 Python 功能。
 導入前沒有紀錄的舊產物不猜測刪除；不要覆蓋執行中的應用。
 來源建置的編譯器快取／中間產物可保留。
 

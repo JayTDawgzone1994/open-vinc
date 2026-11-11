@@ -20,6 +20,13 @@ or service startup during lookup. Lookup compiles/runs a small native ABI probe.
 原有 `add_subdirectory()` 保留；以 `VINC_INSTALL_SDK=ON` 明確啟用安裝規則。
 查找套件不下載或重建相依、不啟動框架服務；會編譯並執行小型本機 ABI 探針。
 
+## macOS 目前交付驗收（2026-11-11）
+
+目前 entry-19／Bus v4 的 Debug／Release 乾淨 SDK-only、搬移 C++／Python／App、
+Recorder／Publisher、多 App、分類部署與輸出目錄已補驗，見
+[第三階段主報告](MACOS_SDK_DEPLOYMENT_VALIDATION.md)。
+後續結果取代下方歷史報告的 Mac 待驗狀態；舊 entry-13 Param 報告保留其原始範圍。
+
 ## Scope / 本輪範圍
 
 Native MSVC consumers must meet the [Common toolchain policy](../common/README.md#build-toolchain-policy)
@@ -386,7 +393,9 @@ invocations writing the same binary directory. Each installed App owns one direc
 package/
 ├── CameraApp/
 │   ├── CameraApp[.exe]
-│   ├── modules/               # Selected custom Plugins and official UI/Bag
+│   ├── modules/
+│   │   ├── native/            # Selected native Plugins and official UI/Bag
+│   │   └── python/            # Selected Python Modules, when enabled
 │   ├── lib/tcl9.1/
 │   ├── licenses/
 │   └── vinc_data/camera-station/ui/
@@ -398,21 +407,35 @@ package/
     └── vinc_data/monitor-station/ui/
 ```
 
-Python-enabled Apps additionally deploy `python/vinc`; the system Python and user
-`data/module` scripts remain external responsibilities. Distinct identities do not
-avoid listener port conflicts. Use distinct Shell ports; stop/restart UI with its
-existing `--port` option when necessary. Param-driven startup settings remain future work.
+Python-enabled Apps additionally deploy `python/vinc`. Selected Python Modules
+are copied from their `add_python_module()` declarations; the interpreter and pip
+dependencies remain external. Distinct identities do not avoid listener port
+conflicts; configure each App's Shell/UI network parameters separately.
 
-啟用 Python 的 App 另有 `python/vinc`，系統 Python 與使用者 `data/module` 自行提供。
-不同身分不會自動解決 port 衝突；Shell 使用不同 port，UI 需要時用既有停止／重新啟動及
-`--port` 操作。Param 啟動設定仍待後續設計。
+啟用 Python 的 App 另有 `python/vinc`；選入的 Python Module 由宣告自動複製，
+直譯器與 pip 相依仍由使用者提供。不同身分不會自動解決 port 衝突，請分別設定
+各 App 的 Shell／UI 網路參數。
 
 - `VINC_BUILD_CONFIG` is required and relative to the calling CMakeLists directory.
   `STARTUP_SCRIPT` remains optional and follows the same path rule. It retains the
   embedded-script contract, including rejecting `-S` when embedded.
 - Each App has its own executable, catalog, identity, script and generated headers.
   `INSTANCE_NAME` permits 1..48 lowercase ASCII letters, digits, `_`, `-`.
-  Build outputs default to `<caller-build>/<target>/<configuration>`.
+  Build outputs default to `<top-level-build>/output/<target>/<configuration>`.
+  The root is the consuming project's `CMAKE_BINARY_DIR`, regardless of where
+  `vinc_add_app()` is declared or whether VINC is a subproject or installed SDK.
+  Existing target output-directory overrides remain supported. Generated files
+  and compilation intermediates stay in their existing build directories.
+  Reconfiguring an older build does not migrate or delete the previous App's
+  params, logs, recordings or manually added Modules. The new package starts
+  with defaults unless the operator explicitly transfers its runtime data.
+  `cmake --install` still packages into `<prefix>/<target>`.
+
+  預設 App 產物集中到使用端最上層 build 的 `output/<App>/<組態>/`，
+  不受宣告位置或來源／installed SDK 整合方式影響。仍支援既有 target 輸出位置覆寫；
+  中間產物及生成檔維持原位。重新配置舊 build 不會自動搬移或刪除舊 App 的參數、
+  Log、錄製資料及手動 Module；未自行移轉資料時，新目錄會使用預設值。
+  `cmake --install` 仍輸出到 `<prefix>/<App>`。
 - Register Modules/messages during ordinary configuration, including after App
   declarations and in sibling directories. No manual finalize or registration
   inside user DEFER callbacks. Target customization remains available.
@@ -436,7 +459,8 @@ existing `--port` option when necessary. Param-driven startup settings remain fu
   Its package is `package/CameraApp/`; installing all uses one sibling directory per App.
 - `.vinc-app-owner` rejects another App/identity claiming that directory. The owned-file
   manifest removes only unchanged obsolete managed files, preserving modified files
-  and user data. Installation does not copy runtime logs/params or user Python Modules.
+  and user data. Installation copies declared Python Module files, not manually
+  added Modules or runtime logs/params.
 - Stop the App before updating its package. Copying is serialized per destination,
   but not a transactional whole-directory replacement: an I/O failure may leave a
   partially updated package. Repair/retry before starting it; hot update is unsupported.
@@ -500,14 +524,17 @@ System/Custom Python in that same file. SDKs include the binding build material 
 when the producer builds no Python binding; consumer builds require a compatible
 CPython development environment and compile only the adapter, not framework
 libraries. Enabled Apps deploy their own `python/vinc` package. User Module
-scripts/dependencies remain the application's responsibility under `data/module`.
+scripts/resources declared with `add_python_module()` deploy under
+`modules/python/<ModuleType>/`; manual Modules may also be placed there.
+Third-party Python packages remain the application's responsibility.
 See [Python SDK](../module_system/python/README.md#installed-sdk-applications--安裝式-sdk-應用)
 for ABI, pinned pybind11, resource ownership and runtime-selection contracts.
 
 Python Module 可在各 App 設定檔啟用，並以同份 Kconfig 選擇 System／Custom Python。即使製作 SDK
 時關閉 Python，套件仍附帶建置材料；使用端需相容的 CPython 開發環境，只編譯接線，
-不重建核心庫。啟用的 App 各自部署 `python/vinc`；使用者腳本及額外相依仍自行部署
-於 `data/module`。ABI、pybind11、產物所有權及執行期選擇契約由上述 Python 文件維護。
+不重建核心庫。啟用的 App 各自部署 `python/vinc`；`add_python_module()` 明列的程式及資源
+隨選入的 App 部署到 `modules/python/<ModuleType>/`，也可手動放入該目錄。
+第三方 Python 套件仍由應用管理。ABI、pybind11、產物所有權及執行期選擇契約由上述文件維護。
 
 On MSVC, SDK installation builds and ships a separate `/MT` (`/MTd` in Debug)
 archive closure for the binding, including its Common error catalog and fmt.
@@ -589,6 +616,48 @@ validation evidence is maintained in the [App composition report](../../../apps/
 內建 App 已統一組裝，最新遷移與驗證結果見上述主紀錄；下方保留各階段的歷史證據。
 
 ## Validation / 驗證
+
+<a id="app-output-validation"></a>
+
+### Centralized App output (2026-11-06) / App 輸出集中驗收
+
+The default App package root is now `<CMAKE_BINARY_DIR>/output/<App>/<configuration>`.
+`multi_app.py` asserts the exact target-file parent for three Apps declared in
+sibling directories, using both source integration and a newly installed SDK.
+It then exercises native/Python Modules, official resources, concurrent Apps,
+installation/relocation, failure isolation, resource repair and owned-file cleanup.
+
+預設 App 集中到上述目錄；測試直接核對三個不同子目錄宣告的 App 實際執行檔位置，
+再驗證 C++／Python Module、官方資源、並行、安裝搬移、故障隔離及資源回收。
+
+| Environment / 環境 | Source multi-App / 來源 | Fresh installed SDK / 全新安裝 SDK |
+| --- | --- | --- |
+| Windows x64, MSVC 19.51.36257, CMake 4.3.2, CPython 3.13.12, Debug | Passed / 通過 | Passed / 通過 |
+| WSL Ubuntu 24.04, GCC 13.3.0, CMake 3.28.3, CPython 3.12.3, Release | Passed / 通過 | Passed / 通過 |
+
+The Windows producer reused its existing build; the WSL producer reused the
+previous clean producer. Each multi-App run used fresh source/consumer trees;
+installed runs also used new SDK prefixes. The bundled Windows App was rebuilt
+at `output/Vinc/Debug/Vinc.exe`. Its old `params.toml` remained in place and was
+not copied to the new package. Logs remain local under `build/app-output-*.log`
+and WSL `/home/vinc-test/python-module-deploy-20261105/output-*.log`.
+
+Windows／WSL producer 重用既有建置；各次使用端及 SDK 安裝位置皆為全新目錄。
+Windows 內建 Vinc 已於新路徑建置成功；舊參數檔仍保留，沒有自動移轉。
+
+A separate WSL installed-SDK configure check passed for the default root and
+an explicit custom output directory, including generated deployment manifests.
+This was configuration-only. Multi-configuration probes were rejected by the
+existing SDK single-config contract and source Tcl integration guard; they did
+not reach build/runtime validation. This change does not add multi-config support.
+Debug and Release continue to use separate build trees. Full-project CTest,
+Windows Release, Linux Debug and native macOS were not rerun; macOS acceptance
+is tracked in the root TODO.
+
+另以 WSL SDK 驗證自訂輸出位置及部署清單，僅做配置檢查。
+Ninja Multi-Config 受到既有 SDK／Tcl 單組態契約拒絕，未進入建置或執行驗收；
+本輪沒有新增多組態支援。未重跑完整 CTest、Windows Release、Linux Debug 或原生 macOS；
+macOS 待驗項目見根目錄 TODO。
 
 新版 Plugin entry 13／Param wire v3 的 Mac 乾淨 SDK producer、搬移 consumer／App／Python
 已通過 Debug／Release 各三套；見 [Mac SDK 報告](MACOS_PARAM_VALIDATION.md)。

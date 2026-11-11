@@ -13,7 +13,8 @@ function(_vinc_build_module variant)
     target_include_directories(${vinc_module_contract} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
     vinc_runtime_link_libraries(${vinc_module_contract} ${variant} PUBLIC vinc::osal)
 
-    add_library(${vinc_module} STATIC src/runtime/base_module.cpp src/runtime/context.cpp)
+    add_library(${vinc_module} STATIC src/runtime/base_module.cpp src/runtime/context.cpp
+        src/runtime/context_parallel.cpp src/runtime/topic_scheduler.cpp)
     vinc_apply_runtime(${vinc_module} ${variant})
 
     target_include_directories(${vinc_module} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -25,7 +26,7 @@ function(_vinc_build_module variant)
     vinc_runtime_link_libraries(${vinc_module_runtime} ${variant} PUBLIC ${vinc_module} vinc::message_bus vinc::control ${vinc_module_contract} vinc::concurrency vinc::param_host vinc::log_host vinc::rpc_host)
 
     if(variant STREQUAL "NATIVE")
-        add_library(vinc_module_manager STATIC src/host/module_manager.cpp src/host/python_modules.cpp src/host/instance.cpp src/host/lock_registry.cpp)
+        add_library(vinc_module_manager STATIC src/host/module_manager.cpp src/host/publisher_defaults.cpp src/host/log_settings.cpp src/host/python_modules.cpp src/host/instance.cpp src/host/lock_registry.cpp)
 
         target_include_directories(vinc_module_manager PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
         target_link_libraries(vinc_module_manager PUBLIC vinc::common vinc::log vinc::param vinc::message_bus vinc::control vinc::output_hub PRIVATE ${vinc_module_contract} vinc::concurrency vinc::param_manager vinc::log_manager vinc::rpc_manager)

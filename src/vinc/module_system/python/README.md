@@ -8,6 +8,19 @@ Python Module 由中央 Shell 啟停，每個實例使用一個系統 Python 程
 中央不連結或嵌入 Python，不附帶直譯器，也不自動安裝 Python／pip 套件。
 使用者程式透過 pybind11 原生擴充使用同一套 C++ Runtime；沒有另寫 Socket／共享記憶體協定。
 
+PublisherOptions now defaults to `None` in both fields, matching C++ optional
+options; omitted fields resolve centrally at registration. See
+[Publisher defaults](../../message_bus/PUBLISHER_DEFAULTS.md). Rebuild the extension
+with Bus v4 / Plugin entry 19 (including parallel-pump drain synchronization).
+PublisherOptions 兩欄預設為 None，與 C++ optional 一致；省略欄位在中央建立時解析。
+契約見上述文件，擴充須與 Bus v4／Plugin entry 19（含多執行緒 pump drain 同步）一起重建。
+
+Manual Modules can use `context.waitForWork(timeout=None)` after an empty
+`pumpOnce()` batch. Timeout is seconds; this releases the GIL but dispatches no
+callbacks. See the [shared wait contract and validation](../PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
+Manual Module 可在空批次後等待通知，timeout 單位為秒；等待釋放 GIL，不派送 callback。
+不要以重複等待代替 pump；期限、錯誤與驗收由上述共用契約維護。
+
 The [single-App entry](../../../../apps/vinc/SINGLE_EXECUTABLE.md) changes native
 Module launches only: C++ Hosts execute the App image, while Python Modules still
 execute the selected system interpreter and bootstrap. Central never imports the
@@ -19,6 +32,113 @@ Python extension merely because Python support is packaged.
 <a id="建置與部署"></a>
 
 ## Build and deploy / 建置與部署
+
+### Declaring and selecting Modules / 宣告與選擇 Module
+
+Source and installed SDK consumers use the same function from a Module's
+`CMakeLists.txt`. It registers availability; each App selects its own membership:
+
+來源整合與安裝式 SDK 共用以下函式。於 Module 的 `CMakeLists.txt` 宣告可用的類型，
+再由各 App 的 Kconfig 決定是否部署：
+
+```cmake
+add_python_module(detector_python
+    MODULE_TYPE_NAME detector
+    SOURCES detector.py helpers.py resources/rules.json
+)
+```
+
+```ini
+CONFIG_VINC_APP_PYTHON=y
+CONFIG_VINC_MODULE_detector=y
+```
+
+- `SOURCES` explicitly lists files relative to the calling source directory;
+  preserve subdirectories under `modules/python/detector/`. No recursive copy.
+  Missing files, absolute/traversing paths, escaping symlinks and duplicate
+  destinations (including case-only differences) fail configuration.
+- Require the root entry `detector.py`. This is a deployable-file target, not a
+  native extension: no user Python execution, interpreter bundling or pip install.
+- Selected Python Modules require Python enabled. Unselected Modules are not
+  deployed. Compatible Apps share the framework binding but own separate copies
+  of their selected Module files. Native Plugins live in `modules/native/<type>/`.
+- Native/Python ModuleTypes share one namespace; case-only names and the official
+  `webUi`/`bagRecorder` names are rejected at build registration.
+- Building the App updates declared files; install uses the same source manifest.
+  Removing a declaration/selection cleans formerly managed, unchanged files.
+  Modified obsolete files and unrelated manual files are preserved. Active
+  managed files are refreshed from source: edit sources, not generated copies.
+- Startup still scans `modules/python/<type>/<type>.py` once. Manually adding a
+  correctly named Module there remains supported; it is not an install input.
+  Discovery does not execute user code. Case collisions with registered native
+  or Python types are reported without replacing the existing type.
+  Kconfig controls managed packaging, not a runtime allowlist: preserved/manual
+  entry files may still be discovered after a selection is removed.
+- The retired `data/module/` path is not searched or automatically deleted.
+  Move intended manual Modules to the new path. Do not update a running package.
+
+- `SOURCES` 明列相對於呼叫端的檔案並保留子目錄，不遞迴整包複製；缺檔、絕對路徑、
+  越界／逃出來源根目錄的連結、重複目的地（含大小寫差異）會在配置時報錯。
+- 入口必須是根層 `<ModuleType>.py`；target 只描述部署檔，不執行使用者 Python、
+  不附帶直譯器、不安裝 pip 套件。選入 Python Module 卻未啟用 Python 時明確報錯。
+- 各 App 只部署選中的 Module，原生庫位於 `modules/native/<type>/`；Python 位於
+  `modules/python/<type>/`。兩者共用名稱空間，拒絕大小寫撞名與官方保留名稱。
+- Build／install 共用清單；來源改動會更新副本，取消選用或刪除宣告只清理原本管理且
+  未被修改的檔案。已修改的過時檔與手動加入的其他檔案保留；仍在清單內的檔案會由
+  來源覆寫，因此請修改來源，不要編輯自動部署的副本。
+- 保留新路徑的啟動掃描與手動放入能力，手動檔不會反向納入 install。舊 `data/module/`
+  不再搜尋、不自動刪除；請自行搬移需保留的 Module。更新部署前先關閉 App。
+  Kconfig 是自動打包清單，不是執行期白名單；取消選用後若保留了手動或已修改的入口，
+  下一次啟動仍可能掃描到它。
+
+<a id="module-deployment-validation"></a>
+
+### Module deployment validation (2026-11-05) / Module 部署驗收
+
+| Environment / 環境 | Result / 結果 |
+| --- | --- |
+| Windows 11 x64, MSVC 19.51.36257, CMake 4.3.2, CPython 3.13.12, Debug | App/SDK targets built; clean installed-SDK consumer plus configuration/selection/ownership CTests **4/4** passed. Registration suite **12 passed, 1 symlink-permission skip**. Fresh source multi-App and final discovery/lifecycle script passed. / App／SDK 建置、乾淨安裝式使用端、多 App 來源與掃描／生命週期通過。 |
+| WSL2 Ubuntu 24.04 x86_64, GCC/libstdc++ 13.3, CMake 3.28.3, CPython 3.12.3, Release | Fresh ext4 producer build; installed-SDK/configuration/selection/ownership CTests **5/5** passed. Final registration suite **13/13**; fresh source multi-App and final discovery/lifecycle script passed. / ext4 乾淨建置、安裝式使用端、多 App 與掃描驗證通過。 |
+
+Both platforms exercised deployed native paths, selected Python entries/helper
+imports/resources, real custom-message Bus/RPC/Param, normal shutdown, App/SDK
+relocation, changed/added/removed declared files, exclusion of unlisted files,
+Python-disable cleanup and preservation of manual files. Source multi-App checks
+also covered shared bindings, independent copies, simultaneous Apps, same-identity
+exclusion, official-Module failures, ownership rejection and sibling isolation.
+Discovery checks cover manually placed Modules, ignored legacy directories,
+case collision with native types, PATH/venv selection and ABI/import failures.
+No user Python executes during CMake registration.
+
+兩平台均實際驗證 native 新路徑、選入的 Python 入口／helper／資源、自訂訊息 Bus／RPC／Param、
+正常退出、SDK／App 搬移、明列檔案增刪更新、未列檔排除、停用清理及保留手動檔。
+多 App 亦驗證共用 binding、各自部署、並行與同名排他、官方 Module 故障隔離、所有權拒絕及
+不誤刪其他 App。掃描包含手動 Module、忽略舊目錄、與 native 撞名、PATH／venv 及 ABI／匯入失敗。
+
+The first Windows source run lacked the full MSVC environment required by Tcl
+nmake; the rerun initialized VsDevCmd and passed. The discovery fixture formerly
+omitted official Plugins/UI assets, producing a Windows shutdown timeout during
+missing-Plugin retries. It now copies the complete required package and cleans
+its own process tree on timeout. A separate first invocation used a Custom-Python
+App for System-PATH assertions; final validation used System mode. These failed
+attempts are not passing evidence and did not change Runtime policy.
+
+Windows 首輪來源測試缺 Tcl nmake 所需的完整 MSVC 環境，初始化 VsDevCmd 後通過。
+舊掃描 fixture 缺官方 Plugin／UI 資源，Windows 曾在缺 Plugin 的重試期間退出逾時；
+已補齊套件並加入測試程序樹的逾時清理。另一次以 Custom App 執行 System PATH 斷言，
+最終改用符合前提的 System App 通過。失敗嘗試不計入通過證據，也未修改 Runtime 政策。
+
+Local evidence (not committed): `build/python-module-windows-tests.log`,
+`build/python-module-source-multi-app-final.log`,
+`build/python-module-discovery-system.log`; WSL evidence under
+`/home/vinc-test/python-module-deploy-20261105/` (`tests.log`,
+`source-multi-app.log`, `discovery-final.log`). Windows reused the existing Debug
+SDK producer but installed into a new prefix; the WSL producer was fresh. This
+round did not run the complete project CTest set, Windows Release, Linux Debug or
+native macOS. macOS acceptance remains in the root TODO.
+
+本輪沒有宣稱完整專案 CTest、Windows Release、Linux Debug 或 macOS 原生驗證完成；
+Windows 重用 Debug producer、全新安裝目錄，WSL producer 為全新建置。macOS 項目見根目錄 TODO。
 
 For the CPython 3.11 minimum-policy environment, results and remaining limits,
 see [CPython 3.11 validation](PYTHON311_VALIDATION.md). The shared
@@ -77,7 +197,7 @@ python/vinc/
         THIRD_PARTY_NOTICES.txt
 licenses/open-vinc/                    # Central binary's shared notices
 licenses/pybind11/LICENSE
-data/module/<ModuleType>/<ModuleType>.py
+modules/python/<ModuleType>/<ModuleType>.py
 ```
 
 Keep the complete `python/vinc` package, including its internal `licenses/open-vinc` directory,
@@ -89,9 +209,9 @@ See [SDK license delivery](../../sdk/README.md#license-delivery) for binary pack
 其中附帶 Open-VINC 條款／署名及原生相依聲明，含完整 pybind11 授權。
 二進位打包契約見 [SDK 授權交付](../../sdk/README.md#license-delivery)。
 
-User code lives in data/module, distinct from vinc_data persistence. Editing existing Python Modules does not rebuild central. Compiled vinc_messages type lists define vinc.messages; new .msg requires regenerating/rebuilding consumers/native extension, without runtime schema parsing. --python selects interpreter/venv; relative paths become absolute on central startup. Otherwise Kconfig Custom uses its absolute path, while System searches the deployment PATH for Windows python.exe/POSIX python3 without silently trying another environment.
+User code lives in modules/python, distinct from vinc_data persistence. Editing existing Python Modules does not rebuild central. Compiled vinc_messages type lists define vinc.messages; new .msg requires regenerating/rebuilding consumers/native extension, without runtime schema parsing. --python selects interpreter/venv; relative paths become absolute on central startup. Otherwise Kconfig Custom uses its absolute path, while System searches the deployment PATH for Windows python.exe/POSIX python3 without silently trying another environment.
 
-`data/module` 是使用者程式的位置，與 Param／Log 的 `vinc_data` 不同。
+`modules/python` 是使用者程式的位置，與 Param／Log 的 `vinc_data` 不同。
 只修改既有 Python Module 程式不需編譯中央。`vinc.messages` 由 `vinc_messages` 的
 編譯期型別清單建立；新增 `.msg` 後須重新生成並建置所有使用它的程式及 Python 擴充。
 不提供 runtime `.msg` 解析器或動態訊息型別。
@@ -260,14 +380,16 @@ Build/install deploy only declared package files, including the selected extensi
 ABI/CRT metadata and licenses, rather than sweeping the build directory for stale
 extensions from another ABI. Ownership records remove obsolete unchanged files
 when Python is disabled or the extension filename changes; untracked/modified
-files are preserved. User `.py` Modules and extra dependencies remain application-
-owned deployment inputs under `data/module`. Never overlay a running application.
+files are preserved. Selected `add_python_module()` files deploy under
+`modules/python`; manually added Modules are not installation inputs. Third-party
+Python dependencies remain application-owned. Never overlay a running application.
 Use separate build directories when changing Python environments to avoid stale
 CMake discovery. Runtime follows the consumer App's Kconfig default or `--python`, never the SDK producer's Python path.
 
 build／install 僅部署明確列出的擴充、ABI／CRT 資訊與授權，不掃描並複製另一 ABI
 遺留的擴充。功能關閉或檔名改變時清理未被修改的舊產物，保留未納管／修改過檔案。
-使用者 `.py` 與額外相依仍由應用自行部署到 `data/module`。不要覆蓋執行中的程式；
+選入的 `add_python_module()` 程式與資源會自動部署到 `modules/python`；手動檔不反向納入
+安裝，第三方 Python 套件仍由應用管理。不要覆蓋執行中的程式；
 切換 Python 環境建議使用不同 build 目錄，避免沿用 CMake 探測快取。
 執行時使用消費端 App 的 Kconfig 預設／`--python`，不使用 SDK 製作者路徑。
 
@@ -339,9 +461,16 @@ the [Common runtime policy](../../common/README.md#macos-system-runtime-decision
 **macOS 已確認維持現狀：** 使用系統動態 C++ Runtime，不因 Windows 的舊 DLL
 衝突改為靜態；原因與尚待驗證的相容性界線統一記錄於上述 Common 政策。
 
-- Static builds verify actual imports after linking. Only the selected CPython
-  DLL and reviewed Windows API DLLs are allowed; CRT imports (including UCRT and
-  sidecars) or another native DLL fail generation and require review.
+- Static builds check the extension's own imports after linking. Direct dynamic
+  CRT imports (MSVC CRT/STL, UCRT, Debug and sidecar names) fail with a specific
+  diagnostic. Exactly one CPython DLL import is required. Other DLL names are
+  not an approval list: Windows API-sets and other non-CRT imports do not fail
+  merely because their names are new. This does not certify third-party binary
+  compatibility or recursively inspect their dependencies/LoadLibrary calls.
+- The existing local `_msvc_runtime.json` keeps a compact `imports` list of
+  sorted, unique DLL basenames for debugging. It contains no dependency paths
+  or process-module inventory. Generation performs no upload; there is no new
+  telemetry, background collector or separate accumulating log.
 - Static format 3 records mode, native filename and SHA-256. `_build.py` selects
   the expected mode. Preflight checks the manifest, Python's actual extension
   selection and image hash before importing `_native`; stale/missing/mixed
@@ -357,7 +486,11 @@ the [Common runtime policy](../../common/README.md#macos-system-runtime-decision
 - Static CRT security updates require rebuilding/redeploying VINC's extension;
   updating the system Redistributable cannot patch its embedded CRT.
 
-靜態建置逐一檢查實際 DLL 相依，拒絕 CRT／UCRT／sidecar 或未審查 DLL。Format 3 保存
+靜態建置檢查擴充本身的匯入，直接連回動態 CRT／UCRT／Debug／sidecar 時明確拒絕，
+並維持恰一個 CPython DLL 的要求；其他 DLL 不再因名稱陌生而被拒絕。不遞迴掃描
+第三方 DLL 的相依或 LoadLibrary 行為，也不宣稱其 ABI 已相容。既有本機
+`_msvc_runtime.json` 的 `imports` 僅保留排序、去重的 DLL 檔名供除錯，不含相依路徑
+或程序已載入模組清單；不主動上傳、不新增遙測、背景蒐集或累積日誌。Format 3 保存
 模式、檔名與 SHA-256；匯入前核對 Python 選中的檔案，混搭、缺檔、損壞均拒絕。
 雜湊防止誤部署，不是簽章或安全沙箱；簽署／修改映像後也需重新產生相符 metadata。
 靜態路徑不檢查、不預載 MSVC DLL，不替換 Python／WinRT 的舊檔。Python minor ABI
@@ -548,7 +681,7 @@ Metadata 只保留逐檔版本、工具鏈／組態、供診斷的 Header 版本
 
 ## Discovery and ModuleTypes / 掃描與 ModuleType
 
-- After Shell reservations/compiled catalog, scan executable-adjacent data/module once.
+- After Shell reservations/compiled catalog, scan executable-adjacent modules/python once.
 - Sorted direct physical subdirectories only, no recursion/symlink following.
 - Same-name .py entry with valid Module naming; discovery never imports/executes it.
 - Missing root is empty success; read/name/entry/duplicate issues diagnose/continue.
@@ -556,7 +689,7 @@ Metadata 只保留逐檔版本、工具鏈／組態、供診斷的 Header 版本
 - Default on_name consumes --name, without numeric suffixes; authors may override.
 - Type/instance names cannot collide; instances have unique names/central MIDs.
 
-- 中央在保留 Shell 命令、登記編譯期 catalog 後，掃描執行檔旁的 `data/module` 一次。
+- 中央在保留 Shell 命令、登記編譯期 catalog 後，掃描執行檔旁的 `modules/python` 一次。
 - 只處理一層實體子目錄，依目錄名排序；不遞迴掃描、不跟隨目錄 symlink。
 - 每個子目錄必須有同名 `.py`，名稱遵守 Module 命名規則。掃描不 import 或執行 Python。
 - 無此根目錄是正常空集合。讀取失敗、名稱不合法、缺入口、重複種類只回報問題；中央繼續運作。
@@ -589,6 +722,18 @@ class Module(vinc.BaseModule, mode=vinc.RunMode.FrameworkLoop):
 
 FrameworkLoop runs pumpLoop and forbids main override; Manual requires main, choosing pumpOnce/pumpLoop or a user pump thread. Lifecycle success returns None, failure raises. Shell hook returns int32, where nonzero is command failure rather than Module fault. Completion returns string lists; naming may consume mutable args. Other hook args are local lists excluding the Shell type/instance token.
 
+Optional parallel dispatch uses immutable `vinc.PumpOptions(topic_workers=N)`:
+FrameworkLoop subclasses pass `pump_options=...` beside `mode=...`; the native
+adapter copies it after construction. Manual passes it to `context.pumpLoop(options)`.
+Manual class-level options are rejected rather than ignored. Omission retains zero
+additional workers; the common Context validates the worker ceiling before dispatch.
+See the [shared contract and evidence](../PARALLEL_PUMP.md) and
+[runnable C++/Python tutorial](../../../../examples/userExampleModule/PARALLEL_PUMP.md).
+
+Python 使用不可變的 `PumpOptions(topic_workers=N)`。FrameworkLoop 在 class 宣告的
+`mode` 旁指定 `pump_options`；Manual 則傳給 `context.pumpLoop()`，不接受會被忽略的
+class 設定。省略即不加 worker，超過共用上限會明確失敗；詳細順序與驗收見上述連結。
+
 FrameworkLoop 由框架執行 `context.pumpLoop()`，不能覆寫 main。Manual 必須實作 main；
 可自行呼叫 pumpOnce／pumpLoop 或建立自己的 pump thread。
 生命週期 hooks 的成功回傳是 None；失敗使用 Python exception。Shell hook 明確回 int32，非零代表命令失敗，不是 Module 故障。
@@ -613,7 +758,7 @@ Context 無公開建構子，來自框架建立的 BaseModule；成功 import �
 - SDK never auto-recovers. Catch VincError/ValueError etc according to application policy.
 - Escaping hooks preserve traceback/PythonException and existing VincError causes, bounded by 32 KiB python_traceback_bytes.
 - Escaping Python Shell/completion exceptions latch Module failure even if Manual ignores pump Results; C++ Shell command failure remains distinct. Malformed external requests do not become hook exceptions.
-- Callbacks run on pump; native waits release GIL, Python access acquires it. Heartbeat/watchdog neither run Python nor acquire GIL; one native control service/process.
+- Default callbacks run on the pump caller. With Topic workers enabled, different Topics may overlap; same-Topic callbacks remain serial, while Param/Shell/RPC stay on the coordinator. Native waits/worker joins release GIL; Python calls and reference retirement acquire it. Heartbeat/watchdog never acquire GIL. Pure-Python CPU parallelism is not promised.
 - User-thread exceptions are not guaranteed detected; manage/join threads in on_stop.
 - Successful Manual main uses Finishing/Completed, no restart; failures follow ModulePolicy. Hook/call-drain/object cleanup stays supervised and may be terminated when stuck.
 - After supervised cleanup, os._exit avoids unbounded interpreter finalization. No atexit/final-GC promise; required cleanup belongs in on_stop. Python stdout/stderr are UTF-8/unbuffered. Before native import/local watchdog, central startup deadlines still protect launch.
@@ -626,7 +771,7 @@ Context 無公開建構子，來自框架建立的 BaseModule；成功 import �
   若原本是 VincError，同時保存其結構化原因鏈。診斷文字上限是 config::python_traceback_bytes（32 KiB）。
 - Python Shell 命令／補全的未處理例外會鎖定 Module 故障，即使 Manual 忽略 pump 失敗也會終止；
   C++ Shell hooks 保留原有命令失敗契約。外來畸形請求不因這項 Python 政策變成使用者 hook 例外。
-- callback 只在 pump 呼叫端執行；原生等待期間釋放 GIL，接觸 Python 物件時取得 GIL。
+- 預設 callback 在 pump 呼叫端執行；啟用 worker 後不同 Topic 可並行，同 Topic 序列，Param／Shell／RPC 留在協調端。原生等待／join 釋放 GIL，Python 呼叫與引用銷毀取得 GIL，不承諾純 Python CPU 平行加速。
   heartbeat 與 watchdog 不執行 Python、不取得 GIL；每個程序只有一份原生控制服務。
 - 使用者自建 Python thread 的未處理例外不保證被框架偵測；必須自行管理與在 on_stop 中 join。
 - main 正常返回走既有 Finishing／Completed 協定，不自動重啟；失敗依 ModulePolicy 處理。
@@ -693,7 +838,7 @@ loan.data().y.assign([4, 5])
 publisher.commit(loan)
 
 subscriber = self.context.subscribe(messages.test, "camera/samples", self.received)
-# self.received(message) returns None and runs on the pump caller.
+# Returns None; runs on the pump caller by default, or its Topic worker when opted in.
 latest = subscriber.get_last()
 ```
 
@@ -708,7 +853,7 @@ latest = subscriber.get_last()
 - message.copy retains content/metadata; assign retains destination metadata. Serialization images omit transport metadata. copy.copy(record view) makes a value copy without colliding with legal copy fields; constants are read-only mappings/raw bytes. Keywords use getattr/setattr.
 - Six metadata getters are read-only. Unix/monotonic unsigned 64 nanoseconds use Python int. format_utc rejects negative/>uint64 inputs. Framework fills metadata, with no setters; hash is compile-time.
 - Local views keep owners, not deleted/reused nodes. Python references do not extend shared writable leases. No raw pointer/memoryview/NumPy zero-copy API.
-- Concurrent operations on a Pub/Sub or messages during push/commit return OperationInProgress. Native waits release GIL without extra pump/heartbeat/control threads.
+- Concurrent operations on a Pub/Sub or messages during push/commit return OperationInProgress. Native waits release GIL. Only explicit PumpOptions adds Topic workers; no extra heartbeat/control service is created.
 
 - PublisherOptions／SubscriberOptions、StartPosition 位於 `vinc.message_bus`；傳給 advertise／subscribe 的 `options`。
   容量、至少兩個 slot、碰撞等待及丟失統計沿用 C++ Bus。`stats()` 回傳獨立統計物件。
@@ -739,7 +884,7 @@ latest = subscriber.get_last()
 - 本地訊息 view 保留其 owner；移除的巢狀節點不因索引再利用而復活。
   共享 loan 的 view 不因保存 Python 參照而延長發布有效期。沒有 raw pointer、memoryview 或 NumPy 零拷貝入口。
 - 單一 Publisher／Subscriber 的同時操作，以及 push／commit 進行中的訊息存取，回報 OperationInProgress。
-  原生等待釋放 GIL；沒有增加 pump、heartbeat 或控制服務執行緒。
+  原生等待釋放 GIL；只有明確指定 PumpOptions 才加 Topic worker，不增加 heartbeat／控制服務。
 
 <a id="param-與-log"></a>
 
@@ -844,13 +989,22 @@ was subsequently repaired and passed focused native Mac Debug/Release checks.
 上述為該輪結果；範例 fixture 後續已修復並通過 Mac Debug／Release 定點補驗，見上方範例連結。
 原始數字、乾淨 SDK 與限制統一維護於上述報告；其他平台歷史紀錄不變。
 
+## macOS 來源 Python 補驗（2026-11-11）
+
+Plugin entry 19／bootstrap v16 的 Debug、Release 均重新編譯 CPython 3.12.14 binding，
+並完成來源 Python／GIL、並行 pump、RPC 及三項 Param 遷移驗收。
+[主報告](../MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)保留首輪兩項失敗、隔離證據及最終結果。
+Shell fixture 改用 canonical 暫存路徑；C++ parallel 教學的 status 主動 flush，
+未延長期限或更改 Runtime。後續[第三階段](../../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補乾淨 SDK-only、多 App／分類部署、搬移 Python 與掃描案例；來源／交付證據各自維護。
+
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
 
 <a id="msvc-1951-static-import-review"></a>
 
-### MSVC 19.51 static import review / 靜態匯入清單待核對
+### MSVC 19.51 static import review / 靜態匯入檢查修正
 
 During Param stage-one validation on Windows x64, a Release binding built with
 MSVC 19.51.36257 (toolset 14.51.36231) and CPython 3.13.12 was rejected by
@@ -868,7 +1022,66 @@ Release binding 被 `cmake/runtime_metadata.py` 拒絕：產物包含目前靜�
 不是 Param 或 CRT 崩潰證據。同條測試流程改用 MSVC 19.44.35229 已通過；
 後續應追查匯入來源並核對 Windows API-set 支援契約，本輪未放寬防護。
 
-Current pending validation is tracked in the [root TODO](../../../../TODO.md).
+The paragraphs above and immediately below preserve the original blocked runs;
+the follow-up validation supersedes their pending status.
+上述與下段保留當時的阻擋紀錄；後續驗收取代其中待驗狀態。
+
+**Publisher-default follow-up (2026-11-04):** the same MSVC 19.51.36257 /
+14.51.36231, CPython 3.13.12 Release check rejected imports
+`api-ms-win-core-synch-l1-2-0.dll`, `kernel32.dll`, `python313.dll`, `ws2_32.dll`.
+Dumpbin identifies `WaitOnAddress` and `WakeByAddressAll` in the API-set entry.
+This matches the earlier blocker; it does not establish safety or a Param
+regression. No import policy was relaxed and no compiler was installed. Native
+C++ validation uses the same compiler; Windows Python runtime acceptance remains
+pending. Raw evidence: ignored `build/publisher-param/windows-build-3.log`.
+
+**Publisher 預設補驗：** 本輪以同一 19.51 工具集再次遇到既有阻擋，匯入符號如上。
+未據此宣稱 DLL 安全或 Param 回歸，也未放寬清單或安裝工具鏈。Windows 原生 C++
+沿用同一編譯器驗證，Python 執行期仍待驗；原始 log 位於上述 Git 忽略路徑。
+
+**Import-policy follow-up (2026-11-04):** removed the four-name system-DLL
+allowlist. The build rejects direct dynamic CRT imports in the VINC extension,
+while other DLL names remain compact local diagnostics in `_msvc_runtime.json`.
+This does not inspect Python's loaded DLLs or certify third-party transitive
+dependencies. The current contract is [above](#windows-msvc-runtime-preflight).
+
+Windows 11 x64 build 26200, MSVC 19.51.36257 / toolset 14.51.36231,
+CPython 3.13.12, CMake 4.3.2 and Ninja 1.13.2: the Release source build and
+`vinc_check_python_runtime` passed. The actual extension imports the synchronization
+API set, `kernel32.dll`, `python313.dll` and `ws2_32.dll`, without direct CRT imports.
+The selected CTests passed **9/9**, including metadata (**11** unit tests),
+loader (**21** tests), Python lifecycle/messages/services/RPC and Publisher defaults.
+Old MSVCP 14.29 and WinRT 3.2.1 import-order tests ran without skips; WinRT Array
+and message operations were exercised, not OCR. `PYTHONMALLOC=debug` and
+faulthandler were enabled. No system DLL was replaced or unloaded.
+
+The maintained `sdk.installed_python` script also passed against a clean, moved
+SDK and fresh consumer: custom messages, Bus/RPC/Param, Publisher defaults,
+normal shutdown, schema changes, ABI failure isolation, metadata repair and
+disabled-feature cleanup. Its fixture preloaded the old MSVCP 14.29 before Vinc
+for the real service flows. No existing consumer build or source SDK was available
+to the relocated App. This acceptance does not assert default-port UI availability.
+
+WSL2 Ubuntu 24.04, GCC/libstdc++ 13.3, glibc 2.39 and CPython 3.12.3:
+metadata **11/11**, loader **15 passed / 6 Windows-only skipped**, and real Python
+lifecycle/messages/services/RPC **4/4** passed. This reused the preceding native
+Release build with the synchronized Python scripts; Linux runtime linkage is unchanged.
+Windows Debug and native macOS were not rerun for this Windows import-policy change.
+These selections are not a complete-project CTest run.
+
+**匯入政策修正補驗：** 已移除四個系統 DLL 名稱的白名單，只拒絕 VINC 擴充本身
+直接匯入動態 CRT。其他相依名稱留在本機 metadata，不蒐集程序 DLL 或主動上傳。
+同一 MSVC 19.51 的 Release 建置、靜態連結檢查及九組選定測試全過，包含舊 DLL
+與 WinRT 先載入。這輪測 WinRT Array／訊息，不宣稱重跑 OCR。WSL 四組實際服務
+測試全過；Windows Debug、原生 Mac 與全專案測試不在本次補驗範圍。
+乾淨 installed Python SDK 腳本亦完整通過，涵蓋搬移、自訂訊息、Bus／RPC／Param、
+Publisher 預設、失敗隔離、修復與清理；實際服務流程先載入舊 MSVCP 14.29。
+這不代表預設端口 UI 驗收完成。收尾確認 Windows／WSL 無本輪測試程序殘留，
+WSL 的 717 個非 Markdown 來源檔與工作樹一致。
+Raw local evidence / 本機原始證據：ignored `build/python-import-policy/`, containing
+build/test logs, JUnit and result summaries. An initial sandbox-only unit run hit
+temporary-directory permissions; rerunning with normal test permissions passed.
+
 The records below preserve completed rollout stages and historical diagnosis;
 they are not an uncompleted implementation checklist. Current Windows bindings
 use static CRT; the retained dynamic-mode guard does not impose its DLL version
@@ -1242,12 +1455,16 @@ Native macOS Debug/Release subsequently passed these six scenarios; see the
 
 ## Python RPC（2026-10-14） / Python RPC (2026-10-14)
 
-Context register_rpc/call_rpc/rpc_stats share native Host/shared-memory protocols. Immediate admission raises; completion gets reply/error: (RpcStatus, Response)/None or None/VincError. Handlers return RpcStatus, completions None. Pump runs callbacks; escaping exceptions retain diagnostics/fault the Module.
+Context provides register_rpc/rpc_client/call_rpc/rpc_stats. Reusable RpcClient callbacks
+run through pump; synchronous call_rpc uses RpcMessages and releases the GIL while waiting,
+without requiring caller pump. Both use module.service addresses. Immediate errors raise
+VincError; async callbacks receive reply/error. Closing suppresses future callbacks without
+cancelling remote work; teardown clears tracked captures. Escaping callbacks fault only that
+Module. See RPC for the complete signatures, Busy/timeout and response ownership rules.
 
-Context 現在提供 register_rpc、call_rpc、rpc_stats，與 C++ 共用 Host／共享記憶體協定。
-同步 admission 失敗拋 VincError，非同步完成使用 completed(reply, error)；框架失敗時 error
-是 VincError，成功 reply 為 (RpcStatus, Response)。Handler 回傳 RpcStatus，completion 回傳 None。
-Callback 都在 pump 執行；未處理 Python 例外保留診斷並使該 Module 失敗。
+Context 提供同步 RpcMessages 呼叫與可重複非同步 RpcClient，地址統一為 module.service。
+同步等待釋放 GIL、不需 caller pump；callback 仍由 pump 執行，進入前解除 Busy。
+錯誤沿用 VincError；未處理 callback 例外保留診斷並使該 Module 失敗。完整契約由 RPC 維護。
 
 See [RPC](../../rpc/README.md) and [comparison examples](../../../../examples/rpc/README.md).
 

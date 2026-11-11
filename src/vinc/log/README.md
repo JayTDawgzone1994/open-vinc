@@ -121,18 +121,28 @@ Each record includes Vinc name/startup identity, Module name/MID/PID, central co
 
 ## Files and capacity / 檔案與容量
 
-Default: `<Vinc executable directory>/vinc_data/<INSTANCE_NAME>/logs/YYYY-MM-DD/vinc-00000000000000000001.log`. Central startup initializes storage; Module authors manage neither spdlog nor files.
+Default: `<Vinc executable directory>/vinc_data/<INSTANCE_NAME>/logs/YYYY-MM-DD/vinc-00000000000000000001.log`. Central startup initializes storage when file output is enabled; Module authors manage neither spdlog nor files.
 
 預設路徑：`<Vinc 執行檔目錄>/vinc_data/<INSTANCE_NAME>/logs/YYYY-MM-DD/vinc-00000000000000000001.log`。
-由中央啟動自動初始化；Module 使用者不操作 spdlog 或檔案。
+啟用檔案輸出時由中央啟動自動初始化；Module 使用者不操作 spdlog 或檔案。
+
+The three [file Log parameters](FILE_PARAMS.md) use Limited/App declarations:
+`vinc.log_file_enabled`, `vinc.log_file_bytes`, `vinc.log_total_bytes`.
+Save changes and restart the App to apply them; `log reopen` retains startup settings.
+Disabled output preserves collection/display and existing files, without a disk queue.
+
+三項 [檔案 Log 參數](FILE_PARAMS.md) 使用 Limited／App，保存後重新啟動 App 套用；
+reopen 保持本次啟動設定。停用只關寫檔，不影響收集／顯示，不排磁碟佇列或修改既有檔案。
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| config::log_file_enabled / FileOptions::enabled | true | Enable file output at startup |
 | config::log_file_bytes / FileOptions::max_file_bytes | 16 MiB | Per-file limit |
 | config::log_total_bytes / FileOptions::max_total_bytes | 128 MiB | All managed date directories combined |
 
 | 設定 | 預設 | 含義 |
 | --- | --- | --- |
+| `config::log_file_enabled`／`FileOptions::enabled` | true | 啟動時允許寫檔 |
 | `config::log_file_bytes`／`FileOptions::max_file_bytes` | 16 MiB | 每個檔案的上限 |
 | `config::log_total_bytes`／`FileOptions::max_total_bytes` | 128 MiB | 所有受管理日期目錄的檔案總上限 |
 
@@ -160,9 +170,9 @@ Default: `<Vinc executable directory>/vinc_data/<INSTANCE_NAME>/logs/YYYY-MM-DD/
   不表示已寫入檔案。Shell 已關閉後的最後失敗，中央以 stderr 留下數值診斷，不遞迴寫入 Log。
   Fatal shared report 始終獨立。
 
-Budgets/intervals live in config; this work did not migrate existing settings into Param.
+Other budgets/intervals remain in config. Only the three settings above are wired to Param.
 
-所有新預算／間隔放在 config；本輪沒有把既有設定遷入 Param。
+其他預算／間隔仍在 config，只有上述三項明確接上 Param。
 
 <a id="shell"></a>
 
@@ -229,10 +239,10 @@ Recorded 2026-10-09 on Windows x64/MSVC: Debug/Release builds and full **67/67**
 ### Outstanding issues / 待處理事項
 
 - OS limitation: synchronous filesystem I/O can block indefinitely, preventing bounded writer join. File work does not hold the central Log mutex, so collector/Module control do not wait on that lock. No detach-based abandoned-worker fallback exists.
-- Native Linux/macOS builds and behavior remain to be validated; Windows results do not prove all platforms.
+- Native macOS acceptance of the current file-Param change remains pending. Keep platform/revision evidence separate; see [file-Param validation](FILE_PARAMS.md#validation--驗證).
 - Crashes, unflushed CRT output, unfenced disconnects, or disk failures can lose records. Log is not a crash-dump tool.
 
 - 已知 OS 能力限制：同步檔案 I/O 若被 OS／filesystem 長期卡住，writer join 無法保證有限時間；
   collector／Module control 不因檔案 I/O 持中央 Log mutex。沒有以 detach 遺留背景資源的替代路徑。
-- 平台待驗證：Linux／macOS 仍須實機建置及行為驗證，Windows 結果不代表三平台已通過。
+- 本次檔案 Param 的 macOS 原生驗收仍待完成；各平台／版本證據分開記錄，見上述驗證連結。
 - 策略限制：程序 crash、CRT 未 flush、無 fence 斷線或磁碟故障可能遺失 Log；這不是 crash dump 工具。

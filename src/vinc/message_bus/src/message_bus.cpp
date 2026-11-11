@@ -14,6 +14,9 @@
 #ifdef VINC_MESSAGE_BUS_TESTING
 #include "bus_test_hooks.hpp"
 #endif
+#ifdef VINC_SHUTDOWN_TESTING
+#include "shutdown_test_hooks.hpp"
+#endif
 
 namespace vinc::message_bus::detail {
 namespace {
@@ -119,7 +122,14 @@ struct Transport {
 
     // Caller holds mutex; closing the session makes an unknown registration result
     // terminal instead of replaying a potentially successful remote mutation.
+#ifdef VINC_SHUTDOWN_TESTING
+    void fail_locked(std::source_location location = std::source_location::current()) {
+        if (!closed) {
+            shutdown_test::first_bus_close(location);
+        }
+#else
     void fail_locked() {
+#endif
         closed = true;
         connection.close();
         changed.notify_all();
@@ -241,10 +251,18 @@ struct Transport {
         }
     }
 
-    bool receive(control::Frame frame) {
+    Result<void> receive(control::Frame frame) {
         std::unique_lock lock(mutex);
-        if (closed || frame.domain != message_bus_domain || !supported_operation(frame.operation)) {
-            return false;
+#ifdef VINC_SHUTDOWN_TESTING
+        shutdown_test::bus_receive(closed, frame);
+#endif
+        if (closed) {
+            return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Receive});
+        }
+
+        const auto protocol_failure = std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Receive});
+        if (frame.domain != message_bus_domain || !supported_operation(frame.operation)) {
+            return protocol_failure;
         }
 
         control::Reader reader(frame.payload);
@@ -256,30 +274,33 @@ struct Transport {
                 // envelope must still be valid; no topology or mutation state is applied.
                 if (!decode_response(frame.payload)) {
                     fail_locked();
-                    return false;
+                    return protocol_failure;
                 }
-                return true;
+                return {};
             }
             if (found == pending.end() || found->second.operation != frame.operation ||
                 found->second.response) {
                 fail_locked();
-                return false;
+                return protocol_failure;
             }
 
             auto response = decode_response(frame.payload);
             if (!response) {
                 fail_locked();
-                return false;
+                return protocol_failure;
             }
 
             if (!response->failure && frame.operation == Advertise) {
                 control::Reader publication_reader(response->body);
+                const auto requested_slots = publication_reader.u32();
                 auto descriptor = decode_descriptor(publication_reader);
                 auto targets = decode_notification_targets(publication_reader);
-                if (!descriptor.id || !targets || notification_routes.contains(descriptor.id)) {
+                if (!requested_slots || requested_slots > maximum_ring_buffer_slots ||
+                    !publication_reader.done() || !descriptor.id || !targets ||
+                    notification_routes.contains(descriptor.id)) {
                     receive_failure = Error{ErrorCode::Protocol, ErrorOperation::Receive};
                     fail_locked();
-                    return false;
+                    return protocol_failure;
                 }
                 auto routes = std::make_shared<NotificationRoutes>();
                 notification_routes.emplace(descriptor.id, routes);
@@ -287,7 +308,7 @@ struct Transport {
                 install_notification_targets(*routes, *targets, notification_totals);
                 lock.lock();
                 if (closed) {
-                    return false;
+                    return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Receive});
                 }
             }
 
@@ -297,7 +318,7 @@ struct Transport {
                 const auto count = subscription_reader.u32();
                 if (!id || count > detail::maximum_attached_publishers || topology.contains(id)) {
                     fail_locked();
-                    return false;
+                    return protocol_failure;
                 }
 
                 std::map<std::uint64_t, Attachment> attachments;
@@ -305,13 +326,13 @@ struct Transport {
                     auto attachment = decode_attachment(subscription_reader);
                     if (!attachments.emplace(attachment.descriptor.id, std::move(attachment)).second) {
                         fail_locked();
-                        return false;
+                        return protocol_failure;
                     }
                 }
 
                 if (!subscription_reader.done()) {
                     fail_locked();
-                    return false;
+                    return protocol_failure;
                 }
                 // Install topology before waking request(): later Attach events must
                 // already recognize this subscription even if its caller has not resumed.
@@ -320,12 +341,12 @@ struct Transport {
 
             found->second.response = std::move(frame);
             changed.notify_all();
-            return true;
+            return {};
         }
 
         if (frame.kind != control::Kind::Event || frame.request) {
             fail_locked();
-            return false;
+            return protocol_failure;
         }
 
         const auto id = reader.u64();
@@ -333,17 +354,17 @@ struct Transport {
             auto targets = decode_notification_targets(reader);
             if (!id || !targets) {
                 fail_locked();
-                return false;
+                return protocol_failure;
             }
             auto found = notification_routes.find(id);
             if (found == notification_routes.end()) {
                 // A local close can retire the Publisher before an ordered event arrives.
-                return true;
+                return {};
             }
             auto routes = found->second;
             lock.unlock();
             install_notification_targets(*routes, *targets, notification_totals);
-            return true;
+            return {};
         }
         auto target = topology.find(id);
         if (frame.operation == Attach) {
@@ -351,21 +372,21 @@ struct Transport {
             if (!reader.done() || !attachment.descriptor.id ||
                 attachment.reader >= attachment.descriptor.readers) {
                 fail_locked();
-                return false;
+                return protocol_failure;
             }
             // A queued topology event can arrive after local unsubscribe.
             if (target != topology.end()) {
                 if (target->second.size() >= maximum_attached_publishers ||
                     !target->second.emplace(attachment.descriptor.id, std::move(attachment)).second) {
                     fail_locked();
-                    return false;
+                    return protocol_failure;
                 }
             }
         } else if (frame.operation == Detach) {
             const auto publisher = reader.u64();
             if (!reader.done()) {
                 fail_locked();
-                return false;
+                return protocol_failure;
             }
 
             if (target != topology.end()) {
@@ -373,10 +394,10 @@ struct Transport {
             }
         } else {
             fail_locked();
-            return false;
+            return protocol_failure;
         }
 
-        return true;
+        return {};
     }
 };
 
@@ -954,7 +975,6 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
         // Allocate local ownership before the remote mutation so failures can clean up.
         auto core = std::make_shared<detail::PublisherCore>();
         core->transport = impl_->transport;
-        core->requested = options.slots;
         control::Bytes payload;
         auto encoded = control::put_string(payload, topic);
         if (!encoded) {
@@ -962,8 +982,20 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
                 vinc::wrap_error(ErrorCode::InvalidArgument, ErrorOperation::Advertise, encoded.error()));
         }
         control::put_u64(payload, schema);
-        control::put_u32(payload, options.slots);
-        control::put_u64(payload, options.max_message_bytes);
+        std::uint32_t present = 0;
+        if (options.slots) {
+            present |= detail::publisher_slots_present;
+        }
+        if (options.max_message_bytes) {
+            present |= detail::publisher_bytes_present;
+        }
+        control::put_u32(payload, present);
+        if (options.slots) {
+            control::put_u32(payload, *options.slots);
+        }
+        if (options.max_message_bytes) {
+            control::put_u64(payload, *options.max_message_bytes);
+        }
         auto result = impl_->transport->request(detail::Advertise, std::move(payload));
         if (!result) {
             return std::unexpected(result.error());
@@ -974,11 +1006,18 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
 #ifdef VINC_MESSAGE_BUS_TESTING
         detail::testing::checkpoint(detail::testing::FaultPoint::DescriptorDecode);
 #endif
+        const auto requested_slots = reader.u32();
         auto descriptor = detail::decode_descriptor(reader);
         auto targets = detail::decode_notification_targets(reader);
-        if (!targets || !reader.done() || !descriptor.id || descriptor.schema != schema) {
+        const bool valid_request = requested_slots != 0 && requested_slots <= detail::maximum_ring_buffer_slots;
+        const bool matching_request = !options.slots || requested_slots == *options.slots;
+        const bool matching_slots = descriptor.slots == (std::max)(detail::minimum_ring_buffer_slots, requested_slots);
+        const bool matching_bytes = !options.max_message_bytes || descriptor.bytes == *options.max_message_bytes;
+        if (!targets || !reader.done() || !descriptor.id || descriptor.schema != schema ||
+            !valid_request || !matching_request || !matching_slots || !matching_bytes) {
             return std::unexpected(vinc::make_error(ErrorCode::Protocol, ErrorOperation::Advertise));
         }
+        core->requested = requested_slots;
         cleanup.id = descriptor.id;
         {
             std::lock_guard lock(impl_->transport->mutex);
@@ -1169,11 +1208,11 @@ detail::RuntimeAccess::create(ControlTransport connection) {
 
 vinc::Result<void> detail::RuntimeAccess::receive(Client& client, control::Frame frame) {
     try {
-        if (client.impl_->transport->receive(std::move(frame))) {
-            return {};
+        auto received = client.impl_->transport->receive(std::move(frame));
+        if (!received) {
+            shutdown(client);
         }
-        shutdown(client);
-        return std::unexpected(vinc::Error{ErrorCode::Protocol, ErrorOperation::Receive});
+        return received;
     } catch (const std::bad_alloc&) {
         shutdown(client);
         return std::unexpected(vinc::Error{ErrorCode::ResourceExhausted, ErrorOperation::Receive});

@@ -2,6 +2,11 @@
 #include <vinc_messages/SdkPacket.hpp>
 #include <iostream>
 #include <optional>
+#include <array>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #ifdef _WIN32
 #include <process.h>
 #else
@@ -12,9 +17,49 @@ class NativePeer final : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
     using Packet = vinc::SdkPacket;
     std::optional<vinc::message_bus::Publisher<Packet>> publisher_;
     std::optional<vinc::message_bus::Subscriber<Packet>> subscriber_;
+    std::optional<vinc::message_bus::Publisher<Packet>> second_publisher_;
+    std::optional<vinc::message_bus::Subscriber<Packet>> second_subscriber_;
+    std::mutex gate_mutex_;
+    std::condition_variable gate_changed_;
+    std::array<std::thread::id, 2> callback_threads_{};
+    std::array<std::unique_ptr<Packet>, 2> retained_;
+    std::size_t arrived_ = 0;
+
+    void receive(std::size_t index, std::unique_ptr<Packet> message) {
+        constexpr auto overlap_timeout = std::chrono::seconds(5);
+        if (message->publisher_name() != "py" || message->data().value != Packet::revision) {
+            std::cerr << "INVALID_PYTHON_PAYLOAD\n" << std::flush;
+            return;
+        }
+
+        // The first callback cannot finish before the other Topic enters. The
+        // condition-variable wait releases the application mutex, not pump ownership.
+        {
+            std::unique_lock lock(gate_mutex_);
+            callback_threads_[index] = std::this_thread::get_id();
+            ++arrived_;
+            gate_changed_.notify_all();
+            if (!gate_changed_.wait_for(lock, overlap_timeout, [this] { return arrived_ == 2; })
+                || callback_threads_[0] == callback_threads_[1]) {
+                std::cerr << "INVALID_PYTHON_PAYLOAD: native parallel gate\n" << std::flush;
+                return;
+            }
+        }
+
+        message->data().value = Packet::revision + 1;
+        auto& publisher = index == 0 ? publisher_ : second_publisher_;
+        auto sent = publisher->push(*message);
+        if (!sent) {
+            std::cerr << vinc::error_to_string(sent.error()) << '\n' << std::flush;
+            return;
+        }
+
+        // Each index has one writer. Runtime drains both before on_stop reads.
+        retained_[index] = std::move(message);
+    }
 
 public:
-    NativePeer() : BaseModule("native") {
+    NativePeer() : BaseModule("native", {.topic_workers = 2}) {
     }
 
     vinc::Result<void> on_start(const std::vector<std::string>& arguments) override {
@@ -93,26 +138,41 @@ public:
 
         publisher_.emplace(std::move(*publisher));
         auto subscriber = context.subscribe<Packet>("sdk/request", [this](std::unique_ptr<Packet> message) {
-            if (message->publisher_name() != "py" || message->data().value != Packet::revision) {
-                std::cerr << "INVALID_PYTHON_PAYLOAD\n" << std::flush;
-                return;
-            }
-
-            message->data().value = Packet::revision + 1;
-            auto sent = publisher_->push(*message);
-            if (!sent) {
-                std::cerr << vinc::error_to_string(sent.error()) << '\n' << std::flush;
-            }
+            receive(0, std::move(message));
         });
         if (!subscriber) {
             return std::unexpected(subscriber.error());
         }
 
         subscriber_.emplace(std::move(*subscriber));
-        return context.register_rpc<Packet, Packet>("echo", {}, [](const Packet& request, Packet& response) {
+        auto second_publisher = context.advertise<Packet>("sdk/reply2");
+        if (!second_publisher) {
+            return std::unexpected(second_publisher.error());
+        }
+
+        second_publisher_.emplace(std::move(*second_publisher));
+        auto second_subscriber = context.subscribe<Packet>("sdk/request2", [this](std::unique_ptr<Packet> message) {
+            receive(1, std::move(message));
+        });
+        if (!second_subscriber) {
+            return std::unexpected(second_subscriber.error());
+        }
+
+        second_subscriber_.emplace(std::move(*second_subscriber));
+        return context.register_rpc<Packet, Packet>("echo", [](const Packet& request, Packet& response) {
             response.data().value = request.data().value.get() + 2;
             return vinc::rpc::RpcStatus::success();
-        });
+        }, {});
+    }
+
+    vinc::Result<void> on_stop() override {
+        // Wrong-Python-ABI tests deliberately leave this peer without deliveries.
+        if (retained_[0] && retained_[1]
+            && retained_[0]->data().value == Packet::revision + 1
+            && retained_[1]->data().value == Packet::revision + 1) {
+            std::cout << "INSTALLED_CPP_PARALLEL_OK\n" << std::flush;
+        }
+        return {};
     }
 
     vinc::Result<std::int32_t> module_interface(std::vector<std::string>) override {

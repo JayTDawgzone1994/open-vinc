@@ -61,11 +61,17 @@ class ContextModule : public BaseModule<RunMode::Manual> {
                 publish(3);
                 auto recursive = context.pumpOnce();
                 require(!recursive && recursive.error().is(module_system::ErrorCode::Busy), "recursive pump rejected");
+                auto waiting = context.waitForWork();
+                require(!waiting && waiting.error().is(module_system::ErrorCode::Busy) &&
+                        waiting.error().is_operation(module_system::ErrorOperation::WaitForWork),
+                        "callback cannot wait or consume a notification");
                 require(take(subscriber_->get_last())->data().sequence.get() == 3, "callback can read latest");
             }
         })));
         publish(1);
         publish(2);
+        take(context.waitForWork());
+        require(received_.empty(), "waiting does not dispatch or advance the subscription");
         auto first = take(context.pumpOnce());
         require(first.callbacks == 2 && received_ == std::vector<std::uint64_t>{1, 2}, "batch freezes upper boundary");
         require(take(subscriber_->get_last())->data().sequence.get() == 3, "latest leaves callback cursor");
@@ -191,6 +197,13 @@ public:
             });
             while (context.living()) {
                 std::this_thread::sleep_for(application_poll_interval);
+            }
+        } else if (mode_ == "wait-loop") {
+            while (context.living()) {
+                const auto pumped = take(context.pumpOnce());
+                if (pumped.callbacks == 0 && pumped.commands == 0) {
+                    take(context.waitForWork());
+                }
             }
         } else if (mode_ == "loop") {
             return context.pumpLoop();

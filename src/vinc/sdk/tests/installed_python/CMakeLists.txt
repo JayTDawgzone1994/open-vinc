@@ -42,5 +42,7 @@ endif()
 # Late registration must reach the Python extension too.
 add_message_dir(messages)
 add_module(python_peer MODULE_TYPE_NAME NativePeer SOURCES peer.cpp)
+add_module(rpc_probe MODULE_TYPE_NAME RpcProbe SOURCES rpc_probe.cpp)
+add_subdirectory(python)
 set_target_properties(PythonApp PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/application output")

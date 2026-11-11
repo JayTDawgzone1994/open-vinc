@@ -49,13 +49,15 @@ constexpr const char* usage =
 #else
     "            [-S file.tcl [args...]]\n"
 #endif
-    "Defaults: 127.0.0.1:5500, 30-second disconnect/send timeouts, 8 connections.\n"
+    "Defaults: 127.0.0.1:31410 (Param may override), 30-second disconnect/send timeouts, 8 connections.\n"
     "Raw TCP, no authentication or encryption. Port 0 selects an ephemeral port.\n";
 
 struct StartupOptions {
     std::filesystem::path script;
     std::vector<std::string> script_arguments;
     vinc::shell::SocketShellOptions network;
+    std::optional<std::string> shell_ip;
+    std::optional<std::uint16_t> shell_port;
     std::filesystem::path python;
 };
 
@@ -112,7 +114,7 @@ ParseAction parse_arguments(int argc, char** argv, StartupOptions& options) {
         }
 
         if (name == "--shell-ip") {
-            options.network.ip = argv[index];
+            options.shell_ip = argv[index];
             continue;
         }
 
@@ -124,7 +126,7 @@ ParseAction parse_arguments(int argc, char** argv, StartupOptions& options) {
         }
 
         if (name == "--shell-port" && number <= maximum_port) {
-            options.network.port = static_cast<std::uint16_t>(number);
+            options.shell_port = static_cast<std::uint16_t>(number);
         } else if (name == "--shell-disconnect-timeout" && number <= maximum_timeout_seconds) {
             options.network.disconnect_timeout = std::chrono::seconds(number);
         } else if (name == "--shell-send-timeout" && number >= minimum_send_timeout_seconds &&
@@ -159,7 +161,7 @@ std::string module_start_reason(const vinc::Error& error) {
     for (const auto& cause : error.causes()) {
         const auto detail = vinc::Error::from_raw(cause.domain, cause.code, cause.operation, cause.native);
         if (detail.is(vinc::ui::ErrorCode::BindFailed)) {
-            return "unable to listen on 127.0.0.1:" + std::to_string(vinc::config::ui_port);
+            return "unable to bind the configured UI endpoint; check ui.port and diagnostic details";
         }
     }
 #endif
@@ -243,13 +245,6 @@ vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupRep
 
     report.entries.push_back({"Module Manager", "process supervision initialized", {}});
     auto& manager = **owner;
-    auto logging = vinc::detail::ManagerAccess::configure_log(manager, *directory / "vinc_data");
-    if (!logging) {
-        report.entries.push_back({"Log", "file output unavailable", logging.error()});
-    } else {
-        report.diagnostics_available = true;
-        report.entries.push_back({"Log", "file output configured", {}});
-    }
     auto parameters = vinc::detail::ManagerAccess::configure_params(manager, *directory / "vinc_data");
     if (!parameters) {
         // Persistence failure leaves the live service available with registered defaults.
@@ -258,6 +253,19 @@ vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupRep
     } else {
         report.entries.push_back({"Parameters", "persistence configured", {}});
     }
+
+    // Load and validate the requested policy before the first filesystem Log
+    // operation. StartupReport retains errors while no file destination exists.
+    auto logging = vinc::detail::ManagerAccess::configure_log_from_params(manager, *directory / "vinc_data");
+    if (!logging) {
+        report.entries.push_back({"Log", "file output unavailable", logging.error()});
+    } else if (!logging->enabled) {
+        report.entries.push_back({"Log", "file output disabled by startup settings; collection available", {}});
+    } else {
+        report.diagnostics_available = true;
+        report.entries.push_back({"Log", "file output configured", {}});
+    }
+
     // Shell must be destroyed before its manager. Reserve Shell/Tcl command names
     // before registering module factories, so collisions fail at registration.
     auto shell_owner = vinc::Shell::create(manager, std::cout);
@@ -272,7 +280,7 @@ vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupRep
     }
     report.entries.push_back({"Module Catalog", "built-in ModuleTypes registered", {}});
 
-    auto discovered = vinc::discover_python_modules(manager, *directory / "data" / "module",
+    auto discovered = vinc::discover_python_modules(manager, *directory / "modules" / "python",
         *directory / "python" / "vinc" / "bootstrap.py", options.python);
     if (!discovered) {
         report.entries.push_back({"Python discovery", "unable to scan Module sources", discovered.error()});
@@ -284,7 +292,12 @@ vinc::Result<void> run_services(StartupOptions& options, vinc::shell::StartupRep
         }
     }
 
-    const auto endpoint = shell.start_socket_shell(std::move(options.network));
+    auto network = shell.configure_socket_params(std::move(options.network), options.shell_ip, options.shell_port);
+    if (!network) {
+        return failed("Socket Shell", "unable to prepare listener parameters", network.error());
+    }
+
+    const auto endpoint = shell.start_socket_shell(std::move(*network));
     if (!endpoint) {
         return failed("Socket Shell", "unable to start listener", endpoint.error());
     }

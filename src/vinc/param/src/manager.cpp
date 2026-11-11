@@ -541,6 +541,54 @@ Result<Snapshot> ParamManager::inspect() {
     });
 }
 
+Result<ParamMap> ParamManager::read_current(std::vector<std::string> names) {
+    if (names.empty() || names.size() > config::param_entry_limit) {
+        return std::unexpected(Error{ErrorCode::InvalidValue, ErrorOperation::ReadCurrent});
+    }
+
+    auto result = call([this, names = std::move(names)]() -> Result<ParamMap> {
+        ParamMap selected;
+        for (const auto& name : names) {
+            if (!valid_name(name)) {
+                return std::unexpected(Error{ErrorCode::InvalidName, ErrorOperation::ReadCurrent});
+            }
+
+            const auto found = live_.entries.find(name);
+            if (found == live_.entries.end()) {
+                return std::unexpected(Error{ErrorCode::NotFound, ErrorOperation::ReadCurrent});
+            }
+
+            selected.emplace(found->first, found->second);
+        }
+        return selected;
+    });
+    if (!result) {
+        return std::unexpected(operation_error(ErrorOperation::ReadCurrent, result.error()));
+    }
+
+    return result;
+}
+
+Result<void> ParamManager::set_framework(std::string name, Value value) {
+    auto result = call([this, name = std::move(name), value = std::move(value)]() mutable -> Result<void> {
+        auto full = qualify("vinc", name);
+        if (!full || !valid_segment(name)) {
+            return std::unexpected(Error{ErrorCode::InvalidName, ErrorOperation::Set});
+        }
+
+        return set_value(central_owner, *full, std::move(value));
+    }, true);
+    if (!result) {
+        return std::unexpected(operation_error(ErrorOperation::Set, result.error()));
+    }
+
+    return result;
+}
+
+void ParamManager::report_framework(Error error, std::string message) {
+    report(error, std::move(message));
+}
+
 Result<std::string> ParamManager::command(std::vector<std::string> args, std::stop_token stop) {
     if (stop.stop_requested()) {
         return std::unexpected(Error{ErrorCode::Cancelled, ErrorOperation::Receive});

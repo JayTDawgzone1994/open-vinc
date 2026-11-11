@@ -10,6 +10,7 @@ namespace vinc::log {
 struct FileOptions {
     std::uint64_t max_file_bytes = config::log_file_bytes;
     std::uint64_t max_total_bytes = config::log_total_bytes;
+    bool enabled = config::log_file_enabled;
 };
 enum class Origin {
     Structured,

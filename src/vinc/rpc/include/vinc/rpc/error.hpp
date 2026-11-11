@@ -18,7 +18,10 @@ enum class ErrorCode : std::int32_t {
     TargetExited = 13,
     CallbackFailed = 14,
     IdExhausted = 15,
-    ResourceExhausted = 16
+    ResourceExhausted = 16,
+    Busy = 17,
+    BlockingCallInPump = 18,
+    SynchronousSelfCall = 19
 };
 enum class ErrorOperation : std::int32_t {
     Register = 1,

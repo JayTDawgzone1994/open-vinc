@@ -28,6 +28,7 @@ foreach(type FirstModule SecondModule SharedModule)
     file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/${type}-$<CONFIG>.path" CONTENT "$<TARGET_FILE:${type}>")
 endforeach()
 add_module(Unselected MODULE_TYPE_NAME Unselected SOURCES forbidden.cpp)
+add_python_module(script_peer MODULE_TYPE_NAME ScriptPeer SOURCES ScriptPeer.py)
 # Explicit fault injection is not a registered or selectable ModuleType.
 vinc_add_module_plugin(StalledOfficial module.cpp)
 set_property(TARGET StalledOfficial PROPERTY EXCLUDE_FROM_ALL TRUE)

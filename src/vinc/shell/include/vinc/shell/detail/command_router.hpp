@@ -5,6 +5,7 @@
 
 #include <vinc/module/host/module_manager.hpp>
 #include <vinc/shell/detail/command_line.hpp>
+#include <vinc/shell/detail/network_params.hpp>
 #include <map>
 #include <optional>
 
@@ -38,6 +39,7 @@ class CommandRouter {
         Session
     };
     ModuleManager& manager_;
+    std::shared_ptr<NetworkParams> network_params_;
     bool remote_session_ = false;
     const std::map<std::string, Builtin> builtins_{
         {"ui", Builtin::System},
@@ -62,8 +64,9 @@ class CommandRouter {
                                           const std::vector<std::string>& arguments);
 
 public:
-    explicit CommandRouter(ModuleManager& manager, bool remote_session = false)
-        : manager_(manager), remote_session_(remote_session) {
+    explicit CommandRouter(ModuleManager& manager, bool remote_session = false,
+                           std::shared_ptr<NetworkParams> network_params = {})
+        : manager_(manager), network_params_(std::move(network_params)), remote_session_(remote_session) {
     }
 
     Result<void> initialize();

@@ -23,6 +23,13 @@ add_dependencies(message_bus_module_tests message_bus_module_helper)
 add_test(NAME message_bus.module COMMAND message_bus_module_tests "$<TARGET_FILE:message_bus_module_helper>")
 set_tests_properties(message_bus.module PROPERTIES TIMEOUT 120)
 
+add_executable(message_bus_defaults_process_tests defaults_process_tests.cpp)
+target_link_libraries(message_bus_defaults_process_tests PRIVATE vinc_test_manager vinc::param_manager)
+add_dependencies(message_bus_defaults_process_tests message_bus_module_helper)
+add_test(NAME message_bus.defaults_process
+    COMMAND message_bus_defaults_process_tests "$<TARGET_FILE:message_bus_module_helper>")
+set_tests_properties(message_bus.defaults_process PROPERTIES TIMEOUT 90)
+
 # Compile the same implementation with local fault seams; never link the
 # production Bus library into this target or export its test-only definition.
 add_executable(message_bus_cleanup_tests

@@ -96,7 +96,9 @@ function(vinc_add_app target)
     set_target_properties(${target} PROPERTIES
         CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${target}/$<CONFIG>"
+        # App packages share one root, independent of the declaring subdirectory.
+        # Retain the configuration as an explicit part of the package identity.
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/output/${target}/$<CONFIG>"
         VINC_APP_GENERATED "${generated}" VINC_APP_IDENTITY "${APP_INSTANCE_NAME}")
     if(MSVC)
         target_compile_options(${target} PRIVATE /utf-8)
@@ -272,9 +274,24 @@ function(vinc_deploy_application app)
     endforeach()
     foreach(module IN LISTS modules)
         get_target_property(type ${module} VINC_MODULE_TYPE)
+        get_target_property(kind ${module} VINC_MODULE_KIND)
+        if(kind STREQUAL "python")
+            get_target_property(sources ${module} VINC_PYTHON_MODULE_SOURCES)
+            get_target_property(paths ${module} VINC_PYTHON_MODULE_PATHS)
+            list(LENGTH paths count)
+            math(EXPR last "${count} - 1")
+            foreach(index RANGE 0 ${last})
+                list(GET sources ${index} source)
+                list(GET paths ${index} path)
+                string(APPEND contents
+                    "list(APPEND module_sources [==[${source}]==])\n"
+                    "list(APPEND module_destinations [==[modules/python/${type}/${path}]==])\n")
+            endforeach()
+            continue()
+        endif()
         string(APPEND contents
             "list(APPEND module_sources [==[$<TARGET_FILE:${module}>]==])\n"
-            "list(APPEND module_destinations [==[modules/${type}/$<TARGET_FILE_NAME:${module}>]==])\n")
+            "list(APPEND module_destinations [==[modules/native/${type}/$<TARGET_FILE_NAME:${module}>]==])\n")
     endforeach()
     set(dependencies ${modules})
     if(with_python)

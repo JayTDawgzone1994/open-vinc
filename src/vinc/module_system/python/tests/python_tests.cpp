@@ -234,9 +234,9 @@ void lifecycle(const std::filesystem::path& python, const std::filesystem::path&
     check(!causes.empty() && causes.back().domain == ErrorDomain::ModuleSystem &&
           causes.back().code == static_cast<std::int32_t>(module_system::ErrorCode::Busy),
           "Python exception retains root cause through central protocol");
-    for (const auto& mode : {"finish", "main-error", "thread"}) {
+    for (const auto& mode : {"finish", "main-error", "thread", "wait"}) {
         auto manual = take(manager->start_module("manual", {"--name", "manualNode", mode}));
-        if (std::string_view(mode) == "thread") {
+        if (std::string_view(mode) == "thread" || std::string_view(mode) == "wait") {
             take(manager->wait_started(manual));
             check(take(manager->command(manual, {}, Clock::now() + command_timeout)) == 24, "manual pump thread");
             take(manager->stop_module(manual, Clock::now() + test_timeout));

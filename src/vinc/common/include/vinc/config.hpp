@@ -118,6 +118,9 @@ inline constexpr std::chrono::milliseconds notification_report_interval{1000};
 inline constexpr std::chrono::milliseconds module_runtime_poll_interval{20};
 // 每個 Context 可保留的 callback 訂閱項目數上限，不是每輪 callback 執行次數。
 inline constexpr std::size_t module_callback_limit = 256;
+// Maximum additional Topic workers per Context; zero is the serial default.
+// 單一 Context 可額外建立的 Topic worker 上限；不是建議或預設 thread 數。
+inline constexpr std::uint32_t module_topic_worker_limit = 32;
 
 
 // 【致命錯誤監督】中央管理出錯 Module 的退出寬限。
@@ -136,7 +139,8 @@ inline constexpr std::size_t error_chain_max_depth = 3;
 static_assert(error_chain_max_depth >= 2, "Error chains require at least two records");
 
 // 【Message Bus】發布槽位、參與者、共享容量與控制請求。
-// Message Bus defaults. Byte budgets include the complete encoded message image.
+// Registration/standalone defaults; framework Publishers resolve omitted options
+// from Param when registering. Byte budgets include the complete message image.
 // 每個 Publisher 的 RingBuffer 預設槽位數；Bus 最低保留兩格。
 inline constexpr std::uint32_t message_bus_default_slots = 2;
 // 每個 RingBuffer 槽位的完整訊息映像預設容量（bytes，含 metadata）。
@@ -251,7 +255,7 @@ inline constexpr auto shell_job_poll_interval = std::chrono::milliseconds(10);
 // Socket Shell 預設綁定位址；只監聽本機 loopback，非遠端 Vinc 連線目標。
 inline constexpr char shell_socket_default_ip[] = "127.0.0.1";
 // Socket Shell 預設 TCP 監聽埠；可由啟動設定覆寫。
-inline constexpr std::uint16_t shell_socket_default_port = 5500;
+inline constexpr std::uint16_t shell_socket_default_port = 31410;
 // 遠端斷線後保留 Session／腳本擁有者的寬限（毫秒），不是健康閒置連線壽命。
 inline constexpr auto shell_socket_disconnect_timeout = std::chrono::milliseconds(30000);
 // 尚有待送資料卻無傳送進度時的等待期限（毫秒），不是整條連線的總期限。
@@ -327,6 +331,9 @@ inline constexpr auto module_error_report_timeout = std::chrono::milliseconds(50
 
 // 【Log】單筆文字、檔案輪替、佇列容量、重要紀錄保留與收集週期。
 // Log budgets count encoded records/bytes, not filesystem allocation units.
+// Registration/standalone default. Disabling files does not disable Log collection.
+// 檔案 Log 註冊／獨立使用預設；關閉寫檔不會關閉紀錄收集及 Shell 顯示。
+inline constexpr bool log_file_enabled = true;
 // 單筆結構化 Log 文字的長度上限（bytes），也用於原始輸出長行的分段。
 inline constexpr std::size_t log_message_bytes = 8 * 1024;
 // 每個受管理 Log 檔案的預設大小上限（bytes），可由 FileOptions 覆寫。
@@ -383,8 +390,6 @@ inline constexpr std::size_t bag_batch_records = 256;
 inline constexpr auto bag_flush_interval = std::chrono::milliseconds{100};
 // Recorder 重新探索可錄製 Topic／Publisher 的間隔（毫秒）。
 inline constexpr auto bag_discovery_interval = std::chrono::milliseconds{500};
-// Recorder Module 的 Manual 主迴圈處理 pump 與錄製後的休眠間隔（毫秒）。
-inline constexpr auto bag_pump_interval = std::chrono::milliseconds{10};
 // Bag 錄製／檢視所允許的不同 Topic 數量上限。
 inline constexpr std::size_t bag_max_topics = 1024;
 // Bag 檢視查詢最多收集的不同發布來源數，依發布者名稱與 Publisher ID 彙整。
@@ -414,7 +419,7 @@ namespace vinc::config {
 // 【Web UI】啟動資源快照、plugin 套件、HTTP worker 與服務啟停。
 // UI keeps an immutable startup snapshot; browsers cannot grow this budget.
 // 官方 UI Module 的預設 HTTP 監聽埠；預設位址為本機 loopback。
-inline constexpr std::uint16_t ui_port = 8080;
+inline constexpr std::uint16_t ui_port = 31411;
 // UI 啟動資源快照中單一檔案的大小上限（bytes）。
 inline constexpr std::size_t ui_file_bytes = 8 * 1024 * 1024;
 // UI 啟動讀入全部資源的合計內容預算（bytes），不包含索引、allocator 與 HTTP 回覆副本。

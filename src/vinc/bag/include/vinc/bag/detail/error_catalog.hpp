@@ -15,14 +15,16 @@ inline constexpr std::array error_entries{ErrorCodeEntry{ErrorCode::InvalidArgum
                                           ErrorCodeEntry{ErrorCode::StorageFailed, "StorageFailed"},
                                           ErrorCodeEntry{ErrorCode::AlreadyExists, "AlreadyExists"},
                                           ErrorCodeEntry{ErrorCode::WorkerFailed, "WorkerFailed"},
-                                          ErrorCodeEntry{ErrorCode::TimestampUnavailable, "TimestampUnavailable"}};
+                                          ErrorCodeEntry{ErrorCode::TimestampUnavailable, "TimestampUnavailable"},
+                                          ErrorCodeEntry{ErrorCode::WaitFailed, "WaitFailed"}};
 inline constexpr std::array operation_entries{ErrorOperationEntry{ErrorOperation::Create, "Create"},
                                               ErrorOperationEntry{ErrorOperation::Write, "Write"},
                                               ErrorOperationEntry{ErrorOperation::Finish, "Finish"},
                                               ErrorOperationEntry{ErrorOperation::Inspect, "Inspect"},
                                               ErrorOperationEntry{ErrorOperation::Discover, "Discover"},
                                               ErrorOperationEntry{ErrorOperation::Command, "Command"},
-                                              ErrorOperationEntry{ErrorOperation::Enqueue, "Enqueue"}};
+                                              ErrorOperationEntry{ErrorOperation::Enqueue, "Enqueue"},
+                                              ErrorOperationEntry{ErrorOperation::Wait, "Wait"}};
 
 inline std::string native_text(const NativeError& error) {
     if (error.source != NativeErrorSource::Sqlite) {

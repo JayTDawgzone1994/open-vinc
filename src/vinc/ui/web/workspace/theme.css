@@ -1,0 +1,54 @@
+/* The workspace owns these inherited tokens. Shadow DOM panels opt in without
+   sharing selectors, JavaScript state, or lifecycle with the workspace. */
+:root {
+    color-scheme: light;
+    --vinc-ui-bg: #f4f3f0;
+    --vinc-ui-surface: #faf9f6;
+    --vinc-ui-raised: #ebeae6;
+    --vinc-ui-hover: #e3e2de;
+    --vinc-ui-text: #292929;
+    --vinc-ui-muted: #60605c;
+    --vinc-ui-border: #d8d7d2;
+    --vinc-ui-brand: #246bdf;
+    --vinc-ui-brand-hover: #1d59bf;
+    --vinc-ui-on-brand: #ffffff;
+    --vinc-ui-accent-text: #205fc9;
+    --vinc-ui-focus: #246bdf;
+    --vinc-ui-selected: #e2e9f5;
+    --vinc-ui-success: #237345;
+    --vinc-ui-warning: #855d00;
+    --vinc-ui-danger: #b53232;
+    --vinc-ui-inactive: #666661;
+    --vinc-ui-warning-bg: #f4ecd9;
+    --vinc-ui-grid: #d7d6d1;
+    --vinc-ui-shadow: #00000026;
+    --vinc-ui-backdrop: #00000066;
+    color: var(--vinc-ui-text);
+    background: var(--vinc-ui-bg);
+}
+
+/* CSS media changes reach mounted panels through inheritance; no remount,
+   polling, or additional data request is needed when the OS theme changes. */
+@media (prefers-color-scheme: dark) {
+    :root {
+        color-scheme: dark;
+        --vinc-ui-bg: #181818;
+        --vinc-ui-surface: #202020;
+        --vinc-ui-raised: #282828;
+        --vinc-ui-hover: #333333;
+        --vinc-ui-text: #d8d8d8;
+        --vinc-ui-muted: #aaaaaa;
+        --vinc-ui-border: #3b3b3b;
+        --vinc-ui-accent-text: #8bb3ff;
+        --vinc-ui-focus: #8bb3ff;
+        --vinc-ui-selected: #272f3d;
+        --vinc-ui-success: #78c698;
+        --vinc-ui-warning: #e2bd69;
+        --vinc-ui-danger: #f28b86;
+        --vinc-ui-inactive: #aaaaaa;
+        --vinc-ui-warning-bg: #352e20;
+        --vinc-ui-grid: #343434;
+        --vinc-ui-shadow: #00000066;
+        --vinc-ui-backdrop: #00000099;
+    }
+}

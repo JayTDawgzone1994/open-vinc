@@ -2,16 +2,25 @@
 
 # Python Module examples / Python Module 範例
 
+The example CMake files register **pythonExample / pythonBusExample** through `add_python_module()`.
+Enable Python and select the matching `CONFIG_VINC_MODULE_<ModuleType>=y` options
+in the App config, then build the App to deploy them automatically. Manual copying
+to the new paths below remains supported; there is no fallback to `data/module`.
+
+範例已用 `add_python_module()` 登記；App 啟用 Python 並選入對應 ModuleType 後，
+建置 App 即自動部署。也可沿用下方的新路徑手動放入，不再搜尋舊 `data/module`。
+
+
 Complete C++/Python comparison, containers, Param, Log, and Manual operation: [userExampleModule](../userExampleModule/README.md).
 
 完整 C++／Python 對照、容器、Param、Log 與 Manual 操作見
 [userExampleModule](../userExampleModule/README.md)。
 
-Build the [Python SDK](../../src/vinc/module_system/python/README.md), copy pythonExample.py to **beside Vinc** at data/module/pythonExample/pythonExample.py, then restart central.
+Build the [Python SDK](../../src/vinc/module_system/python/README.md), copy pythonExample.py to **beside Vinc** at modules/python/pythonExample/pythonExample.py, then restart central.
 
 先依 [Python Module 文件](../../src/vinc/module_system/python/README.md) 建置 Python SDK。
 將 `pythonExample.py` 複製到 **Vinc 執行檔旁**的
-`data/module/pythonExample/pythonExample.py`，然後重新啟動 Vinc。
+`modules/python/pythonExample/pythonExample.py`，然後重新啟動 Vinc。
 
 In Vinc Shell:
 
@@ -36,9 +45,9 @@ Python `print()` 由既有 OutputHub／中央 Log 收集。
 
 ## Context service example / Context 服務範例
 
-Deploy pythonBusExample.py as data/module/pythonBusExample/pythonBusExample.py, restart central, then:
+Deploy pythonBusExample.py as modules/python/pythonBusExample/pythonBusExample.py, restart central, then:
 
-將 `pythonBusExample.py` 放到 `data/module/pythonBusExample/pythonBusExample.py`，重啟中央後：
+將 `pythonBusExample.py` 放到 `modules/python/pythonBusExample/pythonBusExample.py`，重啟中央後：
 
 ```text
 pythonBusExample --name samples

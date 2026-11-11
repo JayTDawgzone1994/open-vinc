@@ -23,10 +23,13 @@ proc httpGet {port route {token ""}} {
 }
 
 if {[catch {
+    param set vinc.pub_default_slots 3
+    param set vinc.pub_default_message_bytes 8192
     AppSender [info nameofexecutable]
     AppReader [info nameofexecutable]
     sender identity
     reader identity
+    if {[sender defaults] != 0} { error "Installed Publisher defaults mismatch" }
     recorder record [file join $::vinc::app_dir recorded] --all
     sender push
     set deadline [expr {[clock milliseconds] + 5000}]
@@ -42,7 +45,9 @@ if {[catch {
     recorder status
     recorder finish
     if {[file exists [file join $::vinc::app_dir vinc_data sdk-package-app ui]]} {
-        set port 8080
+        param get vinc.shell_port
+        param get ui.port
+        set port 31411
         ui status
         set session [httpGet $port /api/session]
         if {![regexp {"token":"([^"]+)"} $session unused token]} { error "Missing UI token" }
