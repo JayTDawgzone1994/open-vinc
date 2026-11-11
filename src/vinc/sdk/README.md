@@ -37,11 +37,11 @@ and the dedicated App passed. The subsequent [Windows import-policy validation](
 also passed the clean installed-Python flow with old MSVCP preloaded. Subsequent
 [service-network acceptance](../shell/NETWORK_PARAMS.md#validation--驗證) passed
 Windows and WSL installed consumer/application, including HTTP at the new default 31411.
-Native Mac coverage for these migrations remains pending.
+Native Mac source and fresh SDK deployment acceptance is now recorded in the 2026-11-11 follow-up below.
 本次 Windows C++ consumer／專用 App，以及 WSL consumer／application／Python／專用 App
 已通過；後續 Windows 靜態匯入政策修正也通過舊 MSVCP 預載的乾淨 installed Python
 驗收。後續服務網路接線已補驗 Windows／WSL installed consumer／application，包含
-新預設 31411 的 HTTP；這些搬移的 Mac 驗收仍待完成。
+新預設 31411 的 HTTP；這些搬移的 Mac 後續驗收見下方 2026-11-11 主報告。
 
 新版 Param／重啟標記的 [macOS 乾淨 SDK 驗收](MACOS_PARAM_VALIDATION.md) 已於
 `9f0ec0b` 完成：全新 Debug／Release producer 及 installed consumer／application／python
@@ -384,15 +384,17 @@ component/
 - RuntimeServices is internal, not in vinc.hpp; common_error only adds public classification. Host/Plugin lifetime belongs to their contracts; add_module builds a Plugin, not an executable.
 
 Stage 1 of the [FD/spawn repair plan](../osal/FD_SPAWN_PLAN.md) adds separate
-Host/Plugin coordination wiring and introduced Plugin entry **11**. The current
-entry is **13** after [Param RegisterOptions/restart hints](../param/README.md#restart-hints).
+Host/Plugin coordination wiring and introduced Plugin entry **11**.
+[Param RegisterOptions/restart hints](../param/README.md#restart-hints) subsequently used entry **13**;
+current entry **19** follows [Module System](../module_system/README.md).
 `vinc::module` explicitly
 depends on OSAL; its component install rules carry the new header/archive and the
 existing Plugin helper carries the new entry. Static linking and ABI/CRT requirements
 remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance)
 owns the earlier source/moved-SDK results. Mac exit-repair evidence is in the
 [current summary](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status); newer Param entry-13 SDK acceptance remains separate.
-該第一階段以 entry 11 接上共用協調器；目前 Param RegisterOptions／重啟標記已升為 entry 13，
+該第一階段以 entry 11 接上共用協調器；Param RegisterOptions／重啟標記當時升為 entry 13，
+目前 entry 19 依 Module System 契約，
 中央與 SDK 消費端需一起重建，一般 Module 作者無須管理鎖。
 來源與乾淨安裝式 SDK 的本輪驗收結果、環境及 Mac 待驗範圍統一見第四階段紀錄。
 
@@ -857,3 +859,12 @@ restriction. See the [toolchain report](WINDOWS_TOOLCHAIN.md) for exact scope.
 **後續補驗（2026-11-01）：**19.44 Release 配合隔離的相容 Python／Runtime，完整
 `sdk.multi_app` 與 `sdk.system_apps` 通過，補到後續並行與故障案例。原始 Python 安裝當時仍
 被動態 CRT 防護拒絕；解決的是相容環境的驗證缺口，不是放寬部署限制。完整範圍見上述報告。
+
+## macOS entry-19 乾淨 SDK／部署補驗（2026-11-11）
+
+Debug／Release 均使用全新 SDK-only producer，製作時不編譯 Python binding／App，
+再完成外部 C++／Python／App、Recorder／Publisher、多 App、搬移部署、公開標頭與輸出目錄驗收。
+[第三階段主報告](MACOS_SDK_DEPLOYMENT_VALIDATION.md)統一維護方法、實際結果、證據與限制；
+來源 Python／GIL 由[第二階段](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)維護。
+上方歷史輪次的 Mac 待驗敘述由這些後續證據取代，不回溯擴大舊版的驗收範圍。
+本輪不做 benchmark，固定 HTTP 埠的測試隔離提案仍未實作。

@@ -5,7 +5,8 @@ Date / 日期: 2026-11-10.
 ## Status and ownership / 狀態與文件責任
 
 **Stages 1–2 completed; stage 3 Windows/WSL acceptance completed.** The owner authorized stage 3
-on 2026-11-10, with native Mac acceptance handed off rather than executed here.
+on 2026-11-10; subsequent native Mac C++ Host/Context Debug/Release acceptance
+is complete in the [Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md).
 Production teardown ordering, Bus classification and first-generation
 test diagnostics are implemented. Windows Debug / WSL Release focused evidence is
 recorded in the [investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md#stage-2-repair-validation).
@@ -14,7 +15,8 @@ the WSL environment-only follow-up. The [Mac handoff](MACOS_CONTEXT_SHUTDOWN_HAN
 lists the remaining native acceptance gates.
 
 **第一、二階段完成；第三階段 Windows／WSL 驗收完成。** 本輪已執行配置內完整回歸；
-Mac 依使用者指示寫成交付文件，維持待原生驗收。
+後續 Mac C++ Host／Context 的 Debug／Release 原生驗收已完成，詳見上述報告；
+來源 Python／GIL 及 SDK-only 交付仍依後續階段驗證。
 
 This document owns the repair scope, target contracts and acceptance gates.
 [Investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md) owns the original observations,

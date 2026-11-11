@@ -29,11 +29,15 @@ including when that rejection itself closes the transport. Do not suppress recei
 failures during stopping. The [Module System investigation](../module_system/CONTEXT_SHUTDOWN_INVESTIGATION.md#stage-2-repair-validation)
 records Windows Debug / WSL Release focused validation. Current broader results
 are in the [shutdown regression report](../module_system/CONTEXT_SHUTDOWN_VALIDATION.md);
-native macOS acceptance remains pending. Payload layout and collision policy are unchanged.
+native Mac C++ Host/Context Debug/Release results are in the
+[Mac report](../module_system/MACOS_CONTEXT_SHUTDOWN_VALIDATION.md).
+Source Python/GIL and SDK-only acceptance are separate stages. Payload layout
+and collision policy are unchanged.
 
 **Host 收尾已修正：** 先等待 watchdog 結束，再關閉 Bus／Session。已關閉的接收回報
 `Closed/Receive`；真正畸形封包仍回報 `Protocol/Receive`，不因處於收尾而忽略故障。
-Windows Debug／WSL Release 針對性驗證已通過；完整回歸狀態見上述驗收報告，Mac 原生驗收待完成。
+Windows／WSL 原始驗收及後續 Mac C++ Host／Context Debug／Release 原生證據分別見上述報告；
+來源 Python／GIL 及 SDK-only 專項不由此結案。
 
 發布成功後直接透過 OSAL 通知 callback 所屬 Module；pumpLoop 等待通知並保留 10 ms 補查，純 get_last 不建路由。故障／重試／UI 契約及驗證見 [pump 喚醒](../module_system/PUMP_WAKEUP.md)。
 

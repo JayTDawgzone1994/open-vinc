@@ -351,6 +351,14 @@ The quarter reserve was removed and failed batches are not split/retried. Record
 測試涵蓋超過舊四分之一容量、非整頁上限、超出支援範圍時不建目錄、整批回滾、
 丟棄等待中的資料，以及容量不足後 Recorder／中央／其他 Module 仍可操作。
 
+### macOS Recorder 後續驗收（2026-11-11）
+
+目前 entry-19 的原生 Debug／Release 均完成 `bag.storage/module/loop/shell`，
+含受控等待分支、512 筆逐筆內容／順序、故障與排空，見
+[第二階段主報告](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)。
+第一階段另有[installed_recorder 搬移證據](../module_system/MACOS_CONTEXT_SHUTDOWN_VALIDATION.md)；
+第二階段沒有建立新的 SDK-only producer，不將兩輪相加成新的完整交付矩陣。
+
 <a id="recorder-wait-validation"></a>
 
 ### Recorder notification wait validation / Recorder 通知等待驗收
@@ -409,3 +417,9 @@ acceptance is tracked in the root TODO.
 
 本輪是功能驗收，不宣稱全專案、CPU／吞吐基準或 Combat Bar 真實負載通過。
 原生 macOS、最低 MSVC 19.44 與 Debug installed SDK 未重驗，Mac 已列根目錄 TODO。
+
+### macOS 新 SDK-only Recorder 補驗（2026-11-11）
+
+[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)已由新 Debug／Release SDK-only producers
+重跑 installed Recorder，含搬移後 64 筆錄製與關閉；另驗兩個 C++ App 的 Recorder／退出隔離。
+512 筆內容／順序及受控等待分支仍由第二階段來源測試負責，不混成相同工作負載。

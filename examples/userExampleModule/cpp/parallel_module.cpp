@@ -116,7 +116,7 @@ public:
             count = received_;
             result = latest_result_;
         }
-        std::cout << get_module_name() << " received=" << count << " scaled=" << result << '\n';
+        std::cout << get_module_name() << " received=" << count << " scaled=" << result << '\n' << std::flush;
         return 0;
     }
 

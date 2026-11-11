@@ -20,6 +20,13 @@ or service startup during lookup. Lookup compiles/runs a small native ABI probe.
 原有 `add_subdirectory()` 保留；以 `VINC_INSTALL_SDK=ON` 明確啟用安裝規則。
 查找套件不下載或重建相依、不啟動框架服務；會編譯並執行小型本機 ABI 探針。
 
+## macOS 目前交付驗收（2026-11-11）
+
+目前 entry-19／Bus v4 的 Debug／Release 乾淨 SDK-only、搬移 C++／Python／App、
+Recorder／Publisher、多 App、分類部署與輸出目錄已補驗，見
+[第三階段主報告](MACOS_SDK_DEPLOYMENT_VALIDATION.md)。
+後續結果取代下方歷史報告的 Mac 待驗狀態；舊 entry-13 Param 報告保留其原始範圍。
+
 ## Scope / 本輪範圍
 
 Native MSVC consumers must meet the [Common toolchain policy](../common/README.md#build-toolchain-policy)

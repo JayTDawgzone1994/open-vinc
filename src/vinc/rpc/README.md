@@ -7,11 +7,11 @@ synchronous `Context::call_rpc()` and reusable asynchronous `Context::rpc_client
 Both C++ and Python use `module.service` addresses. Old per-call async entry points
 and split-target public syntax have been removed. Clean installed-SDK acceptance
 is recorded below, including the initial Windows Release UI failure and successful
-retry; native macOS remains a recorded follow-up.
+retry; native macOS source and fresh SDK-only acceptance are linked below.
 
 **第一至四階段已完成 Windows／WSL 驗收：** C++／Python 均提供同步 call_rpc 與可重複非同步 RpcClient，
 使用 `module.service`。舊逐次傳入 callback 的公開入口已移除；乾淨 SDK 結果、
-Release 首輪 UI 失敗與成功重跑均保留於下方。原生 macOS 另行驗收。
+Release 首輪 UI 失敗與成功重跑均保留於下方。原生 macOS 來源及乾淨 SDK-only 已補驗，見下方後續紀錄。
 
 Current Host/Plugin ABI follows [Module System](../module_system/README.md).
 The subsequent entry-17 Manual-wait change is validated separately in
@@ -580,16 +580,21 @@ recovery 亦注入控制 payload 配置失敗，確認 Submit／Complete 未成�
 - 驗證紀錄：build/rpc-debug-tests.log、build/rpc-release-tests.log、
   build/rpc-debug-final-tests.log、build/rpc-release-final-tests.log。
 
+## macOS 來源補驗（2026-11-11）
+
+目前 entry-19 的 Debug／Release 全部十項 `rpc.*`（含 Python）、Context／Plugin／故障
+與來源 Python 回歸已完成，見[第二階段主報告](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)。
+這項後續結果取代上方歷史紀錄的來源待驗狀態；後續[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補 Debug／Release 乾淨 SDK-only consumer／application／python 與搬移公開標頭 smoke。
+
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
 
-- Current redesign coverage is recorded above. Native macOS RPC/client/Python/installed-SDK acceptance remains pending; unrelated historical OSAL reports do not validate this redesign.
 - Browser bridge/authorization/typed UI APIs remain unwired.
 - No latency/throughput measurement; mapping-cache value needs evidence.
 - Registration timeout can leave a central service without a locally obtained handler identity. No automatic retry/rollback; treat it as initialization failure and recover through Module exit, not assume same-name retries succeed.
 
-- 本次重新設計的平台結果見上方；原生 macOS RPC／Client／Python／installed SDK 仍待驗收，不以歷史 OSAL 紀錄代替。
 - 瀏覽器 UI bridge、權限與 typed UI API 尚未接線。
 - 未量測 RPC 延遲／吞吐量；mapping cache 是否值得增加，待量測。
 - 登記逾時可能已在中央建立服務，本地未取得 handler 身分；不自動重試／回滾。
