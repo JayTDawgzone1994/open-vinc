@@ -989,6 +989,15 @@ was subsequently repaired and passed focused native Mac Debug/Release checks.
 上述為該輪結果；範例 fixture 後續已修復並通過 Mac Debug／Release 定點補驗，見上方範例連結。
 原始數字、乾淨 SDK 與限制統一維護於上述報告；其他平台歷史紀錄不變。
 
+## macOS 來源 Python 補驗（2026-11-11）
+
+Plugin entry 19／bootstrap v16 的 Debug、Release 均重新編譯 CPython 3.12.14 binding，
+並完成來源 Python／GIL、並行 pump、RPC 及三項 Param 遷移驗收。
+[主報告](../MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)保留首輪兩項失敗、隔離證據及最終結果。
+Shell fixture 改用 canonical 暫存路徑；C++ parallel 教學的 status 主動 flush，
+未延長期限或更改 Runtime。後續[第三階段](../../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補乾淨 SDK-only、多 App／分類部署、搬移 Python 與掃描案例；來源／交付證據各自維護。
+
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項

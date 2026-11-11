@@ -1,8 +1,9 @@
 # Host shutdown regression / Host 收尾修復第三階段驗收
 
 Date: 2026-11-10. **Windows/WSL acceptance completed / Windows／WSL 驗收完成**.
-Native macOS is explicitly deferred
-to the [Mac handoff](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md), not claimed as tested here.
+Subsequent native Mac Debug/Release C++ Host/Context acceptance is recorded in the
+[Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md). The Windows/WSL tables below
+retain their original configuration and results; source Python/GIL remains a separate Mac stage.
 The [repair contract](CONTEXT_SHUTDOWN_FIX.md) owns behavior and scope; the
 [investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md) preserves the original failures
 and controlled old-order/new-order proof.
@@ -111,13 +112,15 @@ that existing installation's bin directory in its child-process PATH, without
 installing software or changing framework/toolchain policy. Preserve both the
 original full log and `shutdown-stage3-wsl-external-consumer-path.log`.
 
-Native Mac Debug/Release: follow [the handoff](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md)
-and return actual logs/results before closing the root TODO item. Prior Mac
-FD/spawn, process-exit and Plugin classification reports remain evidence for their
-own revisions; this pending item does not revoke those results.
+Native Mac Debug/Release C++ Host/Context follow-up is complete; see the
+[Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md) and retained
+[reproduction checklist](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md). Prior FD/spawn,
+process-exit and Plugin classification results retain their original revisions.
+The Mac source-Python and SDK-only acceptance stages remain distinct.
 
 本輪只處理收尾修復驗收與文件，不改正式 Runtime。Windows Debug 156/156、Release
 149/149；WSL 首輪 170/171，唯一 Node PATH 環境失敗補驗 1/1 通過，不改寫成一次
 171/171 全過。三組各完成 Context 5 次、受控案例 10 輪及自然短命 Module 100 次，
-沒有非預期重啟／exit 72，也未留下測試子程序。Mac 依使用者指示交付，不能把其他
-平台通過當成 Mac 已驗證。尚未 commit／push。
+沒有非預期重啟／exit 72，也未留下測試子程序。這些是原 Windows／WSL 輪次結果；
+後續 Mac 原生第一階段驗收已完成並另列報告，不拿其他平台結果代替，也不改寫原始失敗。
+本段建立時尚未 commit／push，發布後版本見上述 Mac 報告及來源紀錄。

@@ -159,6 +159,14 @@ separate; see the root TODO and Bag README.
 本輪為針對性驗收，未宣稱完整專案／新效能基準通過。原生 macOS、最低 MSVC 19.44
 及 Debug installed SDK 本輪未重驗；Recorder 與 Combat Bar 負載改善另行驗證。
 
+### macOS 來源補驗（2026-11-11）
+
+[第二階段主報告](MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)補齊目前 entry-19 的 Debug／Release
+`module.context_wait`、Context／Runtime／Plugin、來源 Python／GIL、RPC 與 Recorder 功能證據。
+上方歷史輪次未驗 Mac 的限制保留；後續[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補乾淨 SDK-only C++／Python 搬移等待接線及正常停止。
+本輪不量測延遲／CPU，也不宣稱 Combat Bar 負載驗收完成。
+
 ## Confirmed first-release policy / 已確認的第一版政策
 
 The following policies were approved for this integration. / 以下政策已獲本輪實作授權。

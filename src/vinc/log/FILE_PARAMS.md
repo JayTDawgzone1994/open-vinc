@@ -164,4 +164,12 @@ These ignored artifacts are not shipped in the SDK.
 
 本機證據位於 `build/log-params/`，不隨 SDK 交付。Linux 核對 724 個非 Markdown
 來源檔案一致，無殘留測試程序；其後僅同步 SDK 整套期限調整，Linux 原本已在較嚴格
-期限內通過。macOS 須在同一分支重跑上述來源與乾淨 SDK 案例，舊 Log／Param 證據不能替代。
+期限內通過。macOS 當時尚待同分支來源與乾淨 SDK 補驗；來源後續結果見下節，乾淨 SDK 仍待驗。
+
+## macOS 來源補驗（2026-11-11）
+
+目前 entry-19／Bus v4 的原生 Debug／Release 已補驗 `log.settings/process/transport/unit` 與 `app.entry/log`，涵蓋 Limited／App、最後合法容量、保存／重啟、停用及 reopen。
+環境、實際案例、首輪失敗與最終結果統一見
+[第二階段主報告](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)。
+上方歷史輪次的來源待驗狀態由本輪取代；後續[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補新 Debug／Release SDK-only 交付及搬移 App；來源功能與交付整合的案例範圍分別記錄，未做 benchmark。

@@ -5,7 +5,8 @@ Date / 日期: 2026-11-10.
 ## Status and responsibility / 狀態與文件責任
 
 **Stages 1–4 implemented; Windows/WSL integration and cost runs recorded.** Native
-macOS remains open. The serial Context investigation identified a Host teardown
+macOS source and fresh SDK-only functional acceptance is recorded below; cost
+measurement remains open. The serial Context investigation identified a Host teardown
 race; its repair and current regression status are recorded in the
 [shutdown validation](CONTEXT_SHUTDOWN_VALIDATION.md). The owner approved concurrent
 Topic/control callbacks, callback drain before `on_stop()`, and the Python GIL
@@ -13,7 +14,7 @@ limitation. This document records the target behavior and implementation plan;
 writing it does not authorize later stages or establish performance evidence.
 `PumpOptions` and `topic_workers` are now the stage-1 C++ API spellings.
 
-**第一至四階段已實作並完成 Windows／WSL 驗收紀錄；Mac 待驗。** Context 調查已定位並修正 Host 收尾競爭，本次回歸狀態見上述驗收紀錄。使用者同意控制工作與 Topic callback 並行、
+**第一至四階段已實作並完成 Windows／WSL 驗收；Mac 來源及乾淨 SDK 功能已補驗，成本待補。** Context 調查已定位並修正 Host 收尾競爭，本次回歸狀態見上述驗收紀錄。使用者同意控制工作與 Topic callback 並行、
 先結束框架 callback 再執行 `on_stop()`，以及 Python 的 GIL 限制。
 本文件是本次改動的主契約；SDK／搬移及成本結果見第四階段，不能宣稱三平台全部驗收完成或所有已知問題均已解決。
 
@@ -26,6 +27,14 @@ This contract changes dispatch and shutdown ordering only within the scope below
 
 目前行為仍以 README 的實作紀錄為準。通知、Bus、Param、RPC 的原有責任維持，
 本文件集中描述此次新增的派送與停止契約，不把提案回寫成已完成能力。
+
+## macOS 來源補驗（2026-11-11）
+
+[第二階段主報告](MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)補齊 entry-19 原生 Debug／Release
+來源 C++／Python、GIL、Manual drain、故障隔離及雙 Topic 教學互通證據。
+先前 Mac 待驗敘述的來源部分由此取代；後續[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補乾淨 SDK-only、搬移與公開標頭。成本矩陣依決定未執行。
+教學 status 加上 flush 的原因及首輪失敗均在主報告，未改派送／停止契約。
 
 ## Purpose and exclusions / 目的與非目標
 
@@ -560,7 +569,7 @@ invocations of the three scripts. Their existing timeouts/assertions were retain
 | Windows 11 x64, MSVC 19.51.36257, CMake 4.3.2, Ninja, CPython 3.13.12, Debug | **3/3 passed** | 45.00 / 769.70 / 347.10 s |
 | Same Windows environment, Release | **3/3 passed** | 54.74 / 824.55 / 355.94 s |
 | WSL2 Ubuntu 24.04 x64, GCC/libstdc++ 13.3.0, CMake 3.28.3, Ninja, CPython 3.12.3, Release | **3/3 passed** | 33.55 / 656.54 / 169.20 s |
-| Native macOS Debug/Release | Pending; root TODO lists the same scripts and parallel gates | Not run |
+| Native macOS Debug/Release | Both configurations passed the three fresh SDK scripts and parallel gates; see the [2026-11-11 report](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md) | Recorded in that report |
 
 The long Python script includes multiple extension rebuilds; these times are
 validation durations, not runtime performance or SDK installation benchmarks.
@@ -627,9 +636,10 @@ WSL initially omitted the existing Node directory from PATH. The new cost fixtur
 initially missed the required module_interface override; its build was corrected
 before any measurements. None required a Runtime/ABI guard change.
 
-Mac must rebuild the same entry-19 source/binding, run native Debug/Release Module,
-Param/RPC/Python regressions and the three fresh SDK scripts, then run the native
-Release cost matrix separately. Pay particular attention to cross-image drain,
-Manual main completion, callback stop deadlines, GIL wait/join/reference lifetime,
-retained writable messages, moved paths and native RSS units. Prior Mac FD/Param
-results and these Windows/WSL results do not validate the new parallel pump.
+Mac entry-19 source/binding Debug/Release regression is now recorded in the
+[2026-11-11 source report](MACOS_SOURCE_FUNCTIONAL_VALIDATION.md), including the
+initial failures and their isolated portability fixes. The three fresh SDK-only
+scripts and relocated parallel consumers subsequently passed in the
+[deployment report](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md). Native Release cost
+measurement is separate and was explicitly excluded from this functional round.
+Prior Mac FD/Param and Windows/WSL results are not substituted for this evidence.

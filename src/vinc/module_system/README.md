@@ -954,8 +954,11 @@ The [staged repair contract](CONTEXT_SHUTDOWN_FIX.md) and
 WSL Release. A Windows old-order mutation fails with receive-after-close / exit 72.
 Success-case tests disable retries and inspect the first generation before MID
 queries. Stage 3's broader results are recorded in the
-[shutdown regression report](CONTEXT_SHUTDOWN_VALIDATION.md); native macOS remains
-pending under the [handoff checklist](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md).
+[shutdown regression report](CONTEXT_SHUTDOWN_VALIDATION.md). Native Mac C++
+Host/Context Debug/Release acceptance is complete in the
+[Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md); the
+[handoff checklist](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md) remains a reproduction guide.
+Source Python/GIL and SDK-only acceptance remain separate follow-ups.
 Original logs remain preserved; their missing internal cause cannot be recovered
 retrospectively with certainty.
 
@@ -966,7 +969,8 @@ retrospectively with certainty.
 watchdog，再關閉 Bus／Session；已關閉與畸形封包分別回報 Closed／Protocol。
 正常完成測試不再自動重啟，先檢查原 MID 與退出／故障紀錄。Windows Debug／WSL
 Release 各 9/9 針對性測試、10/10 受控重跑通過，Windows 舊順序對照確實失敗。
-不拉長期限、不吞掉真正故障；第三階段完整回歸見上述驗收報告，Mac 依交付文件待驗。
+不拉長期限、不吞掉真正故障；Windows／WSL 原始完整回歸與後續 Mac C++ Host／Context
+Debug／Release 原生結果分別見上述報告，來源 Python 及乾淨 SDK 專項仍留後續階段。
 原始偶發紀錄的證據限制保留，詳細步驟見 [修復契約](CONTEXT_SHUTDOWN_FIX.md)。
 
 <a id="plugin-遷移後的限制"></a>
@@ -1774,3 +1778,15 @@ are maintained in the [RPC record](../rpc/README.md#integration-acceptance).
 
 Plugin entry 16 加入 Context 持有的可撤銷端點，C++／Python 沿用 Host 單一通訊服務。
 實際驗證、installed SDK 結果及 Mac 待驗項目統一見 RPC 紀錄，避免重複維護。
+
+## macOS 來源功能補驗（2026-11-11）
+
+[第二階段報告](MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)補齊 entry-19 的來源 Python／GIL、
+parallel pump、十項 RPC、Recorder 與三項 Param 遷移 Debug／Release 功能驗收，
+並保留兩項首輪失敗及共用 fixture／教學輸出的最小修正。後續乾淨 SDK-only 見下節第三階段；成本另列 TODO。
+
+### macOS 第三階段交付補驗（2026-11-11）
+
+[乾淨 SDK／搬移報告](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)補齊目前 entry-19 的
+Debug／Release SDK-only C++／Python／App、多 App／System Module 隔離、公開標頭與部署位置。
+功能補驗已完成；成本矩陣仍依決定未執行，來源／Host 歷史報告維持各自測試範圍。

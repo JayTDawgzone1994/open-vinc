@@ -150,7 +150,8 @@ earlier Param or port-8080 results do not establish this migration's behavior.
 The root TODO carries that follow-up.
 
 本輪不是全專案／Debug／macOS 驗收；原始 log 與 XML 留在忽略的本機目錄。
-macOS 必須驗同一分支，不能以舊 Param 或 8080 結果替代，已列根目錄 TODO。
+macOS 當時尚待同分支補驗；來源後續結果見下節，乾淨 SDK 仍列根目錄 TODO，
+不以舊 Param 或 8080 結果替代。
 
 Windows clean installed-SDK acceptance: **2/2 passed** (`sdk.installed_consumer`,
 `sdk.installed_application`, 270.39 seconds). The test recreates the install prefix
@@ -174,3 +175,11 @@ to avoid interference at the default UI port. No system network settings changed
 WSL 乾淨 installed consumer／application 同樣 **2/2 通過**（145.00 秒），
 包含搬移、真實 HTTP 與增量重建。最終核對 720 個非 Markdown 檔案均與 WSL 副本一致；
 兩平台未遺留測試 App／Module。固定埠 SDK 驗收依序執行，避免互相占用，沒有更改系統網路設定。
+
+## macOS 來源補驗（2026-11-11）
+
+目前 entry-19／Bus v4 的原生 Debug／Release 已補驗 `shell.network_params/socket/tcl/integration`、UI 及 App，涵蓋 31410／31411、CLI／保存優先序、IPv6／port 0、非法 IP 修正、現有連線及 UI 同 MID 換埠。
+環境、實際案例、首輪失敗與最終結果統一見
+[第二階段主報告](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)。
+上方歷史輪次的來源待驗狀態由本輪取代；後續[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補新 Debug／Release SDK-only 交付及搬移 App；來源功能與交付整合的案例範圍分別記錄，未做 benchmark。

@@ -188,3 +188,11 @@ fixture `run.log`/stage logs. No benchmark or runtime-policy changes were made.
 **稽核／證據：** 717 個非 Markdown 輸入與實際 Linux 快照一致，兩平台未遺留本輪程序。
 原始失敗、最終 logs／JUnit／結果 JSON 及 SDK 分階段紀錄保留於上述 Git 忽略路徑。
 本輪未改效能量測或 Runtime 政策。
+
+## macOS 來源補驗（2026-11-11）
+
+目前 entry-19／Bus v4 的原生 Debug／Release 已補驗 `module.publisher_defaults`、`message_bus.defaults_process` 及 Python services，涵蓋兩項預設、部分／完整覆寫、最後合法值、既有 Publisher、真實預算耗盡及 Python None／整數。
+環境、實際案例、首輪失敗與最終結果統一見
+[第二階段主報告](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)。
+上方歷史輪次的來源待驗狀態由本輪取代；後續[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
+已補新 Debug／Release SDK-only 交付及搬移 App；來源功能與交付整合的案例範圍分別記錄，未做 benchmark。

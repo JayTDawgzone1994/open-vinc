@@ -58,7 +58,7 @@ def main():
     original = Path(sys.argv[1]).resolve()
     fixture = Path(sys.argv[2]).resolve()
     with tempfile.TemporaryDirectory(prefix="vinc-python-部署-") as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve()
         executable = root / original.name
         shutil.copy2(original, executable)
         for library in original.parent.glob("*.dll"):

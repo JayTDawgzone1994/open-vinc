@@ -1,18 +1,20 @@
 # macOS Host shutdown acceptance / macOS Host 收尾驗收交付
 
-Status: **Pending native macOS execution / 待 Mac 原生執行**. Prepared 2026-11-10.
-This is a handoff, not a Mac pass report. The owner explicitly deferred native
-Mac work to its environment. [Repair contract](CONTEXT_SHUTDOWN_FIX.md) owns the
-behavior; [investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md) preserves evidence.
+Status: **Native Mac C++ Host/Context Debug/Release acceptance completed**; see the
+[Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md) for results and limits.
+原生 Mac 第一階段已完成；來源 Python／GIL 與 SDK-only 專項交付仍屬後續階段。
+Prepared 2026-11-10. The original checklist below remains a reproduction guide.
+[Repair contract](CONTEXT_SHUTDOWN_FIX.md) owns behavior;
+[investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md) preserves earlier evidence.
 
 ## Source and prerequisites / 來源與前置條件
 
-- Validate the **same topic branch and final repair revision** used by Windows/WSL.
-  At handoff preparation it is `codex/parallel-pump-contract`, based on `6151381`,
-  with uncommitted changes. **6151381 alone does not contain this repair.** After
-  publication, record the actual commit and `git status --short`; do not substitute
-  develop/main or an old binary. If receiving a working-tree transfer, record its
-  source hashes and differences explicitly.
+- Validate the **same final repair content** used by Windows/WSL. The original
+  handoff used uncommitted `codex/parallel-pump-contract` work based on `6151381`;
+  **6151381 alone does not contain the repair**. It was published as `820d4ba` and
+  merged into `aab5731` with an identical tree. Native Mac acceptance locks
+  `aab573100a231aa4b4e960fb9e9b49c47ad9d1d8`, not a moving branch name. Record
+  the actual commit/status; any later source transfer requires its own hashes/diff.
 - Build Host, Plugins and tests together (current Plugin entry 19). Do not mix
   old SDK/Plugin objects. Use distinct Debug and Release directories.
 - Record `sw_vers`, `uname -m`, CMake/Ninja, compiler and SDK versions, selected
@@ -27,9 +29,9 @@ behavior; [investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md) preserves evidence.
   unrelated App without permission. Run Debug and Release tests sequentially;
   independent CTest invocations do not share RUN_SERIAL protection.
 
-來源必須包含本次 RuntimeGuard、Bus 分類及新測試；此文件建立時尚未 commit／push。
+來源必須包含本次 RuntimeGuard、Bus 分類及新測試；原交付時尚未發布，現已於上述 commit 驗收。
 先確認收到的實際版本，再測試。既有 Mac FD／退出觀察通過紀錄仍有效於各自版本，
-但不能拿來代替本次收尾修復驗收，也不要將本次 pending 寫成那些舊功能「未驗證」。
+但不能拿來代替本次收尾修復驗收，也不要將後續新功能的 pending 寫成那些舊功能「未驗證」。
 
 ## Build and regression / 建置與回歸
 
