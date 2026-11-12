@@ -78,6 +78,15 @@ else()
     target_link_libraries(osal_descriptor_tests PRIVATE vinc::osal)
     add_test(NAME osal.descriptor COMMAND osal_descriptor_tests)
     set_tests_properties(osal.descriptor PROPERTIES TIMEOUT 45)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Intercept rollback only in this test executable. Creation, fd limits
+        # and size initialization still use the production backend and kernel.
+        add_executable(osal_shared_memory_rollback_tests shared_memory_rollback_tests.cpp)
+        target_link_libraries(osal_shared_memory_rollback_tests PRIVATE vinc::osal)
+        target_link_options(osal_shared_memory_rollback_tests PRIVATE "LINKER:--wrap=shm_unlink")
+        add_test(NAME osal.shared_memory_rollback COMMAND osal_shared_memory_rollback_tests)
+        set_tests_properties(osal.shared_memory_rollback PROPERTIES TIMEOUT 15)
+    endif()
 endif()
 
 add_executable(osal_path_tests path_tests.cpp)

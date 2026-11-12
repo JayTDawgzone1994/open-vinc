@@ -77,6 +77,9 @@ Public headers remain `<vinc/osal/...>`. Native/state/platform headers are under
 `detail/resource_coordinator.hpp` 另指定給 Host／Plugin 接線使用；所有權、等待與初始化契約，
 以及第二階段 POSIX FD／spawn 接線與驗證見上述計畫。元件目錄整理不改變平台行為契約；本輪錯誤型別遷移見下節。
 
+The Message Bus counter uses the designated [exclusive-create report](SHARED_MEMORY.md#名稱清理與程序退出)
+to decide whether it can release a reserved name. Topic 計數器透過此內部介面取得回滾診斷。
+
 <a id="統一錯誤介面"></a>
 
 ## Unified error interface / 統一錯誤介面

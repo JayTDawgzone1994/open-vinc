@@ -47,6 +47,15 @@ vinc::Error error(vinc::osal::ErrorOperation operation, int value = errno) noexc
 std::string native_name(const std::string& name) {
     return "/ov_" + name;
 }
+
+// Called only after exclusive creation. The name has not been handed off.
+// Closing the fd and removing the name are separate OS operations.
+void rollback_created_memory(int fd, const std::string& native, std::optional<Error>& name_cleanup_error) {
+    (void)::close(fd);
+    if (::shm_unlink(native.c_str()) != 0 && errno != ENOENT) {
+        name_cleanup_error = error(ErrorOperation::UnlinkSharedMemory);
+    }
+}
 }
 
 SharedMemoryState::~SharedMemoryState() {
@@ -83,7 +92,8 @@ vinc::Result<void> SharedMemoryMappingState::unmap_native() noexcept {
     return {};
 }
 
-vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& name, std::uint64_t size) {
+vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& name, std::uint64_t size,
+                                 std::optional<Error>& name_cleanup_error) {
     auto resources = acquire_resources(ErrorOperation::CreateSharedMemory);
     if (!resources) {
         return std::unexpected(resources.error());
@@ -104,8 +114,7 @@ vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& na
     }
     auto isolated = isolate_descriptor(fd, operation);
     if (!isolated) {
-        (void)::close(fd);
-        (void)::shm_unlink(native.c_str()); // only the unpublished object we created
+        rollback_created_memory(fd, native, name_cleanup_error);
         return std::unexpected(isolated.error());
     }
 
@@ -115,8 +124,7 @@ vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& na
     } while (result < 0 && errno == EINTR);
     if (result < 0) {
         const auto failure = error(operation);
-        (void)::close(fd);
-        (void)::shm_unlink(native.c_str()); // remove only the object we just created
+        rollback_created_memory(fd, native, name_cleanup_error);
         return std::unexpected(failure);
     }
     state.handle = fd;

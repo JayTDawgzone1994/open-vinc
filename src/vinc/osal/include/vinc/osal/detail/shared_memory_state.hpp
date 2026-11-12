@@ -4,7 +4,7 @@
 // A mapping retains its owner until unmap; neither object stores message or ring metadata.
 
 #include <vinc/osal/error.hpp>
-#include <vinc/osal/shared_memory.hpp>
+#include <vinc/osal/detail/shared_memory_create.hpp>
 #include <string>
 
 namespace vinc::osal::detail {
@@ -26,7 +26,8 @@ struct SharedMemoryMappingState {
     vinc::Result<void> unmap_native() noexcept;
 };
 
-vinc::Result<void> create_memory(SharedMemoryState&, const std::string&, std::uint64_t);
+vinc::Result<void> create_memory(SharedMemoryState&, const std::string&, std::uint64_t,
+                                 std::optional<Error>& name_cleanup_error);
 vinc::Result<void> open_memory(SharedMemoryState&, const std::string&, SharedMemoryAccess);
 vinc::Result<void> map_memory(SharedMemoryMappingState&);
 vinc::Result<void> unlink_memory(const std::string&);
