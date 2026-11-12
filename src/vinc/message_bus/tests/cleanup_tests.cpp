@@ -15,6 +15,11 @@
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#ifdef __linux__
+#include <sys/mman.h>
+#include <unistd.h>
+#include <cerrno>
+#endif
 
 namespace {
 using namespace vinc;
@@ -74,7 +79,7 @@ struct Connection {
     std::shared_ptr<bus::Client> client;
     std::uint64_t next_request = 1;
 
-    Connection() {
+    explicit Connection(bool reject_first_release = false) {
         service = take(control::Service::create(sessions_per_connection));
         auto listener = take(osal::Socket::open(osal::AddressFamily::IPv4, osal::SocketType::Stream));
         ok(listener.bind(osal::IpEndpoint{osal::IPv4Address::loopback(), 0}));
@@ -94,7 +99,21 @@ struct Connection {
         module = take(service->attach(std::move(outgoing), options));
         ok(central->wait_open(deadline()));
         ok(module->wait_open(deadline()));
-        client = take(detail::RuntimeAccess::create(module));
+        if (reject_first_release) {
+            detail::ControlTransport transport;
+            transport.send = [session = module, rejected = false](control::Frame frame) mutable -> Result<void> {
+                if (!rejected && frame.operation == detail::ReleaseBatch) {
+                    rejected = true;
+                    return std::unexpected(Error{control::ErrorCode::Backpressure, control::ErrorOperation::Send});
+                }
+
+                return session->send(std::move(frame));
+            };
+            transport.close = [session = module] { session->close(); };
+            client = take(detail::RuntimeAccess::create(std::move(transport)));
+        } else {
+            client = take(detail::RuntimeAccess::create(module));
+        }
     }
 
     ~Connection() {
@@ -122,11 +141,14 @@ struct Connection {
     }
 
     void expect_release(std::uint16_t operation, std::uint64_t id) {
+        ok(detail::RuntimeAccess::progress_releases(*client));
         auto frame = take(central->receive_until(deadline()));
-        check(frame.kind == control::Kind::Event && frame.operation == operation && !frame.request,
-              "rollback must send release event");
+        check(frame.kind == control::Kind::Request && frame.operation == detail::ReleaseBatch && frame.request,
+              "release requires a correlated acknowledgement");
         control::Reader reader(frame.payload);
-        check(reader.u64() == id && reader.done(), "rollback must release exactly its registration");
+        check(reader.u32() == 1 && reader.u32() == operation && reader.u64() == id && reader.done(),
+              "rollback must release exactly its registration");
+        reply(frame, {});
     }
 };
 
@@ -207,7 +229,7 @@ void test_notification_install_catchup() {
     ok(publisher.push(*local));
     auto empty = receiver.wait_until(std::chrono::steady_clock::now());
     check(!empty && empty.error().is(osal::ErrorCode::Timeout), "removed route must receive no new notification");
-    publisher.close();
+    // Fixture teardown owns the remaining registration.
 }
 
 void test_publication_notification_failure() {
@@ -270,7 +292,6 @@ void test_publication_notification_failure() {
         "low-frequency reopen catches up and retains failure history");
     ok(publisher.push(*local));
     ok(first.wait_until(deadline()));
-    publisher.close();
     control::Frame invalid{control::Kind::Event, detail::message_bus_domain, detail::NotificationRoutesChanged};
     control::put_u64(invalid.payload, 0);
     control::put_u32(invalid.payload, 0);
@@ -413,8 +434,9 @@ void test_subscribe_failure(FaultPoint point) {
     const auto next_request = take(connection.central->receive_until(deadline()));
     connection.reply(next_request, subscription(subscription_id + 1));
     auto subscriber = take(next.get());
-    subscriber.close();
+    auto closing = std::async(std::launch::async, [&] { return subscriber.close(); });
     connection.expect_release(detail::Unsubscribe, subscription_id + 1);
+    ok(closing.get());
 }
 
 enum class MalformedReply {
@@ -470,6 +492,131 @@ Result<control::Bytes> manager_request(detail::BusManager& manager, Connection& 
     return control::Bytes(decoded.body.begin(), decoded.body.end());
 }
 
+enum class CounterFault { None, Reserve, Retire, RetireAllocation, Size, SizeAndUnlink, Map };
+#ifdef __linux__
+thread_local CounterFault native_counter_fault = CounterFault::None;
+#endif
+
+// One fixture represents one journal reservation. The Bus worker is its only
+// writer. Tests inspect it after drain_until synchronizes with that worker.
+struct CounterJournal final : vinc::detail::ResourceNames {
+    explicit CounterJournal(CounterFault fault) : fault(fault) {}
+    CounterFault fault;
+    std::string name = detail::shared_name('t');
+    bool reserved = false;
+    unsigned retire_calls = 0;
+    const Error journal_error{osal::ErrorCode::PermissionDenied};
+
+    Result<std::string> reserve() override {
+        if (fault == CounterFault::Reserve) {
+            return std::unexpected(journal_error);
+        }
+
+        reserved = true;
+#ifdef __linux__
+        native_counter_fault = fault;
+#endif
+        return name;
+    }
+
+    Result<void> retire(std::string_view requested) override {
+        check(reserved && requested == name, "retired unowned reservation");
+        ++retire_calls;
+        if (fault == CounterFault::RetireAllocation) {
+            throw std::bad_alloc();
+        }
+
+        if (fault == CounterFault::Retire) {
+            return std::unexpected(journal_error);
+        }
+
+        reserved = false;
+        return {};
+    }
+};
+
+void test_counter_registration(CounterFault fault, bool collide = false) {
+    auto journal = std::make_shared<CounterJournal>(fault);
+    // An independent owner preserves its mapping and initial value across collision.
+    std::shared_ptr<detail::NamedCounter> original;
+    if (collide) {
+        original = take(detail::NamedCounter::create(journal->name));
+        check(take(original->next()) == 1, "initialize original counter");
+    }
+
+    Connection connection;
+    auto manager = take(detail::BusManager::create({}, journal));
+    control::Bytes payload;
+    ok(control::put_string(payload, "registration/test"));
+    control::put_u64(payload, Frame::schema().hash);
+    control::put_u32(payload, 0);
+    constexpr std::uint64_t owner = 1;
+    auto result = manager_request(*manager, connection, owner, detail::Subscribe, std::move(payload));
+    ok(manager->drain_until(deadline()));
+    auto diagnostic = manager->last_counter_cleanup_failure();
+
+    if (fault == CounterFault::Reserve) {
+        check(!result && result.error().is_operation(bus::ErrorOperation::CreateTopic), "reserve failure");
+        check(!journal->reserved && journal->retire_calls == 0 && !diagnostic, "retired failed reserve");
+        return;
+    }
+
+    if (fault == CounterFault::None && !collide) {
+        check(result && journal->reserved && journal->retire_calls == 0, "successful counter handoff");
+        manager->exited(owner);
+        ok(manager->drain_until(deadline()));
+        check(!journal->reserved && journal->retire_calls == 1 && !diagnostic, "counter owner retirement");
+        return;
+    }
+
+    check(!result && result.error().is(bus::ErrorCode::Io), "unexpected counter failure");
+    const auto operation = fault == CounterFault::Map ? bus::ErrorOperation::MapCounter
+                                                       : bus::ErrorOperation::CreateCounter;
+    check(result.error().is_operation(operation), "lost primary operation");
+    const auto causes = result.error().causes();
+    check(!causes.empty() && causes.back().domain == ErrorDomain::Osal, "lost OSAL primary failure");
+    if (collide) {
+        check(causes.back().code == static_cast<int>(osal::ErrorCode::AlreadyExists), "lost collision cause");
+        auto reopened = take(detail::NamedCounter::open(journal->name));
+        check(take(reopened->next()) == 2, "colliding object changed or lost");
+    }
+
+#ifdef __linux__
+    if (fault == CounterFault::Map) {
+        check(causes.back().native.value() == ENOMEM, "lost native mapping failure");
+    }
+    if (fault == CounterFault::Size || fault == CounterFault::SizeAndUnlink) {
+        check(causes.back().native.value() == ENOSPC, "lost native initialization failure");
+    }
+#endif
+    if (fault == CounterFault::Retire || fault == CounterFault::RetireAllocation || fault == CounterFault::SizeAndUnlink) {
+        check(journal->reserved && diagnostic && diagnostic->resource_name == journal->name &&
+              diagnostic->primary == result.error(), "lost recovery evidence or primary cause");
+        if (fault == CounterFault::Retire) {
+            check(journal->retire_calls == 1 && diagnostic->cleanup == journal->journal_error,
+                  "journal removal failure lost or retried");
+        } else if (fault == CounterFault::RetireAllocation) {
+            check(journal->retire_calls == 1 && diagnostic->cleanup.is(bus::ErrorCode::ResourceExhausted),
+                  "allocation during retirement hid the primary failure");
+        } else {
+#ifdef __linux__
+            check(journal->retire_calls == 0 && diagnostic->cleanup.is_operation(osal::ErrorOperation::UnlinkSharedMemory) &&
+                  diagnostic->cleanup.native.value() == EACCES && causes.back().native.value() == ENOSPC,
+                  "uncertain unlink retired reservation or replaced primary errno");
+            auto retained = take(osal::SharedMemory::open(journal->name, osal::SharedMemoryAccess::ReadOnly));
+            ok(osal::SharedMemory::unlink_name(journal->name));
+#endif
+        }
+        return;
+    }
+
+    check(!diagnostic && !journal->reserved && journal->retire_calls == 1, "confirmed rollback must retire once");
+    if (!collide) {
+        auto missing = osal::SharedMemory::open(journal->name, osal::SharedMemoryAccess::ReadOnly);
+        check(!missing && missing.error().is(osal::ErrorCode::NotFound), "rollback left an owned mapping");
+    }
+}
+
 detail::Descriptor register_publisher(detail::BusManager& manager, Connection& connection,
                                       std::uint64_t owner, const std::string& topic, std::uint32_t expected_routes = 0) {
     control::Bytes payload;
@@ -520,10 +667,43 @@ auto client_request(detail::BusManager& manager, Connection& connection, std::ui
 
 void process_release(detail::BusManager& manager, Connection& connection, std::uint64_t owner,
                      std::uint16_t operation) {
+    ok(detail::RuntimeAccess::progress_releases(*connection.client));
     auto event = take(connection.central->receive_until(deadline()));
-    check(event.kind == control::Kind::Event && event.operation == operation, "expected rollback event");
+    check(event.kind == control::Kind::Request && event.operation == detail::ReleaseBatch, "expected release batch");
+    control::Reader reader(event.payload);
+    check(reader.u32() == 1 && reader.u32() == operation, "expected single release kind");
     ok(manager.submit(owner, "rollback-owner", connection.central, std::move(event)));
     ok(manager.drain_until(deadline()));
+    ok(detail::RuntimeAccess::receive(*connection.client, take(connection.module->receive_until(deadline()))));
+}
+
+void test_topic_limit_read_failure() {
+    Connection connection;
+    constexpr std::uint64_t owner = 33;
+    const Error read_error{osal::ErrorCode::PermissionDenied, osal::ErrorOperation::OpenSharedMemory};
+    std::atomic<bool> unavailable{false};
+    auto manager = take(detail::BusManager::create({}, {}, {}, [&]() -> Result<std::uint32_t> {
+        if (unavailable.load()) {
+            return std::unexpected(read_error);
+        }
+
+        return 0;
+    }));
+    auto subscribe = [&](std::string name) {
+        return client_request(*manager, connection, owner, [&] {
+            return connection.client->subscribe<Frame>(std::move(name));
+        });
+    };
+    auto original = take(subscribe("limit/original"));
+    unavailable.store(true);
+    auto same = take(subscribe("limit/original"));
+    auto rejected = subscribe("limit/new");
+    check(!rejected && rejected.error().is(bus::ErrorCode::Io) &&
+          rejected.error().is_operation(bus::ErrorOperation::CreateTopic) &&
+          rejected.error().causes().size() == 1 && rejected.error().causes().front() == read_error.record(),
+          "a failed limit lookup rejects the new name and preserves the cause");
+    unavailable.store(false);
+    auto retry = take(subscribe("limit/new"));
 }
 
 void test_publisher_defaults() {
@@ -627,11 +807,6 @@ void test_publisher_defaults() {
         check(!rejected && rejected.error().is(bus::ErrorCode::Protocol), "old option wire is never reinterpreted");
     }
     // Every handle is local and idle before simulating confirmed owner exit.
-    original.close();
-    bytes_only.close();
-    slots_only.close();
-    explicit_options.close();
-    retried.close();
     manager->exited(owner);
     manager->exited(malformed_owner);
     ok(manager->drain_until(deadline()));
@@ -861,6 +1036,140 @@ void test_notification_capacity() {
     ok(manager->drain_until(deadline()));
 }
 
+void test_release_confirmation(bool break_session) {
+    Connection connection;
+    std::vector<bus::Subscriber<Frame>> subscribers;
+    for (std::size_t index = 0; index <= detail::maximum_releases_per_batch; ++index) {
+        auto subscribing = std::async(std::launch::async, [&] {
+            return connection.client->subscribe<Frame>("release-order");
+        });
+        connection.reply(take(connection.central->receive_until(deadline())), subscription(index + 1));
+        subscribers.push_back(take(subscribing.get()));
+    }
+
+    auto last = std::move(subscribers.back());
+    subscribers.pop_back();
+    subscribers.clear();
+    auto closing = std::async(std::launch::async, [&] { return last.close(); });
+    auto first = take(connection.central->receive_until(deadline()));
+    control::Reader reader(first.payload);
+    check(first.operation == detail::ReleaseBatch && reader.u32() == detail::maximum_releases_per_batch,
+          "clear sends one bounded batch before explicit close");
+    // Container element destruction order is unspecified. Each retired identity appears exactly once.
+    std::array<bool, detail::maximum_releases_per_batch> seen{};
+    for (std::size_t index = 0; index < seen.size(); ++index) {
+        check(reader.u32() == detail::Unsubscribe, "release kind");
+        const auto id = reader.u64();
+        check(id > 0 && id <= seen.size() && !seen[id - 1], "only cleared identities in the first batch");
+        seen[id - 1] = true;
+    }
+    check(reader.done(), "no trailing fields");
+    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    check(closing.wait_for(0s) != std::future_status::ready, "a write to the socket is not completion");
+
+    if (break_session) {
+        detail::RuntimeAccess::shutdown(*connection.client);
+        const auto result = closing.get();
+        check(!result && result.error().is(bus::ErrorCode::Closed), "disconnect wakes unconfirmed close");
+        return;
+    }
+
+    connection.reply(first, {});
+    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    auto second = take(connection.central->receive_until(deadline()));
+    control::Reader tail(second.payload);
+    check(second.operation == detail::ReleaseBatch && second.request > first.request &&
+          tail.u32() == 1 && tail.u32() == detail::Unsubscribe &&
+          tail.u64() == seen.size() + 1 && tail.done(), "later close follows clear exactly once");
+    check(closing.wait_for(0s) != std::future_status::ready, "close waits for its own batch");
+    connection.reply(second, {});
+    ok(closing.get());
+    auto repeated = last.close();
+    check(!repeated && repeated.error().is(bus::ErrorCode::Closed), "closed handle cannot replay release");
+}
+
+void test_release_backpressure() {
+    Connection connection(true);
+    constexpr std::uint64_t id = 1;
+    auto subscribing = std::async(std::launch::async, [&] {
+        return connection.client->subscribe<Frame>("backpressure");
+    });
+    connection.reply(take(connection.central->receive_until(deadline())), subscription(id));
+    std::optional handle{take(subscribing.get())};
+    handle.reset();
+
+    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    check(!take(connection.central->try_receive()), "rejected send never reached the wire");
+    connection.expect_release(detail::Unsubscribe, id);
+    check(connection.module->state() == control::State::Open, "retry keeps session open");
+}
+
+void test_release_fence() {
+    Connection connection;
+    auto subscribe = [&](std::uint64_t id) {
+        auto call = std::async(std::launch::async, [&] {
+            return connection.client->subscribe<Frame>("fence");
+        });
+        connection.reply(take(connection.central->receive_until(deadline())), subscription(id));
+        return take(call.get());
+    };
+    std::optional first{subscribe(1)};
+    std::optional second{subscribe(2)};
+    first.reset();
+    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    auto batch = take(connection.central->receive_until(deadline()));
+    std::promise<void> waiting;
+    auto entered = waiting.get_future();
+    auto query = std::async(std::launch::async, [&] {
+        // MSVC can reuse an async worker. Remove the hook before the promise leaves scope.
+        struct ResetHook {
+            ~ResetHook() {
+                detail::testing::before_release_wait = {};
+            }
+        } reset;
+        detail::testing::before_release_wait = [&] { waiting.set_value(); };
+        return connection.client->list_topic_connections({}, deadline());
+    });
+    check(entered.wait_until(deadline()) == std::future_status::ready, "query reached release fence");
+    second.reset();
+    connection.reply(batch, {});
+
+    // Leave the later release unconfirmed. An older query must already be allowed to send.
+    auto request = take(connection.central->receive_until(deadline()));
+    check(request.operation == detail::ListTopicConnections, "new retirements cannot extend earlier fence");
+    connection.reply(request, take(detail::encode_connections({})));
+    (void)take(query.get());
+    connection.expect_release(detail::Unsubscribe, 2);
+}
+
+void test_batch_ownership() {
+    Connection owner;
+    Connection other;
+    auto manager = take(detail::BusManager::create());
+    const auto publication = register_publisher(*manager, owner, 1, "batch/first");
+    const auto foreign = register_publisher(*manager, other, 2, "batch/other");
+    auto release = [&](std::initializer_list<std::uint64_t> ids) {
+        control::Bytes body;
+        control::put_u32(body, static_cast<std::uint32_t>(ids.size()));
+        for (const auto id : ids) {
+            control::put_u32(body, detail::ClosePublisher);
+            control::put_u64(body, id);
+        }
+
+        return manager_request(*manager, owner, 1, detail::ReleaseBatch, std::move(body));
+    };
+    auto duplicate = release({publication.id, publication.id});
+    check(!duplicate && duplicate.error().is(bus::ErrorCode::Protocol), "reject duplicate release");
+    auto crossed = release({publication.id, foreign.id});
+    check(!crossed && crossed.error().is(bus::ErrorCode::Protocol), "reject foreign release");
+    // Both rejected batches began with a valid ID; it must still be owned and releasable.
+    (void)take(release({publication.id}));
+    auto ring = take(detail::RingBuffer::open(foreign, false));
+    check(ring->alive(), "other owner retains live ring");
+    manager->exited(2);
+    ok(manager->drain_until(deadline()));
+}
+
 void test_registration_capacity_reuse() {
     Connection publisher_connection;
     Connection subscriber_connection;
@@ -893,10 +1202,12 @@ void test_registration_capacity_reuse() {
           "failure after topology installation must roll back subscriber");
     process_release(*manager, subscriber_connection, subscriber_owner, detail::Unsubscribe);
     auto subscriber = take(client_request(*manager, subscriber_connection, subscriber_owner, subscribe));
-    subscriber.close();
+    auto close_subscriber = std::async(std::launch::async, [&] { return subscriber.close(); });
     process_release(*manager, subscriber_connection, subscriber_owner, detail::Unsubscribe);
-    publisher.close();
+    ok(close_subscriber.get());
+    auto close_publisher = std::async(std::launch::async, [&] { return publisher.close(); });
     process_release(*manager, publisher_connection, publisher_owner, detail::ClosePublisher);
+    ok(close_publisher.get());
     manager->exited(publisher_owner);
     manager->exited(subscriber_owner);
     ok(manager->drain_until(deadline()));
@@ -1004,6 +1315,8 @@ void test_exit_cleanup(FaultPoint point) {
 }
 
 namespace vinc::message_bus::detail::testing {
+thread_local std::function<void()> before_release_wait;
+
 Result<std::uint64_t> publication_timestamp() noexcept {
     return clock_override ? *clock_override : vinc::unix_nanoseconds();
 }
@@ -1032,9 +1345,53 @@ void pending_remaining(std::size_t count) noexcept {
 }
 }
 
+#ifdef __linux__
+// Link-time faults affect only this executable. All unarmed calls go to libc.
+extern "C" int __real_ftruncate(int, off_t);
+extern "C" int __wrap_ftruncate(int fd, off_t size) {
+    if (native_counter_fault == CounterFault::Size || native_counter_fault == CounterFault::SizeAndUnlink) {
+        errno = ENOSPC;
+        return -1;
+    }
+    return __real_ftruncate(fd, size);
+}
+
+extern "C" int __real_shm_unlink(const char*);
+extern "C" int __wrap_shm_unlink(const char* name) {
+    if (native_counter_fault == CounterFault::SizeAndUnlink) {
+        errno = EACCES;
+        return -1;
+    }
+    return __real_shm_unlink(name);
+}
+
+extern "C" void* __real_mmap(void*, size_t, int, int, int, off_t);
+extern "C" void* __wrap_mmap(void* address, size_t length, int prot, int flags, int fd, off_t offset) {
+    if (native_counter_fault == CounterFault::Map) {
+        errno = ENOMEM;
+        return MAP_FAILED;
+    }
+    return __real_mmap(address, length, prot, flags, fd, offset);
+}
+#endif
+
 int main(int argc, char** argv) {
     const char* phase = "startup";
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "counter-registration") {
+            phase = "counter registration rollback";
+            test_counter_registration(CounterFault::None);
+            test_counter_registration(CounterFault::Reserve);
+            test_counter_registration(CounterFault::None, true);
+            test_counter_registration(CounterFault::Retire, true);
+            test_counter_registration(CounterFault::RetireAllocation, true);
+#ifdef __linux__
+            test_counter_registration(CounterFault::Size);
+            test_counter_registration(CounterFault::SizeAndUnlink);
+            test_counter_registration(CounterFault::Map);
+#endif
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "notification-snapshots") {
             phase = "notification snapshot contracts";
             vinc::message_bus::detail::testing::run_notification_snapshot_tests();
@@ -1050,6 +1407,8 @@ int main(int argc, char** argv) {
         test_topic_discovery();
         phase = "test_publisher_defaults()";
         test_publisher_defaults();
+        phase = "test_topic_limit_read_failure()";
+        test_topic_limit_read_failure();
         phase = "test_malformed_discovery()";
         test_malformed_discovery();
         phase = "test_client_topic_separators()";
@@ -1082,6 +1441,15 @@ int main(int argc, char** argv) {
         test_notification_capacity();
         phase = "test_notification_topology()";
         test_notification_topology();
+        phase = "release confirmation";
+        test_release_confirmation(false);
+        test_release_confirmation(true);
+        phase = "release backpressure";
+        test_release_backpressure();
+        phase = "release ordering";
+        test_release_fence();
+        phase = "batch ownership";
+        test_batch_ownership();
         phase = "test_registration_capacity_reuse()";
         test_registration_capacity_reuse();
         phase = "test_exit_cleanup(FaultPoint::DetachEncode)";

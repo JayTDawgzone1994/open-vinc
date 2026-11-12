@@ -18,6 +18,8 @@ constexpr std::size_t default_payload_bytes = 16;
 class MessageBusTestModule : public vinc::BaseModule<vinc::RunMode::FrameworkLoop> {
     std::optional<vinc::message_bus::Publisher<vinc::Frame>> publisher_;
     std::optional<vinc::message_bus::Subscriber<vinc::Frame>> subscriber_;
+    std::vector<vinc::message_bus::Subscriber<vinc::Frame>> held_subscriptions_;
+    std::vector<vinc::message_bus::Publisher<vinc::Frame>> held_publishers_;
     std::optional<vinc::message_bus::WriteLoan<vinc::Frame>> loan_;
     std::unique_ptr<vinc::Frame> copied_;
     std::string topic_;
@@ -125,6 +127,94 @@ public:
         }
 
         const auto& command = args[0];
+        if (command == "hold-subscription" && args.size() == 2) {
+            auto subscriber = context.subscribe<vinc::Frame>(args[1]);
+            if (!subscriber) {
+                return std::unexpected(subscriber.error());
+            }
+
+            held_subscriptions_.push_back(std::move(*subscriber));
+            return 0;
+        }
+
+        if (command == "hold-callback" && args.size() == 2) {
+            auto endpoint = context.subscribe<vinc::Frame>(args[1], [](std::unique_ptr<vinc::Frame>) {});
+            if (!endpoint) {
+                return std::unexpected(endpoint.error());
+            }
+
+            held_subscriptions_.push_back(std::move(*endpoint));
+            return 0;
+        }
+
+        if (command == "hold-publisher" && args.size() == 2) {
+            auto endpoint = context.advertise<vinc::Frame>(args[1], {.slots = 2, .max_message_bytes = 4096});
+            if (!endpoint) {
+                return std::unexpected(endpoint.error());
+            }
+
+            held_publishers_.push_back(std::move(*endpoint));
+            return 0;
+        }
+
+        if (command == "clear-publishers") {
+            held_publishers_.clear();
+            auto barrier = context.list_topics();
+            if (!barrier) {
+                return std::unexpected(barrier.error());
+            }
+
+            return 0;
+        }
+
+        if (command == "clear-and-subscribe" && args.size() == 2) {
+            held_subscriptions_.clear();
+            auto replacement = context.subscribe<vinc::Frame>(args[1]);
+            if (!replacement) {
+                return std::unexpected(replacement.error());
+            }
+
+            auto closed = replacement->close();
+            if (!closed) {
+                return std::unexpected(closed.error());
+            }
+
+            return 0;
+        }
+
+        if (command == "release-subscription" && !held_subscriptions_.empty()) {
+            held_subscriptions_.pop_back();
+            // Order the following admission check after the last endpoint's release.
+            auto barrier = context.list_topics();
+            if (!barrier) {
+                return std::unexpected(barrier.error());
+            }
+
+            return 0;
+        }
+
+        if (command == "probe-explicit-publisher" && args.size() == 2) {
+            auto publisher = context.advertise<vinc::Frame>(args[1], {.slots = 2, .max_message_bytes = 4096});
+            if (!publisher) {
+                return std::unexpected(publisher.error());
+            }
+
+            return 0;
+        }
+        if (command == "probe-subscription" && args.size() == 2) {
+            auto subscriber = context.subscribe<vinc::Frame>(args[1]);
+            if (!subscriber) {
+                return std::unexpected(subscriber.error());
+            }
+
+            auto closed = subscriber->close();
+            if (!closed) {
+                return std::unexpected(closed.error());
+            }
+
+            return 0;
+        }
+
         if (command == "crash") {
             std::_Exit(42);
         }

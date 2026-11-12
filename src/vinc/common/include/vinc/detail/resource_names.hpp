@@ -7,7 +7,9 @@
 namespace vinc::detail {
 // Injected by the central owner. No global registry and no OS dependency here.
 // reserve() records an exclusive name BEFORE its native resource is created.
-// retire() may only follow successful unlink, or Windows handle retirement.
+// retire() removes only the caller's journal reservation. It is valid after
+// confirmed native name cleanup, Windows retirement, or a failed exclusive
+// create that confirms no owned name remains. Uncertain cleanup retains the record.
 class ResourceNames {
 public:
     virtual ~ResourceNames() = default;

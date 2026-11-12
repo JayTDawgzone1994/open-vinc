@@ -59,7 +59,7 @@ class ParallelStopModule final : public BaseModule<RunMode::Manual> {
         check(!active_.exchange(true), "old and replacement Topic overlapped");
         ++calls_;
         if (mode_ == "replace") {
-            subscriber_->close();
+            take(subscriber_->close());
             replacement_.emplace(take(context.subscribe<Frame>("stop/topic", [this](auto) {
                 check(!active_, "replacement bypassed active Topic owner");
                 replaced_ = true;

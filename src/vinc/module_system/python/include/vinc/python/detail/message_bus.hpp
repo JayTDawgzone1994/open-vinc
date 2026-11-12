@@ -104,7 +104,7 @@ template<class T> struct PythonPublisher final : PythonResource {
         if (auto loan = outstanding.lock()) {
             loan->clear();
         }
-        native.close();
+        auto retiring = std::move(native);
     }
     void close() {
         ContextCall call(state);
@@ -112,8 +112,11 @@ template<class T> struct PythonPublisher final : PythonResource {
         if (auto loan = outstanding.lock()) {
             loan->clear();
         }
-        py::gil_scoped_release release;
-        native.close();
+        auto result = [&] {
+            py::gil_scoped_release release;
+            return native.close();
+        }();
+        unwrap(std::move(result));
     }
     void push(const MessageValue<T>& message) {
         ContextCall call(state);
@@ -176,7 +179,7 @@ template<class T> struct PythonSubscriber final : PythonResource {
         : state(std::move(context)), native(std::move(subscriber)), callback(std::move(function)) {
     }
     void clear() override {
-        native.close();
+        auto retiring = std::move(native);
         if (callback) {
             callback->clear();
         }
@@ -184,13 +187,14 @@ template<class T> struct PythonSubscriber final : PythonResource {
     void close() {
         ContextCall call(state);
         ResourceUse use(busy);
-        {
+        auto result = [&] {
             py::gil_scoped_release release;
-            native.close();
-        }
+            return native.close();
+        }();
         if (callback) {
             callback->clear();
         }
+        unwrap(std::move(result));
     }
     MessageValue<T> get_last() {
         ContextCall call(state);

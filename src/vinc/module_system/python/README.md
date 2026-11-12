@@ -11,9 +11,9 @@ Python Module 由中央 Shell 啟停，每個實例使用一個系統 Python 程
 PublisherOptions now defaults to `None` in both fields, matching C++ optional
 options; omitted fields resolve centrally at registration. See
 [Publisher defaults](../../message_bus/PUBLISHER_DEFAULTS.md). Rebuild the extension
-with Bus v4 / Plugin entry 19 (including parallel-pump drain synchronization).
+with Bus v5 / Plugin entry 20 for acknowledged Publisher and Subscriber close.
 PublisherOptions 兩欄預設為 None，與 C++ optional 一致；省略欄位在中央建立時解析。
-契約見上述文件，擴充須與 Bus v4／Plugin entry 19（含多執行緒 pump drain 同步）一起重建。
+契約見上述文件，擴充須與 Bus v5／Plugin entry 20 一起重建。Python 的端點 close 會釋放 GIL 等候中央回覆。
 
 Manual Modules can use `context.waitForWork(timeout=None)` after an empty
 `pumpOnce()` batch. Timeout is seconds; this releases the GIL but dispatches no

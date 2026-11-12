@@ -504,6 +504,13 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
             if (terminal) {
                 watchdog_failure(session, inbox, *terminal, child_exit::application_exception, stop_deadline);
             }
+            auto releases = message_bus::detail::RuntimeAccess::progress_releases(message_bus_client);
+            if (!releases) {
+                watchdog_failure(session, inbox,
+                    wrap_error(ErrorCode::BusFailed, ErrorOperation::Send, releases.error()),
+                    child_exit::central_lost, stop_deadline);
+            }
+
             if (inbox.rpc) {
                 auto progress = inbox.rpc->progress();
                 if (!progress) {

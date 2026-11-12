@@ -7,6 +7,7 @@
 #include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <vinc/control/channel.hpp>
+#include <array>
 #include <condition_variable>
 #include <deque>
 #include <map>
@@ -101,6 +102,7 @@ struct BusManager::Impl {
     std::shared_ptr<vinc::detail::ResourceNames> resources;
     Limits limits;
     PublisherDefaultsSource defaults;
+    TopicLimitSource topic_limit;
     std::uint64_t next_id = 1;
     std::uint64_t allocated = 0;
     std::map<std::string, Topic> topics;
@@ -112,11 +114,12 @@ struct BusManager::Impl {
     std::deque<Work> work;
     bool stopping = false;
     std::size_t pending_work = 0;
+    std::optional<CounterCleanupFailure> last_counter_cleanup; // protected by mutex
     std::thread worker;
 
     explicit Impl(Limits settings, std::shared_ptr<vinc::detail::ResourceNames> names,
-                  PublisherDefaultsSource source)
-        : resources(std::move(names)), limits(settings), defaults(std::move(source)) {
+                  PublisherDefaultsSource source, TopicLimitSource limit_source)
+        : resources(std::move(names)), limits(settings), defaults(std::move(source)), topic_limit(std::move(limit_source)) {
     }
 
     void start_worker() {
@@ -183,7 +186,18 @@ struct BusManager::Impl {
             return &it->second;
         }
 
-        if (topics.size() >= limits.max_topics || allocated > limits.max_shared_bytes - sizeof(SharedWord)) {
+        auto maximum = limits.max_topics;
+        if (topic_limit) {
+            auto current = topic_limit();
+            if (!current) {
+                return std::unexpected(io_resource(current.error(), ErrorOperation::CreateTopic));
+            }
+
+            maximum = *current;
+        }
+
+        const bool count_exhausted = maximum != 0 && topics.size() >= maximum;
+        if (count_exhausted || allocated > limits.max_shared_bytes - sizeof(SharedWord)) {
             return std::unexpected(vinc::make_error(ErrorCode::ResourceExhausted, ErrorOperation::CreateTopic));
         }
 
@@ -191,10 +205,18 @@ struct BusManager::Impl {
         if (!counter_name) {
             return std::unexpected(io_resource(counter_name.error(), ErrorOperation::CreateTopic));
         }
-        auto counter = NamedCounter::create(*counter_name, resources);
+
+        std::optional<Error> cleanup;
+        auto counter = NamedCounter::create(*counter_name, resources, cleanup);
         if (!counter) {
+            if (cleanup) {
+                std::lock_guard lock(mutex);
+                last_counter_cleanup = CounterCleanupFailure{std::move(*counter_name), counter.error(), *cleanup};
+            }
+
             return std::unexpected(counter.error());
         }
+
         Topic topic_state;
         topic_state.schema = schema;
         topic_state.counter = std::move(*counter);
@@ -573,6 +595,72 @@ struct BusManager::Impl {
         return body;
     }
 
+    // The worker owns the registry for the entire validation and application.
+    // Topic pointers stay valid until prune(), after all IDs have been retired.
+    Topic* owned_topic(const EndpointRelease& release, std::uint64_t owner) {
+        for (auto& [_, topic] : topics) {
+            if (release.operation == Unsubscribe) {
+                auto sub = topic.subscribers.find(release.id);
+                if (sub != topic.subscribers.end() && sub->second.owner == owner) {
+                    return &topic;
+                }
+            } else {
+                auto pub = topic.publishers.find(release.id);
+                if (pub != topic.publishers.end() && pub->second->descriptor.owner == owner) {
+                    return &topic;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    Result<control::Bytes> release_batch(const Work& item) {
+        const Error invalid{ErrorCode::Protocol, ErrorOperation::CloseRegistration};
+        control::Reader reader(item.frame.payload);
+        const auto count = reader.u32();
+        if (!count || count > maximum_releases_per_batch) {
+            return std::unexpected(invalid);
+        }
+
+        std::array<EndpointRelease, maximum_releases_per_batch> releases{};
+        std::array<Topic*, maximum_releases_per_batch> owners{};
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto operation = reader.u32();
+            const auto id = reader.u64();
+            if ((operation != Unsubscribe && operation != ClosePublisher) || !id) {
+                return std::unexpected(invalid);
+            }
+            for (std::size_t prior = 0; prior < index; ++prior) {
+                if (releases[prior].id == id) {
+                    return std::unexpected(invalid);
+                }
+            }
+
+            releases[index] = {static_cast<std::uint16_t>(operation), id};
+            owners[index] = owned_topic(releases[index], item.owner);
+            if (!owners[index]) {
+                return std::unexpected(invalid);
+            }
+        }
+        if (!reader.done()) {
+            return std::unexpected(invalid);
+        }
+
+        for (std::size_t index = 0; index < count; ++index) {
+            auto& topic = *owners[index];
+            const auto& release = releases[index];
+            if (release.operation == Unsubscribe) {
+                remove_subscriber(topic, topic.subscribers.find(release.id));
+            } else {
+                remove_publisher(topic, topic.publishers.find(release.id));
+            }
+        }
+
+        // The reply promises capacity is reusable, including the last endpoint's Topic.
+        prune();
+        return control::Bytes{};
+    }
+
     vinc::Result<control::Bytes> list_topics(const Work& item) {
         control::Reader reader(item.frame.payload);
         const auto after = reader.string();
@@ -709,6 +797,8 @@ struct BusManager::Impl {
         case ClosePublisher:
         case Unsubscribe:
             return close_registration(item);
+        case ReleaseBatch:
+            return release_batch(item);
         default:
             return std::unexpected(vinc::make_error(ErrorCode::Protocol, ErrorOperation::Receive));
         }
@@ -770,7 +860,9 @@ struct BusManager::Impl {
                     item.session->close();
                 }
 
-                prune();
+                if (item.frame.operation != ReleaseBatch) {
+                    prune();
+                }
             } catch (...) {
                 if (item.session) {
                     item.session->close();
@@ -787,8 +879,8 @@ BusManager::BusManager(std::unique_ptr<Impl> implementation) noexcept : impl_(st
 }
 
 vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings,
-    std::shared_ptr<vinc::detail::ResourceNames> resources, PublisherDefaultsSource defaults) {
-    if (!settings.max_topics || !settings.publishers_per_topic ||
+    std::shared_ptr<vinc::detail::ResourceNames> resources, PublisherDefaultsSource defaults, TopicLimitSource topic_limit) {
+    if (!settings.publishers_per_topic ||
         settings.publishers_per_topic > maximum_attached_publishers || !settings.subscribers_per_topic ||
         settings.subscribers_per_topic > maximum_ring_buffer_readers ||
         settings.max_shared_bytes < minimum_bus_manager_shared_bytes) {
@@ -796,7 +888,7 @@ vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings,
     }
 
     try {
-        auto impl = std::make_unique<Impl>(settings, std::move(resources), std::move(defaults));
+        auto impl = std::make_unique<Impl>(settings, std::move(resources), std::move(defaults), std::move(topic_limit));
         auto result = std::unique_ptr<BusManager>(new BusManager(std::move(impl)));
         result->impl_->start_worker();
         return result;
@@ -809,6 +901,11 @@ vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings,
 }
 
 BusManager::~BusManager() = default;
+
+std::optional<CounterCleanupFailure> BusManager::last_counter_cleanup_failure() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->last_counter_cleanup;
+}
 
 vinc::Result<void> BusManager::submit(std::uint64_t owner, std::string name,
                                       std::shared_ptr<control::Session> session, control::Frame frame, std::string notification_name) {

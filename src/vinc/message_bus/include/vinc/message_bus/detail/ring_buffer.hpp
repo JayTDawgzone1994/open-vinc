@@ -200,7 +200,10 @@ struct NamedCounter {
     std::string name;
     bool creator = false;
     ~NamedCounter();
-    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string, std::shared_ptr<vinc::detail::ResourceNames> resources = {});
+    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string);
+    // A supplied name service already holds a reservation for this exact name.
+    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string,
+        std::shared_ptr<vinc::detail::ResourceNames> resources, std::optional<Error>& cleanup_failure);
     static vinc::Result<std::shared_ptr<NamedCounter>> open(std::string);
     vinc::Result<std::uint64_t> next();
 };
