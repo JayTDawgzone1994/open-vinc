@@ -8,7 +8,7 @@
 #include <vinc/module/detail/instance.hpp>
 #include <vinc/module/detail/lock_registry.hpp>
 #include <vinc/module/detail/manager_access.hpp>
-#include <vinc/module/detail/publisher_defaults.hpp>
+#include <vinc/module/detail/message_bus_settings.hpp>
 #include <vinc/module/detail/log_settings.hpp>
 // Central module supervisor: allocate MIDs, approve names, launch through OSAL, wait for Ready,
 // route requests, and stop/reap each generation before retiring its Message Bus resources.
@@ -384,13 +384,15 @@ struct DataServices {
 };
 
 Result<DataServices> create_data_services(message_bus::Limits limits,
-    std::shared_ptr<detail::ResourceNames> resources, message_bus::detail::PublisherDefaultsSource defaults) {
+    std::shared_ptr<detail::ResourceNames> resources, detail::MessageBusSettings& settings) {
     auto output =
         output_hub::OutputHub::create(output_hub::Limits{.max_subscribers = output_subscriber_limit});
     if (!output) {
         return std::unexpected(wrap_error(ErrorCode::OutputFailed, ErrorOperation::Create, output.error()));
     }
-    auto bus = message_bus::detail::BusManager::create(limits, std::move(resources), std::move(defaults));
+    auto bus = message_bus::detail::BusManager::create(limits, std::move(resources),
+        [&settings] { return settings.read_publisher_defaults(); },
+        [&settings] { return settings.read_topic_limit(); });
     if (!bus) {
         return std::unexpected(wrap_error(ErrorCode::BusFailed, ErrorOperation::Create, bus.error()));
     }
@@ -429,7 +431,7 @@ struct ModuleManager::Impl {
     // One local Shell plus eight connected remote Shell subscribers.
     std::unique_ptr<output_hub::OutputHub> output;
     std::unique_ptr<param::detail::ParamManager> params;
-    std::unique_ptr<detail::PublisherDefaults> publisher_defaults;
+    std::unique_ptr<detail::MessageBusSettings> bus_settings;
     std::unique_ptr<detail::LogSettings> log_settings;
     // Reverse destruction also protects partial-create rollback: Bus joins
     // before its defaults consumer and the Param worker it may be reading.
@@ -1641,12 +1643,9 @@ Result<std::unique_ptr<ModuleManager>> detail::ManagerAccess::create(std::string
                 wrap_error(ErrorCode::ParamFailed, ErrorOperation::Create, parameters.error()));
         }
         implementation->params = std::move(*parameters);
-        implementation->publisher_defaults = std::make_unique<detail::PublisherDefaults>(*implementation->params, limits);
+        implementation->bus_settings = std::make_unique<detail::MessageBusSettings>(*implementation->params, limits);
         implementation->log_settings = std::make_unique<detail::LogSettings>(*implementation->params);
-        auto data_services = create_data_services(limits, implementation->instance,
-            [defaults = implementation->publisher_defaults.get()] {
-                return defaults->read();
-            });
+        auto data_services = create_data_services(limits, implementation->instance, *implementation->bus_settings);
         if (!data_services) {
             return std::unexpected(data_services.error());
         }
@@ -1696,7 +1695,7 @@ Result<void> detail::ManagerAccess::configure_params(ModuleManager& manager, std
     auto result = manager.impl_->params->configure(data_root / manager.impl_->instance_name / "params.toml");
     // Registration follows load even when file I/O failed: live settings remain
     // available. Module admission begins only after this startup stage returns.
-    auto registered = manager.impl_->publisher_defaults->initialize();
+    auto registered = manager.impl_->bus_settings->initialize();
     if (!registered) {
         return std::unexpected(registered.error());
     }
@@ -1809,7 +1808,7 @@ ModuleManager::~ModuleManager() {
     // No provider call may outlive Param, including timed-out registration
     // requests still queued on the Bus worker. Supervision has already joined.
     impl_->bus_manager.reset();
-    impl_->publisher_defaults.reset();
+    impl_->bus_settings.reset();
     impl_->log_settings.reset();
     impl_->params.reset();
     impl_->rpc.reset();

@@ -2,6 +2,14 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## Message Bus：Topic 登記回收
+
+- [ ] macOS 原生 Release 重建中央、Host 與 Plugin，執行 `message_bus.cleanup`、`message_bus.topic_limit_param`、`message_bus.release_routes`。核對同一個 callback 清除 141 個訂閱後立即重新註冊、對端仍能收發、延後 ACK 與斷線時的 close 結果；記錄提交與工具鏈。
+
+- [ ] macOS 原生 Release 驗證 `vinc.message_bus_max_topics`。執行 `message_bus.topic_limit_param`（預設超過 128 個名稱、動態調整、保存重啟、兩個 App 隔離）、`message_bus.cleanup`、`module.publisher_defaults`、`message_bus.topic_registration_emfile`；需啟用測試並備妥測試用 Python。記錄提交與工具鏈。
+
+- [ ] macOS 原生驗收同名 Topic 的跨 App 崩潰／重啟隔離、FD 耗盡重試與共享名稱回收。使用同一提交的 [第四步驗收指令](src/vinc/message_bus/TOPIC_REGISTRATION_RECOVERY.md#第四步驗收)，記錄實際平台與結果。
+
 ## Parallel pump：macOS 與後續觀察
 
 Windows Debug／Release 與 WSL Release 的乾淨 SDK／搬移驗收已完成；兩平台各 48 組成本對照亦完成。證據見下方契約，不代表 Mac 或所有偶發問題已解決；Recorder 未自動啟用 worker。

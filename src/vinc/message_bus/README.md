@@ -9,12 +9,14 @@ Message Bus connects OSAL SharedMemory, generated messages, and process Modules.
 每個 Publisher 擁有獨立 RingBuffer，同一 topic 可有多個 Publisher。大量訊息留在共享記憶體，
 Socket 控制通道只交換註冊、退訂與 Publisher 增減資訊。
 
+Topic counter creation retires its reservation when OSAL confirms no owned name needs cleanup. Topic 計數器僅在確認無自有名稱待清理時撤銷失敗預留。跨 App 同名 Topic、中央重啟與資源額滿驗收見 [Topic registration failure recovery / Topic 註冊失敗回收契約](TOPIC_REGISTRATION_RECOVERY.md)。
+
 Omitted Publisher capacities use two central Param values; explicit options and
 existing rings remain independent. See [Publisher defaults](PUBLISHER_DEFAULTS.md)
-for last-effective correction, standalone use and Bus v4 / Plugin entry 14.
+for last-effective correction and standalone use. Current endpoint release uses Bus v5 / Plugin entry 20.
 
 省略的 Publisher 容量改用兩項中央 Param，明確指定及既有 Ring 不受影響。
-最後有效值修正、獨立使用與 Bus v4／Plugin entry 14 見上述專題契約。
+最後有效值修正與獨立使用見上述專題契約。現行端點回收使用 Bus v5／Plugin entry 20。
 
 Sequential delivery runs through Context pump callbacks; get_last reads the latest. No per-message data Socket notifications.
 
@@ -393,11 +395,27 @@ Overlapping data operations on one Pub/Sub return OperationInProgress; different
 
 ## Limits and implementation scope / 限制與實作邊界
 
-Manager Bus limits default 128 topics,32 Publishers/topic,128 Subscribers, 1 GiB active shared bytes. Maximum 65536 slots,4096 Subscribers,32 Publishers due to bounded descriptors. Names/topics<=256 UTF-8 bytes. Each Client has 32 pending controls, manager 256 application requests; accepted exit recovery is not dropped by that cap.
+The per-App framework Param `vinc.message_bus_max_topics` (uint32, Limited, no restart) defaults to **0**, which disables the distinct-Topic count check. A subscriber-only Topic counts once. Additional endpoints on the same name and schema share its entry. Lowering the limit retains all live Topics; a new name is admitted only when the live count is below the new limit or the limit is zero. The last endpoint's release frees that entry after Bus cleanup.
+
+The Bus worker reads the committed setting only when creating a distinct name, before reserving shared resources. A read failure rejects that creation with its cause. ModuleManager registers the initial `Limits::max_topics` after loading Param persistence; a standalone Bus uses its supplied limit directly. Use `param set vinc.message_bus_max_topics 256` for a live change and `param save` to retain it across restart.
+
+每個 App 各自計算仍存活的不同 Topic；只有 Subscriber 也算一筆。將上限從 142 降為 100 時，既有 Topic 可繼續收發及加入端點，降到 99 筆才有一個新名稱的名額。設回 0 即解除數量限制。參數只在建立新名稱時讀取，讀取失敗會拒絕該次建立並保留原因鏈。手動調整後用 `param save` 保存。
+
+Release validation on 2026-11-12 passed the targeted Windows x64 suite (MSVC 19.51, 8/8) and the WSL Ubuntu 24.04 x86-64 suite (GCC 13.3, 9/9 including FD exhaustion). On each platform `message_bus.topic_limit_param` also passed three consecutive runs with 142 live names, two independent Apps, and a saved limit restored after restart. Native macOS verification is tracked in the [project TODO](../../../TODO.md).
+
+**Closing an endpoint.** `Publisher::close()` and `Subscriber::close()` consume the handle and return `Result<void>`. Success means the central has reclaimed that registration and pruned any empty Topic. Another owner can use newly available capacity immediately. Close waits within the Bus request deadline without pumping callbacks. A lost acknowledgement leaves the remote outcome unknown. Repeating close on the consumed handle returns `Closed`. Python exposes a successful close as `None` and an error as `VincError`.
+
+**關閉與批次退訂。** 明確呼叫 `close()` 會等中央確認。析構、移動賦值替換舊端點、容器 `clear()` 會先結束本機使用，再將回收交給 Host。後續同一 Host 的 Bus 登記或查詢會等待呼叫前已排入的回收，沿用同一份請求期限。可在同一個 callback 清空訂閱後立即重新訂閱，無須額外 pump 或 sleep。其他 Host 可在中央釋出名額後先行取得；空出的名額不專屬於原持有人。
+
+The old Windows reproduction filled the central receive queue with 64 individual close frames before the next unsubscribe arrived. Bus v5 uses bounded acknowledged batches. See the [release protocol](DESIGN.md#endpoint-release) and the macOS validation item in the root TODO.
+
+2026-11-12 Release validation on Windows x64 (MSVC 19.51) and WSL Ubuntu 24.04 passed both 141-endpoint cases. `message_bus.topic_limit_param` clears 141 subscriber-only Topics and immediately admits a replacement at a reduced limit. `message_bus.release_routes` removes 141 callback subscriptions with live remote Publishers, registers them again, then closes the Publishers and checks communication between the same two Hosts. `message_bus.cleanup` passed five consecutive runs per platform with delayed replies, send backpressure, ownership checks, disconnection and concurrent release ordering. Windows also passed `module.python_services`.
+
+Other Manager budgets default to 32 Publishers/topic, 128 Subscribers/topic and 1 GiB of active shared bytes. Maximum 65536 slots,4096 Subscribers,32 Publishers due to bounded descriptors. Names/topics<=256 UTF-8 bytes. Each Client has 32 pending controls, manager 256 application requests; accepted exit recovery is not dropped by that cap.
 
 框架內部 `ModuleManager::create(limits, host_executable)` 可設定中央預算，Host 路徑由框架提供：
-預設 128 topics、每 topic 32 Publishers、
-128 Subscribers、1 GiB 活躍共享配置。每 Publisher 最多 65,536 slots；Subscriber 上限可設到 4,096，
+Topic 數量預設不限。每個 Topic 預設最多 32 個 Publisher 和 128 個 Subscriber。
+每個 App 的 Bus 預設合計可配置 1 GiB 活躍共享記憶體。每個 Publisher 最多 65,536 slots；Subscriber 上限可設到 4,096，
 Publisher 上限目前不可超過 32（控制封包有界）。Publisher 名稱及 topic 最多 256 UTF-8 bytes。
 每個 Client 最多 32 個控制請求等待，BusManager 應用請求佇列最多 256；退出回收事件不因該上限被丟棄。
 
@@ -536,7 +554,7 @@ Three recovery gaps were fixed:
 本輪重審的三項回收缺口已修正：
 
 - Detach failure no longer aborts exit cleanup: retire ring/reclaim active budget/remove registration before notifying each subscriber. Encoding/send exceptions/Results close only that receiver and do not interrupt remaining notifications/topic readers/peers/pruning, leaving no consumed-but-unfinished exit job on this path.
-- RegistrationCleanup takes ownership immediately after successful response. Trusted IDs send ClosePublisher/Unsubscribe and remove local topology; untrusted/truncated/zero/mismatched/invalid descriptors close the Session. Mapping/counter/decode failures stay covered until core delivery.
+- RegistrationCleanup takes ownership immediately after a successful response. Trusted IDs enter the release queue and retire local topology. Untrusted, truncated or invalid descriptors close the Session. The guard covers mapping, counter and decode failures until core delivery.
 - PendingCleanup removes pending entries on every exit. Send/body-copy exceptions before safe response delivery close the Session/no retry; valid remote errors return normally, success does not close. Existing outer exception classification remains.
 
 - **退出清理不受 Detach 失敗中斷。** `remove_publisher()` 先退役 RingBuffer、扣回活躍預算並移除登記，
@@ -544,7 +562,7 @@ Three recovery gaps were fixed:
   不阻斷其他通知、後續 topic 的 Reader 清理、peer 移除與空 topic 回收。
   因此已接受的退出工作不再因這條通知失敗路徑提前消耗卻留下死亡 Reader token。
 - **註冊回滾涵蓋 handle 交付前的完整階段。** `RegistrationCleanup` 在成功 RPC 返回後立即接管，
-  有可信 ID 時送 ClosePublisher／Unsubscribe，退訂亦移除本機 topology；
+  有可信 ID 時排入回收佇列，退訂亦移除本機 topology；
   尚無可信身分、Descriptor 截斷、零 ID、schema 不符或共享布局／尺寸不合法時關閉會話。
   映射、counter 開啟及本機解碼失敗均受保護；成功交付 core 後才解除 guard。
 - **pending 名額由作用域清理。** `PendingCleanup` 在請求入列後建立，所有出口都移除該 pending。
@@ -659,11 +677,12 @@ Bus 原有 ring buffer 共享布局及 writer 等待政策維持。
 
 ## Central resource-name service (2026-10-08) / 中央共享資源名稱服務（2026-10-08）
 
-Production Manager injects private ResourceNames into BusManager. Counter/control/data names reserve persistent records before SharedMemory creation; retire only after unlink success/already absent or Windows retirement. Incomplete cleanup stays recorded for next startup. Standalone uninjected tests use random names without cross-crash cleanup guarantees. No payload/order/wait/Reader change or per-message file I/O; see [Instance](../module_system/INSTANCE.md).
+Production Manager injects private ResourceNames into BusManager. Counter/control/data names reserve persistent records before SharedMemory creation. Owners retire after unlink succeeds, the name is already absent, or Windows retirement. A failed counter create may also retire its own reservation when OSAL confirms no owned name remains. Incomplete cleanup retains the record. Standalone uninjected tests use random names without cross-crash cleanup guarantees. See [Instance](../module_system/INSTANCE.md).
 
 正式 Manager 組裝時向 `BusManager::create()` 注入 common 的私有 `ResourceNames`。
 Topic counter、RingBuffer control／data 都先 reserve 留下紀錄，再建立 OSAL SharedMemory；
-建立者 unlink 成功／名稱已不存在或 Windows 退役時，才 retire 記錄。清理未完成則保留供下次中央處理。
+建立者在 unlink 成功、名稱已不存在或 Windows 退役後撤銷登記。計數器排他建立失敗且 OSAL
+確認無自有名稱待清理時，也直接撤銷自己的預留。清理未獲確認則保留登記。
 無注入的獨立 Bus 測試仍採原有隨機名稱；這不提供跨中央崩潰的持久清理保證。
 本接線不改 payload、排序、等待或 Reader 回收協定，也不增加每筆 pub/sub 的檔案操作。
 跨世代與名稱生命週期契約見 [Module System INSTANCE.md](../module_system/INSTANCE.md)。

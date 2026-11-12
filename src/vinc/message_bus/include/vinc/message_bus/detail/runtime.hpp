@@ -30,6 +30,8 @@ public:
     // The owner must join its receiver before final shutdown, not suppress receive errors.
     static vinc::Result<void> receive(Client&, control::Frame);
     static void shutdown(Client&) noexcept;
+    // Nonblocking release progress; only the Host receives acknowledgements.
+    static Result<void> progress_releases(Client&);
     // Existing Host receive worker retries failed routes; it never invokes user code.
     static void progress_notifications(Client&);
     static NotificationDiagnostics notification_diagnostics(Client&);

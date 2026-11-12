@@ -15,7 +15,6 @@ using namespace vinc::bag;
 struct Subscription {
     std::uint64_t schema = 0;
     std::function<message_bus::SubscriberStats()> stats;
-    std::function<void()> close;
     std::uint64_t lost = 0;
     std::uint64_t oversized = 0;
 };
@@ -45,7 +44,6 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
     void finish() {
         for (auto& [name, subscription] : subscriptions_) {
             losses(subscription);
-            subscription.close();
         }
 
         subscriptions_.clear();
@@ -84,9 +82,6 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
         return Subscription{T::schema().hash,
                             [owner] {
                                 return owner->stats();
-                            },
-                            [owner] {
-                                owner->close();
                             }};
     }
 
@@ -114,7 +109,6 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
             auto present = topics.find(iterator->first);
             if (present == topics.end() || present->second.schema != iterator->second.schema) {
                 losses(iterator->second);
-                iterator->second.close();
                 iterator = subscriptions_.erase(iterator);
             } else {
                 ++iterator;

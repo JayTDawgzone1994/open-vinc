@@ -16,7 +16,7 @@ Host notification ownership, Bus routes, notification-driven pumpLoop, bounded r
 Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
 preparation failure rejects only the affected Module; later notification failures retain the
 10 ms fallback. See the [pump wakeup contract](PUMP_WAKEUP.md) for policies and validation.
-Current bootstrap is **v16**, Plugin entry **19**, and Module query **v2**; rebuild connected artifacts.
+Current bootstrap is **v16**, Plugin entry **20**, and Module query **v2**. Rebuild connected artifacts for Bus v5 acknowledged endpoint release.
 Entry 19 adds Context-owned cross-image drain synchronization to the entry-18
 C++ Topic workers; see [parallel pump evidence and remaining work](PARALLEL_PUMP.md).
 Entry 17 exposes deadline-aware Manual waiting through Context; see [Manual wait](PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
@@ -26,7 +26,7 @@ Entry 16 adds revocable async-client ownership to the entry-15 synchronous RPC w
 
 已接通通知資源、Bus 路由、pumpLoop 喚醒、故障恢復與診斷；pumpOnce 行為不變。
 準備失敗只拒絕該 Module 啟動，運行中的通知故障保留 10 ms 補查。契約及驗證見上述連結。
-目前 bootstrap v16、Plugin entry 19、Module query v2，所有接線產物須一起重建。
+目前 bootstrap v16、Plugin entry 20、Module query v2；Bus v5 端點回收需要一起重建中央、Host、Plugin 與 SDK 使用者。
 Entry 19 在 entry 18 的 Topic worker 布局加入 Context 持有的跨 image 收尾同步，見上述契約。
 Entry 17 加入 Context 的帶期限 Manual 等待入口，完整契約見上述 Manual 等待連結。
 Entry 16 加入可撤銷的非同步 Client 所有權，延續 Entry 15 同步 RPC／pump 防護；Entry 14 的可省略 Publisher 容量維持；Module System 持有上述參數消費端，Bus 不依賴 Param。

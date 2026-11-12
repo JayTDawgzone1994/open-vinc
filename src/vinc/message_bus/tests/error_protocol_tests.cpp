@@ -136,7 +136,7 @@ void test_catalog_and_boundaries() {
 
     auto manager = protocol::BusManager::create();
     check(bool(manager), "create admission fixture");
-    for (const auto operation : {1, 2, 3, 4, 5, 6, 0x0201, 0x0301, 0x0501, static_cast<int>(protocol::NotificationRoutesChanged) + 1}) {
+    for (const auto operation : {1, 2, 3, 4, 5, 6, 0x0201, 0x0301, 0x0401, 0x0601, static_cast<int>(protocol::ReleaseBatch) + 1}) {
         control::Frame frame{control::Kind::Request, protocol::message_bus_domain,
                              static_cast<std::uint16_t>(operation), 1};
         auto rejected = (*manager)->submit(1, "fixture", {}, std::move(frame));

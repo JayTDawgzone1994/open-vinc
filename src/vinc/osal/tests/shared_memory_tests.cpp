@@ -2,6 +2,7 @@
 // Pipe tokens synchronize test steps; SharedMemory itself supplies no message synchronization.
 
 #include <vinc/time.hpp>
+#include <vinc/osal/detail/shared_memory_create.hpp>
 #include <vinc/osal/shared_memory.hpp>
 #include <vinc/osal/process_pipe.hpp>
 #include <algorithm>
@@ -208,7 +209,32 @@ struct Harness {
     }
 };
 
+#ifdef _WIN32
+void test_create_over_existing_event() {
+    // Named events and mappings share the Windows object namespace. A real
+    // type mismatch makes CreateFileMappingW fail without granting ownership.
+    const auto name = unique_name();
+    const auto native = L"Local\\ov_" + std::wstring(name.begin(), name.end());
+    HANDLE event = CreateEventW(nullptr, TRUE, FALSE, native.c_str());
+    require(event != nullptr, "create named event");
+    detail::SharedMemoryCreateAttempt attempt;
+    auto rejected = attempt.create(name, 1);
+    const bool event_usable = SetEvent(event) != FALSE;
+    const bool closed = CloseHandle(event) != FALSE;
+    require(event_usable && closed, "event owner lost its handle");
+    fails(rejected, ErrorCode::SystemError, "expected native object type mismatch");
+    require(rejected.error().is_operation(ErrorOperation::CreateSharedMemory) &&
+                rejected.error().native == vinc::NativeError{vinc::NativeErrorSource::Win32, ERROR_INVALID_HANDLE},
+            "lost CreateFileMappingW error");
+    require(!attempt.name_cleanup_error, "failed native create claimed a name");
+    require(attempt.create(name, 1).has_value(), "cannot reuse name after event owner closed it");
+}
+#endif
+
 void basic_tests() {
+#ifdef _WIN32
+    test_create_over_existing_event();
+#endif
     const auto invalid_access = static_cast<SharedMemoryAccess>(99);
     for (const auto& name : {std::string{}, std::string("a/b"), std::string("a\\b"), std::string("a\0b", 3),
                              std::string(25, 'x')}) {
@@ -252,6 +278,18 @@ void basic_tests() {
     auto reader = take(ro.map(8192, SharedMemoryAccess::ReadOnly));
     fails(reader.writable_bytes(), vinc::osal::ErrorCode::PermissionDenied, "readonly view upgraded");
     take(writer.writable_bytes())[8191] = std::byte{73};
+    detail::SharedMemoryCreateAttempt attempt;
+    auto collision = attempt.create(cleanup.name, 1);
+    fails(collision, ErrorCode::AlreadyExists, "reported create did not reject duplicate");
+    require(collision.error().native == duplicate.error().native &&
+                collision.error().is_operation(ErrorOperation::CreateSharedMemory),
+            "reported create lost the native collision");
+    require(!attempt.name_cleanup_error, "collision claimed ownership of an existing name");
+    auto reopened = take(SharedMemory::open(cleanup.name, SharedMemoryAccess::ReadOnly));
+    auto preserved = take(reopened.map(8192, SharedMemoryAccess::ReadOnly));
+    require(preserved.bytes()[8191] == std::byte{73}, "collision changed the original named mapping");
+    ok(preserved.unmap());
+    ok(reopened.close());
     require(reader.bytes()[8191] == std::byte{73}, "views do not share storage");
     auto prefix = take(memory.map(3, SharedMemoryAccess::ReadOnly));
     require(prefix.bytes().size() == 3, "prefix extent lost");

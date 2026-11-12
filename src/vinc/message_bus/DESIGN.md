@@ -12,6 +12,14 @@
 - `message_storage` 負責生成 class 的 offset 映像、容量與驗證；`adopt_record` 接管已複製的 buffer，
   避免接收端再次複製整筆映像。C++ class、虛擬函式表與程序內的所有權物件不放在共享區。
 
+<a id="endpoint-release"></a>
+
+## Endpoint release / 端點回收
+
+- Each registration reserves one local release record before sending its request. Local retirement waits for the protected read/write operation, detaches the endpoint, and appends its record in FIFO order. A full control queue never forces a destructor to drop that record.
+- Bus v5 carries at most 16 releases in a request. The Host allows one outstanding batch. Its existing watchdog advances cleanup independently of pump. A send rejected before admission can retry within the batch deadline. Once admitted, a batch with an unknown outcome is recovered through session failure and confirmed process exit.
+- 中央先驗證整批長度、端點種類、重複 ID 與持有人，再回收；清除空 Topic 後才回覆。ACK 確認中央登記與預算已釋放，其他 Module 處理拓樸通知仍各自進行。同一 Host 的後續控制請求只等進入時已排入的回收序號。共享記憶體收發維持原路徑。
+
 ## RingBuffer 布局與原子操作
 
 每個 Publisher 有 control 與 payload 兩個命名共享區；topic 另有共用 counter。

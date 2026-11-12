@@ -1,5 +1,5 @@
 #include "../../param/tests/support.hpp"
-#include <vinc/module/detail/publisher_defaults.hpp>
+#include <vinc/module/detail/message_bus_settings.hpp>
 #include <vinc/module/detail/instance.hpp>
 #include <vinc/module/detail/lock_registry.hpp>
 #include <vinc/param/detail/persistence.hpp>
@@ -36,13 +36,13 @@ struct Fixture {
     std::shared_ptr<detail::Instance> instance = take(detail::Instance::create(unique_name()));
     detail::LockRegistry locks{instance};
     std::unique_ptr<param::detail::ParamManager> params;
-    std::unique_ptr<detail::PublisherDefaults> defaults;
+    std::unique_ptr<detail::MessageBusSettings> defaults;
 
     explicit Fixture(message_bus::Limits limits = {}) {
         const auto lock = take(locks.create());
         auto storage = take(param::detail::Storage::create(instance, lock.name, lock.id));
         params = take(param::detail::ParamManager::create(std::move(storage)));
-        defaults = std::make_unique<detail::PublisherDefaults>(*params, limits);
+        defaults = std::make_unique<detail::MessageBusSettings>(*params, limits);
     }
 
     auto file() const {
@@ -76,8 +76,8 @@ void registration_and_persistence() {
         take(writer.write(saved));
     }
     fixture.start();
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
-    const auto values = take(fixture.params->read_current({slots_name, bytes_name}));
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
+    const auto values = take(fixture.params->read_current({slots_name, bytes_name, "vinc.message_bus_max_topics"}));
     for (const auto& [name, entry] : values) {
         check(entry.permission == param::Permission::Limited && entry.restart_hint == param::RestartHint::None,
               "framework defaults are Limited and do not require restart");
@@ -86,6 +86,13 @@ void registration_and_persistence() {
           "saved override is not a new registered default");
     check(values.at(bytes_name).default_value == param::Value(config::message_bus_default_message_bytes),
           "saved byte override preserves the code default");
+    check(values.at("vinc.message_bus_max_topics").default_value == param::Value(std::uint32_t{0}),
+          "distinct Topic counts default to unlimited uint32");
+    for (const auto* invalid : {"-1", "4294967296"}) {
+        auto rejected = fixture.params->command({"set", "vinc.message_bus_max_topics", invalid});
+        check(!rejected, "invalid uint32 Topic limit accepted");
+    }
+    check(take(fixture.defaults->read_topic_limit()) == 0, "invalid edits changed the effective Topic limit");
 
     auto independent = take(fixture.params->read_current({slots_name}));
     independent.at(slots_name).value = std::uint32_t{99};
@@ -98,7 +105,7 @@ void registration_and_persistence() {
           "framework consumer writes use central short names only");
 
     fixture.set(changed_slots + 1, changed_bytes * 2);
-    check_values(take(fixture.defaults->read()), changed_slots + 1, changed_bytes * 2);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots + 1, changed_bytes * 2);
     {
         param::detail::Persistence reader;
         const auto unchanged = take(reader.load(fixture.file()));
@@ -111,16 +118,16 @@ void registration_and_persistence() {
     Fixture restarted;
     std::filesystem::copy_file(fixture.file(), restarted.file());
     restarted.start();
-    check_values(take(restarted.defaults->read()), changed_slots + 1, changed_bytes * 2);
+    check_values(take(restarted.defaults->read_publisher_defaults()), changed_slots + 1, changed_bytes * 2);
 }
 
 void invalid_values_restore_effective_pair() {
     Fixture fixture;
     fixture.start();
     fixture.set(changed_slots, changed_bytes);
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
     fixture.set(0, changed_bytes * 2);
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
     auto values = take(fixture.params->read_current({slots_name, bytes_name}));
     check(take(values.at(slots_name).get<std::uint32_t>()) == changed_slots &&
           take(values.at(bytes_name).get<std::uint64_t>()) == changed_bytes,
@@ -130,19 +137,19 @@ void invalid_values_restore_effective_pair() {
           "rejection reports correction without claiming persistence");
 
     fixture.set(changed_slots, 0);
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
     fixture.set(changed_slots, UINT64_MAX);
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
     fixture.set(message_bus::detail::maximum_ring_buffer_slots + 1, changed_bytes);
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
     // Each field is individually in range; the pair exceeds an empty Bus budget.
     fixture.set(message_bus::detail::maximum_ring_buffer_slots, config::message_bus_default_message_bytes);
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
 
     fixture.set(1, changed_bytes);
-    check_values(take(fixture.defaults->read()), 1, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), 1, changed_bytes);
     fixture.set(0, changed_bytes);
-    check_values(take(fixture.defaults->read()), 1, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), 1, changed_bytes);
     check(take(take(fixture.params->read_current({slots_name})).at(slots_name).get<std::uint32_t>()) == 1,
           "one remains a valid requested count; Bus alone normalizes it to two");
 }
@@ -151,15 +158,15 @@ void initial_invalid_and_failed_correction() {
     Fixture fixture;
     fixture.start();
     fixture.set(0, changed_bytes);
-    check_values(take(fixture.defaults->read()), config::message_bus_default_slots,
+    check_values(take(fixture.defaults->read_publisher_defaults()), config::message_bus_default_slots,
                  config::message_bus_default_message_bytes);
     fixture.set(changed_slots, changed_bytes);
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
     fixture.set(0, changed_bytes);
     // Exhaustion is an existing deterministic publication failure, not a new
     // production hook or a sleep-based race with the correction worker.
     take(param::detail::ParamManagerTestAccess::exhaust_versions(*fixture.params));
-    check_values(take(fixture.defaults->read()), changed_slots, changed_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, changed_bytes);
     check(take(take(fixture.params->read_current({slots_name})).at(slots_name).get<std::uint32_t>()) == 0,
           "failed correction does not pretend to have changed Param");
     std::uint64_t cursor = 0;
@@ -170,9 +177,12 @@ void initial_invalid_and_failed_correction() {
 void failed_read_is_not_a_default() {
     Fixture fixture;
     fixture.start();
-    take(fixture.defaults->read());
+    take(fixture.defaults->read_publisher_defaults());
     param::detail::ParamManagerTestAccess::close_admission(*fixture.params);
-    const auto failed = fixture.defaults->read();
+    const auto failed_limit = fixture.defaults->read_topic_limit();
+    check(!failed_limit && failed_limit.error().is(module_system::ErrorCode::ParamFailed),
+          "an unreadable Topic limit must not be treated as zero");
+    const auto failed = fixture.defaults->read_publisher_defaults();
     check(!failed && failed.error().is(module_system::ErrorCode::ParamFailed) &&
           failed.error().is_operation(module_system::ErrorOperation::AccessParam),
           "read failure propagates instead of silently using code defaults");
@@ -185,7 +195,7 @@ void completed_registration_can_be_confirmed() {
     // Same state as a committed registration whose caller did not observe
     // completion. Confirmation must preserve live edits and register the rest.
     take(fixture.defaults->initialize());
-    check_values(take(fixture.defaults->read()), changed_slots, config::message_bus_default_message_bytes);
+    check_values(take(fixture.defaults->read_publisher_defaults()), changed_slots, config::message_bus_default_message_bytes);
     take(fixture.defaults->initialize());
 
     Fixture collision;

@@ -28,4 +28,6 @@ extern thread_local std::function<void()> before_notification;
 void run_notification_snapshot_tests();
 void checkpoint(FaultPoint);
 void pending_remaining(std::size_t) noexcept;
+// Test-only observation before the condition variable releases the transport lock.
+extern thread_local std::function<void()> before_release_wait;
 }

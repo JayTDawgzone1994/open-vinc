@@ -145,8 +145,8 @@ static_assert(error_chain_max_depth >= 2, "Error chains require at least two rec
 inline constexpr std::uint32_t message_bus_default_slots = 2;
 // 每個 RingBuffer 槽位的完整訊息映像預設容量（bytes，含 metadata）。
 inline constexpr std::uint64_t message_bus_default_message_bytes = 1024 * 1024;
-// Bus 預設允許的不同 Topic 數量上限。
-inline constexpr std::uint32_t message_bus_default_topics = 128;
+// Zero disables only the distinct-Topic count limit. 每個 App 的 Topic 數量預設不限。
+inline constexpr std::uint32_t message_bus_default_topics = 0;
 // 每個 Topic 預設可登記的 Publisher 數量上限。
 inline constexpr std::uint32_t message_bus_default_publishers_per_topic = 32;
 // 每個 Topic 預設可登記的 Subscriber 數量上限。

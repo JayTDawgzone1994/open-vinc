@@ -50,15 +50,22 @@ SharedMemory::operator bool() const noexcept {
 }
 
 vinc::Result<SharedMemory> SharedMemory::create(std::string_view name, std::uint64_t size) {
+    detail::SharedMemoryCreateAttempt attempt;
+    return attempt.create(name, size);
+}
+
+vinc::Result<SharedMemory> detail::SharedMemoryCreateAttempt::create(std::string_view name, std::uint64_t size) {
+    name_cleanup_error.reset();
     if (!valid_name(name) || !valid_size(size)) {
         return std::unexpected(invalid(vinc::osal::ErrorOperation::CreateSharedMemory));
     }
 
     auto state = std::make_shared<detail::SharedMemoryState>();
-    auto result = detail::create_memory(*state, std::string(name), size);
+    auto result = detail::create_memory(*state, std::string(name), size, name_cleanup_error);
     if (!result) {
         return std::unexpected(result.error());
     }
+
     state->access = SharedMemoryAccess::ReadWrite;
     state->created_size = size;
     return SharedMemory(std::move(state));

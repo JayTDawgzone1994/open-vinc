@@ -8,6 +8,7 @@
 #include <vinc/message/detail/framework_access.hpp>
 #include <vinc/time.hpp>
 #include <condition_variable>
+#include <list>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -98,6 +99,9 @@ void install_notification_targets(NotificationRoutes& routes, const std::vector<
     routes.notify();
 }
 
+// One node is allocated before registration. Splicing it on retirement cannot allocate.
+using ReleaseNode = std::list<EndpointRelease>;
+
 struct Transport {
     struct Pending {
         std::uint16_t operation;
@@ -115,6 +119,14 @@ struct Transport {
     std::map<std::uint64_t, Pending> pending;
     std::map<std::uint64_t, std::map<std::uint64_t, Attachment>> topology;
     std::map<std::uint64_t, std::shared_ptr<NotificationRoutes>> notification_routes;
+
+    ReleaseNode queued_releases;
+    std::uint64_t released = 0;
+    std::uint64_t confirmed = 0;
+    std::uint64_t batch_request = 0;
+    std::uint64_t batch_end = 0;
+    Deadline batch_deadline{};
+    std::atomic<bool> releases_pending{false};
 
     explicit Transport(ControlTransport transport)
         : connection(std::move(transport)) {
@@ -135,6 +147,28 @@ struct Transport {
         changed.notify_all();
     }
 
+    // Snapshot once: a concurrent close cannot extend an older caller's fence.
+    Result<void> await_release(std::unique_lock<std::mutex>& lock, std::uint64_t ticket, Deadline deadline) {
+        if (ticket <= confirmed) {
+            return {};
+        }
+
+#ifdef VINC_MESSAGE_BUS_TESTING
+        if (testing::before_release_wait) {
+            testing::before_release_wait();
+        }
+#endif
+        if (!changed.wait_until(lock, deadline, [&] { return closed || confirmed >= ticket; })) {
+            return std::unexpected(Error{ErrorCode::Timeout, ErrorOperation::CloseRegistration});
+        }
+
+        if (confirmed < ticket) {
+            return std::unexpected(receive_failure.value_or(Error{ErrorCode::Closed, ErrorOperation::CloseRegistration}));
+        }
+
+        return {};
+    }
+
     vinc::Result<control::Bytes> request(std::uint16_t operation, control::Bytes bytes,
                                        Deadline deadline = (Deadline::max)()) {
         std::unique_lock lock(mutex);
@@ -145,6 +179,16 @@ struct Transport {
 
         if (closed) {
             return std::unexpected(vinc::make_error(ErrorCode::Closed, ErrorOperation::Request));
+        }
+
+        deadline = (std::min)(deadline, std::chrono::steady_clock::now() + config::message_bus_request_timeout);
+        auto prior_releases = await_release(lock, released, deadline);
+        if (!prior_releases) {
+            return std::unexpected(prior_releases.error());
+        }
+
+        if (closed) {
+            return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Request});
         }
 
         if (pending.size() >= config::message_bus_pending_requests || next_request == UINT64_MAX) {
@@ -193,8 +237,7 @@ struct Transport {
         }
 
         const bool response_received =
-            changed.wait_until(lock, (std::min)(deadline,
-                std::chrono::steady_clock::now() + config::message_bus_request_timeout), [&] {
+            changed.wait_until(lock, deadline, [&] {
                 return closed || pending.at(id).response.has_value();
             });
         if (!response_received || closed) {
@@ -228,27 +271,109 @@ struct Transport {
         return body;
     }
 
-    void release(std::uint16_t operation, std::uint64_t id) noexcept {
-        try {
-            std::lock_guard lock(mutex);
-            if (operation == Unsubscribe) {
-                topology.erase(id);
-            } else if (operation == ClosePublisher) {
-                notification_routes.erase(id);
-            }
-
-            if (closed) {
-                return;
-            }
-
-            control::Frame frame{control::Kind::Event, message_bus_domain, operation};
-            control::put_u64(frame.payload, id);
-            if (!connection.send(std::move(frame))) {
-                fail_locked();
-            }
-        } catch (...) {
-            connection.close();
+    std::uint64_t release(ReleaseNode& node, std::uint16_t operation, std::uint64_t id) noexcept {
+        std::lock_guard lock(mutex);
+        if (operation == Unsubscribe) {
+            topology.erase(id);
+        } else {
+            notification_routes.erase(id);
         }
+
+        node.front() = {operation, id};
+        queued_releases.splice(queued_releases.end(), node);
+        releases_pending.store(true);
+        return ++released;
+    }
+
+    // Caller holds mutex. Never wait for a reply on the sole receiving thread.
+    Result<void> progress_locked(Deadline now) {
+        if (closed || !releases_pending.load()) {
+            return {};
+        }
+
+        if (batch_deadline == Deadline{}) {
+            batch_deadline = now + config::message_bus_request_timeout;
+        }
+        if (now >= batch_deadline) {
+            return std::unexpected(Error{ErrorCode::Timeout, ErrorOperation::CloseRegistration});
+        }
+        if (batch_request != 0) {
+            return {};
+        }
+        if (next_request == UINT64_MAX) {
+            return std::unexpected(Error{ErrorCode::ResourceExhausted, ErrorOperation::CloseRegistration});
+        }
+
+        const auto count = (std::min<std::size_t>)(queued_releases.size(), maximum_releases_per_batch);
+        control::Frame frame{control::Kind::Request, message_bus_domain, ReleaseBatch, next_request};
+        control::put_u32(frame.payload, static_cast<std::uint32_t>(count));
+        auto end = queued_releases.begin();
+        for (std::size_t index = 0; index < count; ++index) {
+            control::put_u32(frame.payload, end->operation);
+            control::put_u64(frame.payload, end->id);
+            ++end;
+        }
+
+        auto sent = connection.send(std::move(frame));
+        if (!sent) {
+            if (sent.error().is(control::ErrorCode::Backpressure)) {
+                return {};
+            }
+
+            return std::unexpected(wrap_error(ErrorCode::Io, ErrorOperation::CloseRegistration, sent.error()));
+        }
+
+        batch_request = next_request++;
+        batch_end = confirmed + count;
+        queued_releases.erase(queued_releases.begin(), end);
+        return {};
+    }
+
+    Result<void> progress() {
+        if (!releases_pending.load()) {
+            return {};
+        }
+
+        std::lock_guard lock(mutex);
+        auto result = guarded(ErrorOperation::CloseRegistration, [&] {
+            return progress_locked(std::chrono::steady_clock::now());
+        });
+        if (!result) {
+            receive_failure = result.error();
+            fail_locked();
+        }
+
+        return result;
+    }
+
+    Result<void> wait_for_close(std::uint64_t ticket) {
+        const auto deadline = std::chrono::steady_clock::now() + config::message_bus_request_timeout;
+        auto started = progress();
+        if (!started) {
+            return started;
+        }
+
+        std::unique_lock lock(mutex);
+        return await_release(lock, ticket, deadline);
+    }
+
+    Result<void> acknowledge(const control::Frame& frame) {
+        auto response = decode_response(frame.payload);
+        if (!batch_request || frame.request != batch_request || !response || !response->body.empty()) {
+            receive_failure = Error{ErrorCode::Protocol, ErrorOperation::Receive};
+        } else if (response->failure) {
+            receive_failure = *response->failure;
+        } else {
+            confirmed = batch_end;
+            batch_request = 0;
+            batch_deadline = {};
+            releases_pending.store(!queued_releases.empty());
+            changed.notify_all();
+            return {};
+        }
+
+        fail_locked();
+        return std::unexpected(*receive_failure);
     }
 
     Result<void> receive(control::Frame frame) {
@@ -267,6 +392,10 @@ struct Transport {
 
         control::Reader reader(frame.payload);
         if (frame.kind == control::Kind::Response) {
+            if (frame.operation == ReleaseBatch) {
+                return acknowledge(frame);
+            }
+
             auto found = pending.find(frame.request);
             if (found == pending.end() && frame.operation == ListTopicConnections &&
                 frame.request != 0 && frame.request <= retired_query) {
@@ -406,6 +535,7 @@ struct Transport {
 // The enclosing Client keeps Transport alive; this guard itself never allocates.
 struct RegistrationCleanup {
     Transport& transport;
+    ReleaseNode& node;
     std::uint16_t operation;
     std::uint64_t id = 0;
     bool done = false;
@@ -416,7 +546,7 @@ struct RegistrationCleanup {
         }
 
         if (id) {
-            transport.release(operation, id);
+            transport.release(node, operation, id);
         } else {
             std::lock_guard lock(transport.mutex);
             transport.fail_locked();
@@ -434,6 +564,7 @@ struct LoanCore {
 // The operation mutex prevents overlapping writer operations within this process.
 // Shared atomics separately protect the cross-process reader/writer boundary.
 struct PublisherCore {
+    ReleaseNode release_node{1};
     std::shared_ptr<Transport> transport;
     std::shared_ptr<RingBuffer> ring_buffer;
     std::shared_ptr<NamedCounter> counter;
@@ -466,6 +597,7 @@ vinc::Result<void> attach_publisher_resources(PublisherCore& core, const Descrip
 }
 
 struct SubscriberCore {
+    ReleaseNode release_node{1};
     struct Source {
         Attachment attachment;
         std::shared_ptr<RingBuffer> ring_buffer;
@@ -696,9 +828,9 @@ vinc::Result<void> push(const std::shared_ptr<PublisherCore>& publisher, message
     return result;
 }
 
-void close(const std::shared_ptr<PublisherCore>& publisher) noexcept {
+std::uint64_t retire_ticket(const std::shared_ptr<PublisherCore>& publisher) noexcept {
     if (!publisher || publisher->closed.exchange(true)) {
-        return;
+        return 0;
     }
 
     publisher->ring_buffer->retire(); // wakes a reserve operation waiting on a live reader
@@ -709,17 +841,43 @@ void close(const std::shared_ptr<PublisherCore>& publisher) noexcept {
     }
 
     publisher->outstanding.reset();
-    publisher->transport->release(ClosePublisher, publisher->ring_buffer->descriptor.id);
+    return publisher->transport->release(publisher->release_node, ClosePublisher, publisher->ring_buffer->descriptor.id);
 }
 
-void close(const std::shared_ptr<SubscriberCore>& subscriber) noexcept {
+void retire(const std::shared_ptr<PublisherCore>& publisher) noexcept {
+    retire_ticket(publisher);
+}
+
+Result<void> close_confirmed(const std::shared_ptr<PublisherCore>& publisher) {
+    const auto ticket = retire_ticket(publisher);
+    if (!ticket) {
+        return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::CloseRegistration});
+    }
+
+    return publisher->transport->wait_for_close(ticket);
+}
+
+std::uint64_t retire_ticket(const std::shared_ptr<SubscriberCore>& subscriber) noexcept {
     if (!subscriber || subscriber->closed.exchange(true)) {
-        return;
+        return 0;
     }
 
     std::lock_guard lock(subscriber->operation); // read operation's guard is released before unsubscribe
     subscriber->sources.clear();
-    subscriber->transport->release(Unsubscribe, subscriber->id);
+    return subscriber->transport->release(subscriber->release_node, Unsubscribe, subscriber->id);
+}
+
+void retire(const std::shared_ptr<SubscriberCore>& subscriber) noexcept {
+    retire_ticket(subscriber);
+}
+
+Result<void> close_confirmed(const std::shared_ptr<SubscriberCore>& subscriber) {
+    const auto ticket = retire_ticket(subscriber);
+    if (!ticket) {
+        return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::CloseRegistration});
+    }
+
+    return subscriber->transport->wait_for_close(ticket);
 }
 
 PublisherStats stats(const std::shared_ptr<PublisherCore>& publisher) {
@@ -1001,7 +1159,7 @@ vinc::Result<std::shared_ptr<detail::PublisherCore>> Client::advertise_raw(std::
             return std::unexpected(result.error());
         }
 
-        detail::RegistrationCleanup cleanup{*impl_->transport, detail::ClosePublisher};
+        detail::RegistrationCleanup cleanup{*impl_->transport, core->release_node, detail::ClosePublisher};
         control::Reader reader(*result);
 #ifdef VINC_MESSAGE_BUS_TESTING
         detail::testing::checkpoint(detail::testing::FaultPoint::DescriptorDecode);
@@ -1148,7 +1306,7 @@ vinc::Result<std::shared_ptr<detail::SubscriberCore>> Client::subscribe_raw(std:
             return std::unexpected(result.error());
         }
 
-        detail::RegistrationCleanup cleanup{*impl_->transport, detail::Unsubscribe};
+        detail::RegistrationCleanup cleanup{*impl_->transport, core->release_node, detail::Unsubscribe};
         control::Reader reader(*result);
         core->id = reader.u64();
         const auto count = reader.u32();
@@ -1234,6 +1392,10 @@ std::vector<std::shared_ptr<const detail::NotificationDestinations>> notificatio
     }
     return snapshots;
 }
+}
+
+Result<void> detail::RuntimeAccess::progress_releases(Client& client) {
+    return client.impl_->transport->progress();
 }
 
 void detail::RuntimeAccess::progress_notifications(Client& client) {

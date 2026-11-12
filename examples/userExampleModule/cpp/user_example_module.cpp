@@ -313,18 +313,7 @@ private:
     }
 
     void close_bus() {
-        if (subscriber_) {
-            subscriber_->close();
-        }
-
-        if (latest_) {
-            latest_->close();
-        }
-
-        if (publisher_) {
-            publisher_->close();
-        }
-
+        // New registrations in this Context wait for these retirements, including reopen below.
         subscriber_.reset();
         latest_.reset();
         publisher_.reset();
@@ -353,16 +342,13 @@ private:
 
         auto filled = user_example::fill(**loan, sequence);
         if (!filled) {
-            // Dropping a loan alone does not cancel it. Close this Publisher explicitly;
-            // the user can recreate handles with reopen after seeing the failure.
-            publisher_->close();
+            // Retiring the Publisher also abandons its outstanding loan.
             publisher_.reset();
             return filled;
         }
 
         auto committed = publisher_->commit(*loan);
         if (!committed) {
-            publisher_->close();
             publisher_.reset();
             return committed;
         }

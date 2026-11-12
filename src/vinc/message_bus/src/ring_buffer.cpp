@@ -2,12 +2,14 @@
 // Atomic metadata selects a complete payload; the payload bytes themselves are not atomic.
 
 #include <vinc/message_bus/detail/ring_buffer.hpp>
+#include <vinc/osal/detail/shared_memory_create.hpp>
 #include <algorithm>
 #include <cstring>
 #include <limits>
 #include <new>
 #include <random>
 #include <thread>
+#include <utility>
 
 namespace vinc::message_bus::detail {
 namespace {
@@ -25,17 +27,29 @@ vinc::Error io(const vinc::Error& failure, ErrorOperation operation) {
     return vinc::wrap_error(ErrorCode::Io, operation, failure);
 }
 
+Result<void> remove_owned_name(const std::string& name, const std::shared_ptr<vinc::detail::ResourceNames>& resources) {
+    auto unlinked = osal::SharedMemory::unlink_name(name);
+    if (!unlinked && !unlinked.error().is(osal::ErrorCode::NotFound) &&
+        !unlinked.error().is(osal::ErrorCode::Unsupported)) {
+        return unlinked;
+    }
+
+    if (resources) {
+        return resources->retire(name);
+    }
+
+    return {};
+}
+
 void unlink(const std::string& name, const std::shared_ptr<vinc::detail::ResourceNames>& resources = {}) noexcept {
-    if (!name.empty()) {
-        try {
-            auto unlinked = osal::SharedMemory::unlink_name(name);
-            if (resources && (unlinked || unlinked.error().is(osal::ErrorCode::NotFound) ||
-                              unlinked.error().is(osal::ErrorCode::Unsupported))) {
-                (void)resources->retire(name);
-            }
-        } catch (...) {
-            // Keep the persisted record when cleanup cannot finish during unwinding.
-        }
+    if (name.empty()) {
+        return;
+    }
+
+    try {
+        (void)remove_owned_name(name, resources);
+    } catch (...) {
+        // Keep the persisted record when cleanup cannot finish during unwinding.
     }
 }
 
@@ -521,6 +535,32 @@ NamedCounter::~NamedCounter() {
 }
 
 namespace {
+// Consume the acquisition state once. A cleanup failure, including allocation
+// by the journal's filesystem path, must not hide the registration failure.
+std::optional<Error> rollback_counter(NamedCounter& counter) noexcept {
+    const bool owned = std::exchange(counter.creator, false);
+    try {
+        Result<void> cleanup;
+        if (owned) {
+            cleanup = remove_owned_name(counter.name, counter.resources);
+        } else if (counter.resources) {
+            cleanup = counter.resources->retire(counter.name);
+        }
+
+        if (!cleanup) {
+            return cleanup.error();
+        }
+
+        return std::nullopt;
+    } catch (const std::bad_alloc&) {
+        return Error{ErrorCode::ResourceExhausted, ErrorOperation::CloseRegistration};
+    } catch (const std::system_error& error) {
+        return Error{ErrorCode::Io, ErrorOperation::CloseRegistration, osal::native_error(error.code())};
+    } catch (...) {
+        return Error{ErrorCode::Io, ErrorOperation::CloseRegistration};
+    }
+}
+
 // Retain each successful mapping in the owner before the next fallible step.
 // The owner unmaps/closes it, and only the creator unlinks the name on failure.
 vinc::Result<void> map_counter(NamedCounter& counter) {
@@ -534,6 +574,11 @@ vinc::Result<void> map_counter(NamedCounter& counter) {
 }
 
 vinc::Result<void> initialize_counter(NamedCounter& counter) {
+    auto mapped = map_counter(counter);
+    if (!mapped) {
+        return mapped;
+    }
+
     auto bytes = counter.mapping.writable_bytes();
     if (!bytes) {
         return std::unexpected(io(bytes.error(), ErrorOperation::InitializeCounter));
@@ -543,24 +588,37 @@ vinc::Result<void> initialize_counter(NamedCounter& counter) {
 }
 }
 
-vinc::Result<std::shared_ptr<NamedCounter>> NamedCounter::create(std::string name, std::shared_ptr<vinc::detail::ResourceNames> resources) {
+vinc::Result<std::shared_ptr<NamedCounter>> NamedCounter::create(std::string name) {
+    std::optional<Error> cleanup_failure;
+    return create(std::move(name), {}, cleanup_failure);
+}
+
+vinc::Result<std::shared_ptr<NamedCounter>> NamedCounter::create(std::string name,
+    std::shared_ptr<vinc::detail::ResourceNames> resources, std::optional<Error>& cleanup_failure) {
+    cleanup_failure.reset();
     auto counter = std::make_shared<NamedCounter>();
     counter->name = std::move(name);
     counter->resources = std::move(resources);
-    auto memory = osal::SharedMemory::create(counter->name, sizeof(SharedWord));
+    osal::detail::SharedMemoryCreateAttempt attempt;
+    auto memory = attempt.create(counter->name, sizeof(SharedWord));
     if (!memory) {
+        // No handle was transferred. Only OSAL knows whether its rollback left
+        // an owned name. Retiring a reservation must never unlink a collision.
+        cleanup_failure = attempt.name_cleanup_error;
+        if (!cleanup_failure) {
+            cleanup_failure = rollback_counter(*counter);
+        }
+
         return std::unexpected(io(memory.error(), ErrorOperation::CreateCounter));
     }
 
     counter->creator = true;
     counter->memory = std::move(*memory);
-    auto mapped = map_counter(*counter);
-    if (!mapped) {
-        return std::unexpected(mapped.error());
-    }
-
     auto initialized = initialize_counter(*counter);
     if (!initialized) {
+        // We own this name. Perform exactly one rollback and make any secondary
+        // failure available before the counter's handles are destroyed.
+        cleanup_failure = rollback_counter(*counter);
         return std::unexpected(initialized.error());
     }
 
