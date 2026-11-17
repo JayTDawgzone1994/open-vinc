@@ -15,7 +15,8 @@ inline constexpr auto error_entries =
                ErrorCodeEntry{ErrorCode::HeartbeatTimeout, "Peer heartbeat timed out"},
                ErrorCodeEntry{ErrorCode::ResourceExhausted, "Control resources exhausted"},
                ErrorCodeEntry{ErrorCode::WorkerFailed, "Control worker failed"},
-               ErrorCodeEntry{ErrorCode::PayloadTooLarge, "Control payload limit exceeded"}};
+               ErrorCodeEntry{ErrorCode::PayloadTooLarge, "Control payload limit exceeded"},
+               ErrorCodeEntry{ErrorCode::Cancelled, "Control wait cancelled"}};
 inline constexpr auto operation_entries =
     std::array{ErrorOperationEntry{ErrorOperation::Create, "Create"},
                ErrorOperationEntry{ErrorOperation::Attach, "Attach"},
@@ -32,7 +33,8 @@ inline constexpr auto operation_entries =
                ErrorOperationEntry{ErrorOperation::EncodeArguments, "EncodeArguments"},
                ErrorOperationEntry{ErrorOperation::DecodeArguments, "DecodeArguments"},
                ErrorOperationEntry{ErrorOperation::WriteString, "WriteString"},
-               ErrorOperationEntry{ErrorOperation::StartWorker, "StartWorker"}};
+               ErrorOperationEntry{ErrorOperation::StartWorker, "StartWorker"},
+               ErrorOperationEntry{ErrorOperation::WaitReceiveWake, "WaitReceiveWake"}};
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::ControlChannel, "ControlChannel", error_entries,
                                             operation_entries};
 static_assert(valid_catalog(error_catalog));

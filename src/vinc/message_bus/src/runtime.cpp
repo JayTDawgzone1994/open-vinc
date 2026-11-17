@@ -2,13 +2,14 @@
 #include <vinc/control/channel.hpp>
 
 namespace vinc::message_bus::detail {
-Result<std::shared_ptr<Client>> RuntimeAccess::create(std::shared_ptr<control::Session> session) {
+Result<std::shared_ptr<Client>> RuntimeAccess::create(std::shared_ptr<control::Session> session, std::uint64_t generation) {
     if (!session) {
         return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::AttachRuntime});
     }
 
     try {
         ControlTransport transport;
+        transport.generation = generation;
         transport.send = [session](control::Frame frame) {
             return session->send(std::move(frame));
         };

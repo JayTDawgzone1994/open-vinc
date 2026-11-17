@@ -22,3 +22,18 @@ else()
 endif()
 add_test(NAME control.faults COMMAND control_channel_fault_tests)
 set_tests_properties(control.faults PROPERTIES TIMEOUT 30)
+
+# Controlled wait/bind boundaries compile only into this isolated test copy.
+add_executable(control_receive_wake_tests
+    receive_wake_tests.cpp ../src/channel.cpp ../src/protocol.cpp)
+target_include_directories(control_receive_wake_tests PRIVATE ../include "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(control_receive_wake_tests PRIVATE VINC_CONTROL_RECEIVE_TESTING)
+target_link_libraries(control_receive_wake_tests PRIVATE vinc::osal)
+target_compile_features(control_receive_wake_tests PRIVATE cxx_std_23)
+if(MSVC)
+    target_compile_options(control_receive_wake_tests PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(control_receive_wake_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME control.receive_wake COMMAND control_receive_wake_tests)
+set_tests_properties(control.receive_wake PROPERTIES TIMEOUT 45)

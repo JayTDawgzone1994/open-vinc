@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
         const auto helper = std::filesystem::absolute(argv[1]);
         const auto silent_helper = std::filesystem::absolute(argv[2]);
         auto invalid_limits = message_bus::Limits{};
-        invalid_limits.max_topics = 0;
+        invalid_limits.publishers_per_topic = 0;
         auto invalid_manager = vinc::test::create_manager(invalid_limits);
         check(!invalid_manager && invalid_manager.error().is(module_system::ErrorCode::BusFailed) &&
                   invalid_manager.error().causes().size() == 1 &&

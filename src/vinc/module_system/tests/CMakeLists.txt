@@ -36,6 +36,83 @@ target_link_libraries(vinc_test_manager INTERFACE vinc::module_manager)
 target_include_directories(vinc_test_manager INTERFACE "${test_generated}")
 add_dependencies(vinc_test_manager vinc_test_host)
 
+# Real Manager/Socket code with bounded observation gates. The regression now
+# requires queued work to wake supervision; historical pre-fix traces are retained.
+add_executable(module_control_wakeup_host control_wakeup_host.cpp control_wakeup_channel.cpp)
+target_link_libraries(module_control_wakeup_host PRIVATE vinc::module_runtime)
+add_executable(module_control_wakeup_tests control_wakeup_tests.cpp control_wakeup_channel.cpp)
+target_link_libraries(module_control_wakeup_tests PRIVATE
+    vinc_test_manager vinc::concurrency vinc::rpc_manager)
+add_dependencies(module_control_wakeup_tests module_control_wakeup_host message_bus_module_helper)
+foreach(target IN ITEMS module_control_wakeup_host module_control_wakeup_tests)
+    target_compile_definitions(${target} PRIVATE VINC_CONTROL_WAKEUP_TESTING)
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endforeach()
+add_test(NAME module.control_wakeup COMMAND module_control_wakeup_tests
+    "$<TARGET_FILE:module_control_wakeup_host>" "$<TARGET_FILE:message_bus_module_helper>")
+set_tests_properties(module.control_wakeup PROPERTIES TIMEOUT 60)
+
+# Exercise the same scheduler with two real control peers and the real bounded
+# RPC admission queue. Only the test parks its downstream worker.
+add_executable(module_control_scheduler_host control_scheduler_host.cpp)
+target_link_libraries(module_control_scheduler_host PRIVATE vinc_test_manager vinc::control vinc::rpc)
+add_executable(module_control_scheduler_tests control_scheduler_tests.cpp control_wakeup_channel.cpp)
+target_link_libraries(module_control_scheduler_tests PRIVATE vinc_test_manager vinc::concurrency vinc::rpc_manager)
+target_compile_definitions(module_control_scheduler_tests PRIVATE VINC_CONTROL_WAKEUP_TESTING)
+target_include_directories(module_control_scheduler_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_dependencies(module_control_scheduler_tests module_control_scheduler_host)
+foreach(target IN ITEMS module_control_scheduler_tests module_control_scheduler_host)
+    set_target_properties(${target} PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endforeach()
+add_test(NAME module.control_scheduler COMMAND module_control_scheduler_tests "$<TARGET_FILE:module_control_scheduler_host>")
+set_tests_properties(module.control_scheduler PROPERTIES TIMEOUT 60)
+
+# Optional matched scheduling comparison; no benchmark is added to normal CTest.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../common/cmake/VincPythonRequirements.cmake")
+vinc_find_python(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    vinc_add_module_plugin(module_control_cost_plugin control_cost/module.cpp)
+    set_target_properties(module_control_cost_plugin PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    target_link_libraries(module_control_cost_plugin PRIVATE vinc_message_fixture)
+    set(cost_baseline "${CMAKE_CURRENT_BINARY_DIR}/control_cost/polling_manager.cpp")
+    add_custom_command(OUTPUT "${cost_baseline}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/control_cost/baseline.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../src/host/module_manager.cpp" "${cost_baseline}"
+        DEPENDS control_cost/baseline.py control_cost/polling_monitor.inc ../src/host/module_manager.cpp
+        VERBATIM)
+    foreach(policy IN ITEMS notified polling)
+        add_executable(module_control_cost_${policy} EXCLUDE_FROM_ALL
+            control_cost/cost.cpp control_wakeup_channel.cpp)
+        if(policy STREQUAL "polling")
+            target_sources(module_control_cost_${policy} PRIVATE "${cost_baseline}")
+            set_source_files_properties("${cost_baseline}" PROPERTIES HEADER_FILE_ONLY TRUE)
+            set(cost_source "${cost_baseline}")
+        else()
+            set(cost_source "${CMAKE_CURRENT_SOURCE_DIR}/../src/host/module_manager.cpp")
+        endif()
+        target_compile_definitions(module_control_cost_${policy} PRIVATE
+            VINC_CONTROL_WAKEUP_TESTING "VINC_CONTROL_COST_SOURCE=\"${cost_source}\"")
+        target_include_directories(module_control_cost_${policy} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(module_control_cost_${policy} PRIVATE vinc_test_manager vinc::concurrency vinc::rpc_manager)
+        if(WIN32)
+            target_link_libraries(module_control_cost_${policy} PRIVATE Psapi)
+        endif()
+        add_dependencies(module_control_cost_${policy} module_control_cost_plugin module_control_wakeup_host)
+    endforeach()
+endif()
+
 add_executable(module_query_tests query_tests.cpp)
 target_link_libraries(module_query_tests PRIVATE vinc::module_runtime vinc::errors)
 add_test(NAME module.queries COMMAND module_query_tests)

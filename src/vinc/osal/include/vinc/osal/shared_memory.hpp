@@ -17,6 +17,7 @@ enum class SharedMemoryAccess {
 };
 
 namespace detail {
+struct SharedMemoryCreateAttempt;
 struct SharedMemoryState;
 struct SharedMemoryMappingState;
 }
@@ -65,6 +66,7 @@ public:
     [[nodiscard]] static vinc::Result<void> unlink_name(std::string_view name);
 
 private:
+    friend struct detail::SharedMemoryCreateAttempt;
     explicit SharedMemory(std::shared_ptr<detail::SharedMemoryState>);
     std::shared_ptr<detail::SharedMemoryState> state_;
 };

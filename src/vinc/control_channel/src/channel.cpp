@@ -3,12 +3,21 @@
 
 #include <vinc/time.hpp>
 #include <vinc/control/channel.hpp>
+#include <vinc/control/detail/receive_wake.hpp>
 #include <algorithm>
 #include <array>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
 #include <thread>
+
+#ifdef VINC_CONTROL_RECEIVE_TESTING
+#include "receive_wake_test_hooks.hpp"
+#endif
+
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+#include "control_wakeup_hooks.hpp"
+#endif
 
 #if defined(VINC_CONTROL_CHANNEL_TESTING)
 #include "channel_test_hooks.hpp"
@@ -25,6 +34,9 @@ struct Peer {
     mutable std::mutex mutex;
     std::condition_variable changed;
     std::weak_ptr<Engine> engine;
+    // Peer -> ReceiveWake is the only nested notification lock order. Wake
+    // methods never acquire Engine/Peer or execute receiver-owned callbacks.
+    std::weak_ptr<ReceiveWake> receive_wake;
     osal::Socket socket;
     std::optional<osal::SocketRegistration> registration;
     Options options;
@@ -83,6 +95,18 @@ void wake(detail::Peer& peer) {
     }
 }
 
+// Caller holds Peer::mutex across queue/state publication and notification.
+// A temporary strong owner protects an in-flight signal from owner teardown;
+// rebinding waits for this signal to finish, without an external callback/join.
+void notify_receiver(detail::Peer& peer) {
+    if (auto receiver = peer.receive_wake.lock()) {
+#ifdef VINC_CONTROL_RECEIVE_TESTING
+        test::before_receive_signal(receiver.get());
+#endif
+        receiver->notify();
+    }
+}
+
 // Preserve the first failure; later cleanup must not overwrite the diagnostic cause.
 void fail(detail::Peer& peer, Error reason) {
     if (!peer.failure) {
@@ -93,6 +117,7 @@ void fail(detail::Peer& peer, Error reason) {
 
 // I/O worker only, with Peer::mutex held. Retain received frames for callers to drain.
 void dispose(detail::Engine& engine, detail::Peer& peer) {
+    const bool state_changed = peer.state != State::Closed;
     if (peer.registration) {
         (void)engine.poller.remove(*peer.registration);
         peer.registration.reset();
@@ -103,6 +128,9 @@ void dispose(detail::Engine& engine, detail::Peer& peer) {
     peer.active_frame.clear();
     peer.outgoing_bytes = 0;
     peer.changed.notify_all();
+    if (state_changed) {
+        notify_receiver(peer);
+    }
 }
 
 Result<Frame> hello(const Options& options) {
@@ -168,6 +196,7 @@ void incoming(detail::Peer& peer, Frame frame, vinc::Deadline now) {
         peer.last_heartbeat = now;
         peer.next_heartbeat = now;
         peer.changed.notify_all();
+        notify_receiver(peer);
         return;
     }
 
@@ -186,6 +215,9 @@ void incoming(detail::Peer& peer, Frame frame, vinc::Deadline now) {
 
         peer.received_sequence = sequence;
         peer.last_heartbeat = now;
+#ifdef VINC_CONTROL_RECEIVE_TESTING
+        test::received(peer.options.generation, frame.kind);
+#endif
         return;
     }
 
@@ -208,7 +240,16 @@ void incoming(detail::Peer& peer, Frame frame, vinc::Deadline now) {
 
     peer.incoming_bytes += size;
     peer.incoming.push_back(std::move(frame));
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+    vinc::test::control_wakeup::frame_event(
+        vinc::test::control_wakeup::Point::Queued, peer.options.role,
+        peer.options.generation, peer.incoming.back());
+#endif
     peer.changed.notify_all();
+    notify_receiver(peer);
+#ifdef VINC_CONTROL_RECEIVE_TESTING
+    test::received(peer.options.generation, peer.incoming.back().kind);
+#endif
 }
 
 // These phases run only on the I/O worker with Peer::mutex held by advance's caller.
@@ -473,6 +514,54 @@ Result<std::shared_ptr<detail::Peer>> prepare_peer(osal::Socket socket, Options 
 Session::Session(std::shared_ptr<detail::Peer> peer) : peer_(std::move(peer)) {
 }
 
+void detail::ReceiveWake::notify() {
+    std::lock_guard lock(mutex_);
+    if (pending_) {
+        return;
+    }
+    pending_ = true;
+    changed_.notify_all();
+}
+
+bool detail::ReceiveWake::consume() {
+    std::lock_guard lock(mutex_);
+    const bool pending = pending_;
+    pending_ = false;
+    return pending;
+}
+
+Result<void> detail::ReceiveWake::wait_until(Deadline deadline, std::stop_token stop) {
+    // Register before taking mutex_: an already-stopped token invokes inline.
+    // Destruction order releases the wait lock before waiting for this callback.
+    std::stop_callback cancel_wait(stop, [this] {
+        std::lock_guard lock(mutex_);
+        changed_.notify_all();
+    });
+    std::unique_lock lock(mutex_);
+    while (!pending_ && !stop.stop_requested()) {
+#ifdef VINC_CONTROL_RECEIVE_TESTING
+        test::before_receive_wait(this);
+#endif
+        const auto status = changed_.wait_until(lock, deadline);
+        if (status == std::cv_status::timeout && !pending_ && !stop.stop_requested()) {
+            return std::unexpected(Error{ErrorCode::Timeout, ErrorOperation::WaitReceiveWake});
+        }
+    }
+    if (stop.stop_requested()) {
+        return std::unexpected(Error{ErrorCode::Cancelled, ErrorOperation::WaitReceiveWake});
+    }
+    return {};
+}
+
+void detail::ReceiveWakeAccess::bind(Session& session, const std::shared_ptr<ReceiveWake>& wake) {
+    std::lock_guard lock(session.peer_->mutex);
+    session.peer_->receive_wake = wake;
+    if (!session.peer_->incoming.empty() || session.peer_->state != State::Handshaking ||
+        session.peer_->closing) {
+        notify_receiver(*session.peer_);
+    }
+}
+
 State Session::state() const {
     std::lock_guard lock(peer_->mutex);
     return peer_->state;
@@ -541,6 +630,11 @@ Result<void> Session::send(Frame frame, bool use_reserved_capacity) {
 
         peer_->outgoing.push_back(std::move(bytes));
         peer_->outgoing_bytes += peer_->outgoing.back().size();
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+        vinc::test::control_wakeup::frame_event(
+            vinc::test::control_wakeup::Point::Sent, peer_->options.role,
+            peer_->options.generation, frame);
+#endif
     }
     wake(*peer_);
     return {};
@@ -552,6 +646,11 @@ Result<std::optional<Frame>> Session::try_receive() {
         auto result = std::move(peer_->incoming.front());
         peer_->incoming.pop_front();
         peer_->incoming_bytes -= header_size + result.payload.size();
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+        vinc::test::control_wakeup::frame_event(
+            vinc::test::control_wakeup::Point::Taken, peer_->options.role,
+            peer_->options.generation, result);
+#endif
         return std::optional<Frame>(std::move(result));
     }
 
@@ -577,6 +676,11 @@ Result<Frame> Session::receive_until(vinc::Deadline deadline) {
     auto frame = std::move(peer_->incoming.front());
     peer_->incoming.pop_front();
     peer_->incoming_bytes -= header_size + frame.payload.size();
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+    vinc::test::control_wakeup::frame_event(
+        vinc::test::control_wakeup::Point::Taken, peer_->options.role,
+        peer_->options.generation, frame);
+#endif
     return frame;
 }
 

@@ -48,7 +48,8 @@ void run(const std::filesystem::path& plugin) {
     };
 
     const auto initial = take(detail::ManagerAccess::param_snapshot(*manager));
-    check(initial.entries.size() == 2, "framework parameters exist before the first Module");
+    check(initial.entries.contains(slots_name) && initial.entries.contains(bytes_name),
+          "Publisher defaults exist before the first Module");
     auto original = start("original");
     check(command(original, "slots") == config::message_bus_default_slots &&
           command(original, "bytes") == config::message_bus_default_message_bytes,

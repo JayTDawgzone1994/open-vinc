@@ -62,6 +62,7 @@ inline constexpr auto operation_entries =
                ErrorOperationEntry{ErrorOperation::OpenNotification, "OpenNotification"},
                ErrorOperationEntry{ErrorOperation::Notify, "Notify"},
                ErrorOperationEntry{ErrorOperation::EnableNotifications, "EnableNotifications"},
+               ErrorOperationEntry{ErrorOperation::EncodeTopology, "EncodeTopology"},
                ErrorOperationEntry{ErrorOperation::NextCount, "NextCount"}};
 inline constexpr ErrorCatalog error_catalog{ErrorDomain::MessageBus, "MessageBus", error_entries,
                                             operation_entries};

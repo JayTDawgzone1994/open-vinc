@@ -13,7 +13,8 @@ enum class ErrorCode : std::int32_t {
     HeartbeatTimeout = 8,
     ResourceExhausted = 9,
     WorkerFailed = 10,
-    PayloadTooLarge = 11
+    PayloadTooLarge = 11,
+    Cancelled = 12
 };
 enum class ErrorOperation : std::int32_t {
     Create = 1,
@@ -31,7 +32,8 @@ enum class ErrorOperation : std::int32_t {
     EncodeArguments = 13,
     DecodeArguments = 14,
     WriteString = 15,
-    StartWorker = 16
+    StartWorker = 16,
+    WaitReceiveWake = 17
 };
 }
 

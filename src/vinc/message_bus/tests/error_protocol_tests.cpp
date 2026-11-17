@@ -1,9 +1,11 @@
 // Numeric error transport is independent of native C++ layout and local chain capacity.
 #include <vinc/message_bus/detail/protocol.hpp>
+#include <vinc/message_bus/detail/topology_protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <vinc/message_bus/detail/error_catalog.hpp>
 #include <vinc/message_bus/detail/runtime.hpp>
 #include <vinc/osal/error.hpp>
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
@@ -41,6 +43,10 @@ void test_receive_after_close() {
                              protocol::NotificationRoutesChanged};
         control::put_u64(frame.payload, 1);
         control::put_u32(frame.payload, 0);
+        control::Bytes record;
+        protocol::append_topology_record(record, frame.operation, frame.payload);
+        frame.operation = protocol::SyncPage;
+        frame.payload = *protocol::encode_topology_page({{1, 1, 0}, 0, 1, protocol::TopologyMode::Delta, true, record});
         return frame;
     };
     unsigned closes = 0;
@@ -73,6 +79,125 @@ void test_receive_after_close() {
     auto later = protocol::RuntimeAccess::receive(**malformed_client, valid_notification());
     check(!later && later.error().is(bus::ErrorCode::Closed),
           "subsequent receive observes closure without relabeling the original Protocol error");
+}
+
+void test_topology_envelope() {
+    const protocol::TopologyPageId id{17, 4, 2};
+    control::Bytes records(protocol::topology_page_capacity, std::byte{17});
+    protocol::TopologyPage page{id, 31, 33, protocol::TopologyMode::Delta, true, records};
+    auto encoded = protocol::encode_topology_page(page);
+    check(encoded && encoded->size() == control::max_payload, "full topology page fits the transport");
+    auto decoded = protocol::decode_topology_page(*encoded);
+    check(decoded && decoded->id == id && decoded->base == page.base && decoded->target == page.target &&
+          decoded->mode == page.mode && decoded->final && std::ranges::equal(decoded->records, records),
+          "topology header and body round trip");
+    const std::span<const std::byte> wire(*encoded);
+    for (std::size_t length = 0; length < protocol::topology_header_bytes; ++length) {
+        check(!protocol::decode_topology_page(wire.first(length)), "truncated topology header");
+    }
+    encoded->push_back(std::byte{0});
+    check(!protocol::decode_topology_page(*encoded), "oversized topology page");
+    page.base = page.target;
+    check(!protocol::encode_topology_page(page), "delta cannot roll a revision back");
+    page = {{17, 5, 0}, 0, 33, protocol::TopologyMode::Snapshot, true, {}};
+    encoded = protocol::encode_topology_page(page);
+    check(encoded && protocol::decode_topology_page(*encoded), "empty snapshot can clear old relationships");
+    encoded->back() = std::byte{2};
+    check(!protocol::decode_topology_page(*encoded), "malformed final flag");
+
+    for (auto receipt : {protocol::TopologyReceipt::Staged, protocol::TopologyReceipt::Applied,
+                         protocol::TopologyReceipt::Resync}) {
+        auto bytes = protocol::encode_topology_ack({id, receipt});
+        check(bool(bytes), "encode receipt");
+        auto ack = protocol::decode_topology_ack(*bytes);
+        check(ack && ack->id == id && ack->receipt == receipt, "receipt identifies the exact page");
+        bytes->back() = std::byte{0};
+        check(!protocol::decode_topology_ack(*bytes), "unknown receipt");
+        bytes->pop_back();
+        check(!protocol::decode_topology_ack(*bytes), "truncated receipt");
+    }
+}
+
+void test_topology_page_sequence() {
+    using protocol::PageAction;
+    const control::Bytes records{std::byte{1}};
+    protocol::TopologyReceiveCursor cursor(17);
+    protocol::TopologyPage page{{17, 1, 0}, 0, 12, protocol::TopologyMode::Snapshot, false, records};
+    check(cursor.classify(page) == PageAction::Stage, "first snapshot page");
+    cursor.accept(page);
+    check(cursor.applied() == 0 && cursor.classify(page) == PageAction::RepeatReceipt,
+          "staging or receiving a duplicate must not advance the applied revision");
+    page.id.index = 2;
+    check(cursor.classify(page) == PageAction::RequestSnapshot, "missing page requests a snapshot");
+    page.id.index = 1;
+    page.final = true;
+    check(cursor.classify(page) == PageAction::Commit, "complete snapshot ready for atomic installation");
+    cursor.accept(page);
+    check(cursor.applied() == 12 && cursor.classify(page) == PageAction::RepeatReceipt,
+          "duplicate final page never reapplies data");
+    page = {{17, 2, 0}, 11, 13, protocol::TopologyMode::Delta, true, records};
+    check(cursor.classify(page) == PageAction::RequestSnapshot, "reject delta based on stale registration state");
+    page.base = 12;
+    check(cursor.classify(page) == PageAction::Commit, "next change follows completed snapshot");
+    cursor.accept(page);
+    page.id.generation = 16;
+    check(cursor.classify(page) == PageAction::IgnoreOld && cursor.applied() == 13, "ignore old Session generation");
+}
+
+void test_topology_source_group() {
+    protocol::Descriptor source;
+    source.id = 21;
+    source.owner = 2;
+    source.schema = 31;
+    source.rank = source.id;
+    source.slots = 2;
+    source.readers = 128;
+    source.bytes = 1024;
+    source.control = "control";
+    source.data = "data";
+    source.counter = "counter";
+    source.publisher = "camera";
+    std::vector<protocol::TopologyReader> readers;
+    for (std::uint32_t index = 0; index < source.readers; ++index) {
+        readers.push_back({1000u + index, index, 2000u + index});
+    }
+    auto encoded = protocol::encode_source_group(source, readers);
+    check(encoded && encoded->size() <= protocol::topology_page_capacity, "128 relationships fit in one group");
+    const auto decoded = protocol::decode_source_group(*encoded);
+    check(decoded && decoded->publisher.control == source.control && decoded->readers == readers,
+          "grouped subscriptions retain independent indices and initial floors");
+    encoded->pop_back();
+    check(!protocol::decode_source_group(*encoded), "truncated source group");
+    readers.back().subscription = readers.front().subscription;
+    check(!protocol::encode_source_group(source, readers), "duplicate subscription in source group");
+}
+
+void test_topology_ack_sequence() {
+    using protocol::AckAction;
+    using protocol::TopologyReceipt;
+    protocol::TopologySendCursor sender(4);
+    check(sender.start(17) && sender.ready_to_send(), "first page awaits admission");
+    const auto first = sender.id();
+    check(!sender.acknowledge({first, TopologyReceipt::Staged}) && sender.ready_to_send(),
+          "a page rejected by transport cannot be acknowledged");
+    sender.sent(false);
+    check(!sender.ready_to_send() && !sender.acknowledge({first, TopologyReceipt::Applied}),
+          "one page outstanding and no early commit");
+    auto result = sender.acknowledge({first, TopologyReceipt::Staged});
+    check(result && *result == AckAction::NextPage && sender.applied() == 0, "stage ACK only admits next page");
+    result = sender.acknowledge({first, TopologyReceipt::Staged});
+    check(result && *result == AckAction::IgnoreOld && sender.ready_to_send(), "duplicate stage ACK");
+    sender.sent(true);
+    result = sender.acknowledge({sender.id(), TopologyReceipt::Resync});
+    check(result && *result == AckAction::RestartSnapshot && sender.applied() == 0, "abandon incomplete transfer");
+    check(bool(sender.start(18)), "replacement snapshot");
+    sender.sent(true);
+    auto stale = sender.id();
+    --stale.generation;
+    result = sender.acknowledge({stale, TopologyReceipt::Applied});
+    check(result && *result == AckAction::IgnoreOld && sender.applied() == 0, "old generation cannot commit");
+    result = sender.acknowledge({sender.id(), TopologyReceipt::Applied});
+    check(result && *result == AckAction::Finished && sender.applied() == 18, "only final ACK advances revision");
 }
 
 void test_validation() {
@@ -136,7 +261,7 @@ void test_catalog_and_boundaries() {
 
     auto manager = protocol::BusManager::create();
     check(bool(manager), "create admission fixture");
-    for (const auto operation : {1, 2, 3, 4, 5, 6, 0x0201, 0x0301, 0x0501, static_cast<int>(protocol::NotificationRoutesChanged) + 1}) {
+    for (const auto operation : {1, 2, 3, 4, 5, 6, 0x0201, 0x0301, 0x0401, 0x0501, 0x0701, static_cast<int>(protocol::SyncAck) + 1}) {
         control::Frame frame{control::Kind::Request, protocol::message_bus_domain,
                              static_cast<std::uint16_t>(operation), 1};
         auto rejected = (*manager)->submit(1, "fixture", {}, std::move(frame));
@@ -177,6 +302,10 @@ int main() {
         test_receive_after_close();
         test_validation();
         test_local_capacity();
+        test_topology_envelope();
+        test_topology_page_sequence();
+        test_topology_source_group();
+        test_topology_ack_sequence();
         test_catalog_and_boundaries();
         std::cout << "Message Bus error protocol passed\n";
         return 0;

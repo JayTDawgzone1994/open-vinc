@@ -2,6 +2,13 @@
 
 # Module System / 模組系統
 
+**Central control wakeup integrated (2026-11-17):** ModuleManager now binds its
+single supervisor to ReceiveWake. Bounded fair passes continue runnable backlogs;
+RPC downstream saturation waits for the absolute supervision fallback. See the
+[central control wakeup contract](CONTROL_WAKEUP.md) and [stage-four acceptance](CONTROL_WAKEUP_VALIDATION.md) for Windows/WSL integration, fresh SDK relocation, matched costs and the remaining macOS handoff.
+**中央已接線：** 收件、管理及停止共用可靠等待；每 Module 每輪最多 16 幀，RPC deferred
+依 20 ms 補查，滿載不自行忙迴圈。Windows／WSL 四階段及成本驗收完成，Mac 待驗見根 TODO；這與 Context pump 喚醒及 Bus 拓樸修復是不同工作。
+
 App packages group native Plugins under `modules/native/<ModuleType>/` and Python
 Modules under `modules/python/<ModuleType>/`. `add_python_module()` participates
 in per-App selection and managed deployment, while startup still discovers
@@ -16,7 +23,7 @@ Host notification ownership, Bus routes, notification-driven pumpLoop, bounded r
 Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
 preparation failure rejects only the affected Module; later notification failures retain the
 10 ms fallback. See the [pump wakeup contract](PUMP_WAKEUP.md) for policies and validation.
-Current bootstrap is **v16**, Plugin entry **19**, and Module query **v2**; rebuild connected artifacts.
+Current bootstrap is **v16**, Plugin entry **22**, and Module query **v2**. Rebuild connected artifacts for Bus v6 topology pages and receipts.
 Entry 19 adds Context-owned cross-image drain synchronization to the entry-18
 C++ Topic workers; see [parallel pump evidence and remaining work](PARALLEL_PUMP.md).
 Entry 17 exposes deadline-aware Manual waiting through Context; see [Manual wait](PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
@@ -26,7 +33,7 @@ Entry 16 adds revocable async-client ownership to the entry-15 synchronous RPC w
 
 已接通通知資源、Bus 路由、pumpLoop 喚醒、故障恢復與診斷；pumpOnce 行為不變。
 準備失敗只拒絕該 Module 啟動，運行中的通知故障保留 10 ms 補查。契約及驗證見上述連結。
-目前 bootstrap v16、Plugin entry 19、Module query v2，所有接線產物須一起重建。
+目前 bootstrap v16、Plugin entry 22、Module query v2。Bus Client 的來源確認狀態由 Host 與 Plugin 共用，兩側靜態連結的 Client 布局必須一致。此版需一起重建中央、Host、Plugin 與 SDK 使用者。
 Entry 19 在 entry 18 的 Topic worker 布局加入 Context 持有的跨 image 收尾同步，見上述契約。
 Entry 17 加入 Context 的帶期限 Manual 等待入口，完整契約見上述 Manual 等待連結。
 Entry 16 加入可撤銷的非同步 Client 所有權，延續 Entry 15 同步 RPC／pump 防護；Entry 14 的可省略 Publisher 容量維持；Module System 持有上述參數消費端，Bus 不依賴 Param。
@@ -913,6 +920,20 @@ ModuleSnapshot.last_failure and cleanup_failure each hold {mid, error}; the firs
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
+
+### GCC Release diagnostic follow-up (2026-11-17)
+
+Central-wakeup stage-three WSL Release builds report `-Wdangling-pointer` in
+`record_failure()` at the assignments from local `now` to `Record::stop_deadline`.
+Those assignments predate this change. Both fields are steady-clock time-point
+values; code review finds no retained reference to the local value. The related
+tests pass, but the compiler diagnostic has not been reduced to a standalone case.
+Next step: isolate the optimized GCC 13.3 case before classifying or suppressing
+the warning; do not change failure deadlines solely to silence it. Evidence:
+`build/control-wakeup-stage3/wsl-release/{build,closure-build}.log`.
+
+WSL Release 在既有 `record_failure()` 值複製處發出懸空指標警告；目前沒有確認
+實際生命週期缺陷。需另做最小重現，不能直接當作已證實誤報或修改故障期限語意。
 
 ### Parallel pump cost follow-up / 多執行緒 pump 成本後續
 

@@ -4,6 +4,7 @@
 // Control words are writable by participants; Subscribers map the payload region read-only.
 
 #include <vinc/message_bus/message_bus.hpp>
+#include <vinc/message_bus/detail/registration_cleanup.hpp>
 #include <vinc/osal/shared_memory.hpp>
 #include <vinc/osal/shared_atomic.hpp>
 #include <atomic>
@@ -137,14 +138,10 @@ class RingBuffer : public std::enable_shared_from_this<RingBuffer> {
     osal::SharedMemoryMapping data_map_;
     bool creator_ = false;
     bool writable_ = false;
-    // Acquisition helpers retain each successful handle/mapping in this RingBuffer immediately.
-    // On failure, the enclosing shared_ptr destroys it and unlinks only creator-owned names.
-    vinc::Result<void> create_control();
     vinc::Result<void> open_control();
     vinc::Result<void> map_control();
     vinc::Result<void> initialize_control();
     vinc::Result<void> validate_control();
-    vinc::Result<void> create_payload();
     vinc::Result<void> open_payload(osal::SharedMemoryAccess access);
     vinc::Result<void> map_payload(osal::SharedMemoryAccess access);
 
@@ -163,7 +160,9 @@ public:
         return (bytes + payload_alignment_mask) & ~payload_alignment_mask;
     }
 
-    static vinc::Result<std::shared_ptr<RingBuffer>> create(Descriptor, std::shared_ptr<vinc::detail::ResourceNames> resources = {});
+    static vinc::Result<std::shared_ptr<RingBuffer>> create(Descriptor);
+    static vinc::Result<std::shared_ptr<RingBuffer>> create(Descriptor,
+        std::shared_ptr<vinc::detail::ResourceNames>, RegistrationCleanupFailure&);
     static vinc::Result<std::shared_ptr<RingBuffer>> open(Descriptor, bool writer);
 
     RingBufferHeader& header() {
@@ -200,7 +199,9 @@ struct NamedCounter {
     std::string name;
     bool creator = false;
     ~NamedCounter();
-    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string, std::shared_ptr<vinc::detail::ResourceNames> resources = {});
+    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string);
+    static vinc::Result<std::shared_ptr<NamedCounter>> create(std::string,
+        std::shared_ptr<vinc::detail::ResourceNames>, std::optional<NameCleanupFailure>&);
     static vinc::Result<std::shared_ptr<NamedCounter>> open(std::string);
     vinc::Result<std::uint64_t> next();
 };

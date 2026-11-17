@@ -639,10 +639,9 @@ request policy, not a hard OS exit guarantee; see the [ModuleSystem contract](..
 
 The header currently contains Message Bus defaults (ring buffer slots, message byte budget,
 topic/participant/shared-memory budgets), control request/queue bounds, the request
-timeout, and reader-wait retry settings. Their values are unchanged from the original
-Message Bus implementation.
+timeout, and reader-wait retry settings. The default distinct-Topic count limit is zero.
 
-標頭包含 Bus 槽位、訊息 byte、topic／參與者／共享記憶體預算、控制請求／佇列、請求逾時及 Reader 等待重試設定；集中設定時維持原有值。
+標頭包含 Bus 槽位、訊息 byte、Topic／參與者／共享記憶體預算、控制請求／佇列、請求逾時及 Reader 等待重試設定。`message_bus_default_topics` 提供中央 Param 與獨立 Bus 的預設值，0 表示停用 Topic 名稱數量上限。詳見 [Message Bus](../message_bus/README.md)。
 
 The two Publisher capacities serve as Param registration/standalone defaults;
 runtime resolution and last-effective correction belong to the

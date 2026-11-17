@@ -62,6 +62,20 @@ Shared Memory 不等於同步：此元件沒有 lock、atomic、Ready／Publishe
 
 ## 名稱清理與程序退出
 
+框架內部若在建立前已預留名稱，可使用
+[`detail::SharedMemoryCreateAttempt`](include/vinc/osal/detail/shared_memory_create.hpp)。
+`attempt.create(name, bytes)` 成功時交付與公開 API 相同的 handle；失敗的 `Result`
+保留建立操作的原始錯誤。只有收到失敗結果時，才用 `attempt.name_cleanup_error` 決定如何處理預留：
+
+| 情況 | 名稱清理診斷與責任 |
+| --- | --- |
+| 尚未取得新名稱，例如 FD 用完或名稱已存在 | 診斷為空，可撤銷本次預留。不得移除既有同名物件。 |
+| POSIX 已排他建立，但初始化失敗；回滾 unlink 成功或回報 `ENOENT` | 診斷為空，可撤銷預留。 |
+| POSIX 已排他建立，回滾 unlink 回報其他錯誤 | 診斷記錄 `UnlinkSharedMemory` 與原生 errno。清理未獲確認，保留預留供復原。 |
+
+每次呼叫會重設該 attempt 的診斷。它只描述本次建立對**名稱**的清理責任；
+程序在呼叫途中崩潰時沒有回傳結果，仍須依上層的持久記錄復原。
+
 - Windows 最後的 handle／view 引用釋放後回收物件。此實作的 mapping 同時保留 handle。
   不提供假的跨平台 unlink 行為。
 - POSIX 析構只關閉本機資源，不自動 `shm_unlink`。指定的建立者／管理者負責明確移除名稱。

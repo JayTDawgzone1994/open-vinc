@@ -1,5 +1,6 @@
 #include "channel_test_support.hpp"
 #include "channel_test_hooks.hpp"
+#include <vinc/control/detail/receive_wake.hpp>
 #include <condition_variable>
 #include <iostream>
 #include <mutex>
@@ -127,6 +128,10 @@ void test_terminal_failure(Injection mode) {
     auto service = take(control::Service::create(4));
     auto existing = attach_raw(*service, options());
     auto closing = attach_raw(*service, options());
+    auto existing_wake = std::make_shared<control::detail::ReceiveWake>();
+    auto late_wake = std::make_shared<control::detail::ReceiveWake>();
+    control::detail::ReceiveWakeAccess::bind(*existing.session, existing_wake);
+    check(existing_wake->consume(), "consume existing session Open hint");
     injection.arm(mode);
     // A real send wakes the worker if it was already inside the native wait.
     check(bool(existing.session->send(application())), "wake worker for injected failure");
@@ -134,7 +139,13 @@ void test_terminal_failure(Injection mode) {
     closing.session->close();
     // This peer was published after the worker took its current peer snapshot.
     auto late = attach_raw(*service, options(), false);
+    control::detail::ReceiveWakeAccess::bind(*late.session, late_wake);
+    check(!late_wake->consume(), "late session still handshaking");
     injection.release();
+    check(bool(existing_wake->wait_until(control::Clock::now() + operation_timeout)),
+          "worker failure wakes existing receiver");
+    check(bool(late_wake->wait_until(control::Clock::now() + operation_timeout)),
+          "worker failure wakes late attachment receiver");
     wait_closed(*existing.session);
     wait_closed(*late.session);
     wait_closed(*closing.session);

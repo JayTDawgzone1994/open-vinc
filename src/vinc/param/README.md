@@ -819,6 +819,16 @@ Two shared slots serve all parameters and consume one module_lock_limit mutex. E
 
 ## Recorded validation and outstanding issues / 驗證與待處理事項
 
+**Cache convergence test correction (2026-11-17):** `tests/process_tests.cpp` now
+checks committed writes through `read_current()` and waits separately for another
+Module's pump cache, including a newly appearing watch. It no longer assumes that
+a write acknowledgement means another pump has applied the value. No Param runtime
+contract changed. Windows/WSL evidence and the original intermittent failure are
+recorded in [central receive-wakeup acceptance](../module_system/CONTROL_WAKEUP_VALIDATION.md).
+
+**快取收斂測試修正：**寫入 ACK 不保證其他 Module 的 pump 已更新；測試分別驗中央已提交
+及快取最終收斂，首次出現的監聽先確認 present。原始失敗與四組態結果見上述報告。
+
 <a id="param-redesign-stage-one"></a>
 
 ### Redesign stage 1: permissions and identity / 重設計第一階段：權限與身分

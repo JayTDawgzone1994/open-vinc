@@ -98,7 +98,10 @@ vinc::Result<void> SharedMemoryMappingState::unmap_native() noexcept {
     return {};
 }
 
-vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& name, std::uint64_t size) {
+// All failure paths precede ownership of a new mapping. After exclusive
+// creation the handle is transferred directly, so no name rollback is needed.
+vinc::Result<void> create_memory(SharedMemoryState& state, const std::string& name, std::uint64_t size,
+                                 std::optional<Error>&) {
     constexpr auto operation = vinc::osal::ErrorOperation::CreateSharedMemory;
     const auto native = native_name(name);
     // Restrict the DACL to this process's user, rather than inheriting an

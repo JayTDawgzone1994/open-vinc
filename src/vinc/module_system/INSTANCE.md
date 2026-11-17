@@ -38,7 +38,13 @@
    清理只退役名稱紀錄，不重新 open、初始化或接管舊共享區。
 4. 排他建立新的隨機 epoch 前綴保留目錄，完成 owner 紀錄後，才允許 reserve 資源名稱。
 5. `reserve()` 先建立空目錄形式的記錄，再把名稱交給 OSAL create。即使 create 中途崩潰，
-   下一次啟動仍知道要檢查哪個名稱。`retire()` 在 unlink 成功／已不存在或 Windows 名稱退役後移除記錄。
+   下一次啟動仍知道要檢查哪個名稱。`retire()` 只刪呼叫端的登記目錄。若排他建立確認未留下自有名稱，
+   包含撞到既有名稱，可直接撤銷預留。已取得的名稱則在 unlink 成功／已不存在或 Windows 名稱退役後移除登記。
+
+**內部名稱的保留範圍。** 透過 Context 註冊的 Topic 名稱可以在不同 App 重複；
+原生資源名稱由各自的 Instance 分配。POSIX 重啟時，`clean_epoch()` 依上述已驗證的舊登記 unlink。
+同帳號程序若繞過框架，用原生 API 搶占已預留的完整名稱，該物件也可能被 unlink；
+框架只承諾正常 App 之間的隔離。相關實測見 [Topic 重啟驗收](../message_bus/TOPIC_REGISTRATION_RECOVERY.md#第四步驗收)。
 
 新名稱由 epoch＋不回繞的序號組合，符合 OSAL 的 24 個 ASCII 字元限制。
 同一狀態目錄的已用 epoch 前綴保留，不再次分配，因此舊 Module 尚未退出也不會接觸新世代。
@@ -204,6 +210,8 @@ Param 接線後 Plugin entry version 為 4，bootstrap 為 `--vinc-module-v9`，
 | `instance_name_attempts` | 隨機 epoch 前綴碰撞最多嘗試 32 次 |
 
 ## 驗證與待處理事項
+
+- WSL Ubuntu 24.04 Release 的 Topic 上限驗收中，以空白 HOME 同時首次啟動兩個不同名稱的 App，有一次第二中央回報 `InvalidInstanceJournal / OpenInstance`。`private_directory()` 在建立目錄後另行收緊權限，同時啟動者可能讀到中間狀態；尚未取得該次目錄狀態或受控重現。後續應隔離測試首次建立共用狀態目錄，保留對不安全權限的拒絕。Topic 參數驗收在 A 就緒後啟動 B，兩者隨後同時運行。
 
 2026-10-08，Windows x64／MSVC：Debug／Release 完整建置與公開 SDK 標頭編譯成功。
 Debug CTest **61/61**（182.98 秒）；Release 58 套首輪通過，3 套建置型測試因

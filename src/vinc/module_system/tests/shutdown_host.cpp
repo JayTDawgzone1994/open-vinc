@@ -2,7 +2,7 @@
 // teardown order. The companion Bus translation unit uses the same test hooks.
 #include "../src/runtime/module_runtime.cpp"
 #include "shutdown_test_hooks.hpp"
-#include <vinc/message_bus/detail/protocol.hpp>
+#include <vinc/message_bus/detail/topology_protocol.hpp>
 #include <fstream>
 
 namespace {
@@ -12,6 +12,7 @@ constexpr auto gate_budget = 2s;
 constexpr int probe_failure_exit = 99;
 constexpr std::uint64_t retired_publisher_id = 1;
 
+std::uint64_t host_generation = 0;
 std::string scenario;
 std::ofstream trace;
 std::mutex trace_mutex;
@@ -56,6 +57,11 @@ control::Frame route_notification() {
         // Leave the routing operation/envelope intact but truncate the count.
         frame.payload.pop_back();
     }
+    control::Bytes record;
+    message_bus::detail::append_topology_record(record, frame.operation, frame.payload);
+    frame.operation = message_bus::detail::SyncPage;
+    frame.payload = *message_bus::detail::encode_topology_page({{host_generation, 1, 0}, 0, 1,
+        message_bus::detail::TopologyMode::Delta, true, record});
     return frame;
 }
 
@@ -70,6 +76,7 @@ int run(std::vector<std::string> args) {
     }
     trace.open(*path);
     record("scenario=" + scenario);
+    host_generation = std::stoull(args[detail::bootstrap::generation]);
     record("mid=" + args[detail::bootstrap::generation]);
     // Extra application arguments are ignored by the existing Context fixture.
     // Bootstrap, Plugin loading, hooks, completion exchange and exit are real.
@@ -175,13 +182,16 @@ void bus_receive(bool closed, const control::Frame& frame) {
     if (!closed && !injected) {
         return;
     }
-    control::Reader reader(frame.payload);
-    const auto publisher = reader.u64();
-    const auto destinations = reader.u32();
-    const bool valid_empty_route = frame.kind == control::Kind::Event &&
-        frame.domain == message_bus::detail::message_bus_domain &&
-        frame.operation == message_bus::detail::NotificationRoutesChanged &&
-        frame.request == 0 && publisher != 0 && destinations == 0 && reader.done();
+    bool valid_empty_route = false;
+    auto page = message_bus::detail::decode_topology_page(frame.payload);
+    if (frame.operation == message_bus::detail::SyncPage && page) {
+        (void)message_bus::detail::visit_topology_records(page->records, [&](auto kind, auto body) -> Result<void> {
+            control::Reader reader(body);
+            valid_empty_route = kind == message_bus::detail::NotificationRoutesChanged &&
+                reader.u64() != 0 && reader.u32() == 0 && reader.done();
+            return {};
+        });
+    }
     record("bus_receive closed=" + std::to_string(closed) +
            " injected=" + std::to_string(injected) +
            " valid_empty_route=" + std::to_string(valid_empty_route) +
