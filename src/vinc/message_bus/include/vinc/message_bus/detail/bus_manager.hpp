@@ -5,6 +5,7 @@
 #include <vinc/time.hpp>
 #include <vinc/detail/resource_names.hpp>
 #include <vinc/message_bus/detail/runtime.hpp>
+#include <vinc/message_bus/detail/registration_cleanup.hpp>
 #include <functional>
 #include <optional>
 
@@ -24,10 +25,10 @@ using PublisherDefaultsSource = std::function<Result<PublisherDefaults>()>;
 // Queried on the same worker only when a distinct Topic would be created.
 using TopicLimitSource = std::function<Result<std::uint32_t>()>;
 
-struct CounterCleanupFailure {
-    std::string resource_name;
-    Error primary;
-    Error cleanup;
+struct TopologyStatus {
+    std::uint64_t applied = 0;
+    std::uint64_t target = 0;
+    Deadline last_progress{};
 };
 
 class BusManager {
@@ -41,7 +42,8 @@ public:
         TopicLimitSource topic_limit = {});
     ~BusManager();
     // Bounded central diagnostic, retained across subsequent successful registrations.
-    std::optional<CounterCleanupFailure> last_counter_cleanup_failure() const;
+    std::optional<RegistrationCleanupFailure> last_registration_cleanup_failure() const;
+    std::optional<TopologyStatus> topology_status(std::uint64_t owner) const;
     // Enqueue only; allocation/mapping runs on the BusManager worker, never supervisor.
     vinc::Result<void> submit(std::uint64_t owner, std::string name, std::shared_ptr<control::Session>,
                               control::Frame, std::string notification_name = {});

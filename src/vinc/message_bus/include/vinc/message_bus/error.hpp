@@ -62,7 +62,8 @@ enum class ErrorOperation : std::int32_t {
     ListTopicConnections = 39,
     OpenNotification = 40,
     Notify = 41,
-    EnableNotifications = 42
+    EnableNotifications = 42,
+    EncodeTopology = 43
 };
 }
 

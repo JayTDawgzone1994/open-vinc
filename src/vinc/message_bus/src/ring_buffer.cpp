@@ -53,6 +53,83 @@ void unlink(const std::string& name, const std::shared_ptr<vinc::detail::Resourc
     }
 }
 
+// During construction each name has exactly one rollback owner. The destination
+// object already owns any handles/mappings, but only takes over name cleanup on success.
+class PendingSharedName {
+    enum class State { Inactive, Reserved, Owned };
+    State state_ = State::Inactive;
+    std::string& name_;
+    const std::shared_ptr<vinc::detail::ResourceNames>& resources_;
+    std::optional<NameCleanupFailure>& cleanup_;
+
+    void retain_for_recovery(Error error) noexcept {
+        state_ = State::Inactive;
+        cleanup_ = NameCleanupFailure{std::move(name_), error};
+    }
+
+public:
+    PendingSharedName(std::string& name, const std::shared_ptr<vinc::detail::ResourceNames>& resources,
+                      std::optional<NameCleanupFailure>& cleanup)
+        : name_(name), resources_(resources), cleanup_(cleanup) {}
+    PendingSharedName(const PendingSharedName&) = delete;
+    PendingSharedName& operator=(const PendingSharedName&) = delete;
+
+    Result<void> reserve(ErrorOperation operation) {
+        if (resources_) {
+            auto reserved = resources_->reserve();
+            if (!reserved) {
+                return std::unexpected(io(reserved.error(), operation));
+            }
+
+            name_ = std::move(*reserved);
+            state_ = State::Reserved;
+        }
+        return {};
+    }
+
+    Result<void> create(osal::SharedMemory& destination, std::uint64_t bytes, ErrorOperation operation) {
+        osal::detail::SharedMemoryCreateAttempt attempt;
+        // If OSAL unwinds without returning an ownership result, leave the
+        // journal intact. Only a reported clean failure permits retirement.
+        const auto before_create = std::exchange(state_, State::Inactive);
+        auto memory = attempt.create(name_, bytes);
+        if (!memory) {
+            state_ = before_create;
+            if (attempt.name_cleanup_error) {
+                retain_for_recovery(*attempt.name_cleanup_error);
+            }
+            return std::unexpected(io(memory.error(), operation));
+        }
+
+        destination = std::move(*memory);
+        state_ = State::Owned;
+        return {};
+    }
+
+    void handoff() noexcept {
+        state_ = State::Inactive;
+    }
+
+    ~PendingSharedName() {
+        if (state_ == State::Inactive) {
+            return;
+        }
+        try {
+            // A reservation alone grants no right to unlink a colliding native name.
+            auto result = state_ == State::Owned ? remove_owned_name(name_, resources_) : resources_->retire(name_);
+            if (!result) {
+                retain_for_recovery(result.error());
+            }
+        } catch (const std::bad_alloc&) {
+            retain_for_recovery({ErrorCode::ResourceExhausted, ErrorOperation::CloseRegistration});
+        } catch (const std::system_error& error) {
+            retain_for_recovery({ErrorCode::Io, ErrorOperation::CloseRegistration, osal::native_error(error.code())});
+        } catch (...) {
+            retain_for_recovery({ErrorCode::Io, ErrorOperation::CloseRegistration});
+        }
+    }
+};
+
 std::uint64_t saturated_add(std::uint64_t a, std::uint64_t b) {
     return b > UINT64_MAX - a ? UINT64_MAX : a + b;
 }
@@ -110,17 +187,6 @@ RingBuffer::~RingBuffer() {
     }
 }
 
-vinc::Result<void> RingBuffer::create_control() {
-    auto memory =
-        osal::SharedMemory::create(descriptor.control, control_bytes(descriptor.slots, descriptor.readers));
-    if (!memory) {
-        creator_ = false;
-        return std::unexpected(io(memory.error(), ErrorOperation::CreateControl));
-    }
-    control_ = std::move(*memory);
-    return {};
-}
-
 vinc::Result<void> RingBuffer::map_control() {
     auto mapping = control_.map(control_bytes(descriptor.slots, descriptor.readers),
                                 osal::SharedMemoryAccess::ReadWrite);
@@ -156,16 +222,6 @@ vinc::Result<void> RingBuffer::initialize_control() {
         ::new (readers_ + i) ReaderSlot{};
     }
 
-    return {};
-}
-
-vinc::Result<void> RingBuffer::create_payload() {
-    auto data = osal::SharedMemory::create(descriptor.data, descriptor.slots * slot_stride(descriptor.bytes));
-    if (!data) {
-        descriptor.data.clear();
-        return std::unexpected(io(data.error(), ErrorOperation::CreatePayload));
-    }
-    data_ = std::move(*data);
     return {};
 }
 
@@ -219,7 +275,13 @@ vinc::Result<void> RingBuffer::map_payload(osal::SharedMemoryAccess access) {
     return {};
 }
 
-vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descriptor, std::shared_ptr<vinc::detail::ResourceNames> resources) {
+vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descriptor) {
+    RegistrationCleanupFailure cleanup;
+    return create(std::move(descriptor), {}, cleanup);
+}
+
+vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descriptor,
+    std::shared_ptr<vinc::detail::ResourceNames> resources, RegistrationCleanupFailure& cleanup) {
     if (descriptor.slots < minimum_ring_buffer_slots || descriptor.slots > maximum_ring_buffer_slots ||
         !descriptor.readers || descriptor.readers > maximum_ring_buffer_readers ||
         descriptor.bytes < minimum_message_bytes || descriptor.bytes > SIZE_MAX - payload_alignment_mask ||
@@ -230,10 +292,23 @@ vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descript
     auto ring_buffer = std::make_shared<RingBuffer>();
     ring_buffer->descriptor = std::move(descriptor);
     ring_buffer->resources_ = std::move(resources);
-    ring_buffer->creator_ = true;
     ring_buffer->writable_ = true;
+    auto& layout = ring_buffer->descriptor;
+    PendingSharedName control(layout.control, ring_buffer->resources_, cleanup.control);
+    PendingSharedName payload(layout.data, ring_buffer->resources_, cleanup.payload);
 
-    auto create_control_result = ring_buffer->create_control();
+    auto reserved_control = control.reserve(ErrorOperation::Advertise);
+    if (!reserved_control) {
+        return std::unexpected(reserved_control.error());
+    }
+
+    auto reserved_payload = payload.reserve(ErrorOperation::Advertise);
+    if (!reserved_payload) {
+        return std::unexpected(reserved_payload.error());
+    }
+
+    auto create_control_result = control.create(ring_buffer->control_, control_bytes(layout.slots, layout.readers),
+                                                ErrorOperation::CreateControl);
     if (!create_control_result) {
         return std::unexpected(create_control_result.error());
     }
@@ -248,7 +323,8 @@ vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descript
         return std::unexpected(initialize_control_result.error());
     }
 
-    auto create_payload_result = ring_buffer->create_payload();
+    auto create_payload_result = payload.create(ring_buffer->data_, layout.slots * slot_stride(layout.bytes),
+                                                ErrorOperation::CreatePayload);
     if (!create_payload_result) {
         return std::unexpected(create_payload_result.error());
     }
@@ -259,6 +335,9 @@ vinc::Result<std::shared_ptr<RingBuffer>> RingBuffer::create(Descriptor descript
     }
 
     shared_store(ring_buffer->header_->alive, 1);
+    control.handoff();
+    payload.handoff();
+    ring_buffer->creator_ = true;
     return ring_buffer;
 }
 
@@ -535,32 +614,6 @@ NamedCounter::~NamedCounter() {
 }
 
 namespace {
-// Consume the acquisition state once. A cleanup failure, including allocation
-// by the journal's filesystem path, must not hide the registration failure.
-std::optional<Error> rollback_counter(NamedCounter& counter) noexcept {
-    const bool owned = std::exchange(counter.creator, false);
-    try {
-        Result<void> cleanup;
-        if (owned) {
-            cleanup = remove_owned_name(counter.name, counter.resources);
-        } else if (counter.resources) {
-            cleanup = counter.resources->retire(counter.name);
-        }
-
-        if (!cleanup) {
-            return cleanup.error();
-        }
-
-        return std::nullopt;
-    } catch (const std::bad_alloc&) {
-        return Error{ErrorCode::ResourceExhausted, ErrorOperation::CloseRegistration};
-    } catch (const std::system_error& error) {
-        return Error{ErrorCode::Io, ErrorOperation::CloseRegistration, osal::native_error(error.code())};
-    } catch (...) {
-        return Error{ErrorCode::Io, ErrorOperation::CloseRegistration};
-    }
-}
-
 // Retain each successful mapping in the owner before the next fallible step.
 // The owner unmaps/closes it, and only the creator unlinks the name on failure.
 vinc::Result<void> map_counter(NamedCounter& counter) {
@@ -589,39 +642,34 @@ vinc::Result<void> initialize_counter(NamedCounter& counter) {
 }
 
 vinc::Result<std::shared_ptr<NamedCounter>> NamedCounter::create(std::string name) {
-    std::optional<Error> cleanup_failure;
+    std::optional<NameCleanupFailure> cleanup_failure;
     return create(std::move(name), {}, cleanup_failure);
 }
 
 vinc::Result<std::shared_ptr<NamedCounter>> NamedCounter::create(std::string name,
-    std::shared_ptr<vinc::detail::ResourceNames> resources, std::optional<Error>& cleanup_failure) {
+    std::shared_ptr<vinc::detail::ResourceNames> resources, std::optional<NameCleanupFailure>& cleanup_failure) {
     cleanup_failure.reset();
     auto counter = std::make_shared<NamedCounter>();
     counter->name = std::move(name);
     counter->resources = std::move(resources);
-    osal::detail::SharedMemoryCreateAttempt attempt;
-    auto memory = attempt.create(counter->name, sizeof(SharedWord));
-    if (!memory) {
-        // No handle was transferred. Only OSAL knows whether its rollback left
-        // an owned name. Retiring a reservation must never unlink a collision.
-        cleanup_failure = attempt.name_cleanup_error;
-        if (!cleanup_failure) {
-            cleanup_failure = rollback_counter(*counter);
-        }
-
-        return std::unexpected(io(memory.error(), ErrorOperation::CreateCounter));
+    PendingSharedName pending(counter->name, counter->resources, cleanup_failure);
+    auto reserved = pending.reserve(ErrorOperation::CreateTopic);
+    if (!reserved) {
+        return std::unexpected(reserved.error());
     }
 
-    counter->creator = true;
-    counter->memory = std::move(*memory);
+    auto created = pending.create(counter->memory, sizeof(SharedWord), ErrorOperation::CreateCounter);
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+
     auto initialized = initialize_counter(*counter);
     if (!initialized) {
-        // We own this name. Perform exactly one rollback and make any secondary
-        // failure available before the counter's handles are destroyed.
-        cleanup_failure = rollback_counter(*counter);
         return std::unexpected(initialized.error());
     }
 
+    pending.handoff();
+    counter->creator = true;
     return counter;
 }
 

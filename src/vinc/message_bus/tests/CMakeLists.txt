@@ -50,6 +50,11 @@ if(UNIX)
     add_test(NAME message_bus.topic_registration_emfile
         COMMAND message_bus_topic_registration_tests "$<TARGET_FILE:message_bus_module_helper>")
     set_tests_properties(message_bus.topic_registration_emfile PROPERTIES TIMEOUT 60)
+    foreach(step IN ITEMS control payload)
+        add_test(NAME message_bus.control_plane.emfile-${step}
+            COMMAND message_bus_topic_registration_tests "$<TARGET_FILE:message_bus_module_helper>" ${step})
+        set_tests_properties(message_bus.control_plane.emfile-${step} PROPERTIES TIMEOUT 60)
+    endforeach()
 endif()
 
 add_executable(message_bus_defaults_process_tests defaults_process_tests.cpp)
@@ -62,7 +67,7 @@ set_tests_properties(message_bus.defaults_process PROPERTIES TIMEOUT 90)
 # Compile the same implementation with local fault seams; never link the
 # production Bus library into this target or export its test-only definition.
 add_executable(message_bus_cleanup_tests
-    cleanup_tests.cpp notification_snapshot_tests.cpp
+    cleanup_tests.cpp notification_snapshot_tests.cpp topology_load_tests.cpp
     ../src/message_bus.cpp ../src/runtime.cpp ../src/bus_manager.cpp ../src/ring_buffer.cpp)
 target_include_directories(message_bus_cleanup_tests PRIVATE ../include "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(message_bus_cleanup_tests PRIVATE VINC_MESSAGE_BUS_TESTING)
@@ -80,6 +85,11 @@ else()
 endif()
 add_test(NAME message_bus.cleanup COMMAND message_bus_cleanup_tests)
 set_tests_properties(message_bus.cleanup PROPERTIES TIMEOUT 90)
+foreach(scenario IN ITEMS topology-load topology-control topology-admission topology-snapshot topology-replace topology-attach topology-detach timely-request expired-request retired-source confirmed-source
+        reservation-control reservation-ring-control reservation-ring-payload reservation-rollback)
+    add_test(NAME message_bus.control_plane.${scenario} COMMAND message_bus_cleanup_tests ${scenario})
+    set_tests_properties(message_bus.control_plane.${scenario} PROPERTIES TIMEOUT 45)
+endforeach()
 add_test(NAME message_bus.counter_registration COMMAND message_bus_cleanup_tests counter-registration)
 set_tests_properties(message_bus.counter_registration PROPERTIES TIMEOUT 30)
 add_test(NAME message_bus.notification_snapshots COMMAND message_bus_cleanup_tests notification-snapshots)

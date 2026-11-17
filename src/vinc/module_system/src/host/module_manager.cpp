@@ -5,6 +5,7 @@
 #include <iostream>
 #include <vinc/param/detail/manager.hpp>
 #include <vinc/rpc/detail/manager.hpp>
+#include <vinc/control/detail/receive_wake.hpp>
 #include <vinc/module/detail/instance.hpp>
 #include <vinc/module/detail/lock_registry.hpp>
 #include <vinc/module/detail/manager_access.hpp>
@@ -33,6 +34,9 @@
 #include <set>
 #include <stdexcept>
 #include <thread>
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+#include "control_wakeup_hooks.hpp"
+#endif
 #ifdef VINC_MODULE_TESTING
 #include "fault_hooks.hpp"
 #endif
@@ -421,7 +425,10 @@ struct ModuleManager::Impl {
     std::shared_ptr<detail::Instance> instance;
     std::unique_ptr<detail::LockRegistry> locks;
     mutable std::mutex mutex;
-    std::condition_variable wake;
+    // Sessions keep weak references. This owner outlives worker and channels;
+    // waiting never holds the registry or a Module record mutex.
+    std::shared_ptr<control::detail::ReceiveWake> wake =
+        std::make_shared<control::detail::ReceiveWake>();
     std::map<std::string, RegisteredType> module_types;
     std::vector<std::shared_ptr<Record>> records;
     std::map<std::string, microProgram> programs;
@@ -889,7 +896,7 @@ struct ModuleManager::Impl {
     }
 
     // Advance one Module while its record mutex is held; poll for child readiness and exit.
-    void tick(Record& record) {
+    void tick(Record& record, bool retry_deferred, bool& runnable) {
         const auto now = Clock::now();
         if (terminal(record.snapshot.state)) {
             return;
@@ -911,7 +918,7 @@ struct ModuleManager::Impl {
 
         // Latch fatal before processing Ready/name messages or channel errors.
         observe_contract_failure(record, Clock::now());
-        receive_control_frames(record);
+        runnable = receive_control_frames(record, retry_deferred) || runnable;
 
         // Observe OS exit before retiring any resources shared with the child.
         if (record.process) {
@@ -999,6 +1006,10 @@ struct ModuleManager::Impl {
                 }
 
                 record.session = *attached;
+                control::detail::ReceiveWakeAccess::bind(*record.session, wake);
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+                test::control_wakeup::attached(record.session);
+#endif
                 close_listener(record);
             } else if (!(accepted.error().is(vinc::osal::ErrorCode::WouldBlock))) {
                 record_failure(
@@ -1012,24 +1023,42 @@ struct ModuleManager::Impl {
         }
     }
 
+    // First admission and deferred retry use the same downstream boundary.
+    // The frame remains owned by this layer until admission succeeds.
+    Result<void> submit_rpc(Record& record, const control::Frame& frame) {
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+        test::control_wakeup::before_rpc_submit(*rpc, record.snapshot.mid, frame);
+#endif
+        auto result = rpc->submit(record.snapshot.mid, frame);
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+        test::control_wakeup::after_rpc_submit(record.snapshot.mid, frame, result);
+#endif
+        return result;
+    }
+
     // Caller retains Record::mutex across the entire batch. Name claims are only
     // queued here; register_name() later takes registry -> record locks in that order.
-    void receive_control_frames(Record& record) {
+    bool receive_control_frames(Record& record, bool retry_deferred) {
         if (record.rpc_deferred) {
-            auto submitted = rpc->submit(record.snapshot.mid, *record.rpc_deferred);
+            // A full downstream queue is not runnable inbox work. Other
+            // Sessions' notifications must not turn this retry into a spin.
+            if (!retry_deferred) {
+                return false;
+            }
+            auto submitted = submit_rpc(record, *record.rpc_deferred);
             if (!submitted) {
                 if (submitted.error().is(rpc::ErrorCode::QueueFull)) {
-                    return;
+                    return false;
                 }
                 record_failure(record, wrap_error(ErrorCode::RpcFailed, ErrorOperation::Receive,
                                                   submitted.error()));
             }
             record.rpc_deferred.reset();
         }
+        int messages_processed = 0;
         // Bound each pass so a busy Module cannot monopolize the supervisor.
         if (record.session) {
-            for (int messages_processed = 0; messages_processed < control_messages_per_pass;
-                 ++messages_processed) {
+            while (messages_processed < control_messages_per_pass) {
                 auto received = record.session->try_receive();
                 if (!received) {
                     if (record.fatal_deadline || (!record.user_stop && !record.fault && !record.finishing)) {
@@ -1044,6 +1073,7 @@ struct ModuleManager::Impl {
                 }
 
                 auto frame = std::move(**received);
+                ++messages_processed;
                 const bool command_response =
                     frame.kind == control::Kind::Response && frame.domain == detail::commands;
                 if (record.fatal_deadline && !command_response) {
@@ -1099,7 +1129,7 @@ struct ModuleManager::Impl {
                         record_failure(record, failure(ErrorCode::Protocol, ErrorOperation::Receive));
                         break;
                     }
-                    auto submitted = rpc->submit(record.snapshot.mid, frame);
+                    auto submitted = submit_rpc(record, frame);
                     if (!submitted) {
                         if (submitted.error().is(rpc::ErrorCode::QueueFull)) {
                             record.rpc_deferred = std::move(frame);
@@ -1138,7 +1168,9 @@ struct ModuleManager::Impl {
                     const auto request = frame.request;
                     auto submitted = bus_manager->submit(record.snapshot.generation, record.snapshot.name,
                                                          record.session, std::move(frame), record.notification_name);
-                    if (!submitted && operation == message_bus::detail::ListTopicConnections &&
+                    const bool read_only = operation == message_bus::detail::ListTopicConnections ||
+                                           operation == message_bus::detail::CheckSource;
+                    if (!submitted && read_only &&
                         submitted.error().is(message_bus::ErrorCode::CapacityExceeded)) {
                         control::Frame response{control::Kind::Response, message_bus::detail::message_bus_domain,
                             operation, request};
@@ -1208,6 +1240,9 @@ struct ModuleManager::Impl {
                 }
             }
         }
+        // One extra empty scan is harmless. Never dequeue a seventeenth frame
+        // just to inspect readiness, and never reclassify deferred work as ready.
+        return messages_processed == control_messages_per_pass && !record.rpc_deferred && !record.fault;
     }
 
     void receive_lock_request(Record& record, const control::Frame& frame) {
@@ -1464,7 +1499,20 @@ struct ModuleManager::Impl {
     void monitor(std::stop_token token) {
         // Admission bounds the array. Copying shared owners here cannot allocate during a fault.
         std::array<std::shared_ptr<Record>, module_record_limit> current;
+        auto health_deadline = Clock::now();
         while (!token.stop_requested()) {
+            // Consume before scanning: a signal during the scan remains pending
+            // for wait_until. Traffic cannot postpone the absolute fallback.
+            wake->consume();
+            const auto now = Clock::now();
+            const bool retry_deferred = now >= health_deadline;
+            if (retry_deferred) {
+                health_deadline = now + supervisor_poll_interval;
+            }
+            bool runnable = false;
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+            test::control_wakeup::pass_started(retry_deferred, health_deadline);
+#endif
             std::size_t count = 0;
             {
                 std::lock_guard registry_lock(mutex);
@@ -1475,7 +1523,7 @@ struct ModuleManager::Impl {
                 try {
                     {
                         std::lock_guard record_lock(record->mutex);
-                        tick(*record);
+                        tick(*record, retry_deferred, runnable);
                     }
                     // Release the record before taking registry -> record locks.
                     register_name(record);
@@ -1493,8 +1541,21 @@ struct ModuleManager::Impl {
                 }
                 record.reset();
             }
-            std::unique_lock registry_lock(mutex);
-            wake.wait_for(registry_lock, supervisor_poll_interval);
+            if (runnable) {
+                continue;
+            }
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+            // The bounded test gate owns no registry/record/peer lock.
+            test::control_wakeup::before_wait();
+#endif
+            const auto waited = wake->wait_until(health_deadline, token);
+#ifdef VINC_CONTROL_WAKEUP_TESTING
+            test::control_wakeup::after_wait(
+                !waited && waited.error().is(control::ErrorCode::Timeout)
+                    ? std::cv_status::timeout : std::cv_status::no_timeout);
+#else
+            (void)waited;
+#endif
         }
     }
 
@@ -1779,7 +1840,7 @@ ModuleManager::~ModuleManager() {
         deadline = (std::max)(deadline, Clock::now() + record->module_type.policy.stop_timeout +
                                             shutdown_observation_grace);
     }
-    impl_->wake.notify_all();
+    impl_->wake->notify();
 
     for (auto& record : records) {
         std::unique_lock record_lock(record->mutex);
@@ -1789,7 +1850,7 @@ ModuleManager::~ModuleManager() {
     }
 
     impl_->worker.request_stop();
-    impl_->wake.notify_all();
+    impl_->wake->notify();
     if (impl_->worker.joinable()) {
         impl_->worker.join();
     }
@@ -1950,7 +2011,7 @@ Result<MID> ModuleManager::start_type(const std::string& name, std::vector<std::
     record->snapshot.debug = options.debug;
     record->arguments = std::move(args);
     impl_->records.push_back(record);
-    impl_->wake.notify_all();
+    impl_->wake->notify();
     return *mid;
 }
 
@@ -2089,7 +2150,7 @@ void ModuleManager::begin_shutdown() {
         request_user_stop(*record);
         record->changed.notify_all();
     }
-    impl_->wake.notify_all();
+    impl_->wake->notify();
 }
 
 std::vector<ModuleSnapshot> ModuleManager::snapshots() const {
@@ -2142,7 +2203,7 @@ Result<void> ModuleManager::stop_module(const ModuleKey& key, vinc::Deadline dea
     }
 
     request_user_stop(*record);
-    impl_->wake.notify_all();
+    impl_->wake->notify();
 
     if (!record->changed.wait_until(record_lock, deadline, [&] {
             return terminal(record->snapshot.state);

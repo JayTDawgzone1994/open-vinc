@@ -17,12 +17,15 @@
 ## Endpoint release / 端點回收
 
 - Each registration reserves one local release record before sending its request. Local retirement waits for the protected read/write operation, detaches the endpoint, and appends its record in FIFO order. A full control queue never forces a destructor to drop that record.
-- Bus v5 carries at most 16 releases in a request. The Host allows one outstanding batch. Its existing watchdog advances cleanup independently of pump. A send rejected before admission can retry within the batch deadline. Once admitted, a batch with an unknown outcome is recovered through session failure and confirmed process exit.
+- Bus v6 carries at most 16 releases in a request. The Host allows one outstanding batch. Its existing watchdog advances cleanup independently of pump. A send rejected before admission can retry within the batch deadline. Once admitted, a batch with an unknown outcome is recovered through session failure and confirmed process exit.
 - 中央先驗證整批長度、端點種類、重複 ID 與持有人，再回收；清除空 Topic 後才回覆。ACK 確認中央登記與預算已釋放，其他 Module 處理拓樸通知仍各自進行。同一 Host 的後續控制請求只等進入時已排入的回收序號。共享記憶體收發維持原路徑。
+- 等回收 ACK 與送出後續請求共用原期限。等待 ACK 到期回 `Timeout / CloseRegistration`；ACK 已確認、呼叫端恢復時期限已到則回 `Timeout / Request`。兩者都在分配新 request ID 之前返回，Session 可繼續使用。變更請求已送出後才逾時，結果仍屬未知，依既有政策關閉 Session。
 
 ## RingBuffer 布局與原子操作
 
 每個 Publisher 有 control 與 payload 兩個命名共享區；topic 另有共用 counter。
+建立期間，每個名稱從 reserve 成功起各自負責回滾。排他建立失敗且 OSAL 確認無自有名稱時只撤銷 journal 預留；已取得的名稱依平台清理；無法確認者留給同名 App 重啟復原。control 與 payload 都完成映射後，兩筆名稱才交給 RingBuffer。Publisher 註冊保留最初失敗，清理錯誤另按名稱記錄。此流程只在建立或回收時執行。
+
 固定 header 128 bytes，每 slot metadata 64 bytes，每訂閱 reader token 64 bytes。
 payload 有 N 個固定 byte budget 的位置，stride 對齊 8 bytes。控制區版本為 3（Reader 診斷沿用原保留空間），
 magic、schema、dimensions、instance ID 在 open 時核對；訊息映像維持 message_storage v2。
@@ -69,35 +72,56 @@ reader index 屬於訂閱而非執行緒或 OS PID；同一 Subscriber 的 read 
 Heartbeat timeout 自己不足以安全清 token；仍活著但掛住的讀者可能讓 Writer 持續等待，
 需由 Module 故障政策終止並確認退出才能回收。中央控制面、heartbeat 與 reader copy 不執行應用 callback。
 
-## Message Bus Domain=3 的 v4 控制協定
+## Message Bus Domain=3 的 v6 控制協定
 
 沿用共用 Socket v1 framing、big-endian 整數與 u32 長度字串。
-Operation 的高 byte 為 Bus 版本 4，低 byte 為操作編號；v1 的 1–6 及 v2／v3 操作已退休。
+Operation 的高 byte 為 Bus 版本 6，低 byte 為操作編號；v1 的 1–6 及 v2 至 v5 的 wire 操作已退休。
 中央 `submit()` 在工作入列前驗證，Client dispatcher 在處理回覆／拓樸前驗證，
 舊／未知版本拒絕並由接線關閉會話，不做 capability negotiation 或舊格式 fallback。
-新 Client 的 v4 request 對舊 BusManager 是未知操作；不因 payload 長度碰巧可解析而接受。
+新 Client 的 v6 request 對舊 BusManager 是未知操作；不因 payload 長度碰巧可解析而接受。
 此變更不修改共用 Socket framing、當時的 Module bootstrap（目前版本見 Module System）、Lifecycle／Command 欄位。
 
 | Operation | Kind | Payload |
 | --- | --- | --- |
-| `0x0401` Advertise | Request | topic string、schema u64、presence u32、存在時的 slots u32／bytes u64 |
-| `0x0402` Subscribe | Request | topic string、schema u64、start u32（0 oldest、1 new-only） |
-| `0x0403` ClosePublisher | Event | Publisher ID u64 |
-| `0x0404` Unsubscribe | Event | Subscription ID u64 |
-| `0x0405` Attach | Event | Subscription ID u64、Attachment |
-| `0x0406` Detach | Event | Subscription ID u64、Publisher ID u64 |
-| `0x0407` ListTopics | Request | 字典序游標 string；回覆活動 Publisher 的 Topic 清單 |
-| `0x0408` InspectTopics | Request | 字典序游標 string；回覆單一 Topic 的有界診斷 |
+| `0x0601` Advertise | Request | topic string、schema u64、presence u32、存在時的 slots u32／bytes u64 |
+| `0x0602` Subscribe | Request | topic string、schema u64、start u32（0 oldest、1 new-only） |
+| `0x0603` ClosePublisher | Event | Publisher ID u64 |
+| `0x0604` Unsubscribe | Event | Subscription ID u64 |
+| `0x0605` Attach | Page record | Descriptor、reader count u32、每筆 subscription ID u64／reader index u32／起始 floor u64 |
+| `0x0606` Detach | Page record | Publisher ID u64、count u32、該 Host 的 Subscription IDs u64 |
+| `0x0607` ListTopics | Request | 字典序游標 string；回覆活動 Publisher 的 Topic 清單 |
+| `0x0608` InspectTopics | Request | 字典序游標 string；回覆單一 Topic 的有界診斷 |
+| `0x0609` ListTopicConnections | Request | 有界連線分頁游標；回覆發布／訂閱登記 |
+| `0x060a` EnableNotifications | Request | Subscription ID u64；成功後空 body，只啟用該 owner 的訂閱 |
+| `0x060b` NotificationRoutesChanged | Page record | Publisher ID u64、route count u32、各 route 的 MID u64／name string |
+| `0x060c` ReleaseBatch | Request | count u32、每筆 release operation u32／endpoint ID u64 |
+| `0x060d` CheckSource | Request | Topic、Subscription ID、Publisher ID；成功回覆 present u32 |
+| `0x060e` SyncPage | Event | generation、transfer serial、page index、base／target revision、mode、final、records |
+| `0x060f` SyncAck | Event | generation、transfer serial、page index、Staged／Applied／Resync |
 
-| `0x0409` ListTopicConnections | Request | 有界連線分頁游標；回覆發布／訂閱登記 |
-| `0x040a` EnableNotifications | Request | Subscription ID u64；成功後空 body，只啟用該 owner 的訂閱 |
-| `0x040b` NotificationRoutesChanged | Event | Publisher ID u64、route count u32、各 route 的 MID u64／name string |
+中央按 Host 世代維護一頁在途。每頁上限 16 KiB，記錄使用 u32 類型及 u32 長度。
+差異按 Publisher 分組，一組最多 128 筆 reader。中央寫入佇列暫滿時，工作執行緒
+10 ms 後重試；等待 ACK 時沒有輪詢。Host 的 ACK 若遇背壓，由既有 watchdog 重試。
+`BusManager::topology_status(generation)` 供框架查詢 applied、target 與最後進度的單調時間。
+
+每個 Host 最多保留 64 筆／64 KiB 待送差異，另有最多 64 KiB 用來保存快照中尚未讀取、
+卻正在被修改的 Topic 舊紀錄。這兩種歷史共用全 App 的 4 MiB 預算。
+已準備的單次差異傳輸最多另占 64 KiB／Host；快照逐頁編碼，同時僅保留一個待送頁及
+單一 Topic 的編碼工作空間。以上是控制資料預算，容器管理、OS 佇列及原有關係表另計。
+Host 收件端保留單次傳輸的暫存關係，直到完整提交或被新 transfer 取代。
+
+快照第一筆為 SnapshotCut（tag 1，u64 最後已分配端點 ID）。中央按 Topic 名稱排序分頁，
+僅保存這個 Host 尚未讀到、又將改變的關係。若舊紀錄預算耗盡，當前頁收到 Staged
+後換用新序號重新補查；舊版從未對使用者可見。變更停止後，健康的 Host 可以在原
+Session 收斂。登記回覆先安裝初始來源或路由；快照只取代 cut 以內仍在本機的端點。
+讀者按 Publisher ID 保留既有游標。端點回收 ACK 與拓樸套用 ACK 分開。
+
 
 Advertise presence bit 0 表示 slots、bit 1 表示 bytes；依序只傳存在欄位，拒絕未知 bit、截斷及尾隨資料。
 省略值與框架驗證／修正見 [Publisher 預設契約](PUBLISHER_DEFAULTS.md)。
 Advertise 成功 body 為解析後 requested slots u32、Descriptor、完整 route list。route 依非零 MID 嚴格遞增，
 名稱僅允許 1..24 ASCII 字母、數字、底線、連字號；來源為中央可信的啟動紀錄，非 Module payload。
-v3 與 v4 不相容。控制 framing 與錯誤 envelope 未改版，RingBuffer／訊息布局不變。
+v5 與 v6 不相容。控制 framing 與錯誤 envelope 未改版，RingBuffer／訊息布局不變。
 
 路由依 Publisher／目標 Module 世代合併，只有 Context callback 訂閱啟用；純 get_last 不啟用。
 route count 受 reader 上限約束，也受 16 KiB 控制封包 byte 上限約束。啟用時預留最大 Descriptor
@@ -125,8 +149,16 @@ floor 是該來源初始游標，只影響 callback 批次讀取。
 
 接收 Subscribe Response 時先建立 topology 才喚醒等待者，避免後續 Attach 先被當成未知訂閱而丟失。
 正常 Unsubscribe 後抵達的舊拓樸事件可忽略。Publisher retire 與讀者尚未處理 Attach 可競爭；
-mapping 已退役或已收到 Detach 時跳過，其他 OS 錯誤回傳；稍後重試會觀察更新後 topology。
-不以映射／註冊失敗假裝「沒有資料」。控制背壓或 RPC 逾時採關閉會話，避免未知結果被重試成重複註冊。
+若首次開啟 control 或 payload 共享區收到 OSAL NotFound，略過該來源。其他來源仍可讀；
+所有來源皆無可讀資料時，`get_last()` 回 NoPublishedData，pump 繼續下一項工作。
+其他原生錯誤照常交付。控制面補查期間，讀取與 pump 均不等待回覆或重開該來源。
+
+Bus v6 的 CheckSource（`0x060d`）為唯讀 Request，body 依序為 Topic string、Subscription ID u64、
+Publisher ID u64。中央依已驗證的 Session owner 確認這筆訂閱與來源的關係，回覆標準成功 envelope
+與一個 u32（0 已移除、1 仍存在）。後者允許下次讀取重新開啟；同一名稱仍不存在時回報首次原生錯誤。
+每筆尚待確認的關係只入列一次，既有 Host 控制執行緒每次最多送一筆在途查詢。
+傳送背壓、中央工作佇列滿或回覆遺失時，依既有 Bus 請求期限延後重試；查詢逾時讓其他待查來源先行。
+Detach／本機退訂會撤銷相關待辦，晚到的舊回覆不會恢復端點。新舊程序混搭時，舊中央遇未知操作依原協定拒絕。
 
 ## 驗證對照
 

@@ -24,19 +24,22 @@ inline bool valid_topic_separators(std::string_view topic) noexcept {
 
 enum Operation : std::uint16_t {
     // High byte is the Bus protocol version. v1 used 1..6; disjoint identities
-    // make old peers reject v5 before interpreting acknowledged release batches.
-    Advertise = 0x0501,
-    Subscribe = 0x0502,
-    ClosePublisher = 0x0503,
-    Unsubscribe = 0x0504,
-    Attach = 0x0505,
-    Detach = 0x0506,
-    ListTopics = 0x0507,
-    InspectTopics = 0x0508,
-    ListTopicConnections = 0x0509,
-    EnableNotifications = 0x050a,
-    NotificationRoutesChanged = 0x050b,
-    ReleaseBatch = 0x050c
+    // make old peers reject v6 before interpreting versioned topology pages.
+    Advertise = 0x0601,
+    Subscribe = 0x0602,
+    ClosePublisher = 0x0603,
+    Unsubscribe = 0x0604,
+    Attach = 0x0605,
+    Detach = 0x0606,
+    ListTopics = 0x0607,
+    InspectTopics = 0x0608,
+    ListTopicConnections = 0x0609,
+    EnableNotifications = 0x060a,
+    NotificationRoutesChanged = 0x060b,
+    ReleaseBatch = 0x060c,
+    CheckSource = 0x060d,
+    SyncPage = 0x060e,
+    SyncAck = 0x060f
 };
 
 // Bounds the cleanup work admitted by one control frame.
@@ -51,7 +54,7 @@ inline constexpr std::uint32_t publisher_bytes_present = 2;
 inline constexpr std::uint32_t publisher_options_mask = publisher_slots_present | publisher_bytes_present;
 
 inline bool supported_operation(std::uint16_t operation) noexcept {
-    return operation >= Advertise && operation <= ReleaseBatch;
+    return operation >= Advertise && operation <= SyncAck;
 }
 
 inline vinc::Result<void> encode_descriptor(control::Bytes& bytes, const Descriptor& descriptor) {

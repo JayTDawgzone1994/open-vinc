@@ -2,7 +2,14 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## Module System：中央控制接收喚醒
+
+- [ ] macOS 原生以同版重建，Debug／Release 執行 `control.channel`、`control.faults`、`control.receive_wake`、`module.control_wakeup`、`module.control_scheduler`，並重跑 Module 生命週期／故障／退出、Bus、RPC、Param（包含快取收斂測試補強）。核對入睡交界、40 幀公平掃描、RPC 真實滿載下等待／FIFO／一次入列、blocked Module 停止及 confirmed exit；每組態建立乾淨 SDK，驗 consumer／App／Python 及搬移部署。依[第四階段報告](src/vinc/module_system/CONTROL_WAKEUP_VALIDATION.md)重做相同 4／128 筆、每組三次的成本對照；目前 `tests/control_cost/usage.hpp` 僅有 Windows／Linux 採樣，Mac 需補原生 CPU／RSS／執行緒／資源計數，不接受假數值或直接套用 WSL 結果。記錄提交與工具鏈，Windows／WSL 證據不能替代 Mac。
+- [ ] 外部應用另核對 callback 容量及 pin，保留原 491 筆／30 秒 Ready 條件，不以框架局部通過替代完整應用驗收。
+
 ## Message Bus：Topic 登記回收
+
+- [ ] macOS 原生以同一提交重建 Bus v6／Plugin entry 22，Debug／Release 執行 `message_bus.control_plane.*`、Bus 回歸、`message_bus.module`、`message_bus.release_routes`、`module.context`、`module.shutdown_evidence` 與 Control Channel 測試。涵蓋 `topology-load` 的 1×128／16×128、160 個 Topic、超過心跳期限的派送暫停、無新操作收斂及原生 Host 異常退出。再驗乾淨 installed SDK 的 consumer／application／Python 與搬移部署；用 `tests/topology_cost.py` 記錄原生頁面、記憶體及喚醒成本。Windows／WSL 第五階段已有通過證據，不能替代 Mac。指令、量測邊界與完整矩陣見[控制面修復契約](src/vinc/message_bus/CONTROL_PLANE_REPAIR.md#第五階段整合與成本驗收2026-11-16)。
 
 - [ ] macOS 原生 Release 重建中央、Host 與 Plugin，執行 `message_bus.cleanup`、`message_bus.topic_limit_param`、`message_bus.release_routes`。核對同一個 callback 清除 141 個訂閱後立即重新註冊、對端仍能收發、延後 ACK 與斷線時的 close 結果；記錄提交與工具鏈。
 
@@ -25,6 +32,8 @@ Mac 功能補驗已完成；成本量測仍依使用者決定延後，不能宣�
 - [ ] 成本後續評估（提案，未授權改排程）：profile `Context::dispatch_parallel()` 空 Topic batch 重建與 `TopicScheduler::finish()` 全員喚醒的成本；若要量化 Windows 閒置增量，需更長的獨立取樣。不能因此直接取消 10ms fallback、縮弱快照／同 Topic 序列／停止契約。實測方法與限制見 [成本報告](src/vinc/module_system/PUMP_COST_VALIDATION.md)。
 
 ## Installed SDK：UI 測試埠隔離
+
+- [ ] 追蹤 2026-11-17 Windows Debug consumer／搬移 App 首輪的 20 s／35 s guard 逾時；原期限乾淨重跑通過，但根因尚未定位。如再現先取得階段時間與堆疊，不直接延長期限；見 [SDK 待辦](src/vinc/sdk/README.md#待處理事項)及[驗收報告](src/vinc/module_system/CONTROL_WAKEUP_VALIDATION.md)。
 
 - [ ] `installed_application` 固定使用 31411；Windows Release 首輪曾出現 UI BindFailed／HTTP 401，listener 身分未確認，埠釋放後原設定完整重跑通過。後續拆開預設 port 驗證與 HTTP 流程隔離，避免連到非預期服務；詳見 [SDK 待辦](src/vinc/sdk/README.md#待處理事項)。正式 UI 與 RPC 行為本輪未改。
 

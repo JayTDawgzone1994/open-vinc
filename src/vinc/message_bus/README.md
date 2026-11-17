@@ -9,14 +9,24 @@ Message Bus connects OSAL SharedMemory, generated messages, and process Modules.
 每個 Publisher 擁有獨立 RingBuffer，同一 topic 可有多個 Publisher。大量訊息留在共享記憶體，
 Socket 控制通道只交換註冊、退訂與 Publisher 增減資訊。
 
-Topic counter creation retires its reservation when OSAL confirms no owned name needs cleanup. Topic 計數器僅在確認無自有名稱待清理時撤銷失敗預留。跨 App 同名 Topic、中央重啟與資源額滿驗收見 [Topic registration failure recovery / Topic 註冊失敗回收契約](TOPIC_REGISTRATION_RECOVERY.md)。
+The Topic counter and both Publisher mappings retire failed reservations individually when cleanup is confirmed. Topic 計數器、Publisher 控制區與資料區各自確認清理結果，再撤銷自己的預留。跨 App 同名 Topic、中央重啟與資源額滿驗收見 [Topic registration failure recovery / Topic 註冊失敗回收契約](TOPIC_REGISTRATION_RECOVERY.md)。
+
+The [control-plane repair contract / 控制面修復開工契約](CONTROL_PLANE_REPAIR.md) records the deadline and reservation fixes and the versioned Host topology protocol and its validation.
+
+Stage 5 Windows/WSL Debug and Release integration, load and clean C++/Python SDK checks
+passed on 2026-11-16. The linked report distinguishes sampled storage, whole-process
+memory and the old wire-format size model; native macOS acceptance remains pending.
+第五階段 Windows／WSL Debug、Release 的整合、負載與乾淨 C++／Python SDK 驗收已通過。
+成本取樣與限制見上述報告；不能以此代替 macOS 原生驗收。
+
+A Subscriber skips a missing Publisher mapping while the Host checks its registration in the background. Other Publishers remain readable. 若同一 Topic 的所有來源都沒有可讀資料，`get_last()` 回 `NoPublishedData`，pump 繼續派送其他工作。中央確認仍有登記且重新開啟仍失敗時，讀取端會收到原始錯誤。見[退場驗收](CONTROL_PLANE_REPAIR.md#第四階段延後套用更新與第一次開啟共享區)。
 
 Omitted Publisher capacities use two central Param values; explicit options and
 existing rings remain independent. See [Publisher defaults](PUBLISHER_DEFAULTS.md)
-for last-effective correction and standalone use. Current endpoint release uses Bus v5 / Plugin entry 20.
+for last-effective correction and standalone use. Current endpoint release uses Bus v6 / Plugin entry 22.
 
 省略的 Publisher 容量改用兩項中央 Param，明確指定及既有 Ring 不受影響。
-最後有效值修正與獨立使用見上述專題契約。現行端點回收使用 Bus v5／Plugin entry 20。
+最後有效值修正與獨立使用見上述專題契約。現行端點回收使用 Bus v6／Plugin entry 22。
 
 Sequential delivery runs through Context pump callbacks; get_last reads the latest. No per-message data Socket notifications.
 
@@ -175,10 +185,9 @@ The2026-10-03 readability pass expanded flow/declarations/lifetime comments, ret
 | `include/vinc/message_bus/detail/ring_buffer.hpp` | 固定共享布局、generation token、payload 對齊及版本限制 |
 | `include/vinc/message_bus/detail/protocol.hpp` | Descriptor／Attachment 的欄位編碼順序及控制面上限 |
 
-Acquisition helpers immediately transfer resources to RingBuffer; later failure uses its destructor, with only creators unlinking their own names. RegistrationCleanup handles remote rollback; failed Publisher attachment sends closure before releasing core mappings. Detailed failure policy is below.
+RingBuffer holds each acquired handle and mapping immediately. Pending names have separate rollback owners until the ring is ready. RegistrationCleanup handles remote rollback; failed Publisher attachment sends closure before releasing core mappings. Detailed failure policy is below.
 
-RingBuffer 的 acquisition helper 把成功取得的資源立即交回 RingBuffer 持有；後續失敗由 RingBuffer 析構回收，
-只有建立者移除自己成功建立的名稱。Client 的遠端註冊回滾由 `RegistrationCleanup` 維護，
+RingBuffer 持有已取得的 handle 與 mapping；建立期間兩筆名稱各有回滾責任，整個 RingBuffer 就緒才一併移交。Client 的遠端註冊回滾由 `RegistrationCleanup` 維護，
 `attach_publisher_resources` 失敗時，先送關閉事件，再釋放本機 core 持有的映射；完整失敗行為見下方重審修正。
 
 Compile-time message_bus_* config centralizes capacities/budgets/control waits/retries and publicly propagates Common. Values were preserved during readability work; protocol/layout/test constants remain owned locally. This is not runtime Param rebinding.
@@ -513,9 +522,15 @@ Result alias 與 `to_error()`；呼叫端以 `error.is(message_bus::ErrorCode::.
   錯誤遷移輪次沒有全面攔截 STL 例外或宣告所有操作不拋例外。
 - 通知送出與析構路徑維持既有關閉會話政策，未新增背景故障查詢介面。
 
-Current control protocol is Bus v3: high operation byte 3, original operations 1–6 in the low byte, plus list/inspect/connection and callback-notification operations. Old/unknown versions reject before queue/topology, without adapters. Frame stays v1; current bootstrap is v16, ring layout v3, Storage image v2. Historical migration preserved its then-current bootstrap/ring versions, not those values forever. Rebuild all connected participants.
+Current control protocol is Bus v6: high operation byte 6, including registration,
+queries, callback notification routes, release batches, source checks and versioned
+topology pages/ACKs. See [the protocol table](DESIGN.md) for operation identities.
+Old/unknown versions reject before queue/topology, without adapters. Frame stays v1;
+current bootstrap is v16, ring layout v3, Storage image v2. Historical migration
+preserved its then-current bootstrap/ring versions, not those values forever.
+Rebuild all connected participants.
 
-目前 Bus 控制協定為 v3，高 byte 為 3，低 byte 保留原 1–6，另含清單／診斷／連線及 callback 通知操作。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v16、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
+目前 Bus 控制協定為 v6，高 byte 為 6，包含登記、查詢、callback 通知路由、回收批次、來源補查及版本化拓樸頁面／ACK；操作編號以 DESIGN 為準。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v16、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
 
 Failure responses explicitly encode current error/causes/count/truncation/native fields; same-layer remote Bus errors pass through. Unknown codes stay numeric; malformed packets close Sessions. Text resolves in local catalogs, never object-layout transport. [DESIGN](DESIGN.md) owns bytes. detail/error_protocol is only Bus codec/runtime/test integration, independent of Module-private protocol; Module wraps Bus failures at its boundary.
 
@@ -677,11 +692,11 @@ Bus 原有 ring buffer 共享布局及 writer 等待政策維持。
 
 ## Central resource-name service (2026-10-08) / 中央共享資源名稱服務（2026-10-08）
 
-Production Manager injects private ResourceNames into BusManager. Counter/control/data names reserve persistent records before SharedMemory creation. Owners retire after unlink succeeds, the name is already absent, or Windows retirement. A failed counter create may also retire its own reservation when OSAL confirms no owned name remains. Incomplete cleanup retains the record. Standalone uninjected tests use random names without cross-crash cleanup guarantees. See [Instance](../module_system/INSTANCE.md).
+Production Manager injects private ResourceNames into BusManager. Counter/control/data names reserve persistent records before SharedMemory creation. Owners retire after unlink succeeds, the name is already absent, or Windows retirement. A failed exclusive create retires only its own reservation when OSAL confirms no owned name remains. Incomplete cleanup retains the affected record. Standalone uninjected tests use random names without cross-crash cleanup guarantees. See [Instance](../module_system/INSTANCE.md).
 
 正式 Manager 組裝時向 `BusManager::create()` 注入 common 的私有 `ResourceNames`。
 Topic counter、RingBuffer control／data 都先 reserve 留下紀錄，再建立 OSAL SharedMemory；
-建立者在 unlink 成功、名稱已不存在或 Windows 退役後撤銷登記。計數器排他建立失敗且 OSAL
+建立者在 unlink 成功、名稱已不存在或 Windows 退役後撤銷登記。任一共享區排他建立失敗且 OSAL
 確認無自有名稱待清理時，也直接撤銷自己的預留。清理未獲確認則保留登記。
 無注入的獨立 Bus 測試仍採原有隨機名稱；這不提供跨中央崩潰的持久清理保證。
 本接線不改 payload、排序、等待或 Reader 回收協定，也不增加每筆 pub/sub 的檔案操作。

@@ -1,16 +1,19 @@
 #include <vinc/message_bus/detail/connections_protocol.hpp>
+#include <vinc/message_bus/detail/dispatch.hpp>
 #include <vinc/control/channel.hpp>
 // Exercise actual Bus code and Socket sessions at allocation failure boundaries.
 // Fault checkpoints throw only in this test executable; data-path tests use real mappings.
 #include "bus_test_hooks.hpp"
 #include <vinc/message_bus/detail/bus_manager.hpp>
-#include <vinc/message_bus/detail/protocol.hpp>
+#include <vinc/message_bus/detail/topology_protocol.hpp>
 #include <vinc_messages/Frame.hpp>
 #include <vinc/time.hpp>
 #include <vinc/common_error.hpp>
+#include <algorithm>
 #include <atomic>
 #include <future>
 #include <limits>
+#include <set>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -38,6 +41,7 @@ constexpr std::size_t sessions_per_connection = 2;
 thread_local std::optional<Result<std::uint64_t>> clock_override;
 std::atomic<FaultPoint> armed{FaultPoint::None};
 std::atomic<bool> fault_hit{false};
+std::atomic<bool> reject_page{false};
 std::atomic<std::size_t> remaining_pending{SIZE_MAX};
 std::atomic<std::uint64_t> failed_notification_owner{0};
 std::atomic<std::uint64_t> notification_calls{0};
@@ -141,7 +145,7 @@ struct Connection {
     }
 
     void expect_release(std::uint16_t operation, std::uint64_t id) {
-        ok(detail::RuntimeAccess::progress_releases(*client));
+        ok(detail::RuntimeAccess::progress_control(*client));
         auto frame = take(central->receive_until(deadline()));
         check(frame.kind == control::Kind::Request && frame.operation == detail::ReleaseBatch && frame.request,
               "release requires a correlated acknowledgement");
@@ -151,6 +155,25 @@ struct Connection {
         reply(frame, {});
     }
 };
+
+// Inspect the worker's real page while standing in for the dispatcher.
+control::Frame receive_single_change(detail::BusManager& manager, Connection& connection, std::uint64_t owner) {
+    auto frame = take(connection.module->receive_until(deadline()));
+    check(frame.operation == detail::SyncPage, "expected a topology transfer");
+    auto page = take(detail::decode_topology_page(frame.payload));
+    check(page.final && page.mode == detail::TopologyMode::Delta, "single delta page");
+    control::Frame change;
+    ok(detail::visit_topology_records(page.records, [&](auto kind, auto body) -> Result<void> {
+        check(!change.operation, "one mutation in this transfer");
+        change.operation = static_cast<std::uint16_t>(kind);
+        change.payload.assign(body.begin(), body.end());
+        return {};
+    }));
+    auto ack = take(detail::encode_topology_ack({page.id, detail::TopologyReceipt::Applied}));
+    ok(manager.submit(owner, "fixture", connection.central,
+        {control::Kind::Event, detail::message_bus_domain, detail::SyncAck, 0, std::move(ack)}));
+    return change;
+}
 
 detail::Descriptor descriptor() {
     detail::Descriptor result;
@@ -210,6 +233,7 @@ void test_notification_install_catchup() {
     ok(publisher.push(*local));
     check(detail::shared_load(ring->header().head) == 1, "publication precedes route installation");
 
+    std::uint64_t revision = 0;
     auto install = [&](bool enabled) {
         control::Frame frame{control::Kind::Event, detail::message_bus_domain, detail::NotificationRoutesChanged};
         control::put_u64(frame.payload, source.id);
@@ -218,7 +242,14 @@ void test_notification_install_catchup() {
             control::put_u64(frame.payload, 2);
             ok(control::put_string(frame.payload, name));
         }
+        control::Bytes record;
+        detail::append_topology_record(record, frame.operation, frame.payload);
+        ++revision;
+        frame.operation = detail::SyncPage;
+        frame.payload = take(detail::encode_topology_page({{1, revision, 0}, revision - 1, revision,
+            detail::TopologyMode::Delta, true, record}));
         ok(detail::RuntimeAccess::receive(*connection.client, std::move(frame)));
+        check(take(connection.central->receive_until(deadline())).operation == detail::SyncAck, "receipt");
     };
     install(true);
     ok(receiver.wait_until(deadline()));
@@ -495,6 +526,11 @@ Result<control::Bytes> manager_request(detail::BusManager& manager, Connection& 
 enum class CounterFault { None, Reserve, Retire, RetireAllocation, Size, SizeAndUnlink, Map };
 #ifdef __linux__
 thread_local CounterFault native_counter_fault = CounterFault::None;
+// Native calls made on the fixture thread only. Names identify the exact
+// failed allocation even when the other half of the ring also needs cleanup.
+thread_local unsigned ring_maps_before_failure = 0;
+thread_local unsigned ring_sizes_before_failure = 0;
+thread_local std::string_view ring_unlink_denied;
 #endif
 
 // One fixture represents one journal reservation. The Bus worker is its only
@@ -553,7 +589,7 @@ void test_counter_registration(CounterFault fault, bool collide = false) {
     constexpr std::uint64_t owner = 1;
     auto result = manager_request(*manager, connection, owner, detail::Subscribe, std::move(payload));
     ok(manager->drain_until(deadline()));
-    auto diagnostic = manager->last_counter_cleanup_failure();
+    auto diagnostic = manager->last_registration_cleanup_failure();
 
     if (fault == CounterFault::Reserve) {
         check(!result && result.error().is_operation(bus::ErrorOperation::CreateTopic), "reserve failure");
@@ -590,18 +626,18 @@ void test_counter_registration(CounterFault fault, bool collide = false) {
     }
 #endif
     if (fault == CounterFault::Retire || fault == CounterFault::RetireAllocation || fault == CounterFault::SizeAndUnlink) {
-        check(journal->reserved && diagnostic && diagnostic->resource_name == journal->name &&
+        check(journal->reserved && diagnostic && diagnostic->counter && diagnostic->counter->resource_name == journal->name &&
               diagnostic->primary == result.error(), "lost recovery evidence or primary cause");
         if (fault == CounterFault::Retire) {
-            check(journal->retire_calls == 1 && diagnostic->cleanup == journal->journal_error,
+            check(journal->retire_calls == 1 && diagnostic->counter->cleanup == journal->journal_error,
                   "journal removal failure lost or retried");
         } else if (fault == CounterFault::RetireAllocation) {
-            check(journal->retire_calls == 1 && diagnostic->cleanup.is(bus::ErrorCode::ResourceExhausted),
+            check(journal->retire_calls == 1 && diagnostic->counter->cleanup.is(bus::ErrorCode::ResourceExhausted),
                   "allocation during retirement hid the primary failure");
         } else {
 #ifdef __linux__
-            check(journal->retire_calls == 0 && diagnostic->cleanup.is_operation(osal::ErrorOperation::UnlinkSharedMemory) &&
-                  diagnostic->cleanup.native.value() == EACCES && causes.back().native.value() == ENOSPC,
+            check(journal->retire_calls == 0 && diagnostic->counter->cleanup.is_operation(osal::ErrorOperation::UnlinkSharedMemory) &&
+                  diagnostic->counter->cleanup.native.value() == EACCES && causes.back().native.value() == ENOSPC,
                   "uncertain unlink retired reservation or replaced primary errno");
             auto retained = take(osal::SharedMemory::open(journal->name, osal::SharedMemoryAccess::ReadOnly));
             ok(osal::SharedMemory::unlink_name(journal->name));
@@ -617,15 +653,19 @@ void test_counter_registration(CounterFault fault, bool collide = false) {
     }
 }
 
-detail::Descriptor register_publisher(detail::BusManager& manager, Connection& connection,
-                                      std::uint64_t owner, const std::string& topic, std::uint32_t expected_routes = 0) {
+control::Bytes advertise_payload(const std::string& topic) {
     control::Bytes payload;
     ok(control::put_string(payload, topic));
     control::put_u64(payload, Frame::schema().hash);
     control::put_u32(payload, detail::publisher_options_mask);
     control::put_u32(payload, fixture_slots);
     control::put_u64(payload, message_bytes);
-    auto body = take(manager_request(manager, connection, owner, detail::Advertise, std::move(payload)));
+    return payload;
+}
+
+detail::Descriptor register_publisher(detail::BusManager& manager, Connection& connection,
+                                      std::uint64_t owner, const std::string& topic, std::uint32_t expected_routes = 0) {
+    auto body = take(manager_request(manager, connection, owner, detail::Advertise, advertise_payload(topic)));
     control::Reader reader(body);
     check(reader.u32() == fixture_slots, "Advertise resolved request count");
     auto value = detail::decode_descriptor(reader);
@@ -667,7 +707,7 @@ auto client_request(detail::BusManager& manager, Connection& connection, std::ui
 
 void process_release(detail::BusManager& manager, Connection& connection, std::uint64_t owner,
                      std::uint16_t operation) {
-    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
     auto event = take(connection.central->receive_until(deadline()));
     check(event.kind == control::Kind::Request && event.operation == detail::ReleaseBatch, "expected release batch");
     control::Reader reader(event.payload);
@@ -954,7 +994,7 @@ void test_notification_topology() {
         take(manager_request(*manager, reader, 2, operation, std::move(payload), name));
     };
     const auto route_event = [&](std::uint64_t publisher, std::uint32_t count) {
-        const auto event = take(writer.module->receive_until(deadline()));
+        const auto event = receive_single_change(*manager, writer, 1);
         check(event.operation == detail::NotificationRoutesChanged, "dedicated route event");
         control::Reader decoded(event.payload);
         check(decoded.u64() == publisher && decoded.u32() == count, "route belongs to the current Publisher");
@@ -969,11 +1009,11 @@ void test_notification_topology() {
     route_event(publication.id, 1);
     const auto second = subscribe("routes");
     mutate(detail::EnableNotifications, second);
-    route_event(publication.id, 1);
     const auto get_last_only = subscribe("routes");
     mutate(detail::Unsubscribe, first);
-    route_event(publication.id, 1);
     mutate(detail::Unsubscribe, second);
+    // Same-session FIFO: any redundant route update from the intermediate
+    // enable/close would be received here ahead of this empty destination set.
     route_event(publication.id, 0);
     mutate(detail::Unsubscribe, get_last_only);
     const auto early = subscribe("sub-first");
@@ -981,7 +1021,7 @@ void test_notification_topology() {
     const auto early_publication = register_publisher(*manager, writer, 1, "sub-first", 1);
     auto early_ring = take(detail::RingBuffer::open(early_publication, false));
     detail::shared_store(early_ring->reader(0).token, 1);
-    check(take(reader.module->receive_until(deadline())).operation == detail::Attach,
+    check(receive_single_change(*manager, reader, 2).operation == detail::Attach,
         "subscriber-first route accompanies ordinary source attachment");
     arm(FaultPoint::NotificationRoutesEncode);
     manager->exited(2);
@@ -1064,7 +1104,7 @@ void test_release_confirmation(bool break_session) {
         seen[id - 1] = true;
     }
     check(reader.done(), "no trailing fields");
-    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
     check(closing.wait_for(0s) != std::future_status::ready, "a write to the socket is not completion");
 
     if (break_session) {
@@ -1075,7 +1115,7 @@ void test_release_confirmation(bool break_session) {
     }
 
     connection.reply(first, {});
-    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
     auto second = take(connection.central->receive_until(deadline()));
     control::Reader tail(second.payload);
     check(second.operation == detail::ReleaseBatch && second.request > first.request &&
@@ -1098,7 +1138,7 @@ void test_release_backpressure() {
     std::optional handle{take(subscribing.get())};
     handle.reset();
 
-    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
     check(!take(connection.central->try_receive()), "rejected send never reached the wire");
     connection.expect_release(detail::Unsubscribe, id);
     check(connection.module->state() == control::State::Open, "retry keeps session open");
@@ -1116,7 +1156,7 @@ void test_release_fence() {
     std::optional first{subscribe(1)};
     std::optional second{subscribe(2)};
     first.reset();
-    ok(detail::RuntimeAccess::progress_releases(*connection.client));
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
     auto batch = take(connection.central->receive_until(deadline()));
     std::promise<void> waiting;
     auto entered = waiting.get_future();
@@ -1141,6 +1181,552 @@ void test_release_fence() {
     (void)take(query.get());
     connection.expect_release(detail::Unsubscribe, 2);
 }
+
+// The only application traffic on the paused reader Session is topology. Pace
+// the writer on independent registration replies so the reader's own queue fills.
+void test_paused_topology(bool attaching, std::size_t topic_count, bool mutate_snapshot = false, bool exhaust_history = false) {
+    Connection writer;
+    Connection reader;
+    auto manager = take(detail::BusManager::create());
+    constexpr std::uint64_t writer_mid = 1;
+    constexpr std::uint64_t reader_mid = 2;
+    std::vector<bus::Subscriber<Frame>> subscriptions;
+    std::vector<std::uint64_t> publisher_ids;
+    std::vector<std::string> topics;
+    for (std::size_t index = 0; index < topic_count; ++index) {
+        auto topic = "pressure/topic" + std::to_string(index);
+        if (!attaching) {
+            publisher_ids.push_back(register_publisher(*manager, writer, writer_mid, topic).id);
+        }
+
+        auto subscribed = client_request(*manager, reader, reader_mid, [&] {
+            return reader.client->subscribe<Frame>(topic);
+        });
+        subscriptions.push_back(take(std::move(subscribed)));
+        topics.push_back(std::move(topic));
+    }
+
+    auto sources = [&] {
+        std::set<std::uint64_t> ids;
+        for (const auto& source : detail::RuntimeAccess::inspect_attachments(*reader.client)) {
+            ids.insert(source.descriptor.id);
+        }
+        return ids;
+    };
+    check(sources() == std::set(publisher_ids.begin(), publisher_ids.end()), "unexpected starting topology");
+
+    // Hold back application reads across the entire burst; the socket and its
+    // heartbeat worker stay live. Each command below has its own central ACK.
+    for (std::size_t index = 0; index < topic_count; ++index) {
+        if (attaching) {
+            publisher_ids.push_back(register_publisher(*manager, writer, writer_mid, topics[index]).id);
+        } else {
+            control::Bytes release;
+            control::put_u32(release, 1);
+            control::put_u32(release, detail::ClosePublisher);
+            control::put_u64(release, publisher_ids[index]);
+            take(manager_request(*manager, writer, writer_mid, detail::ReleaseBatch, std::move(release)));
+        }
+    }
+
+    // A reply on the writer socket is not a delivery fence on the reader socket.
+    // Keep the dispatcher paused for a bounded slow-reader interval; the reactor
+    // continues to receive frames and exchange heartbeats throughout.
+    constexpr auto slow_reader_interval = 1s;
+    const auto resume_at = control::Clock::now() + slow_reader_interval;
+    while (reader.module->state() == control::State::Open && control::Clock::now() < resume_at) {
+        std::this_thread::sleep_until((std::min)(resume_at, control::Clock::now() + heartbeat_interval));
+    }
+
+    std::set<std::uint64_t> expected = attaching
+        ? std::set(publisher_ids.begin(), publisher_ids.end()) : std::set<std::uint64_t>{};
+    if (mutate_snapshot) {
+        // A Publisher with no local reader must not enter this Host's snapshot.
+        register_publisher(*manager, writer, writer_mid, "unrelated/not-visible");
+    }
+    const auto end = deadline();
+    std::size_t delivered = 0;
+    bool mutated = false;
+    bool saw_snapshot = false;
+    std::uint64_t target_revision = topic_count;
+    std::set<std::uint64_t> snapshot_sources;
+    std::uint64_t snapshot_serial = 0;
+    bool replaced = false;
+    while (sources() != expected) {
+        auto frame = reader.module->receive_until(end);
+        if (!frame) {
+            std::cerr << (attaching ? "Attach" : "Detach") << " changes=" << topic_count
+                      << " delivered=" << delivered << " reader=" << error_to_string(frame.error()) << '\n';
+            throw std::runtime_error("paused Host failed before its topology converged");
+        }
+
+        auto page = take(detail::decode_topology_page(frame->payload));
+        const bool staged_snapshot = page.mode == detail::TopologyMode::Snapshot && !page.final;
+        saw_snapshot |= page.mode == detail::TopologyMode::Snapshot;
+        if (mutate_snapshot && page.mode == detail::TopologyMode::Snapshot) {
+            if (!page.id.index) {
+                replaced = snapshot_serial != 0;
+                snapshot_serial = page.id.transfer;
+                snapshot_sources.clear();
+            }
+            ok(detail::visit_topology_records(page.records, [&](auto kind, auto body) -> Result<void> {
+                if (kind == detail::Attach) {
+                    auto group = take(detail::decode_source_group(body));
+                    snapshot_sources.insert(group.publisher.id);
+                }
+                return {};
+            }));
+        }
+        auto before = sources();
+        ok(detail::RuntimeAccess::receive(*reader.client, std::move(*frame)));
+        if (staged_snapshot) {
+            check(sources() == before, "incomplete snapshot leaked into a Subscriber");
+        }
+        auto ack = take(reader.central->receive_until(end));
+        check(ack.operation == detail::SyncAck, "Host acknowledges applied or staged topology");
+        if (mutate_snapshot && staged_snapshot && !mutated) {
+            mutated = true;
+            auto closed = client_request(*manager, reader, reader_mid, [&] { return subscriptions.back().close(); });
+            ok(std::move(closed));
+            expected.erase(publisher_ids.back());
+
+            // Register a new reader after the cut, with its own initial sources.
+            subscriptions.push_back(take(client_request(*manager, reader, reader_mid, [&] {
+                return reader.client->subscribe<Frame>("unrelated/not-visible");
+            })));
+            for (auto id : sources()) {
+                expected.insert(id);
+            }
+
+            control::Bytes release;
+            control::put_u32(release, 1);
+            control::put_u32(release, detail::ClosePublisher);
+            const auto removed = publisher_ids[std::ranges::max_element(topics) - topics.begin()];
+            control::put_u64(release, removed);
+            if (exhaust_history) {
+                arm(FaultPoint::SnapshotHistory);
+            }
+            take(manager_request(*manager, writer, writer_mid, detail::ReleaseBatch, std::move(release)));
+            expected.erase(removed);
+            ++target_revision;
+        }
+        ok(manager->submit(reader_mid, "fixture", reader.central, std::move(ack)));
+        ++delivered;
+    }
+    ok(manager->drain_until(end));
+    auto status = manager->topology_status(reader_mid);
+    check(replaced == exhaust_history, "replace only the snapshot whose undo storage failed");
+    if (mutate_snapshot && !exhaust_history) {
+        check(snapshot_sources == std::set(publisher_ids.begin(), publisher_ids.end()),
+              "frozen snapshot leaked an unrelated source or lost a subsequently retired Publisher");
+    }
+    check(!mutate_snapshot || mutated, "mutation must occur between two snapshot pages");
+    check(topic_count <= config::message_bus_topology_history_records || saw_snapshot, "overflow must use a snapshot");
+    check(status && status->target == target_revision && status->applied == status->target,
+          "same generation reached the final revision without more registrations");
+    check(reader.module->state() == control::State::Open, "reader lost its Session");
+}
+
+void test_topology_admission_retry() {
+    Connection writer;
+    Connection reader;
+    auto manager = take(detail::BusManager::create());
+    std::atomic<bool> reject_receipt{true};
+    detail::ControlTransport transport;
+    transport.generation = 2;
+    transport.send = [&](control::Frame frame) -> Result<void> {
+        if (frame.operation == detail::SyncAck && reject_receipt.exchange(false)) {
+            return std::unexpected(Error{control::ErrorCode::Backpressure, control::ErrorOperation::Send});
+        }
+        return reader.module->send(std::move(frame));
+    };
+    transport.close = [&] { reader.module->close(); };
+    reader.client = take(detail::RuntimeAccess::create(std::move(transport)));
+    auto sub = take(client_request(*manager, reader, 2, [&] { return reader.client->subscribe<Frame>("admission"); }));
+    reject_page.store(true);
+    auto pub = register_publisher(*manager, writer, 1, "admission");
+    // No further command reaches the Bus. Its worker must retry the rejected page.
+    auto page = take(reader.module->receive_until(deadline()));
+    check(!reject_page.load() && page.operation == detail::SyncPage, "central retries without another change");
+    ok(detail::RuntimeAccess::receive(*reader.client, std::move(page)));
+    const auto sources = detail::RuntimeAccess::inspect_attachments(*reader.client);
+    check(!reject_receipt.load() && sources.size() == 1 && sources.front().descriptor.id == pub.id,
+          "Host committed before its first receipt was rejected");
+    auto status = manager->topology_status(2);
+    check(status && status->applied == 0 && status->target == 1, "missed receipt is visible as lag");
+
+    // This is the existing watchdog operation, independent of the user's pump.
+    ok(detail::RuntimeAccess::progress_control(*reader.client));
+    auto ack = take(reader.central->receive_until(deadline()));
+    ok(manager->submit(2, "reader", reader.central, std::move(ack)));
+    ok(manager->drain_until(deadline()));
+    status = manager->topology_status(2);
+    check(status && status->applied == 1 && reader.module->state() == control::State::Open,
+          "rejected receipt eventually confirmed on the original session");
+}
+
+void test_request_after_release_ack(bool expire) {
+    std::atomic<unsigned> admitted{0};
+    Deadline admission_time{};
+    Deadline waited_until{};
+    Connection connection;
+    detail::ControlTransport observed;
+    observed.send = [&](control::Frame frame) {
+        const bool subscribing = frame.operation == detail::Subscribe;
+        const auto sending_at = control::Clock::now();
+        auto result = connection.module->send(std::move(frame));
+        if (subscribing && result) {
+            admission_time = sending_at;
+            ++admitted;
+        }
+        return result;
+    };
+    observed.close = [&] { connection.module->close(); };
+    connection.client = take(detail::RuntimeAccess::create(std::move(observed)));
+
+    auto subscribe_with_reply = [&](std::uint64_t id) {
+        auto call = std::async(std::launch::async, [&] { return connection.client->subscribe<Frame>("expiry"); });
+        connection.reply(take(connection.central->receive_until(deadline())), subscription(id));
+        return take(call.get());
+    };
+    std::optional first{subscribe_with_reply(1)};
+    first.reset();
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
+    auto batch = take(connection.central->receive_until(deadline()));
+    check(batch.operation == detail::ReleaseBatch, "expected a real release request");
+
+    std::promise<void> waiting;
+    auto entered = waiting.get_future();
+    auto next = std::async(std::launch::async, [&] {
+        struct ResetHooks {
+            ~ResetHooks() {
+                detail::testing::before_release_wait = {};
+                detail::testing::after_release_wait = {};
+            }
+        } reset;
+        detail::testing::before_release_wait = [&] { waiting.set_value(); };
+        if (expire) {
+            detail::testing::after_release_wait = [&](Deadline end) {
+                // Model a descheduled caller after a real ACK, using its actual request deadline.
+                waited_until = end;
+                std::this_thread::sleep_until(end);
+            };
+        }
+        return connection.client->subscribe<Frame>("after-ack");
+    });
+    check(entered.wait_until(deadline()) == std::future_status::ready, "caller did not reach the release fence");
+    connection.reply(batch, {});
+    if (!expire) {
+        connection.reply(take(connection.central->receive_until(deadline())), subscription(2));
+        (void)take(next.get());
+        check(admitted == 2, "timely ACK must admit exactly one new Subscribe");
+        return;
+    }
+
+    auto result = next.get();
+    check(waited_until != Deadline{} && control::Clock::now() >= waited_until, "late-resume fixture did not run");
+    const bool resumed_expired = !result && result.error().is(bus::ErrorCode::Timeout)
+        && result.error().is_operation(bus::ErrorOperation::Request);
+    check(resumed_expired, "expected Request timeout after release ACK");
+    std::cerr << "expired Subscribe admissions=" << admitted.load() - 1
+              << " session_open=" << (connection.module->state() == control::State::Open) << '\n';
+    if (admitted > 1) {
+        check(admission_time >= waited_until, "unexpected Subscribe before the requested delay");
+    }
+    check(admitted == 1, "transport accepted a new Subscribe after its deadline");
+    check(connection.module->state() == control::State::Open, "unsubmitted timeout closed the Session");
+    auto retry = std::async(std::launch::async, [&] { return connection.client->subscribe<Frame>("retry"); });
+    auto request = take(connection.central->receive_until(deadline()));
+    check(request.operation == detail::Subscribe && request.request == batch.request + 1,
+          "expired request consumed an ID or sent an unexpected frame");
+    connection.reply(request, subscription(2));
+    (void)take(retry.get());
+}
+
+void test_missing_release_ack() {
+    Connection connection;
+    auto call = std::async(std::launch::async, [&] { return connection.client->subscribe<Frame>("release"); });
+    connection.reply(take(connection.central->receive_until(deadline())), subscription(1));
+    std::optional first{take(call.get())};
+    first.reset();
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
+    auto batch = take(connection.central->receive_until(deadline()));
+    check(batch.operation == detail::ReleaseBatch, "expected a pending release batch");
+
+    constexpr auto query_budget = 100ms;
+    auto result = connection.client->list_topic_connections({}, control::Clock::now() + query_budget);
+    check(!result && result.error().is(bus::ErrorCode::Io) &&
+          result.error().is_operation(bus::ErrorOperation::ListTopicConnections), "expected a query failure");
+    const Error timeout{bus::ErrorCode::Timeout, bus::ErrorOperation::CloseRegistration};
+    const auto causes = result.error().causes();
+    check(!causes.empty() && causes.front() == timeout.record(), "expected a release wait timeout");
+
+    connection.reply(batch, {});
+    auto retry = std::async(std::launch::async, [&] { return connection.client->list_topic_connections({}, deadline()); });
+    auto request = take(connection.central->receive_until(deadline()));
+    check(request.request == batch.request + 1 && request.operation == detail::ListTopicConnections,
+          "waiting for a missing ACK consumed a request ID");
+    connection.reply(request, take(detail::encode_connections({})));
+    (void)take(retry.get());
+}
+
+void test_submitted_mutation_timeout() {
+    Connection connection;
+    auto call = std::async(std::launch::async, [&] { return connection.client->subscribe<Frame>("unknown"); });
+    auto admitted = take(connection.central->receive_until(deadline()));
+    check(admitted.operation == detail::Subscribe, "central did not receive the mutation");
+    // Withhold the reply after receipt. The caller cannot tell whether the registration took effect.
+    auto result = call.get();
+    check(!result && result.error().is(bus::ErrorCode::Timeout) &&
+          result.error().is_operation(bus::ErrorOperation::Request), "expected a submitted mutation timeout");
+    connection.expect_closed();
+}
+
+// BusManager owns the worker that calls this journal. Only inspect or arm it
+// between requests, after drain_until has synchronized with that worker.
+struct PublisherJournal final : vinc::detail::ResourceNames {
+    std::set<std::string> records;
+    std::string occupied_name;
+    unsigned collide_on = 0;
+    unsigned allocations = 0;
+    unsigned reject_reserve = 0;
+    bool throw_on_reserve = false;
+    bool reject_retire = false;
+    std::vector<std::string> retired;
+    const Error journal_error{osal::ErrorCode::PermissionDenied};
+
+    Result<std::string> reserve() override {
+        ++allocations;
+        if (allocations == reject_reserve) {
+            if (throw_on_reserve) {
+                throw std::bad_alloc();
+            }
+            return std::unexpected(journal_error);
+        }
+        auto name = allocations == collide_on ? occupied_name : detail::shared_name('r');
+        check(records.insert(name).second, "duplicate reservation in test journal");
+        return name;
+    }
+
+    Result<void> retire(std::string_view name) override {
+        retired.emplace_back(name);
+        if (reject_retire) {
+            return std::unexpected(journal_error);
+        }
+        check(records.erase(std::string(name)) == 1, "retiring an unknown test reservation");
+        return {};
+    }
+};
+
+void test_publisher_reservation(unsigned collide_on, bool reject_retire = false) {
+    Connection connection;
+    auto journal = std::make_shared<PublisherJournal>();
+    auto manager = take(detail::BusManager::create({}, journal));
+    constexpr std::uint64_t original_owner = 1;
+    constexpr std::uint64_t new_owner = 2;
+    const std::string topic = "reservation/existing";
+    (void)register_publisher(*manager, connection, original_owner, topic);
+    ok(manager->drain_until(deadline()));
+    const auto baseline = journal->records;
+    journal->allocations = 0;
+    journal->collide_on = collide_on;
+    journal->reject_retire = reject_retire;
+    journal->occupied_name = detail::shared_name('x');
+    auto foreign = take(detail::NamedCounter::create(journal->occupied_name));
+    check(take(foreign->next()) == 1, "initialize independent mapping");
+
+    Connection other;
+    auto result = manager_request(*manager, other, new_owner, detail::Advertise, advertise_payload(topic));
+    ok(manager->drain_until(deadline()));
+    if (collide_on == 0) {
+        (void)take(std::move(result));
+        manager->exited(new_owner);
+        ok(manager->drain_until(deadline()));
+    } else {
+        const auto expected = collide_on == 1 ? bus::ErrorOperation::CreateControl : bus::ErrorOperation::CreatePayload;
+        check(!result && result.error().is_operation(expected), "failure at wrong ring creation step");
+        const auto causes = result.error().causes();
+        check(!causes.empty() && causes.back().domain == ErrorDomain::Osal &&
+              causes.back().code == static_cast<int>(osal::ErrorCode::AlreadyExists), "missing native name collision");
+        auto reopened = take(detail::NamedCounter::open(journal->occupied_name));
+        check(take(reopened->next()) == 2, "failure damaged the foreign mapping");
+        std::cerr << error_to_string(result.error()) << " baseline=" << baseline.size()
+                  << " current=" << journal->records.size() << '\n';
+    }
+    auto diagnostic = manager->last_registration_cleanup_failure();
+    if (reject_retire) {
+        check(diagnostic && diagnostic->primary == result.error() && diagnostic->control && diagnostic->payload,
+              "lost independent Publisher rollback diagnostics");
+        auto retained = baseline;
+        retained.insert(diagnostic->control->resource_name);
+        retained.insert(diagnostic->payload->resource_name);
+        check(journal->records == retained && journal->retired.size() == 2 &&
+              diagnostic->payload->resource_name == journal->occupied_name &&
+              diagnostic->control->cleanup == journal->journal_error && diagnostic->payload->cleanup == journal->journal_error,
+              "journal failures must preserve exactly both names");
+        journal->reject_retire = false;
+    } else {
+        check(!diagnostic && journal->records == baseline, "Publisher left its shared memory names reserved");
+    }
+}
+
+// Hold an authentic Detach in the application queue while the ring has no
+// remaining handles. This isolates the lazy-open race from queue overflow.
+void test_retired_source_before_dispatch(bool with_other_publisher) {
+    Connection writer;
+    Connection reader;
+    Connection live_writer;
+    auto manager = take(detail::BusManager::create());
+    constexpr std::uint64_t writer_owner = 1;
+    constexpr std::uint64_t reader_owner = 2;
+    const std::string topic = "retirement/lazy-open";
+    register_publisher(*manager, writer, writer_owner, topic);
+    std::optional<bus::Publisher<Frame>> live;
+    if (with_other_publisher) {
+        live.emplace(take(client_request(*manager, live_writer, 3, [&] {
+            return live_writer.client->advertise<Frame>(topic, {.slots = fixture_slots, .max_message_bytes = message_bytes});
+        })));
+        auto value = make_message<Frame>();
+        value->data().sequence = 42;
+        ok(live->push(*value));
+    }
+    auto subscribed = take(client_request(*manager, reader, reader_owner, [&] {
+        return reader.client->subscribe<Frame>(topic);
+    }));
+    manager->exited(writer_owner);
+    ok(manager->drain_until(deadline()));
+    auto detach = take(reader.module->receive_until(deadline()));
+    // No control dispatcher is running. Waiting for central here would time out.
+    auto core = detail::DispatchAccess::core(subscribed);
+    auto captured = take(detail::capture(core));
+    check(captured.size() == (live ? 1u : 0u), "pump includes only usable sources before Detach");
+    const auto last = subscribed.get_last();
+    if (live) {
+        check(last && (*last)->data().sequence == 42, "retirement must not hide another Publisher");
+        check(captured.front().upper == 1, "live publication is dispatchable in this pump");
+        const auto factory = [](message::detail::Binding binding) -> std::unique_ptr<BaseMessage> {
+            return std::unique_ptr<Frame>(new Frame(message::detail::RecordAccess::bind<Frame>(std::move(binding))));
+        };
+        auto delivered = take(detail::read_batch(core, captured, Frame::schema(), factory));
+        check(static_cast<Frame&>(*delivered).data().sequence == 42, "pump delivers live data before confirmation");
+        auto exhausted = detail::read_batch(core, captured, Frame::schema(), factory);
+        check(!exhausted && exhausted.error().is(bus::ErrorCode::NoNewData), "pump finishes its batch");
+    } else {
+        check(!last && last.error().is(bus::ErrorCode::NoPublishedData), "no visible publication before Detach");
+    }
+    ok(detail::RuntimeAccess::progress_control(*reader.client));
+    auto check_request = take(reader.central->receive_until(deadline()));
+    check(check_request.operation == detail::CheckSource, "Host must check a missing mapping asynchronously");
+    ok(manager->submit(reader_owner, "rollback-owner", reader.central, std::move(check_request)));
+    auto confirmation = take(reader.module->receive_until(deadline()));
+    if (live) {
+        ok(detail::RuntimeAccess::receive(*reader.client, std::move(detach)));
+        ok(detail::RuntimeAccess::receive(*reader.client, std::move(confirmation)));
+    } else {
+        ok(detail::RuntimeAccess::receive(*reader.client, std::move(confirmation)));
+        check(detail::RuntimeAccess::inspect_attachments(*reader.client).empty(), "central confirmation removes stale source");
+        ok(detail::RuntimeAccess::receive(*reader.client, std::move(detach)));
+    }
+    const auto after = subscribed.get_last();
+    check(live ? bool(after) : (!after && after.error().is(bus::ErrorCode::NoPublishedData)), "retirement after dispatch");
+}
+
+void test_confirmed_missing_source(bool repair_mapping) {
+    Connection connection;
+    const auto source = descriptor();
+    auto pending = std::async(std::launch::async, [&] {
+        return connection.client->subscribe<Frame>("missing/confirmed");
+    });
+    constexpr std::uint64_t subscription_id = 77;
+    connection.reply(take(connection.central->receive_until(deadline())), subscription(subscription_id, &source));
+    auto sub = take(pending.get());
+    const auto first = sub.get_last();
+    check(!first && first.error().is(bus::ErrorCode::NoPublishedData), "first missing mapping is pending");
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
+    auto request = take(connection.central->receive_until(deadline()));
+    control::Reader fields(request.payload);
+    check(request.operation == detail::CheckSource && fields.string() == "missing/confirmed" &&
+          fields.u64() == subscription_id && fields.u64() == source.id && fields.done(), "verify the exact relationship");
+    ok(detail::RuntimeAccess::progress_control(*connection.client));
+    auto capture = take(detail::capture(detail::DispatchAccess::core(sub)));
+    check(capture.empty(), "pump must finish while confirmation is withheld");
+    std::shared_ptr<detail::RingBuffer> repaired;
+    if (repair_mapping) {
+        repaired = take(detail::RingBuffer::create(source));
+        check(take(detail::capture(detail::DispatchAccess::core(sub))).empty(),
+              "repeated pump calls must not retry the native open before confirmation");
+    }
+    control::Bytes body;
+    control::put_u32(body, 1);
+    connection.reply(request, std::move(body));
+    auto retry = detail::capture(detail::DispatchAccess::core(sub));
+    if (repair_mapping) {
+        check(retry && retry->size() == 1 && retry->front().publisher == source.id, "confirmed mapping can recover");
+    } else {
+        check(!retry && retry.error().is_operation(bus::ErrorOperation::OpenControl) && !retry.error().causes().empty()
+              && retry.error().causes().back().domain == ErrorDomain::Osal
+              && retry.error().causes().back().code == static_cast<std::int32_t>(osal::ErrorCode::NotFound),
+              "confirmed missing source retains its native error");
+    }
+}
+
+void test_second_ring_reserve(bool inject_exception) {
+    auto journal = std::make_shared<PublisherJournal>();
+    journal->reject_reserve = 2;
+    journal->throw_on_reserve = inject_exception;
+    detail::RegistrationCleanupFailure cleanup;
+    bool threw = false;
+    try {
+        auto result = detail::RingBuffer::create(descriptor(), journal, cleanup);
+        check(!result && result.error().is_operation(bus::ErrorOperation::Advertise) && !result.error().causes().empty() &&
+              result.error().causes().back() == journal->journal_error.record(), "lost second reserve failure");
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    check(threw == inject_exception && journal->allocations == 2 && journal->records.empty() &&
+          journal->retired.size() == 1 && !cleanup.control && !cleanup.payload, "first reserve rollback");
+}
+
+#ifdef __linux__
+// Select control (first call) or payload (second). When cleanup is denied,
+// verify the actual POSIX name survives for recovery and clean up the fixture.
+void test_native_ring_rollback(bool fail_map, unsigned allocation, bool deny_unlink) {
+    auto journal = std::make_shared<PublisherJournal>();
+    journal->collide_on = allocation;
+    journal->occupied_name = detail::shared_name('f');
+    if (fail_map) {
+        ring_maps_before_failure = allocation;
+    } else {
+        ring_sizes_before_failure = allocation;
+    }
+    if (deny_unlink) {
+        ring_unlink_denied = journal->occupied_name;
+    }
+    detail::RegistrationCleanupFailure cleanup;
+    auto result = detail::RingBuffer::create(descriptor(), journal, cleanup);
+    ring_unlink_denied = {};
+    const auto expected_map = allocation == 1 ? bus::ErrorOperation::MapControl : bus::ErrorOperation::MapPayload;
+    const auto expected_create = allocation == 1 ? bus::ErrorOperation::CreateControl : bus::ErrorOperation::CreatePayload;
+    check(!result && result.error().is_operation(fail_map ? expected_map : expected_create) && !result.error().causes().empty() &&
+          result.error().causes().back().native.value() == (fail_map ? ENOMEM : ENOSPC), "lost primary ring failure");
+    auto reopened = osal::SharedMemory::open(journal->occupied_name, osal::SharedMemoryAccess::ReadOnly);
+    if (deny_unlink) {
+        const auto& failure = allocation == 1 ? cleanup.control : cleanup.payload;
+        const auto& other = allocation == 1 ? cleanup.payload : cleanup.control;
+        check(reopened && failure && !other && failure->resource_name == journal->occupied_name &&
+              failure->cleanup.native.value() == EACCES && journal->records == std::set{journal->occupied_name} &&
+              journal->retired.size() == 1, "uncertain cleanup must retain only its own name");
+        ok(osal::SharedMemory::unlink_name(journal->occupied_name));
+    } else {
+        check(!reopened && reopened.error().is(osal::ErrorCode::NotFound) && journal->records.empty() &&
+              journal->retired.size() == 2 && !cleanup.control && !cleanup.payload, "confirmed ring rollback");
+    }
+    for (const auto& name : journal->retired) {
+        auto retired = osal::SharedMemory::open(name, osal::SharedMemoryAccess::ReadOnly);
+        check(!retired && retired.error().is(osal::ErrorCode::NotFound), "journal retired a surviving native name");
+    }
+}
+#endif
 
 void test_batch_ownership() {
     Connection owner;
@@ -1292,7 +1878,7 @@ void test_exit_cleanup(FaultPoint point) {
           "later topic must release dead reader even when earlier Detach fails");
     const auto resumed = take(ring->reserve(closed));
     ring->abandon(resumed);
-    const auto notification = take(healthy_observer.module->receive_until(deadline()));
+    const auto notification = receive_single_change(*manager, healthy_observer, healthy_observer_id);
     check(notification.operation == detail::Detach, "other recipients still receive Detach");
     auto failed_send = failed_observer.central->send(
         {control::Kind::Event, detail::message_bus_domain, detail::Detach});
@@ -1303,7 +1889,7 @@ void test_exit_cleanup(FaultPoint point) {
     const auto replacement = register_publisher(*manager, writer, writer_id, "a-first");
     check(replacement.id != first.id, "publisher capacity and shared budget must be reusable");
     // Drain the expected Attach from the healthy observer before its next request.
-    check(take(healthy_observer.module->receive_until(deadline())).operation == detail::Attach,
+    check(receive_single_change(*manager, healthy_observer, healthy_observer_id).operation == detail::Attach,
           "replacement publisher attaches");
     const auto reused = register_subscriber(*manager, healthy_observer, healthy_observer_id, "z-last");
     check(reused.reader == reader.reader, "dead reader index must be reusable");
@@ -1316,6 +1902,7 @@ void test_exit_cleanup(FaultPoint point) {
 
 namespace vinc::message_bus::detail::testing {
 thread_local std::function<void()> before_release_wait;
+thread_local std::function<void(Deadline)> after_release_wait;
 
 Result<std::uint64_t> publication_timestamp() noexcept {
     return clock_override ? *clock_override : vinc::unix_nanoseconds();
@@ -1330,6 +1917,10 @@ Result<void> notification_notify(osal::NotificationSender& sender, std::uint64_t
         return std::unexpected(Error{osal::ErrorCode::SystemError, osal::ErrorOperation::Notify});
     }
     return sender.notify();
+}
+
+bool reject_topology_admission() noexcept {
+    return reject_page.exchange(false);
 }
 
 void checkpoint(FaultPoint point) {
@@ -1349,6 +1940,10 @@ void pending_remaining(std::size_t count) noexcept {
 // Link-time faults affect only this executable. All unarmed calls go to libc.
 extern "C" int __real_ftruncate(int, off_t);
 extern "C" int __wrap_ftruncate(int fd, off_t size) {
+    if (ring_sizes_before_failure && --ring_sizes_before_failure == 0) {
+        errno = ENOSPC;
+        return -1;
+    }
     if (native_counter_fault == CounterFault::Size || native_counter_fault == CounterFault::SizeAndUnlink) {
         errno = ENOSPC;
         return -1;
@@ -1358,6 +1953,10 @@ extern "C" int __wrap_ftruncate(int fd, off_t size) {
 
 extern "C" int __real_shm_unlink(const char*);
 extern "C" int __wrap_shm_unlink(const char* name) {
+    if (!ring_unlink_denied.empty() && std::string_view(name).ends_with(ring_unlink_denied)) {
+        errno = EACCES;
+        return -1;
+    }
     if (native_counter_fault == CounterFault::SizeAndUnlink) {
         errno = EACCES;
         return -1;
@@ -1367,6 +1966,10 @@ extern "C" int __wrap_shm_unlink(const char* name) {
 
 extern "C" void* __real_mmap(void*, size_t, int, int, int, off_t);
 extern "C" void* __wrap_mmap(void* address, size_t length, int prot, int flags, int fd, off_t offset) {
+    if (ring_maps_before_failure && --ring_maps_before_failure == 0) {
+        errno = ENOMEM;
+        return MAP_FAILED;
+    }
     if (native_counter_fault == CounterFault::Map) {
         errno = ENOMEM;
         return MAP_FAILED;
@@ -1378,6 +1981,70 @@ extern "C" void* __wrap_mmap(void* address, size_t length, int prot, int flags, 
 int main(int argc, char** argv) {
     const char* phase = "startup";
     try {
+        if (argc == 2) {
+            const std::string_view scenario = argv[1];
+            phase = argv[1];
+            if (scenario == "topology-load") {
+                vinc::message_bus::detail::testing::run_topology_load_tests();
+                return 0;
+            }
+            constexpr std::size_t burst_topics = 80; // Exceeds the reliable channel's 64-frame queue.
+            if (scenario == "topology-control") {
+                test_paused_topology(true, 1);
+                test_paused_topology(false, 1);
+                return 0;
+            }
+            if (scenario == "topology-admission") {
+                test_topology_admission_retry();
+                return 0;
+            }
+            if (scenario == "topology-snapshot" || scenario == "topology-replace") {
+                constexpr std::size_t multipage_topics = 160;
+                test_paused_topology(true, multipage_topics, true, scenario == "topology-replace");
+                vinc::message_bus::detail::testing::report_topology_storage();
+                return 0;
+            }
+            if (scenario == "retired-source") {
+                test_retired_source_before_dispatch(false);
+                test_retired_source_before_dispatch(true);
+                return 0;
+            }
+            if (scenario == "confirmed-source") {
+                test_confirmed_missing_source(false);
+                test_confirmed_missing_source(true);
+                return 0;
+            }
+            if (scenario == "topology-attach" || scenario == "topology-detach") {
+                test_paused_topology(scenario == "topology-attach", burst_topics);
+                return 0;
+            }
+            if (scenario == "timely-request" || scenario == "expired-request") {
+                test_request_after_release_ack(scenario == "expired-request");
+                return 0;
+            }
+            if (scenario == "reservation-control") {
+                test_publisher_reservation(0);
+                return 0;
+            }
+            if (scenario == "reservation-rollback") {
+                test_second_ring_reserve(false);
+                test_second_ring_reserve(true);
+                test_publisher_reservation(2, true);
+#ifdef __linux__
+                for (unsigned allocation : {1u, 2u}) {
+                    for (bool deny_unlink : {false, true}) {
+                        test_native_ring_rollback(false, allocation, deny_unlink);
+                        test_native_ring_rollback(true, allocation, deny_unlink);
+                    }
+                }
+#endif
+                return 0;
+            }
+            if (scenario == "reservation-ring-control" || scenario == "reservation-ring-payload") {
+                test_publisher_reservation(scenario == "reservation-ring-control" ? 1 : 2);
+                return 0;
+            }
+        }
         if (argc == 2 && std::string_view(argv[1]) == "counter-registration") {
             phase = "counter registration rollback";
             test_counter_registration(CounterFault::None);
@@ -1417,6 +2084,10 @@ int main(int argc, char** argv) {
         test_manager_topic_separators();
         phase = "test_readonly_timeout()";
         test_readonly_timeout();
+        phase = "test_missing_release_ack()";
+        test_missing_release_ack();
+        phase = "test_submitted_mutation_timeout()";
+        test_submitted_mutation_timeout();
         phase = "test_send_failure()";
         test_send_failure();
         phase = "test_advertise_failure(FaultPoint::ResponseCopy)";

@@ -59,8 +59,8 @@ ctest --test-dir "$build_dir" -C Release -R '^message_bus\.topic_registration_em
 
 `NamedCounter::create` 收到 OSAL 建立失敗後，只在 OSAL 確認無自有名稱待清理時退役預留。
 成功取得原生名稱後若 map／初始化失敗，改由計數器清理一次。建立成功時由既有計數器持有者管理名稱。
-呼叫端取得原始註冊失敗；若回滾或登記退役也失敗，中央內部的 `BusManager::last_counter_cleanup_failure()`
-保留最近一筆資源名稱、主要錯誤及獨立清理錯誤，供中央存活期間查詢。持久 journal 保留名稱。
+呼叫端取得原始註冊失敗。若回滾或登記退役也失敗，中央內部的 `BusManager::last_registration_cleanup_failure()`
+保留最近一次同時發生清理失敗的註冊主因，以及各受影響名稱和清理錯誤。持久 journal 保留名稱。
 
 - Windows x64 MSVC 19.51 Release、WSL Ubuntu 24.04 x86-64 GCC 13 Release：兩邊的
   `message_bus.counter_registration`、`cleanup`、`ring_buffer`、`module`、`defaults_process` 各 5/5。

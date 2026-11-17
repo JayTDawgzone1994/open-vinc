@@ -19,19 +19,20 @@ constexpr std::uint16_t message_bus_domain = static_cast<std::uint16_t>(control:
 struct ControlTransport {
     std::function<Result<void>(control::Frame)> send;
     std::function<void()> close;
+    std::uint64_t generation = 0;
 };
 
 class RuntimeAccess {
 public:
-    static vinc::Result<std::shared_ptr<Client>> create(std::shared_ptr<control::Session>);
+    static vinc::Result<std::shared_ptr<Client>> create(std::shared_ptr<control::Session>, std::uint64_t generation = 0);
     static vinc::Result<std::shared_ptr<Client>> create(ControlTransport);
     // Called only by the module's existing receive dispatcher; does not map/copy payload.
     // Already closed reports Closed/Receive; malformed input reports Protocol/Receive.
     // The owner must join its receiver before final shutdown, not suppress receive errors.
     static vinc::Result<void> receive(Client&, control::Frame);
     static void shutdown(Client&) noexcept;
-    // Nonblocking release progress; only the Host receives acknowledgements.
-    static Result<void> progress_releases(Client&);
+    // Progress release batches and missing-source checks without waiting for a reply.
+    static Result<void> progress_control(Client&);
     // Existing Host receive worker retries failed routes; it never invokes user code.
     static void progress_notifications(Client&);
     static NotificationDiagnostics notification_diagnostics(Client&);

@@ -1,0 +1,1286 @@
+{
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
+  "binary_sha256": {
+    "module_control_cost_polling.exe": "b727333331b1965681623aca55e3e3a58e7ccf3240308c0e04b5aae4723a22f4",
+    "module_control_cost_notified.exe": "38ab09ec9a368aecd8e30ec81a466eb7ea2340b614669740e2a74305a9b2176f",
+    "module_control_wakeup_host.exe": "445b5f54c8fb352b44c98fc9fa73ed061deacf63017e57d56acdf5fdc66b5a43",
+    "module_control_cost_plugin.dll": "967c9d0fafcc12c6a132d4f3fb7648c7f1081d6cc402f44ecb6c6c502ad979e6"
+  },
+  "scope": "central process CPU/resources; identical trace hooks; not payload throughput",
+  "baseline": "current sources with reconstructed pre-stage3 polling policy only",
+  "runs": [
+    {
+      "policy": "polling",
+      "count": 4,
+      "repeat": 0,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 30.2541,
+          "p50_ms": 30.9577,
+          "p95_ms": 31.5755,
+          "p99_ms": 31.5755,
+          "max_ms": 31.5755
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 30.8186,
+          "p50_ms": 31.8282,
+          "p95_ms": 33.4312,
+          "p99_ms": 33.4312,
+          "max_ms": 33.4312
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 30.4724,
+          "p50_ms": 30.6596,
+          "p95_ms": 31.2639,
+          "p99_ms": 31.2639,
+          "max_ms": 31.2639
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 31.0231,
+          "p50_ms": 31.2591,
+          "p95_ms": 32.9506,
+          "p99_ms": 32.9506,
+          "max_ms": 32.9506
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 28.3636,
+          "p50_ms": 30.756,
+          "p95_ms": 31.2647,
+          "p99_ms": 31.2647,
+          "max_ms": 31.2647
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 28.5343,
+          "p50_ms": 30.924,
+          "p95_ms": 31.4651,
+          "p99_ms": 31.4651,
+          "max_ms": 31.4651
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 28.4867,
+          "p50_ms": 30.0473,
+          "p95_ms": 30.8729,
+          "p99_ms": 30.8729,
+          "max_ms": 30.8729
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 28.689,
+          "p50_ms": 30.2703,
+          "p95_ms": 31.0681,
+          "p99_ms": 31.0681,
+          "max_ms": 31.0681
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 341.61,
+            "cpu_ms": 46.875,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 9469952.0,
+            "peak_rss_bytes": 10014720.0,
+            "threads": 15.0,
+            "handles_or_fds": 144.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10011.4,
+            "cpu_ms": 62.5,
+            "passes": 323.0,
+            "waits": 323.0,
+            "rss_bytes": 9551872.0,
+            "peak_rss_bytes": 10461184.0,
+            "threads": 15.0,
+            "handles_or_fds": 144.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 375.216,
+            "cpu_ms": 46.875,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 9568256.0,
+            "peak_rss_bytes": 10461184.0,
+            "threads": 15.0,
+            "handles_or_fds": 148.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "notified",
+      "count": 4,
+      "repeat": 0,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 0.0078,
+          "p50_ms": 0.0081,
+          "p95_ms": 0.0091,
+          "p99_ms": 0.0091,
+          "max_ms": 0.0091
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 0.4238,
+          "p50_ms": 0.4304,
+          "p95_ms": 0.5209,
+          "p99_ms": 0.5209,
+          "max_ms": 0.5209
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 0.0103,
+          "p50_ms": 0.0109,
+          "p95_ms": 0.0119,
+          "p99_ms": 0.0119,
+          "max_ms": 0.0119
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 0.4313,
+          "p50_ms": 0.4359,
+          "p95_ms": 0.5976,
+          "p99_ms": 0.5976,
+          "max_ms": 0.5976
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 0.009,
+          "p50_ms": 0.0092,
+          "p95_ms": 0.0097,
+          "p99_ms": 0.0097,
+          "max_ms": 0.0097
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 0.1219,
+          "p50_ms": 0.1355,
+          "p95_ms": 0.1518,
+          "p99_ms": 0.1518,
+          "max_ms": 0.1518
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 0.0085,
+          "p50_ms": 0.0094,
+          "p95_ms": 0.0113,
+          "p99_ms": 0.0113,
+          "max_ms": 0.0113
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 0.148,
+          "p50_ms": 0.151,
+          "p95_ms": 0.1698,
+          "p99_ms": 0.1698,
+          "max_ms": 0.1698
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 55.3204,
+            "cpu_ms": 46.875,
+            "passes": 16.0,
+            "waits": 16.0,
+            "rss_bytes": 9461760.0,
+            "peak_rss_bytes": 10006528.0,
+            "threads": 15.0,
+            "handles_or_fds": 144.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10000.9,
+            "cpu_ms": 78.125,
+            "passes": 323.0,
+            "waits": 323.0,
+            "rss_bytes": 9547776.0,
+            "peak_rss_bytes": 10448896.0,
+            "threads": 15.0,
+            "handles_or_fds": 144.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 3.4309,
+            "cpu_ms": 31.25,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 9564160.0,
+            "peak_rss_bytes": 10448896.0,
+            "threads": 15.0,
+            "handles_or_fds": 148.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "polling",
+      "count": 128,
+      "repeat": 0,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 28.7438,
+          "p50_ms": 30.8632,
+          "p95_ms": 31.8253,
+          "p99_ms": 32.0081,
+          "max_ms": 32.1461
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 29.6173,
+          "p50_ms": 31.5954,
+          "p95_ms": 32.8214,
+          "p99_ms": 33.6316,
+          "max_ms": 33.732
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 2.3535,
+          "p50_ms": 30.8205,
+          "p95_ms": 31.7645,
+          "p99_ms": 32.3007,
+          "max_ms": 32.7628
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 3.009,
+          "p50_ms": 31.6248,
+          "p95_ms": 32.7552,
+          "p99_ms": 33.4261,
+          "max_ms": 33.4992
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 28.1708,
+          "p50_ms": 30.4019,
+          "p95_ms": 31.5063,
+          "p99_ms": 31.6846,
+          "max_ms": 32.0378
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 28.3608,
+          "p50_ms": 30.6343,
+          "p95_ms": 31.6979,
+          "p99_ms": 31.8352,
+          "max_ms": 32.3432
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 28.5869,
+          "p50_ms": 30.4287,
+          "p95_ms": 31.2461,
+          "p99_ms": 31.6008,
+          "max_ms": 31.8169
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 28.7714,
+          "p50_ms": 30.6248,
+          "p95_ms": 31.4518,
+          "p99_ms": 31.8086,
+          "max_ms": 32.0167
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 8079.15,
+            "cpu_ms": 109.375,
+            "passes": 261.0,
+            "waits": 261.0,
+            "rss_bytes": 8761344.0,
+            "peak_rss_bytes": 8761344.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10011.5,
+            "cpu_ms": 46.875,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8847360.0,
+            "peak_rss_bytes": 9748480.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 11944.1,
+            "cpu_ms": 203.125,
+            "passes": 385.0,
+            "waits": 385.0,
+            "rss_bytes": 9588736.0,
+            "peak_rss_bytes": 9748480.0,
+            "threads": 14.0,
+            "handles_or_fds": 391.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "notified",
+      "count": 128,
+      "repeat": 0,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 0.0046,
+          "p50_ms": 0.0083,
+          "p95_ms": 0.012,
+          "p99_ms": 0.0157,
+          "max_ms": 0.0214
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 0.3711,
+          "p50_ms": 0.4175,
+          "p95_ms": 0.6318,
+          "p99_ms": 0.722,
+          "max_ms": 0.8832
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 0.0074,
+          "p50_ms": 0.01,
+          "p95_ms": 0.0137,
+          "p99_ms": 0.0233,
+          "max_ms": 0.0234
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 0.4123,
+          "p50_ms": 0.4539,
+          "p95_ms": 0.6138,
+          "p99_ms": 0.7752,
+          "max_ms": 0.8561
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 0.0045,
+          "p50_ms": 0.0091,
+          "p95_ms": 0.0108,
+          "p99_ms": 0.0124,
+          "max_ms": 0.0152
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 0.1004,
+          "p50_ms": 0.1248,
+          "p95_ms": 0.1688,
+          "p99_ms": 0.2147,
+          "max_ms": 0.2377
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 0.006,
+          "p50_ms": 0.0103,
+          "p95_ms": 0.0128,
+          "p99_ms": 0.0171,
+          "max_ms": 0.0192
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 0.1276,
+          "p50_ms": 0.159,
+          "p95_ms": 0.2043,
+          "p99_ms": 0.2257,
+          "max_ms": 0.2354
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 122.963,
+            "cpu_ms": 62.5,
+            "passes": 264.0,
+            "waits": 264.0,
+            "rss_bytes": 8765440.0,
+            "peak_rss_bytes": 8765440.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10007.9,
+            "cpu_ms": 31.25,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8847360.0,
+            "peak_rss_bytes": 9748480.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 113.018,
+            "cpu_ms": 125.0,
+            "passes": 385.0,
+            "waits": 385.0,
+            "rss_bytes": 9605120.0,
+            "peak_rss_bytes": 9748480.0,
+            "threads": 15.0,
+            "handles_or_fds": 390.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "notified",
+      "count": 4,
+      "repeat": 1,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 0.0081,
+          "p50_ms": 0.0091,
+          "p95_ms": 0.0111,
+          "p99_ms": 0.0111,
+          "max_ms": 0.0111
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 0.447,
+          "p50_ms": 0.4648,
+          "p95_ms": 0.7607,
+          "p99_ms": 0.7607,
+          "max_ms": 0.7607
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 0.0081,
+          "p50_ms": 0.009,
+          "p95_ms": 0.0112,
+          "p99_ms": 0.0112,
+          "max_ms": 0.0112
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 0.4458,
+          "p50_ms": 0.4476,
+          "p95_ms": 0.5673,
+          "p99_ms": 0.5673,
+          "max_ms": 0.5673
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 0.0087,
+          "p50_ms": 0.0095,
+          "p95_ms": 0.0099,
+          "p99_ms": 0.0099,
+          "max_ms": 0.0099
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 0.1211,
+          "p50_ms": 0.1418,
+          "p95_ms": 0.2022,
+          "p99_ms": 0.2022,
+          "max_ms": 0.2022
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 0.0077,
+          "p50_ms": 0.0081,
+          "p95_ms": 0.011,
+          "p99_ms": 0.011,
+          "max_ms": 0.011
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 0.1554,
+          "p50_ms": 0.1573,
+          "p95_ms": 0.1834,
+          "p99_ms": 0.1834,
+          "max_ms": 0.1834
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 45.9942,
+            "cpu_ms": 31.25,
+            "passes": 15.0,
+            "waits": 15.0,
+            "rss_bytes": 8105984.0,
+            "peak_rss_bytes": 8470528.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10004.6,
+            "cpu_ms": 109.375,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8192000.0,
+            "peak_rss_bytes": 9093120.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 3.3956,
+            "cpu_ms": 46.875,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 8208384.0,
+            "peak_rss_bytes": 9093120.0,
+            "threads": 15.0,
+            "handles_or_fds": 142.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "polling",
+      "count": 4,
+      "repeat": 1,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 30.7276,
+          "p50_ms": 30.8886,
+          "p95_ms": 31.223,
+          "p99_ms": 31.223,
+          "max_ms": 31.223
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 31.3611,
+          "p50_ms": 31.4831,
+          "p95_ms": 31.8599,
+          "p99_ms": 31.8599,
+          "max_ms": 31.8599
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 21.4291,
+          "p50_ms": 30.9932,
+          "p95_ms": 31.3345,
+          "p99_ms": 31.3345,
+          "max_ms": 31.3345
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 22.1226,
+          "p50_ms": 31.5481,
+          "p95_ms": 31.9762,
+          "p99_ms": 31.9762,
+          "max_ms": 31.9762
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 30.2587,
+          "p50_ms": 30.53,
+          "p95_ms": 31.6388,
+          "p99_ms": 31.6388,
+          "max_ms": 31.6388
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 30.4048,
+          "p50_ms": 30.6854,
+          "p95_ms": 31.7988,
+          "p99_ms": 31.7988,
+          "max_ms": 31.7988
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 29.6771,
+          "p50_ms": 29.9823,
+          "p95_ms": 30.8239,
+          "p99_ms": 30.8239,
+          "max_ms": 30.8239
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 29.8499,
+          "p50_ms": 30.1817,
+          "p95_ms": 31.0436,
+          "p99_ms": 31.0436,
+          "max_ms": 31.0436
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 352.575,
+            "cpu_ms": 46.875,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 8085504.0,
+            "peak_rss_bytes": 8478720.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10007.6,
+            "cpu_ms": 31.25,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8171520.0,
+            "peak_rss_bytes": 9072640.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 362.762,
+            "cpu_ms": 31.25,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 8196096.0,
+            "peak_rss_bytes": 9072640.0,
+            "threads": 15.0,
+            "handles_or_fds": 142.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "notified",
+      "count": 128,
+      "repeat": 1,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 0.0064,
+          "p50_ms": 0.0081,
+          "p95_ms": 0.0124,
+          "p99_ms": 0.0182,
+          "max_ms": 0.0238
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 0.3768,
+          "p50_ms": 0.4126,
+          "p95_ms": 0.5688,
+          "p99_ms": 0.6734,
+          "max_ms": 0.6964
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 0.004,
+          "p50_ms": 0.01,
+          "p95_ms": 0.0122,
+          "p99_ms": 0.0167,
+          "max_ms": 0.0187
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 0.4037,
+          "p50_ms": 0.4734,
+          "p95_ms": 0.6978,
+          "p99_ms": 1.0212,
+          "max_ms": 1.6681
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 0.0051,
+          "p50_ms": 0.0086,
+          "p95_ms": 0.0112,
+          "p99_ms": 0.0131,
+          "max_ms": 0.0171
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 0.0993,
+          "p50_ms": 0.1222,
+          "p95_ms": 0.1798,
+          "p99_ms": 0.283,
+          "max_ms": 0.3257
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 0.0076,
+          "p50_ms": 0.0105,
+          "p95_ms": 0.0128,
+          "p99_ms": 0.0149,
+          "max_ms": 0.0167
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 0.1362,
+          "p50_ms": 0.1628,
+          "p95_ms": 0.21,
+          "p99_ms": 0.2802,
+          "max_ms": 0.4308
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 129.176,
+            "cpu_ms": 93.75,
+            "passes": 264.0,
+            "waits": 264.0,
+            "rss_bytes": 8798208.0,
+            "peak_rss_bytes": 8798208.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10012.5,
+            "cpu_ms": 46.875,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8888320.0,
+            "peak_rss_bytes": 9764864.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 116.227,
+            "cpu_ms": 93.75,
+            "passes": 385.0,
+            "waits": 385.0,
+            "rss_bytes": 9629696.0,
+            "peak_rss_bytes": 9768960.0,
+            "threads": 15.0,
+            "handles_or_fds": 390.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "polling",
+      "count": 128,
+      "repeat": 1,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 29.7214,
+          "p50_ms": 30.8815,
+          "p95_ms": 31.8151,
+          "p99_ms": 32.6137,
+          "max_ms": 32.7553
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 30.3166,
+          "p50_ms": 31.4846,
+          "p95_ms": 32.5666,
+          "p99_ms": 33.3839,
+          "max_ms": 33.6871
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 23.6433,
+          "p50_ms": 30.911,
+          "p95_ms": 31.8273,
+          "p99_ms": 31.9434,
+          "max_ms": 32.4458
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 24.6288,
+          "p50_ms": 31.603,
+          "p95_ms": 32.5332,
+          "p99_ms": 32.9066,
+          "max_ms": 33.3404
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 28.5988,
+          "p50_ms": 30.5449,
+          "p95_ms": 31.4175,
+          "p99_ms": 31.6492,
+          "max_ms": 31.7694
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 28.8,
+          "p50_ms": 30.7395,
+          "p95_ms": 31.6196,
+          "p99_ms": 31.8577,
+          "max_ms": 31.9343
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 28.6421,
+          "p50_ms": 30.5553,
+          "p95_ms": 31.3543,
+          "p99_ms": 31.6836,
+          "max_ms": 32.5604
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 28.8235,
+          "p50_ms": 30.7381,
+          "p95_ms": 31.5743,
+          "p99_ms": 31.889,
+          "max_ms": 32.7696
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 8118.62,
+            "cpu_ms": 234.375,
+            "passes": 262.0,
+            "waits": 262.0,
+            "rss_bytes": 8757248.0,
+            "peak_rss_bytes": 8757248.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10010.6,
+            "cpu_ms": 46.875,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8843264.0,
+            "peak_rss_bytes": 9723904.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 11980.7,
+            "cpu_ms": 171.875,
+            "passes": 385.0,
+            "waits": 385.0,
+            "rss_bytes": 9601024.0,
+            "peak_rss_bytes": 9723904.0,
+            "threads": 14.0,
+            "handles_or_fds": 391.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "polling",
+      "count": 4,
+      "repeat": 2,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 30.3643,
+          "p50_ms": 30.934,
+          "p95_ms": 31.7515,
+          "p99_ms": 31.7515,
+          "max_ms": 31.7515
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 31.0928,
+          "p50_ms": 31.5731,
+          "p95_ms": 32.5104,
+          "p99_ms": 32.5104,
+          "max_ms": 32.5104
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 17.9492,
+          "p50_ms": 30.8366,
+          "p95_ms": 31.3524,
+          "p99_ms": 31.3524,
+          "max_ms": 31.3524
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 18.6845,
+          "p50_ms": 31.4821,
+          "p95_ms": 32.0997,
+          "p99_ms": 32.0997,
+          "max_ms": 32.0997
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 30.0953,
+          "p50_ms": 30.7883,
+          "p95_ms": 31.3606,
+          "p99_ms": 31.3606,
+          "max_ms": 31.3606
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 30.3278,
+          "p50_ms": 31.0064,
+          "p95_ms": 31.5806,
+          "p99_ms": 31.5806,
+          "max_ms": 31.5806
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 29.9723,
+          "p50_ms": 30.0531,
+          "p95_ms": 31.0149,
+          "p99_ms": 31.0149,
+          "max_ms": 31.0149
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 30.1934,
+          "p50_ms": 30.2645,
+          "p95_ms": 31.2167,
+          "p99_ms": 31.2167,
+          "max_ms": 31.2167
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 350.619,
+            "cpu_ms": 31.25,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 8105984.0,
+            "peak_rss_bytes": 8450048.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10003.9,
+            "cpu_ms": 46.875,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8187904.0,
+            "peak_rss_bytes": 9056256.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 360.364,
+            "cpu_ms": 46.875,
+            "passes": 13.0,
+            "waits": 13.0,
+            "rss_bytes": 8204288.0,
+            "peak_rss_bytes": 9056256.0,
+            "threads": 15.0,
+            "handles_or_fds": 142.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "notified",
+      "count": 4,
+      "repeat": 2,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 0.0055,
+          "p50_ms": 0.0096,
+          "p95_ms": 0.0104,
+          "p99_ms": 0.0104,
+          "max_ms": 0.0104
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 0.4787,
+          "p50_ms": 0.4851,
+          "p95_ms": 0.5675,
+          "p99_ms": 0.5675,
+          "max_ms": 0.5675
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 4,
+          "min_ms": 0.0105,
+          "p50_ms": 0.011,
+          "p95_ms": 0.0121,
+          "p99_ms": 0.0121,
+          "max_ms": 0.0121
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 4,
+          "min_ms": 0.4381,
+          "p50_ms": 0.4646,
+          "p95_ms": 0.6919,
+          "p99_ms": 0.6919,
+          "max_ms": 0.6919
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 0.0093,
+          "p50_ms": 0.0096,
+          "p95_ms": 0.0124,
+          "p99_ms": 0.0124,
+          "max_ms": 0.0124
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 0.1254,
+          "p50_ms": 0.1789,
+          "p95_ms": 0.1899,
+          "p99_ms": 0.1899,
+          "max_ms": 0.1899
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 4,
+          "min_ms": 0.0101,
+          "p50_ms": 0.0104,
+          "p95_ms": 0.013,
+          "p99_ms": 0.013,
+          "max_ms": 0.013
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 4,
+          "min_ms": 0.1564,
+          "p50_ms": 0.1753,
+          "p95_ms": 0.2374,
+          "p99_ms": 0.2374,
+          "max_ms": 0.2374
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 49.6391,
+            "cpu_ms": 46.875,
+            "passes": 17.0,
+            "waits": 17.0,
+            "rss_bytes": 8056832.0,
+            "peak_rss_bytes": 8441856.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10007.3,
+            "cpu_ms": 31.25,
+            "passes": 321.0,
+            "waits": 321.0,
+            "rss_bytes": 8142848.0,
+            "peak_rss_bytes": 9011200.0,
+            "threads": 15.0,
+            "handles_or_fds": 138.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 3.8204,
+            "cpu_ms": 62.5,
+            "passes": 14.0,
+            "waits": 14.0,
+            "rss_bytes": 8167424.0,
+            "peak_rss_bytes": 9011200.0,
+            "threads": 15.0,
+            "handles_or_fds": 142.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "polling",
+      "count": 128,
+      "repeat": 2,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 29.9004,
+          "p50_ms": 30.9905,
+          "p95_ms": 32.029,
+          "p99_ms": 32.3542,
+          "max_ms": 32.4572
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 30.5317,
+          "p50_ms": 31.7689,
+          "p95_ms": 32.8979,
+          "p99_ms": 34.2225,
+          "max_ms": 34.8237
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 25.7068,
+          "p50_ms": 30.8263,
+          "p95_ms": 31.7699,
+          "p99_ms": 32.2464,
+          "max_ms": 32.3935
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 26.364,
+          "p50_ms": 31.6438,
+          "p95_ms": 32.9155,
+          "p99_ms": 33.4393,
+          "max_ms": 33.596
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 27.1581,
+          "p50_ms": 30.4132,
+          "p95_ms": 31.4271,
+          "p99_ms": 31.5407,
+          "max_ms": 31.6748
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 27.3631,
+          "p50_ms": 30.6334,
+          "p95_ms": 31.6641,
+          "p99_ms": 31.7979,
+          "max_ms": 31.8783
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 28.4955,
+          "p50_ms": 30.3034,
+          "p95_ms": 31.2699,
+          "p99_ms": 31.6522,
+          "max_ms": 31.7568
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 28.7261,
+          "p50_ms": 30.5203,
+          "p95_ms": 31.4666,
+          "p99_ms": 31.9824,
+          "max_ms": 32.1004
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 8125.61,
+            "cpu_ms": 78.125,
+            "passes": 262.0,
+            "waits": 262.0,
+            "rss_bytes": 8802304.0,
+            "peak_rss_bytes": 8802304.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10009.4,
+            "cpu_ms": 46.875,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8888320.0,
+            "peak_rss_bytes": 9756672.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 11980.3,
+            "cpu_ms": 203.125,
+            "passes": 385.0,
+            "waits": 385.0,
+            "rss_bytes": 9629696.0,
+            "peak_rss_bytes": 9756672.0,
+            "threads": 14.0,
+            "handles_or_fds": 391.0
+          }
+        ]
+      }
+    },
+    {
+      "policy": "notified",
+      "count": 128,
+      "repeat": 2,
+      "metrics": {
+        "startup.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 0.0054,
+          "p50_ms": 0.0083,
+          "p95_ms": 0.0112,
+          "p99_ms": 0.0164,
+          "max_ms": 0.02
+        },
+        "startup.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 0.3738,
+          "p50_ms": 0.4165,
+          "p95_ms": 0.5886,
+          "p99_ms": 0.6481,
+          "max_ms": 0.7987
+        },
+        "commands.Subscribe.central_queue": {
+          "count": 128,
+          "min_ms": 0.006,
+          "p50_ms": 0.01,
+          "p95_ms": 0.0129,
+          "p99_ms": 0.0176,
+          "max_ms": 0.0218
+        },
+        "commands.Subscribe.round_trip": {
+          "count": 128,
+          "min_ms": 0.4114,
+          "p50_ms": 0.4534,
+          "p95_ms": 0.5789,
+          "p99_ms": 0.7556,
+          "max_ms": 1.7362
+        },
+        "startup.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 0.0067,
+          "p50_ms": 0.0091,
+          "p95_ms": 0.0114,
+          "p99_ms": 0.0129,
+          "max_ms": 0.0135
+        },
+        "startup.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 0.0997,
+          "p50_ms": 0.1261,
+          "p95_ms": 0.1676,
+          "p99_ms": 0.2019,
+          "max_ms": 0.2033
+        },
+        "commands.EnableNotifications.central_queue": {
+          "count": 128,
+          "min_ms": 0.0065,
+          "p50_ms": 0.0103,
+          "p95_ms": 0.0122,
+          "p99_ms": 0.0136,
+          "max_ms": 0.0168
+        },
+        "commands.EnableNotifications.round_trip": {
+          "count": 128,
+          "min_ms": 0.1332,
+          "p50_ms": 0.159,
+          "p95_ms": 0.2071,
+          "p99_ms": 0.2598,
+          "max_ms": 0.3039
+        },
+        "phases": [
+          {
+            "phase": "startup",
+            "wall_ms": 118.375,
+            "cpu_ms": 93.75,
+            "passes": 264.0,
+            "waits": 264.0,
+            "rss_bytes": 8769536.0,
+            "peak_rss_bytes": 8769536.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "idle",
+            "wall_ms": 10000.8,
+            "cpu_ms": 62.5,
+            "passes": 322.0,
+            "waits": 322.0,
+            "rss_bytes": 8851456.0,
+            "peak_rss_bytes": 9719808.0,
+            "threads": 15.0,
+            "handles_or_fds": 262.0
+          },
+          {
+            "phase": "commands",
+            "wall_ms": 113.37,
+            "cpu_ms": 171.875,
+            "passes": 385.0,
+            "waits": 385.0,
+            "rss_bytes": 9605120.0,
+            "peak_rss_bytes": 9719808.0,
+            "threads": 15.0,
+            "handles_or_fds": 390.0
+          }
+        ]
+      }
+    }
+  ]
+}

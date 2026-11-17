@@ -3,10 +3,16 @@
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
 The [Publisher-default migration](../message_bus/PUBLISHER_DEFAULTS.md) changes
-PublisherOptions ABI. Current builds use Bus v4 / Plugin entry 19 (Context-owned parallel-pump drain). Rebuild connected artifacts;
+PublisherOptions ABI. Current builds use Bus v6 / Plugin entry 22; see the [control-plane contract](../message_bus/CONTROL_PLANE_REPAIR.md). Rebuild connected artifacts;
 the older acceptance records below apply only to their recorded revisions.
-Publisher 預設搬移改變選項 ABI，目前使用 Bus v4／Plugin entry 19（Context 持有多執行緒 pump drain），所有接線產物須一起重建；
+Publisher 預設搬移改變選項 ABI，目前使用 Bus v6／Plugin entry 22（見上述控制面契約），所有接線產物須一起重建；
 下方較早驗收仍僅適用其記錄版本，不能替本次改動背書。
+
+Central receive-wakeup integration is also exercised by fresh Debug/Release SDK
+producers and relocated consumers on Windows/WSL; see the [acceptance report](../module_system/CONTROL_WAKEUP_VALIDATION.md)
+for actual counts, retries and native macOS handoff. No new public SDK API was added.
+中央接收喚醒已納入 Windows／WSL 乾淨 SDK 與搬移驗收；沒有新增公開 SDK API，
+實際結果、重跑限制及 Mac 待驗清單統一見上述報告。
 
 `<vinc/module/pump_options.hpp>` is included in the installed header tree and
 the public first-include smoke check. `sdk.installed_python` now enables two
@@ -534,6 +540,17 @@ Windows x64／MSVC／Ninja 驗證：
 <a id="待處理事項"></a>
 
 ## Outstanding issues / 待處理事項
+
+- **Intermittent SDK fixture guards (2026-11-17):** During central receive-wakeup
+  acceptance, the first Windows Debug consumer exceeded its 20-second guard and
+  the relocated App exceeded its 35-second guard after UI status. Clean fixture
+  retries passed with unchanged deadlines; Release and WSL also passed. Concurrent
+  load is context, not an established cause. Preserve stage timings/stacks if this
+  recurs before changing deadlines. Evidence and limits are maintained in the
+  [acceptance report](../module_system/CONTROL_WAKEUP_VALIDATION.md).
+
+  **SDK 測試偶發逾時待觀察：**Debug consumer 與搬移 App 首輪碰到原有限時，乾淨重跑
+  通過；尚未定位原因，不能宣稱已修復。下次重現先補階段時間／堆疊，不直接放寬期限。
 
 - **Installed application UI test isolation (2026-11-06):**
   `tests/installed_application/startup.tcl` queries fixed port 31411. During RPC

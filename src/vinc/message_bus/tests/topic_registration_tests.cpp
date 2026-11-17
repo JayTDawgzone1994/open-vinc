@@ -2,6 +2,7 @@
 #include "../../param/tests/support.hpp"
 #include <vinc/osal/detail/native_error.hpp>
 #include <sys/resource.h>
+#include <fcntl.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -21,22 +22,31 @@ constexpr int canary_sequence = 42;
 constexpr char canary_topic[] = "registration/canary";
 
 // Apply pressure only after the Hosts and their control sessions are running.
-// A zero soft limit leaves existing descriptors usable, regardless of which fds CTest inherited.
-class NoNewDescriptors {
+// The first unused fd is the only hole below first_free + 1, including under CTest.
+class DescriptorBudget {
     rlimit previous_{};
 
 public:
-    NoNewDescriptors() {
+    explicit DescriptorBudget(bool allow_one) {
         check(::getrlimit(RLIMIT_NOFILE, &previous_) == 0, "read soft fd limit");
         auto exhausted = previous_;
         exhausted.rlim_cur = 0;
+        if (allow_one) {
+            int first_free = 0;
+            while (::fcntl(first_free, F_GETFD) != -1) {
+                ++first_free;
+            }
+            check(errno == EBADF, "locate first free descriptor");
+            exhausted.rlim_cur = static_cast<rlim_t>(first_free) + 1;
+            check(exhausted.rlim_cur <= previous_.rlim_cur, "one free fd required by fixture");
+        }
         check(::setrlimit(RLIMIT_NOFILE, &exhausted) == 0, "exhaust central fd table");
     }
 
-    NoNewDescriptors(const NoNewDescriptors&) = delete;
-    NoNewDescriptors& operator=(const NoNewDescriptors&) = delete;
+    DescriptorBudget(const DescriptorBudget&) = delete;
+    DescriptorBudget& operator=(const DescriptorBudget&) = delete;
 
-    ~NoNewDescriptors() {
+    ~DescriptorBudget() {
         if (::setrlimit(RLIMIT_NOFILE, &previous_) != 0) {
             std::perror("restore central fd limit");
         }
@@ -62,7 +72,9 @@ void require_create_emfile(const Error& error) {
     check(deepest == expected.record(), "expected OSAL CreateSharedMemory with native EMFILE");
 }
 
-void run(const fs::path& plugin) {
+enum class Registration { Topic, RingControl, RingPayload };
+
+void run(const fs::path& plugin, Registration target) {
     Directory home;
     check(::setenv("HOME", home.path.c_str(), 1) == 0, "isolate central instance journal");
     auto manager = take(test::create_manager());
@@ -90,14 +102,16 @@ void run(const fs::path& plugin) {
     const auto baseline = reservation_count(journal);
     check(baseline > 0, "expected active Topic and Module reservations before applying fd pressure");
     bool clean = true;
+    const bool publisher = target != Registration::Topic;
     for (int attempt = 1; attempt <= rejected_attempts; ++attempt) {
         const auto topic = "registration/retry" + std::to_string(attempt);
         const auto before = reservation_count(journal);
         {
-            NoNewDescriptors exhausted;
-            auto refused = command(reader, {"probe-subscription", topic});
-            check(!refused, "new Topic registered under fd exhaustion");
-            std::cout << topic << " " << error_to_string(refused.error()) << '\n';
+            DescriptorBudget exhausted(target == Registration::RingPayload);
+            auto refused = publisher ? command(writer, {"probe-explicit-publisher", canary_topic})
+                                     : command(reader, {"probe-subscription", topic});
+            check(!refused, "registration succeeded under fd exhaustion");
+            std::cout << "attempt=" << attempt << " " << error_to_string(refused.error()) << '\n';
             require_create_emfile(refused.error());
 
             const int sequence = canary_sequence + attempt;
@@ -106,27 +120,39 @@ void run(const fs::path& plugin) {
         }
         // Counting opens a directory; inspect after restoring the limit and before registering the next Topic.
         const auto after = reservation_count(journal);
-        std::cout << topic << " journal before=" << before << " after=" << after << '\n';
+        std::cout << "journal before=" << before << " after=" << after << '\n';
         if (after != before) {
             clean = false;
         }
     }
 
-    check(take(command(reader, {"probe-subscription", "registration/recovered"})) == 0, "retry after fd recovery");
+    if (publisher) {
+        check(take(command(writer, {"probe-explicit-publisher", canary_topic})) == 0, "publisher retry after fd recovery");
+        // Fence the temporary Publisher's destructor before sampling its journal.
+        check(take(command(writer, {"probe-subscription", canary_topic})) == 0, "publisher cleanup fence");
+    } else {
+        check(take(command(reader, {"probe-subscription", "registration/recovered"})) == 0, "retry after fd recovery");
+    }
     const auto final_count = reservation_count(journal);
     std::cout << "live central journal baseline=" << baseline << " final=" << final_count << '\n';
     take(manager->wait_shutdown(control::Clock::now() + shutdown_timeout));
     manager.reset();
     const auto remaining = reservation_count(journal);
     std::cout << "after shutdown reservations=" << remaining << '\n';
-    check(clean && final_count == baseline && remaining == 0, "failed Topic registration left journal reservations");
+    check(clean && final_count == baseline && remaining == 0, "failed registration left journal reservations");
 }
 }
 
 int main(int argc, char** argv) {
     try {
-        check(argc == 2, "expected path to test Module");
-        run(fs::absolute(argv[1]));
+        check(argc == 2 || argc == 3, "expected path to test Module and optional ring creation step");
+        auto target = Registration::Topic;
+        if (argc == 3) {
+            const std::string_view step(argv[2]);
+            check(step == "control" || step == "payload", "unknown ring creation step");
+            target = step == "control" ? Registration::RingControl : Registration::RingPayload;
+        }
+        run(fs::absolute(argv[1]), target);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

@@ -2,6 +2,7 @@
 // Exercise real Socket sessions without invoking application module hooks.
 
 #include "channel_test_support.hpp"
+#include <vinc/control/detail/receive_wake.hpp>
 #include <vinc/config.hpp>
 #include <array>
 #include <iostream>
@@ -358,6 +359,21 @@ void test_lossy_receive_and_reserved_send() {
     check(bool(peer.session->send(application(), true)), "urgent record can use reserved outgoing capacity");
 }
 
+// Link the ordinary production library here, independently of injection builds.
+void test_receive_wake_integration() {
+    auto service = take(control::Service::create());
+    auto peer = attach_raw(*service, channel_test::options());
+    auto wake = std::make_shared<control::detail::ReceiveWake>();
+    control::detail::ReceiveWakeAccess::bind(*peer.session, wake);
+    check(wake->consume(), "bind Open session");
+    send_frame(peer.remote, application());
+    check(bool(wake->wait_until(control::Clock::now() + operation_timeout)), "production receive wake");
+    check(take(peer.session->try_receive()).has_value(), "production inbox remains owned by Session");
+    check(wake->consume(), "clear application hint before shutdown");
+    service.reset();
+    check(bool(wake->wait_until(control::Clock::now())), "production Service closure wakes receiver");
+}
+
 int main() {
     try {
         control::Frame frame{control::Kind::Request, 42, 7, 19, {std::byte{1}, std::byte{2}}};
@@ -372,6 +388,7 @@ int main() {
         test_handshake_timeout_and_normal_close();
         test_bad_heartbeat_isolation();
         test_receive_capacity_and_drain();
+        test_receive_wake_integration();
         std::cout << "control framing, sessions, heartbeat and disconnect tests passed\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

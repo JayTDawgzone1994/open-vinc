@@ -2,11 +2,12 @@
 // and process-exit cleanup; payload copies never pass through this BusManager.
 
 #include <vinc/time.hpp>
-#include <vinc/message_bus/detail/protocol.hpp>
+#include <vinc/message_bus/detail/topology_protocol.hpp>
 #include <vinc/message_bus/detail/diagnostics_protocol.hpp>
 #include <vinc/message_bus/detail/connections_protocol.hpp>
 #include <vinc/message_bus/detail/bus_manager.hpp>
 #include <vinc/control/channel.hpp>
+#include <algorithm>
 #include <array>
 #include <condition_variable>
 #include <deque>
@@ -63,10 +64,42 @@ Result<void> validate_publisher_defaults(PublisherDefaults settings, const Limit
 }
 
 struct BusManager::Impl {
+    using Records = std::vector<control::Bytes>;
+    struct SavedTopic {
+        Records records;
+        std::size_t charge;
+    };
+
+    // A keyset cursor into the registry. Only a changed, unread Topic needs
+    // its pre-change wire image. No snapshot pins shared memory or reader slots.
+    struct Snapshot {
+        explicit Snapshot(std::uint64_t boundary) : cut(boundary) {}
+        std::uint64_t cut;
+        std::string topic;
+        std::size_t next_record = 0;
+        bool finished_topic = false;
+        bool final_page = false;
+        bool superseded = false;
+        std::map<std::string, SavedTopic> saved;
+        std::size_t saved_bytes = 0;
+    };
+
     struct Peer {
         std::shared_ptr<control::Session> session;
         std::uint64_t last_request = 0;
         std::string notification_name;
+        Peer(std::shared_ptr<control::Session> channel, std::string wakeup, std::uint64_t owner)
+            : session(std::move(channel)), notification_name(std::move(wakeup)), cursor(owner) {}
+
+        TopologySendCursor cursor;
+        std::uint64_t revision = 0;
+        std::uint64_t target = 0;
+        TopologyMode mode = TopologyMode::Delta;
+        bool snapshot_needed = false;
+        std::size_t history_bytes = 0;
+        std::deque<control::Bytes> history;
+        std::deque<control::Bytes> pages;
+        std::optional<Snapshot> snapshot;
     };
 
     struct Sub {
@@ -74,15 +107,26 @@ struct BusManager::Impl {
         std::uint64_t owner;
         std::uint32_t index;
         bool notifications = false;
+        // Only pre-existing Publishers with a nonzero NewOnly boundary need
+        // storage. Later Publishers start at zero, even during snapshot repair.
+        std::map<std::uint64_t, std::uint64_t> starting_floors;
+
+        std::uint64_t floor(std::uint64_t publisher) const {
+            const auto found = starting_floors.find(publisher);
+            return found == starting_floors.end() ? 0 : found->second;
+        }
     };
 
     // A topic shares its schema and count, but each Publisher owns a separate ring buffer.
     // Adding another Publisher does not relocate memory already mapped by existing clients.
     struct Topic {
+        std::string name;
         std::uint64_t schema = 0;
         std::shared_ptr<NamedCounter> counter;
         std::map<std::uint64_t, std::shared_ptr<RingBuffer>> publishers;
         std::map<std::uint64_t, Sub> subscribers;
+        // Ordered membership groups keep Attach/Detach work local to this Topic.
+        std::map<std::uint64_t, std::set<std::uint64_t>> local_readers;
         std::vector<bool> used;
         // Preserve retired reader/source losses while this topic still exists.
         std::uint64_t lost = 0;
@@ -105,6 +149,13 @@ struct BusManager::Impl {
     TopicLimitSource topic_limit;
     std::uint64_t next_id = 1;
     std::uint64_t allocated = 0;
+    std::size_t history_bytes = 0;
+    std::set<std::uint64_t> snapshot_hosts;
+    std::set<std::uint64_t> ready_hosts;
+    std::set<std::uint64_t> blocked_hosts;
+    Deadline retry_at = Deadline::max();
+    std::map<std::uint64_t, TopologyAck> queued_receipts; // protected by mutex
+    std::map<std::uint64_t, TopologyStatus> status; // protected by mutex
     std::map<std::string, Topic> topics;
     std::map<std::uint64_t, Peer> peers;
     // Only the worker touches topics/peers/allocated. This mutex protects the work
@@ -114,12 +165,20 @@ struct BusManager::Impl {
     std::deque<Work> work;
     bool stopping = false;
     std::size_t pending_work = 0;
-    std::optional<CounterCleanupFailure> last_counter_cleanup; // protected by mutex
+    std::optional<RegistrationCleanupFailure> last_cleanup; // protected by mutex
     std::thread worker;
 
     explicit Impl(Limits settings, std::shared_ptr<vinc::detail::ResourceNames> names,
                   PublisherDefaultsSource source, TopicLimitSource limit_source)
         : resources(std::move(names)), limits(settings), defaults(std::move(source)), topic_limit(std::move(limit_source)) {
+    }
+
+    void record_rollback(Error primary, RegistrationCleanupFailure&& failure) {
+        if (failure.counter || failure.control || failure.payload) {
+            failure.primary = primary;
+            std::lock_guard lock(mutex);
+            last_cleanup = std::move(failure);
+        }
     }
 
     void start_worker() {
@@ -161,7 +220,7 @@ struct BusManager::Impl {
             frame.payload = encode_failure(body.error());
         }
 
-        if (item.frame.operation == ListTopicConnections) {
+        if (item.frame.operation == ListTopicConnections || item.frame.operation == CheckSource) {
             // A congested diagnostic reply may time out at its caller; it must
             // not turn a read-only refresh into a forced Module disconnection.
             (void)item.session->send(std::move(frame));
@@ -201,23 +260,15 @@ struct BusManager::Impl {
             return std::unexpected(vinc::make_error(ErrorCode::ResourceExhausted, ErrorOperation::CreateTopic));
         }
 
-        auto counter_name = resources ? resources->reserve() : vinc::Result<std::string>(shared_name('t'));
-        if (!counter_name) {
-            return std::unexpected(io_resource(counter_name.error(), ErrorOperation::CreateTopic));
-        }
-
-        std::optional<Error> cleanup;
-        auto counter = NamedCounter::create(*counter_name, resources, cleanup);
+        RegistrationCleanupFailure cleanup;
+        auto counter = NamedCounter::create(resources ? std::string{} : shared_name('t'), resources, cleanup.counter);
         if (!counter) {
-            if (cleanup) {
-                std::lock_guard lock(mutex);
-                last_counter_cleanup = CounterCleanupFailure{std::move(*counter_name), counter.error(), *cleanup};
-            }
-
+            record_rollback(counter.error(), std::move(cleanup));
             return std::unexpected(counter.error());
         }
 
         Topic topic_state;
+        topic_state.name = name;
         topic_state.schema = schema;
         topic_state.counter = std::move(*counter);
         topic_state.used.resize(limits.subscribers_per_topic);
@@ -237,25 +288,367 @@ struct BusManager::Impl {
         }
     }
 
-    // Notification has no ownership of the retired ring. A failed notification
-    // closes only its recipient and cannot interrupt another topic's cleanup.
-    void notify_detached(const Sub& subscriber, std::uint64_t publisher) noexcept {
+    void publish_status(std::uint64_t owner, const Peer& peer, bool progressed) {
+        std::lock_guard lock(mutex);
+        auto& value = status[owner];
+        value.applied = peer.cursor.applied();
+        value.target = peer.revision;
+        if (progressed || value.last_progress == Deadline{}) {
+            value.last_progress = std::chrono::steady_clock::now();
+        }
+    }
+
+    void clear_history(Peer& peer) {
+        history_bytes -= peer.history_bytes;
+        peer.history.clear();
+        peer.history_bytes = 0;
+    }
+
+    void queue_change(std::uint64_t owner, std::uint32_t kind, const control::Bytes& body) {
+        auto found = peers.find(owner);
+        if (found == peers.end()) {
+            return;
+        }
+        auto& peer = found->second;
+        if (peer.revision == UINT64_MAX || body.size() + topology_record_header > topology_page_capacity) {
+            peer.session->close();
+            return;
+        }
+        ++peer.revision;
+        const auto bytes = topology_record_header + body.size();
+        if (!peer.snapshot_needed) {
+            if (peer.history.size() >= config::message_bus_topology_history_records ||
+                bytes > config::message_bus_topology_history_bytes - peer.history_bytes ||
+                bytes > config::message_bus_topology_total_history_bytes - history_bytes) {
+                clear_history(peer);
+                peer.snapshot_needed = true;
+            } else {
+                control::Bytes record;
+                append_topology_record(record, kind, body);
+                peer.history.push_back(std::move(record));
+                peer.history_bytes += bytes;
+                history_bytes += bytes;
+            }
+        }
+        if (peer.pages.empty()) {
+            ready_hosts.insert(owner);
+        }
+        publish_status(owner, peer, false);
+    }
+
+    // One Publisher descriptor serves all of this Host's reader leases.
+    template<class Emit>
+    static void source_records(const Descriptor& descriptor, std::span<const TopologyReader> readers, Emit emit) {
+        while (!readers.empty()) {
+            const auto count = (std::min)(topology_group_readers, readers.size());
+            auto encoded = encode_source_group(descriptor, readers.first(count));
+            emit(std::move(encoded));
+            readers = readers.subspan(count);
+        }
+    }
+
+    // At most one Topic is encoded in temporary workspace. Its size is bounded
+    // by admitted readers, Publishers and the control route/descriptor limits.
+    Result<Records> snapshot_records(const Topic& topic, std::uint64_t owner, std::uint64_t cut) const {
+        Records result;
+        const auto add = [&](auto kind, const control::Bytes& body) {
+            append_topology_record(result.emplace_back(), kind, body);
+        };
+        std::vector<TopologyReader> local;
+        const auto group = topic.local_readers.find(owner);
+        if (group != topic.local_readers.end()) {
+            for (auto id : group->second) {
+                if (id <= cut) {
+                    local.push_back({id, topic.subscribers.at(id).index, 0});
+                }
+            }
+        }
+        for (const auto& [id, ring] : topic.publishers) {
+            if (id > cut) {
+                break;
+            }
+            for (auto& reader : local) {
+                reader.floor = topic.subscribers.at(reader.subscription).floor(id);
+            }
+            std::optional<Error> failure;
+            source_records(ring->descriptor, local, [&](auto encoded) {
+                if (encoded) {
+                    add(Attach, *encoded);
+                } else {
+                    failure = encoded.error();
+                }
+            });
+            if (failure) {
+                return std::unexpected(*failure);
+            }
+            if (ring->descriptor.owner == owner) {
+                control::Bytes body;
+                control::put_u64(body, id);
+                const auto routes = notification_routes(topic);
+                body.insert(body.end(), routes.begin(), routes.end());
+                add(NotificationRoutesChanged, body);
+            }
+        }
+        return result;
+    }
+
+    void discard_saved(Snapshot& snapshot) {
+        history_bytes -= snapshot.saved_bytes;
+        snapshot.saved_bytes = 0;
+        snapshot.saved.clear();
+    }
+
+    // Save the unread version before a removal or a route mutation. New endpoint
+    // IDs are above the cut and need no undo. On budget pressure the outgoing
+    // page remains valid; the next staged ACK permits a fresh transfer serial.
+    void preserve_topic(const Topic& topic) {
+        for (auto owner : snapshot_hosts) {
+            auto& peer = peers.at(owner);
+            auto& snapshot = *peer.snapshot;
+            if (snapshot.superseded || snapshot.final_page || topic.name < snapshot.topic ||
+                (topic.name == snapshot.topic && snapshot.finished_topic) || snapshot.saved.contains(topic.name)) {
+                continue;
+            }
+            if (!topic.local_readers.contains(owner) && std::ranges::none_of(topic.publishers, [owner](const auto& entry) {
+                    return entry.second->descriptor.owner == owner;
+                })) {
+                continue;
+            }
+            try {
+                auto records = snapshot_records(topic, owner, snapshot.cut);
+                if (!records) {
+                    peer.session->close();
+                    continue;
+                }
+#ifdef VINC_MESSAGE_BUS_TESTING
+                testing::checkpoint(testing::FaultPoint::SnapshotHistory);
+#endif
+                std::size_t charge = topic.name.size() + sizeof(SavedTopic);
+                for (const auto& record : *records) {
+                    charge += record.size() + sizeof(control::Bytes);
+                }
+                if (charge <= config::message_bus_topology_history_bytes - snapshot.saved_bytes &&
+                    charge <= config::message_bus_topology_total_history_bytes - history_bytes) {
+                    snapshot.saved.emplace(topic.name, SavedTopic{std::move(*records), charge});
+                    history_bytes += charge;
+                    snapshot.saved_bytes += charge;
+                    continue;
+                }
+            } catch (const std::bad_alloc&) {
+                // The current wire page already owns its bytes. Recovery needs
+                // no extra undo record and cannot interfere with endpoint cleanup.
+            }
+            discard_saved(snapshot);
+            snapshot.superseded = true;
+        }
+    }
+
+    void next_snapshot_page(std::uint64_t owner, Peer& peer) {
+        auto& snapshot = *peer.snapshot;
+        auto& page = peer.pages.emplace_back();
+        if (snapshot.topic.empty()) {
+            control::Bytes cut;
+            control::put_u64(cut, snapshot.cut);
+            append_topology_record(page, snapshot_cut, cut);
+        }
+        for (;;) {
+            auto live = snapshot.finished_topic ? topics.upper_bound(snapshot.topic) : topics.lower_bound(snapshot.topic);
+            auto saved = snapshot.finished_topic ? snapshot.saved.upper_bound(snapshot.topic)
+                                                 : snapshot.saved.lower_bound(snapshot.topic);
+            if (live == topics.end() && saved == snapshot.saved.end()) {
+                snapshot.final_page = true;
+                return;
+            }
+
+            const bool use_saved = saved != snapshot.saved.end() && (live == topics.end() || saved->first <= live->first);
+            snapshot.topic = use_saved ? saved->first : live->first;
+            snapshot.finished_topic = false;
+            Records scratch;
+            if (!use_saved) {
+                auto result = snapshot_records(live->second, owner, snapshot.cut);
+                if (!result) {
+                    peer.session->close();
+                    return;
+                }
+                scratch = std::move(*result);
+            }
+            const auto& records = use_saved ? saved->second.records : scratch;
+            while (snapshot.next_record < records.size()) {
+                const auto& record = records[snapshot.next_record];
+                if (record.size() > topology_page_capacity - page.size()) {
+                    return;
+                }
+                page.insert(page.end(), record.begin(), record.end());
+                ++snapshot.next_record;
+            }
+            if (use_saved) {
+                snapshot.saved_bytes -= saved->second.charge;
+                history_bytes -= saved->second.charge;
+                snapshot.saved.erase(saved);
+            }
+            snapshot.next_record = 0;
+            snapshot.finished_topic = true;
+        }
+    }
+
+    void prepare_transfer(std::uint64_t owner, Peer& peer) {
+        peer.target = peer.revision;
+        if (peer.snapshot_needed) {
+            peer.mode = TopologyMode::Snapshot;
+            peer.snapshot.emplace(next_id - 1);
+            snapshot_hosts.insert(owner);
+            next_snapshot_page(owner, peer);
+            peer.snapshot_needed = false;
+        } else {
+            peer.mode = TopologyMode::Delta;
+            for (const auto& record : peer.history) {
+                if (peer.pages.empty() || peer.pages.back().size() + record.size() > topology_page_capacity) {
+                    peer.pages.emplace_back();
+                }
+                auto& page = peer.pages.back();
+                page.insert(page.end(), record.begin(), record.end());
+            }
+        }
+        clear_history(peer);
+    }
+
+    void send_page(std::uint64_t owner, Peer& peer) {
+        if (peer.pages.empty()) {
+            if (peer.snapshot) {
+                next_snapshot_page(owner, peer);
+            } else {
+                if (!peer.snapshot_needed && peer.history.empty()) {
+                    return;
+                }
+                prepare_transfer(owner, peer);
+                if (!peer.cursor.start(peer.target)) {
+                    peer.session->close();
+                    return;
+                }
+            }
+        }
+        if (!peer.cursor.ready_to_send()) {
+            return;
+        }
+        const bool final = peer.snapshot ? peer.snapshot->final_page : peer.pages.size() == 1;
+        const auto base = peer.mode == TopologyMode::Snapshot ? 0 : peer.cursor.applied();
+        auto encoded = encode_topology_page({peer.cursor.id(), base, peer.target, peer.mode, final, peer.pages.front()});
+        if (!encoded) {
+            peer.session->close();
+            return;
+        }
+        Result<void> sent;
+#ifdef VINC_MESSAGE_BUS_TESTING
+        if (testing::reject_topology_admission()) {
+            sent = std::unexpected(Error{control::ErrorCode::Backpressure, control::ErrorOperation::Send});
+        } else
+#endif
+        {
+            sent = peer.session->send({control::Kind::Event, message_bus_domain, SyncPage, 0, std::move(*encoded)});
+        }
+        if (sent) {
+            peer.cursor.sent(final);
+        } else if (sent.error().is(control::ErrorCode::Backpressure)) {
+            blocked_hosts.insert(owner);
+            if (retry_at == Deadline::max()) {
+                retry_at = std::chrono::steady_clock::now() + config::message_bus_topology_send_retry;
+            }
+        } else {
+            peer.session->close();
+        }
+    }
+
+    void flush_pages() {
+        if (std::chrono::steady_clock::now() >= retry_at) {
+            ready_hosts.merge(blocked_hosts);
+            blocked_hosts.clear();
+            retry_at = Deadline::max();
+        }
+        for (const auto owner : ready_hosts) {
+            auto found = peers.find(owner);
+            if (found != peers.end()) {
+                try {
+                    send_page(owner, found->second);
+                } catch (const std::bad_alloc&) {
+                    found->second.session->close();
+                }
+            }
+        }
+        ready_hosts.clear();
+#ifdef VINC_MESSAGE_BUS_TESTING
+        // Sample only in the private test build, on the registry's owning worker.
+        std::size_t prepared_bytes = 0;
+        std::size_t saved_bytes = 0;
+        for (const auto& [owner, peer] : peers) {
+            for (const auto& page : peer.pages) {
+                prepared_bytes += page.size();
+            }
+            if (peer.snapshot) {
+                saved_bytes += peer.snapshot->saved_bytes;
+            }
+        }
+        testing::topology_storage(history_bytes, prepared_bytes, saved_bytes);
+#endif
+    }
+
+    void receipt(std::uint64_t owner, Peer& peer, const control::Frame& frame) {
+        auto ack = decode_topology_ack(frame.payload);
+        if (!ack) {
+            peer.session->close();
+            return;
+        }
+        auto action = peer.cursor.acknowledge(*ack);
+        if (!action) {
+            peer.session->close();
+            return;
+        }
+        if (*action == AckAction::IgnoreOld) {
+            return;
+        }
+        const bool replace = *action == AckAction::NextPage && peer.snapshot && peer.snapshot->superseded;
+        if (replace) {
+            peer.cursor.supersede_staged();
+        }
+        if (peer.snapshot && (*action == AckAction::Finished || *action == AckAction::RestartSnapshot || replace)) {
+            discard_saved(*peer.snapshot);
+            peer.snapshot.reset();
+            snapshot_hosts.erase(owner);
+        }
+        if (*action == AckAction::RestartSnapshot || replace) {
+            peer.pages.clear();
+            clear_history(peer);
+            peer.snapshot_needed = true;
+        } else {
+            peer.pages.pop_front();
+        }
+        publish_status(owner, peer, true);
+        ready_hosts.insert(owner);
+    }
+
+    void notify_detached(std::uint64_t owner, std::uint64_t publisher, const Topic& topic) noexcept {
         try {
 #ifdef VINC_MESSAGE_BUS_TESTING
             testing::checkpoint(testing::FaultPoint::DetachEncode);
 #endif
-            control::Frame frame{control::Kind::Event, message_bus_domain, Detach};
-            control::put_u64(frame.payload, subscriber.id);
-            control::put_u64(frame.payload, publisher);
+            const auto& ids = topic.local_readers.at(owner);
+            auto it = ids.begin();
+            std::size_t remaining = ids.size();
+            while (remaining) {
+                const auto count = (std::min)(remaining, topology_group_readers);
+                control::Bytes body;
+                control::put_u64(body, publisher);
+                control::put_u32(body, static_cast<std::uint32_t>(count));
+                for (std::size_t index = 0; index < count; ++index) {
+                    control::put_u64(body, *it++);
+                }
 #ifdef VINC_MESSAGE_BUS_TESTING
-            testing::checkpoint(testing::FaultPoint::DetachSend);
+                testing::checkpoint(testing::FaultPoint::DetachSend);
 #endif
-            send(subscriber.owner, std::move(frame));
-        } catch (...) {
-            auto peer = peers.find(subscriber.owner);
-            if (peer != peers.end()) {
-                peer->second.session->close();
+                queue_change(owner, Detach, body);
+                remaining -= count;
             }
+        } catch (...) {
+            peers.at(owner).session->close();
         }
     }
 
@@ -268,18 +661,20 @@ struct BusManager::Impl {
 
     void remove_publisher(Topic& topic_state,
                           std::map<std::uint64_t, std::shared_ptr<RingBuffer>>::iterator it) {
+        preserve_topic(topic_state);
         auto ring_buffer = it->second;
         const auto publisher = it->first;
         ring_buffer->retire();
-        for (const auto& [_, subscriber] : topic_state.subscribers) {
+        for (auto& [_, subscriber] : topic_state.subscribers) {
             collect_reader(topic_state, *ring_buffer, subscriber.index);
+            subscriber.starting_floors.erase(publisher);
         }
         allocated -=
             RingBuffer::control_bytes(ring_buffer->descriptor.slots, ring_buffer->descriptor.readers) +
             ring_buffer->descriptor.slots * RingBuffer::slot_stride(ring_buffer->descriptor.bytes);
         topic_state.publishers.erase(it);
-        for (const auto& [_, subscriber] : topic_state.subscribers) {
-            notify_detached(subscriber, publisher);
+        for (const auto& [owner, _] : topic_state.local_readers) {
+            notify_detached(owner, publisher, topic_state);
         }
     }
 
@@ -303,6 +698,14 @@ struct BusManager::Impl {
         return bytes;
     }
 
+    // One Module generation has one wakeup endpoint, including when several
+    // of its independent subscriptions enable callbacks for the same Topic.
+    static bool has_notification_owner(const Topic& topic, std::uint64_t owner) {
+        return std::ranges::any_of(topic.subscribers, [owner](const auto& entry) {
+            return entry.second.owner == owner && entry.second.notifications;
+        });
+    }
+
     void update_notification_routes(const Topic& topic_state) noexcept {
         for (const auto& [id, publisher] : topic_state.publishers) {
             try {
@@ -313,7 +716,7 @@ struct BusManager::Impl {
                 control::Frame frame{control::Kind::Event, message_bus_domain, NotificationRoutesChanged};
                 control::put_u64(frame.payload, id);
                 frame.payload.insert(frame.payload.end(), routes.begin(), routes.end());
-                send(publisher->descriptor.owner, std::move(frame));
+                queue_change(publisher->descriptor.owner, NotificationRoutesChanged, frame.payload);
             } catch (...) {
                 // Match Detach's existing topology-failure boundary: a recipient
                 // that cannot receive consistent routes is disconnected, while
@@ -335,6 +738,10 @@ struct BusManager::Impl {
         for (auto& [_, topic_state] : topics) {
             auto found = topic_state.subscribers.find(id);
             if (found != topic_state.subscribers.end() && found->second.owner == item.owner) {
+                if (has_notification_owner(topic_state, item.owner) || peers.at(item.owner).notification_name.empty()) {
+                    found->second.notifications = true;
+                    return control::Bytes{};
+                }
                 const auto routes = notification_routes(topic_state, id);
                 // Reserve the largest encoded Descriptor, so subscriber-first
                 // registration also fits a later Advertise response. This is a
@@ -347,6 +754,7 @@ struct BusManager::Impl {
                     return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::EnableNotifications});
                 }
 
+                preserve_topic(topic_state);
                 found->second.notifications = true;
                 update_notification_routes(topic_state);
                 return control::Bytes{};
@@ -358,15 +766,24 @@ struct BusManager::Impl {
     // Called only after a quiescent unsubscribe or confirmed owner-process exit.
     // Clearing a live reader lease based only on a timeout would permit unsafe overwrite.
     void remove_subscriber(Topic& topic_state, std::map<std::uint64_t, Sub>::iterator it) {
+        preserve_topic(topic_state);
         for (auto& [_, publisher] : topic_state.publishers) {
             collect_reader(topic_state, *publisher, it->second.index);
             publisher->reset_reader(it->second.index);
         }
 
         topic_state.used[it->second.index] = false;
+        const auto owner = it->second.owner;
         const bool notifications = it->second.notifications;
+        auto group = topic_state.local_readers.find(owner);
+        group->second.erase(it->first);
+        if (group->second.empty()) {
+            topic_state.local_readers.erase(group);
+        }
         topic_state.subscribers.erase(it);
-        if (notifications) {
+        auto peer = peers.find(owner);
+        if (notifications && peer != peers.end() && !peer->second.notification_name.empty() &&
+            !has_notification_owner(topic_state, owner)) {
             update_notification_routes(topic_state);
         }
     }
@@ -393,7 +810,20 @@ struct BusManager::Impl {
             }
         }
 
-        peers.erase(owner);
+        if (auto peer = peers.find(owner); peer != peers.end()) {
+            clear_history(peer->second);
+            if (peer->second.snapshot) {
+                discard_saved(*peer->second.snapshot);
+                snapshot_hosts.erase(owner);
+            }
+            peers.erase(peer);
+        }
+        ready_hosts.erase(owner);
+        blocked_hosts.erase(owner);
+        {
+            std::lock_guard lock(mutex);
+            status.erase(owner);
+        }
         prune();
     }
 
@@ -469,28 +899,22 @@ struct BusManager::Impl {
         descriptor.slots = slots;
         descriptor.bytes = bytes;
         descriptor.readers = limits.subscribers_per_topic;
-        auto control_name = resources ? resources->reserve() : vinc::Result<std::string>(shared_name('c'));
-        if (!control_name) {
-            return std::unexpected(io_resource(control_name.error(), ErrorOperation::Advertise));
+        if (!resources) {
+            descriptor.control = shared_name('c');
+            descriptor.data = shared_name('d');
         }
-        auto data_name = resources ? resources->reserve() : vinc::Result<std::string>(shared_name('d'));
-        if (!data_name) {
-            if (resources) {
-                (void)resources->retire(*control_name);
-            }
-            return std::unexpected(io_resource(data_name.error(), ErrorOperation::Advertise));
-        }
-        descriptor.control = std::move(*control_name);
-        descriptor.data = std::move(*data_name);
         descriptor.counter = topic_state.counter->name;
         descriptor.publisher = item.name;
-        auto ring_buffer = RingBuffer::create(descriptor, resources);
+        RegistrationCleanupFailure cleanup;
+        auto ring_buffer = RingBuffer::create(std::move(descriptor), resources, cleanup);
         if (!ring_buffer) {
+            record_rollback(ring_buffer.error(), std::move(cleanup));
             return std::unexpected(ring_buffer.error());
         }
 
+        const auto& published = (*ring_buffer)->descriptor;
         control::put_u32(body, requested);
-        auto encoded = encode_descriptor(body, descriptor);
+        auto encoded = encode_descriptor(body, published);
         if (!encoded) {
             return std::unexpected(encoded.error());
         }
@@ -501,20 +925,25 @@ struct BusManager::Impl {
         }
 
         (*ring_buffer)->requested_slots = requested;
-        topic_state.publishers.emplace(descriptor.id, *ring_buffer);
+        topic_state.publishers.emplace(published.id, *ring_buffer);
         allocated += needed;
-        for (const auto& [_, sub] : topic_state.subscribers) {
-            control::Frame frame{control::Kind::Event, message_bus_domain, Attach};
-            control::put_u64(frame.payload, sub.id);
-            auto attachment = encode_attachment(frame.payload, {descriptor, sub.index, 0});
-            if (!attachment) {
-                auto peer = peers.find(sub.owner);
-                if (peer != peers.end()) {
-                    peer->second.session->close();
+        for (const auto& [owner, ids] : topic_state.local_readers) {
+            try {
+                std::vector<TopologyReader> local;
+                local.reserve(ids.size());
+                for (auto id : ids) {
+                    local.push_back({id, topic_state.subscribers.at(id).index, 0});
                 }
-                continue;
+                source_records(published, local, [&](auto encoded) {
+                    if (encoded) {
+                        queue_change(owner, Attach, *encoded);
+                    } else {
+                        peers.at(owner).session->close();
+                    }
+                });
+            } catch (const std::bad_alloc&) {
+                peers.at(owner).session->close();
             }
-            send(sub.owner, std::move(frame));
         }
 
         return body;
@@ -547,11 +976,15 @@ struct BusManager::Impl {
 
         const auto index = static_cast<std::uint32_t>(free_reader - topic_state.used.begin());
         const auto id = next_id++;
+        Sub subscription{id, item.owner, index, false, {}};
         control::put_u64(body, id);
         control::put_u32(body, static_cast<std::uint32_t>(topic_state.publishers.size()));
         for (const auto& [_, publisher] : topic_state.publishers) {
-            auto attachment = encode_attachment(
-                body, {publisher->descriptor, index, start ? shared_load(publisher->header().head) : 0});
+            const auto floor = start ? shared_load(publisher->header().head) : 0;
+            if (floor != 0) {
+                subscription.starting_floors.emplace(publisher->descriptor.id, floor);
+            }
+            auto attachment = encode_attachment(body, {publisher->descriptor, index, subscription.floor(publisher->descriptor.id)});
             if (!attachment) {
                 return std::unexpected(attachment.error());
             }
@@ -562,7 +995,17 @@ struct BusManager::Impl {
                 vinc::make_error(ErrorCode::ResourceExhausted, ErrorOperation::Subscribe));
         }
 
-        topic_state.subscribers.emplace(id, Sub{id, item.owner, index});
+        auto [group, _] = topic_state.local_readers.try_emplace(item.owner);
+        try {
+            group->second.insert(id);
+            topic_state.subscribers.emplace(id, std::move(subscription));
+        } catch (...) {
+            group->second.erase(id);
+            if (group->second.empty()) {
+                topic_state.local_readers.erase(group);
+            }
+            throw;
+        }
         *free_reader = true;
         return body;
     }
@@ -776,8 +1219,32 @@ struct BusManager::Impl {
         return encode_connections(page);
     }
 
+    Result<control::Bytes> check_source(const Work& item) const {
+        control::Reader reader(item.frame.payload);
+        const auto name = reader.string();
+        const auto subscription = reader.u64();
+        const auto publisher = reader.u64();
+        if (!reader.done() || name.empty() || name.size() > maximum_name_bytes || !subscription || !publisher) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Receive});
+        }
+
+        bool present = false;
+        const auto topic = topics.find(name);
+        if (topic != topics.end()) {
+            const auto sub = topic->second.subscribers.find(subscription);
+            present = sub != topic->second.subscribers.end() && sub->second.owner == item.owner &&
+                      topic->second.publishers.contains(publisher);
+        }
+
+        control::Bytes body;
+        control::put_u32(body, present ? 1 : 0);
+        return body;
+    }
+
     vinc::Result<control::Bytes> execute(const Work& item) {
         switch (item.frame.operation) {
+        case CheckSource:
+            return check_source(item);
         case ListTopicConnections:
             try {
                 return list_connections(item);
@@ -811,14 +1278,31 @@ struct BusManager::Impl {
             Work item;
             {
                 std::unique_lock lock(mutex);
-                cv.wait(lock, [&] {
-                    return stopping || !work.empty();
-                });
+                const auto has_work = [&] { return stopping || !work.empty(); };
+                if (retry_at == Deadline::max()) {
+                    cv.wait(lock, has_work);
+                } else {
+                    cv.wait_until(lock, retry_at, has_work);
+                }
                 if (work.empty()) {
-                    break;
+#ifdef VINC_MESSAGE_BUS_TESTING
+                    testing::topology_worker_wake();
+#endif
+                    if (stopping) {
+                        break;
+                    }
+                    lock.unlock();
+                    flush_pages();
+                    continue;
                 }
                 item = std::move(work.front());
+#ifdef VINC_MESSAGE_BUS_TESTING
+                testing::topology_worker_wake();
+#endif
                 work.pop_front();
+                if (item.frame.operation == SyncAck) {
+                    queued_receipts.erase(item.owner);
+                }
             }
 
             struct Completed {
@@ -834,10 +1318,14 @@ struct BusManager::Impl {
             try {
                 if (item.exit) {
                     exited(item.owner);
+                    flush_pages();
                     continue;
                 }
 
-                auto [peer, added] = peers.try_emplace(item.owner, Peer{item.session, 0, item.notification_name});
+                if (item.frame.operation == SyncAck && !peers.contains(item.owner)) {
+                    continue;
+                }
+                auto [peer, added] = peers.try_emplace(item.owner, item.session, item.notification_name, item.owner);
                 if (peer->second.session != item.session || item.frame.domain != message_bus_domain) {
                     item.session->close();
                     continue;
@@ -851,6 +1339,8 @@ struct BusManager::Impl {
 
                     peer->second.last_request = item.frame.request;
                     response(item, execute(item));
+                } else if (item.frame.kind == control::Kind::Event && !item.frame.request && item.frame.operation == SyncAck) {
+                    receipt(item.owner, peer->second, item.frame);
                 } else if (item.frame.kind == control::Kind::Event && !item.frame.request &&
                            (item.frame.operation == ClosePublisher || item.frame.operation == Unsubscribe)) {
                     if (!execute(item)) {
@@ -860,9 +1350,10 @@ struct BusManager::Impl {
                     item.session->close();
                 }
 
-                if (item.frame.operation != ReleaseBatch) {
+                if (item.frame.operation != ReleaseBatch && item.frame.operation != CheckSource && item.frame.operation != SyncAck) {
                     prune();
                 }
+                flush_pages();
             } catch (...) {
                 if (item.session) {
                     item.session->close();
@@ -902,9 +1393,18 @@ vinc::Result<std::unique_ptr<BusManager>> BusManager::create(Limits settings,
 
 BusManager::~BusManager() = default;
 
-std::optional<CounterCleanupFailure> BusManager::last_counter_cleanup_failure() const {
+std::optional<RegistrationCleanupFailure> BusManager::last_registration_cleanup_failure() const {
     std::lock_guard lock(impl_->mutex);
-    return impl_->last_counter_cleanup;
+    return impl_->last_cleanup;
+}
+
+std::optional<TopologyStatus> BusManager::topology_status(std::uint64_t owner) const {
+    std::lock_guard lock(impl_->mutex);
+    const auto found = impl_->status.find(owner);
+    if (found == impl_->status.end()) {
+        return std::nullopt;
+    }
+    return found->second;
 }
 
 vinc::Result<void> BusManager::submit(std::uint64_t owner, std::string name,
@@ -918,7 +1418,22 @@ vinc::Result<void> BusManager::submit(std::uint64_t owner, std::string name,
     if (impl_->stopping) {
         return std::unexpected(vinc::Error{ErrorCode::Closed, ErrorOperation::Submit});
     }
-    if (impl_->work.size() >= config::message_bus_manager_queue_size) {
+    if (frame.operation == SyncAck) {
+        auto ack = decode_topology_ack(frame.payload);
+        if (frame.kind != control::Kind::Event || frame.request || !ack) {
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Submit});
+        }
+        if (ack->id.generation != owner) {
+            return {};
+        }
+        auto [slot, inserted] = impl_->queued_receipts.try_emplace(owner, *ack);
+        if (!inserted) {
+            if (slot->second.id == ack->id && slot->second.receipt == ack->receipt) {
+                return {};
+            }
+            return std::unexpected(Error{ErrorCode::Protocol, ErrorOperation::Submit});
+        }
+    } else if (impl_->work.size() >= config::message_bus_manager_queue_size) {
         return std::unexpected(vinc::Error{ErrorCode::CapacityExceeded, ErrorOperation::Submit});
     }
 

@@ -504,10 +504,10 @@ void watch_central(const std::shared_ptr<control::Session>& session, message_bus
             if (terminal) {
                 watchdog_failure(session, inbox, *terminal, child_exit::application_exception, stop_deadline);
             }
-            auto releases = message_bus::detail::RuntimeAccess::progress_releases(message_bus_client);
-            if (!releases) {
+            auto bus_progress = message_bus::detail::RuntimeAccess::progress_control(message_bus_client);
+            if (!bus_progress) {
                 watchdog_failure(session, inbox,
-                    wrap_error(ErrorCode::BusFailed, ErrorOperation::Send, releases.error()),
+                    wrap_error(ErrorCode::BusFailed, ErrorOperation::Send, bus_progress.error()),
                     child_exit::central_lost, stop_deadline);
             }
 
@@ -1221,7 +1221,7 @@ int detail::run_module_runtime(const std::vector<std::string>& args, ModuleSourc
                 child_exit::handshake_failed,
                 wrap_error(ErrorCode::ChannelFailed, ErrorOperation::Connect, opened.error()));
         }
-        auto client = message_bus::detail::RuntimeAccess::create(session);
+        auto client = message_bus::detail::RuntimeAccess::create(session, bootstrap->generation);
         if (!client) {
             // Before the dispatcher exists, receive this acknowledgement synchronously.
             const auto error =
