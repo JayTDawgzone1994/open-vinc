@@ -1,6 +1,6 @@
 #pragma once
 
-// Framework-only access to externally owned, fixed-capacity message storage.
+// Framework-only access to owned received images and fixed-capacity message storage.
 // Public constructors create local memory; Message Bus alone supplies and synchronizes a shared-memory loan.
 
 // Framework-only detail contract; visibility does not make it an application API.
@@ -10,6 +10,15 @@
 namespace vinc::message::detail {
 class FrameworkAccess {
 public:
+    // Consumes an exclusively owned local copy, including on failure. The caller
+    // must release shared reader protection and discard mutable aliases first.
+    // Checks structure and one record root/hash, never concrete field schemas.
+    [[nodiscard]] static Result<Snapshot> adopt_image(std::vector<std::byte> bytes,
+        std::uint64_t expected_hash, std::uint64_t maximum);
+    // Accepts only owned single-record images, never a borrowed shared snapshot.
+    // Retains the source on failure; removes spare capacity and clears padding.
+    [[nodiscard]] static Result<Snapshot> canonical_image(const Snapshot& image, std::uint64_t maximum);
+
     // owner must keep the exclusively borrowed bytes valid until release.
     // scratch_limit bounds any one payload rebuild buffer (metadata is additional).
     [[nodiscard]] static Result<Message> borrow(std::span<std::byte> bytes, std::shared_ptr<void> owner,

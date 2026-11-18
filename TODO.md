@@ -2,6 +2,14 @@
 
 本檔只保留尚未解決或已決定延後的事項；已完成項目的契約與驗證紀錄由所屬元件 README 維護。
 
+## Bag Recorder：通用映像錄製
+
+- [ ] UI 型別清單編譯成本另案審查：本輪 137 classes 的外部 App 在 MSVC 19.51 Release 的 `topic_monitor.cpp` 觸發 C1128，A/B fixture 兩組均加 `/bigobj` 才可完成大型清單建置。正式 UI 未改；見 [UI 待辦](src/vinc/ui/README.md#large-typed-catalogs)。這不是 Recorder runtime RAM 問題。
+
+- [x] 第四階段 Windows／WSL 完成：Debug、Release 相關元件及乾淨 SDK／雙 App 搬移、正文／metadata／退出驗收通過；兩平台各完成三組編譯及兩種尺寸各三組 runtime A/B。見[本輪結果](src/vinc/bag/IMAGE_RECORDING.md#stage-4-validation)。
+- [ ] Recorder 真實負載成本追蹤：Windows 1 KiB paced A/B 的 generic CPU 中位數較高但範圍重疊，WSL 未見同方向；原因未定位，24 次錄製內容／loss／退出驗證均通過。建議後續分段 profiling，不能把編譯節省外推成普遍 runtime 節省；見 [Bag 待辦](src/vinc/bag/README.md#驗證與待處理事項)。
+- [ ] macOS 原生同版重建 Debug／Release（Plugin entry 23、Bag v3）：先跑 `message.errors/storage/generated/access`，核對 generic canonical／typed byte parity、壞映像拒絕、未知 hash、型別驗證界線與配置失敗重試；另跑 `message_bus.images`、`module.context`、`module.parallel_images`、`module.parallel_image_stop` 及既有 Bus／Host／Python typed 回歸。跑 `bag.storage/module/loop`、`ribosome.schema/generated/names`，確認未知型別正文與巢狀欄位可由外部 schema 解碼、byte／筆數 queue、worker credit、容量／故障／drain、Bag v2 拒絕及名稱表依賴。每組態建立乾淨 SDK，搬移並隱藏 producer／consumer／SDK 原路徑，同時錄製兩個 App，逐筆驗正文、順序、metadata、finish、真實回收。成本沿用 137 class、相同 ring／queue／兩種尺寸，各三組 A/B；先補 Mac 原生 CPU／RSS 採樣（現有成本工具明確拒絕 Darwin）。記錄工具鏈與初次失敗，不沿用歷史 typed Recorder 證據。見[完整交付清單](src/vinc/bag/IMAGE_RECORDING.md#stage-4-validation)。
+
 ## Module System：中央控制接收喚醒
 
 - [ ] macOS 原生以同版重建，Debug／Release 執行 `control.channel`、`control.faults`、`control.receive_wake`、`module.control_wakeup`、`module.control_scheduler`，並重跑 Module 生命週期／故障／退出、Bus、RPC、Param（包含快取收斂測試補強）。核對入睡交界、40 幀公平掃描、RPC 真實滿載下等待／FIFO／一次入列、blocked Module 停止及 confirmed exit；每組態建立乾淨 SDK，驗 consumer／App／Python 及搬移部署。依[第四階段報告](src/vinc/module_system/CONTROL_WAKEUP_VALIDATION.md)重做相同 4／128 筆、每組三次的成本對照；目前 `tests/control_cost/usage.hpp` 僅有 Windows／Linux 採樣，Mac 需補原生 CPU／RSS／執行緒／資源計數，不接受假數值或直接套用 WSL 結果。記錄提交與工具鏈，Windows／WSL 證據不能替代 Mac。
@@ -9,7 +17,7 @@
 
 ## Message Bus：Topic 登記回收
 
-- [ ] macOS 原生以同一提交重建 Bus v6／Plugin entry 22，Debug／Release 執行 `message_bus.control_plane.*`、Bus 回歸、`message_bus.module`、`message_bus.release_routes`、`module.context`、`module.shutdown_evidence` 與 Control Channel 測試。涵蓋 `topology-load` 的 1×128／16×128、160 個 Topic、超過心跳期限的派送暫停、無新操作收斂及原生 Host 異常退出。再驗乾淨 installed SDK 的 consumer／application／Python 與搬移部署；用 `tests/topology_cost.py` 記錄原生頁面、記憶體及喚醒成本。Windows／WSL 第五階段已有通過證據，不能替代 Mac。指令、量測邊界與完整矩陣見[控制面修復契約](src/vinc/message_bus/CONTROL_PLANE_REPAIR.md#第五階段整合與成本驗收2026-11-16)。
+- [ ] macOS 原生以同一提交重建 Bus v6／Plugin entry 23，Debug／Release 執行 `message_bus.control_plane.*`、Bus 回歸、`message_bus.module`、`message_bus.release_routes`、`module.context`、`module.shutdown_evidence` 與 Control Channel 測試。涵蓋 `topology-load` 的 1×128／16×128、160 個 Topic、超過心跳期限的派送暫停、無新操作收斂及原生 Host 異常退出。再驗乾淨 installed SDK 的 consumer／application／Python 與搬移部署；用 `tests/topology_cost.py` 記錄原生頁面、記憶體及喚醒成本。Windows／WSL 第五階段已有通過證據，不能替代 Mac。指令、量測邊界與完整矩陣見[控制面修復契約](src/vinc/message_bus/CONTROL_PLANE_REPAIR.md#第五階段整合與成本驗收2026-11-16)。
 
 - [ ] macOS 原生 Release 重建中央、Host 與 Plugin，執行 `message_bus.cleanup`、`message_bus.topic_limit_param`、`message_bus.release_routes`。核對同一個 callback 清除 141 個訂閱後立即重新註冊、對端仍能收發、延後 ACK 與斷線時的 close 結果；記錄提交與工具鏈。
 

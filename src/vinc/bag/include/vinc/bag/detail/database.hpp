@@ -5,10 +5,9 @@ struct sqlite3;
 
 namespace vinc::bag::detail {
 struct Record {
-    std::unique_ptr<BaseMessage> message;
+    message_bus::detail::ImageDelivery message;
     std::uint64_t retained_bytes = 0;
     std::uint64_t receive_ns = 0;
-    Recorder::Encoder encode = nullptr;
 };
 
 class Database {

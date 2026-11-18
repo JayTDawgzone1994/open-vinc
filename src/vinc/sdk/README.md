@@ -3,10 +3,16 @@
 # VINC SDK and component layout / VINC SDK 與元件目錄
 
 The [Publisher-default migration](../message_bus/PUBLISHER_DEFAULTS.md) changes
-PublisherOptions ABI. Current builds use Bus v6 / Plugin entry 22; see the [control-plane contract](../message_bus/CONTROL_PLANE_REPAIR.md). Rebuild connected artifacts;
+PublisherOptions ABI. Current builds use Bus v6 / Plugin entry 23; see the [control-plane contract](../message_bus/CONTROL_PLANE_REPAIR.md). Rebuild connected artifacts;
 the older acceptance records below apply only to their recorded revisions.
-Publisher 預設搬移改變選項 ABI，目前使用 Bus v6／Plugin entry 22（見上述控制面契約），所有接線產物須一起重建；
+Publisher 預設搬移改變選項 ABI，目前使用 Bus v6／Plugin entry 23（見上述控制面契約），所有接線產物須一起重建；
 下方較早驗收仍僅適用其記錄版本，不能替本次改動背書。
+
+Plugin entry 23 additionally identifies Context's internal image dispatch layout.
+See [image subscriptions](../bag/IMAGE_RECORDING.md#stage-2-validation) and
+[fresh SDK acceptance](../bag/IMAGE_RECORDING.md#stage-4-validation).
+Plugin entry 23 另包含 Context 通用映像派送結構；Windows／WSL Debug、Release
+已通過本輪乾淨 SDK／雙 App 搬移驗收，Mac 仍待原生驗證。
 
 Central receive-wakeup integration is also exercised by fresh Debug/Release SDK
 producers and relocated consumers on Windows/WSL; see the [acceptance report](../module_system/CONTROL_WAKEUP_VALIDATION.md)
@@ -30,6 +36,15 @@ C++／Python 雙 Topic callback 真正交會、持有獨立副本到停止及正
 through the normal SDK, using the Host-owned receiver and existing fallback.
 Contracts and this change's acceptance: [Manual wait](../module_system/PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
 SDK 提供 C++／Python Manual 等待入口，仍由 Host 持有接收資源；契約與本輪驗收見上述連結。
+
+The Recorder adapter now consumes `message_names.hpp` and generic Bus images;
+it does not instantiate one subscriber/encoder per generated class. The installed
+Ribosome and shared `VincMessages.cmake` emit the same lightweight catalog. Bag's
+exported dependency is the Bus **client**, not central control ownership. Rebuild
+the Bag library, generator and adapter together. Fresh relocated SDK acceptance
+is recorded in stage 4 of [image recording](../bag/IMAGE_RECORDING.md#stage-4-validation).
+Recorder 已改用通用映像與名稱表；來源／SDK 共用生成接線，Bag 相依只到 Bus client。
+本次乾淨 SDK 搬移結果見第四階段，包含正文／順序／metadata 與退出驗證。
 
 The installed Recorder adapter also uses this wait. `sdk.installed_recorder`
 checks a relocated external App with custom messages, recording completion and

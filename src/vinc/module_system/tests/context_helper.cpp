@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <thread>
 
+void verify_context_images(vinc::Context&, std::string_view);
+
 namespace {
 using namespace vinc;
 using namespace std::chrono_literals;
@@ -161,7 +163,9 @@ public:
     }
 
     Result<void> main() override {
-        if (mode_ == "batch") {
+        if (mode_.starts_with("image-")) {
+            verify_context_images(context, mode_);
+        } else if (mode_ == "batch") {
             verify_batch();
         } else if (mode_ == "loss") {
             verify_loss();

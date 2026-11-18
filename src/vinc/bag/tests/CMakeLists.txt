@@ -1,4 +1,5 @@
-add_executable(bag_storage_tests storage_tests.cpp)
+add_executable(bag_storage_tests storage_tests.cpp ../src/recorder.cpp)
+target_compile_definitions(bag_storage_tests PRIVATE VINC_BAG_TESTING)
 target_link_libraries(bag_storage_tests PRIVATE vinc::bag vinc::sqlite vinc::osal vinc_message_fixture)
 add_test(NAME bag.storage COMMAND bag_storage_tests "$<TARGET_FILE:bag_storage_tests>")
 set_tests_properties(bag.storage PROPERTIES TIMEOUT 180)

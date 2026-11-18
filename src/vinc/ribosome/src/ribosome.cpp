@@ -620,7 +620,7 @@ std::vector<MessageInfo> Ribosome::load() {
     }
 
     std::vector<MessageInfo> messages;
-    std::set<std::string> file_names{"all_messages", "message_types"};
+    std::set<std::string> file_names{"all_messages", "message_types", "message_names"};
     for (const auto& path : paths) {
         MessageInfo message;
         message.path = path;
@@ -1113,6 +1113,34 @@ std::int8_t Ribosome::make_ligand() {
         }
         catalog << "}\n}\n";
         write_file(stage.path / "message_types.hpp", catalog.str());
+        // Recorders need identity labels, not concrete classes or template dispatch.
+        // Keep this header standard-library-only, including for installed consumers.
+        std::ostringstream names;
+        names << "#pragma once\n#include <array>\n#include <cstdint>\n#include <string_view>\n"
+                 "namespace vinc::message {\n"
+                 "struct MessageName {\n    std::uint64_t hash;\n    std::string_view name;\n};\n"
+              << "inline constexpr std::array<MessageName, " << messages.size() << "> message_names{{\n";
+        for (const auto& message : messages) {
+            names << "    {" << message.hash << "ULL, \"" << message.name << "\"},\n";
+        }
+        names << "}};\n"
+                 "inline std::string_view name_for_hash(std::uint64_t hash) noexcept {\n"
+                 "    for (const auto& entry : message_names) {\n"
+                 "        if (entry.hash == hash) {\n"
+                 "            return entry.name;\n"
+                 "        }\n"
+                 "    }\n"
+                 "    return {};\n"
+                 "}\n"
+                 "inline std::uint64_t hash_for_name(std::string_view name) noexcept {\n"
+                 "    for (const auto& entry : message_names) {\n"
+                 "        if (entry.name == name) {\n"
+                 "            return entry.hash;\n"
+                 "        }\n"
+                 "    }\n"
+                 "    return 0;\n"
+                 "}\n}\n";
+        write_file(stage.path / "message_names.hpp", names.str());
         publish_staging(stage, paths.output);
 
         std::cout << "Generated " << messages.size() << " message classes at " << path_text(paths.output) << '\n';

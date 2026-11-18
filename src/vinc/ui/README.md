@@ -334,6 +334,23 @@ Debug 既有 `module.shell`、`message_bus.shell`、`bag.shell` 亦通過。
 
 ## Outstanding work / 待處理事項
 
+<a id="large-typed-catalogs"></a>
+
+### Large typed catalogs / 大型 typed 型別清單（2026-11-18）
+
+Recorder's isolated cost fixture generated 137 message classes. On MSVC 19.51
+Release, the unchanged `module/topic_monitor.cpp` exceeded the normal object
+section limit (C1128). Both A/B fixture builds explicitly use `/bigobj`; production
+UI flags and behavior were not changed. Topic Monitor still instantiates typed
+preview code, so generic Recorder does not eliminate UI compile scaling costs.
+Evidence: local `build/image-stage4-cost-win-r3/typed-full.log`.
+Review UI catalog/preview compilation separately; do not remove typed preview
+validation just to reduce build costs.
+
+Recorder 成本驗收的 137 型別外部 App 讓 UI 的 `topic_monitor.cpp` 出現 C1128。
+兩組測試均明確加 `/bigobj` 後重跑；正式 UI 本輪未修改。這是 UI typed preview
+的另一項編譯成本，需另案評估，不能宣稱 Recorder 改版已消除整個 App 的模板成本。
+
 <a id="local-windows-port-validation"></a>
 
 ### Local Windows port validation (2026-11-04) / 本機端口驗收與後續結果

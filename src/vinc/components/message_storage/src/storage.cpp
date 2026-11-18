@@ -1457,8 +1457,8 @@ Result<void> validate_schema(ImageType& image, std::uint64_t id, Type expected) 
     return {};
 }
 
-Result<std::shared_ptr<Image>> make_image(State& state, std::uint64_t maximum) {
-    auto positions_result = calculate_layout(state.plan, true);
+Result<std::shared_ptr<Image>> make_image(State& state, const Plan& plan, std::uint64_t maximum) {
+    auto positions_result = calculate_layout(plan, true);
     if (!positions_result) {
         return std::unexpected(positions_result.error());
     }
@@ -1469,7 +1469,7 @@ Result<std::shared_ptr<Image>> make_image(State& state, std::uint64_t maximum) {
     }
 
     auto image = std::make_shared<Image>();
-    auto bytes_result = render(state, state.plan, positions, true);
+    auto bytes_result = render(state, plan, positions, true);
     if (!bytes_result) {
         return std::unexpected(bytes_result.error());
     }
@@ -2749,6 +2749,114 @@ Result<void> populate_readonly_plan(Plan& plan, const Image& image) {
     }
     return {};
 }
+
+Result<void> validate_record_root(const Image& image, std::uint64_t expected_hash) {
+    if (image.roots.size() != 1) {
+        return std::unexpected(Error{ErrorCode::InvalidData});
+    }
+
+    const auto& root = image.entries[image.roots.front()];
+    if (root.type.scalar != 0 || root.type.depth != 0 || root.type.hash != expected_hash) {
+        return std::unexpected(Error{ErrorCode::TypeMismatch});
+    }
+
+    return {};
+}
+
+// Import only used scalar bytes. The Image outlives this plan and rendering;
+// no mutable State facade or schema pointers are needed to compact the image.
+Result<Plan> image_render_plan(const Image& image) {
+    Plan plan;
+    auto populated = populate_readonly_plan(plan, image);
+    if (!populated) {
+        return std::unexpected(populated.error());
+    }
+
+    for (auto root : image.roots) {
+        plan.roots.push_back({root, root + 1});
+    }
+    for (auto& node : plan.nodes) {
+        if (!is_scalar_array(node.type)) {
+            continue;
+        }
+
+        auto width = element_width(node.type);
+        if (!width) {
+            return std::unexpected(width.error());
+        }
+
+        // validate() already bounded offset and capacity * width by image size.
+        const auto length = static_cast<std::size_t>(node.size * *width);
+        node.imported = image.bytes().subspan(static_cast<std::size_t>(node.offset), length);
+    }
+    return plan;
+}
+}
+
+Result<Snapshot> FrameworkAccess::adopt_image(std::vector<std::byte> bytes,
+    std::uint64_t expected_hash, std::uint64_t maximum) {
+    auto result = with_allocation_errors(ErrorOperation::ValidateImage, [&]() -> Result<Snapshot> {
+        if (expected_hash == 0) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument});
+        }
+        if (bytes.size() > maximum) {
+            return std::unexpected(Error{ErrorCode::CapacityExceeded});
+        }
+
+        auto image = std::make_shared<Image>();
+        image->owned = std::move(bytes);
+        auto validated = validate(*image);
+        if (!validated) {
+            return std::unexpected(validated.error());
+        }
+
+        auto root = validate_record_root(*image, expected_hash);
+        if (!root) {
+            return std::unexpected(root.error());
+        }
+
+        return Snapshot(std::move(image));
+    });
+    if (!result && result.error().is(ErrorCode::SizeOverflow)) {
+        result.error().code = static_cast<std::int32_t>(ErrorCode::InvalidData);
+    }
+    return result;
+}
+
+Result<Snapshot> FrameworkAccess::canonical_image(const Snapshot& snapshot, std::uint64_t maximum) {
+    return with_allocation_errors(ErrorOperation::Snapshot, [&]() -> Result<Snapshot> {
+        if (!snapshot.image_) {
+            return std::unexpected(Error{ErrorCode::Closed});
+        }
+
+        const auto& image = *snapshot.image_;
+        if (image.owner) {
+            return std::unexpected(Error{ErrorCode::InvalidArgument});
+        }
+        if (image.roots.size() != 1) {
+            return std::unexpected(Error{ErrorCode::InvalidData});
+        }
+
+        auto root = validate_record_root(image, image.entries[image.roots.front()].type.hash);
+        if (!root) {
+            return std::unexpected(root.error());
+        }
+
+        auto plan = image_render_plan(image);
+        if (!plan) {
+            return std::unexpected(plan.error());
+        }
+
+        // All scalar sources are immutable imports in plan. The empty State
+        // supplies no backing storage and is never exposed to the caller.
+        State source;
+        auto canonical = make_image(source, *plan, maximum);
+        if (!canonical) {
+            return std::unexpected(canonical.error());
+        }
+
+        return Snapshot(std::move(*canonical));
+    });
 }
 
 Result<Binding> copy_image_record(const std::shared_ptr<const Image>& image, std::uint64_t id, Type type) {
@@ -2846,7 +2954,7 @@ Result<Snapshot> snapshot(const std::shared_ptr<State>& state_ptr, std::uint64_t
         }
 
         auto state_ref = std::move(*state_ref_result);
-        auto image_result = make_image(state_ref.get(), maximum);
+        auto image_result = make_image(state_ref.get(), state_ref.get().plan, maximum);
         if (!image_result) {
             return std::unexpected(image_result.error());
         }

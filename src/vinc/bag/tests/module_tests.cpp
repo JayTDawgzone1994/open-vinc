@@ -294,17 +294,51 @@ int main(int argc, char** argv) {
             auto info = bag::inspect(root / "unknown");
             return info && info->topics.size() == 1;
         });
+        // Persisting discovery metadata can precede the subscription ACK.
+        // Observe the actual endpoint before publishing the one required image.
+        until([&] {
+            return take(manager->command("first", {"subscribers"},
+                std::chrono::steady_clock::now() + operation_budget)) == 1;
+        });
         command(*manager, "first", {"push", "6", "64"});
+        until([&] {
+            auto info = bag::inspect(root / "unknown");
+            return info && info->counters.written == 1;
+        });
         command(*manager, "recorder", {"status"});
         stop(*manager, "recorder");
         auto unknown = take(bag::inspect(root / "unknown"));
-        check(unknown.completed && unknown.counters.written == 0 && !unknown.topics.front().topic.supported,
-              "unknown type preserves metadata only");
+        check(unknown.completed && unknown.counters.written == 1 && !unknown.topics.front().topic.type_known,
+              "unknown type records payload without concrete headers");
+        {
+            sqlite3* raw_database = nullptr;
+            const auto filename = take(osal::path_to_utf8(root / "unknown" / "recording.sqlite"));
+            const auto opened = sqlite3_open_v2(filename.c_str(), &raw_database, SQLITE_OPEN_READONLY, nullptr);
+            std::unique_ptr<sqlite3, decltype(&sqlite3_close)> database(raw_database, sqlite3_close);
+            check(opened == SQLITE_OK, "open unknown image recording");
+            sqlite3_stmt* raw_statement = nullptr;
+            const auto prepared = sqlite3_prepare_v2(database.get(), "SELECT payload FROM messages",
+                                                     -1, &raw_statement, nullptr);
+            std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> statement(raw_statement, sqlite3_finalize);
+            check(prepared == SQLITE_OK && sqlite3_step(statement.get()) == SQLITE_ROW, "unknown payload exists");
+            const auto* bytes = static_cast<const std::byte*>(sqlite3_column_blob(statement.get(), 0));
+            const auto size = static_cast<std::size_t>(sqlite3_column_bytes(statement.get(), 0));
+            auto decoded = take(Frame::from_bytes({bytes, size}));
+            check(decoded->data().sequence == 6 && decoded->data().payload.size() == 64,
+                  "external schema decodes unknown recorded payload");
+            for (auto byte : std::as_const(decoded->data().payload)) {
+                check(byte == 6, "unknown payload bytes preserved");
+            }
+            check(decoded->data().detections.size() == 1 && decoded->data().detections[0].data().id == 6 &&
+                      decoded->data().detections[0].data().label.str() == "nested detection",
+                  "unknown nested record and string preserved");
+            check(sqlite3_step(statement.get()) == SQLITE_DONE, "unknown exactly once");
+        }
         start(*manager, "bagRecorder", {});
         command(*manager, "recorder", {"info", path_text("known")});
         until([&] {
             drain_output();
-            return trace.find("unsupported type") != std::string::npos &&
+            return trace.find("unknown type (recording image)") != std::string::npos &&
                    trace.find("unknown type") != std::string::npos;
         });
         sqlite3* database = nullptr;

@@ -1,6 +1,6 @@
 #pragma once
 #include <vinc/bag/error.hpp>
-#include <vinc/message/generated.hpp>
+#include <vinc/message_bus/detail/image_subscription.hpp>
 #include <vinc/config.hpp>
 #include <filesystem>
 #include <cstddef>
@@ -23,7 +23,8 @@ struct Topic {
     std::string name;
     std::string type;
     std::uint64_t schema = 0;
-    bool supported = true;
+    // Name catalog knowledge at recording time, not payload recordability.
+    bool type_known = true;
 };
 
 struct Counters {
@@ -77,13 +78,14 @@ class Recorder {
     explicit Recorder(std::unique_ptr<Impl>);
 
 public:
-    using Encoder = Result<message::Snapshot> (*)(const BaseMessage&, std::uint64_t);
     ~Recorder();
     Recorder(const Recorder&) = delete;
     Recorder& operator=(const Recorder&) = delete;
     static Result<std::unique_ptr<Recorder>> create(const std::filesystem::path&, Options = {});
     Result<void> discover(Topic);
-    Result<void> enqueue(std::unique_ptr<BaseMessage>, std::uint64_t retained_bytes, Encoder);
+    // Charges the owned payload allocation; validator metadata and worker output
+    // are additional memory. Admission never waits for canonicalization or I/O.
+    Result<void> enqueue(message_bus::detail::ImageDelivery);
     void observe_losses(std::uint64_t overwritten, std::uint64_t oversized);
     void finish(std::optional<Error> failure = {});
     Result<void> wait();

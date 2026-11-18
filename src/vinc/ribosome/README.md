@@ -348,12 +348,17 @@ No full-project rerun or isolated-script rerun in that round; Linux/macOS/MinGW 
 
 ## Compile-time message list (2026-10-12) / 編譯期訊息清單（2026-10-12）
 
-message_types.hpp provides visit_types(visitor), invoking visitor.template operator()<T>() per generated type. Recorder uses it for typed subscriptions without Bag/runtime-registry dependency. message_types/all_messages are reserved output names; hashes/layout unchanged.
+`message_types.hpp` provides `visit_types(visitor)` for typed consumers such as
+Python bindings. Recorder instead includes `message_names.hpp`: a generated
+standard-library-only `std::array` of hash/name entries, with `name_for_hash()` and
+`hash_for_name()` lookup (linear scan; unknown returns empty/zero). It includes no
+message class, schema factory or runtime registry. All three catalog filenames
+(`all_messages`, `message_types`, `message_names`) are reserved, case-insensitively.
+This changes neither schema hashes nor image layouts.
 
-生成目錄增加 message_types.hpp，提供 `vinc::message::visit_types(visitor)`；
-對每個生成類別呼叫 visitor 的 template operator()<T>()。
-Bag Recorder 用它建立已知型別的 typed subscription，不引入 Bag 相依或 runtime registry。
-message_types 與 all_messages 同為保留輸出名稱；schema hash／image layout 不因清單而改變。
+Recorder 改用輕量 `message_names.hpp`，只含 hash／名稱及查詢，不再展開 typed visitor。
+未知 hash 回空名稱，未知名稱回零；線性查詢用於探索／資訊，不在逐筆正文處理路徑。
+三個 catalog 檔名均為保留名稱，大小寫碰撞也拒絕。原本 typed visitor 保留給其他用途。
 
 Python also uses this list plus generated ribosome_visit_fields/constants for compile-time field/index and constant metadata. These integration APIs introduce no Python runtime dependency/hash/layout changes. Language/conversion/loan limits are in [Python](../module_system/python/README.md).
 
@@ -371,7 +376,7 @@ Repeat --input: first replaces the default, later inputs append, canonical dupli
 CLI 可重複 `--input`，第一個取代預設目錄、後續追加；同一 canonical 目錄去重。
 將所有目錄的直接 `.msg` 合併後統一解析，相依可跨目錄；名稱／大小寫碰撞與循環仍拒絕。
 輸出與所有輸入目錄、模板都檢查重疊，避免清理生成檔時移除使用者定義。
-一次生成完整 all_messages.hpp／message_types.hpp；schema 格式與 hash 計算未改。
+一次生成完整 all_messages.hpp／message_types.hpp／message_names.hpp；schema 格式與 hash 計算未改。
 CMake 登記入口由本元件的 cmake/VincMessages.cmake 提供，見 [SDK](../sdk/README.md)。
 
 <a id="待處理事項"></a>

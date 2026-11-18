@@ -137,6 +137,7 @@ struct TopicConnectionsPage {
 namespace detail {
 struct PublisherCore;
 struct SubscriberCore;
+class ImageAccess;
 struct LoanCore;
 class RuntimeAccess;
 class DispatchAccess;
@@ -217,6 +218,7 @@ public:
 // Registration may wait for the central BusManager; normal payload transfers use shared memory.
 class Client {
     friend class detail::RuntimeAccess;
+    friend class detail::ImageAccess;
     struct Impl;
     std::shared_ptr<Impl> impl_;
     explicit Client(std::shared_ptr<Impl>);

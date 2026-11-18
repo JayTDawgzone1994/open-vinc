@@ -1,6 +1,7 @@
 // Compile actual generator output: successful generation alone cannot validate
 // C++ name lookup or the meaning of emitted literals.
 #include <vinc_messages/message_types.hpp>
+#include <vinc_messages/message_names.hpp>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -28,7 +29,9 @@ static_assert(Constants::Base == 7);
 int main() {
     std::size_t known_types = 0;
     vinc::message::visit_types([&]<class T> {
-        if (T::schema().hash != 0) {
+        if (T::schema().hash != 0 &&
+            vinc::message::name_for_hash(T::schema().hash) == T::message_name &&
+            vinc::message::hash_for_name(T::message_name) == T::schema().hash) {
             ++known_types;
         }
     });
