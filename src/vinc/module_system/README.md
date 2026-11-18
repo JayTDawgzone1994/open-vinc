@@ -5,9 +5,9 @@
 **Central control wakeup integrated (2026-11-17):** ModuleManager now binds its
 single supervisor to ReceiveWake. Bounded fair passes continue runnable backlogs;
 RPC downstream saturation waits for the absolute supervision fallback. See the
-[central control wakeup contract](CONTROL_WAKEUP.md) and [stage-four acceptance](CONTROL_WAKEUP_VALIDATION.md) for Windows/WSL integration, fresh SDK relocation, matched costs and the remaining macOS handoff.
+[central control wakeup contract](CONTROL_WAKEUP.md) and [stage-four acceptance](CONTROL_WAKEUP_VALIDATION.md) for Windows/WSL integration and matched costs. See [macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) for native CTest, clean SDK and cost results.
 **中央已接線：** 收件、管理及停止共用可靠等待；每 Module 每輪最多 16 幀，RPC deferred
-依 20 ms 補查，滿載不自行忙迴圈。Windows／WSL 四階段及成本驗收完成，Mac 待驗見根 TODO；這與 Context pump 喚醒及 Bus 拓樸修復是不同工作。
+依 20 ms 補查，滿載不自行忙迴圈。Windows／WSL 驗收及後續 Mac 原生結果各見上述報告。
 
 App packages group native Plugins under `modules/native/<ModuleType>/` and Python
 Modules under `modules/python/<ModuleType>/`. `add_python_module()` participates

@@ -5,8 +5,9 @@ Date / 日期: 2026-11-10.
 ## Status and responsibility / 狀態與文件責任
 
 **Stages 1–4 implemented; Windows/WSL integration and cost runs recorded.** Native
-macOS source and fresh SDK-only functional acceptance is recorded below; cost
-measurement remains open. The serial Context investigation identified a Host teardown
+macOS source and fresh SDK-only functional acceptance is recorded below. The
+[November 19 report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md#parallel-pump)
+records the native Release cost matrix on entry 23. The serial Context investigation identified a Host teardown
 race; its repair and current regression status are recorded in the
 [shutdown validation](CONTEXT_SHUTDOWN_VALIDATION.md). The owner approved concurrent
 Topic/control callbacks, callback drain before `on_stop()`, and the Python GIL
@@ -14,7 +15,7 @@ limitation. This document records the target behavior and implementation plan;
 writing it does not authorize later stages or establish performance evidence.
 `PumpOptions` and `topic_workers` are now the stage-1 C++ API spellings.
 
-**第一至四階段已實作並完成 Windows／WSL 驗收；Mac 來源及乾淨 SDK 功能已補驗，成本待補。** Context 調查已定位並修正 Host 收尾競爭，本次回歸狀態見上述驗收紀錄。使用者同意控制工作與 Topic callback 並行、
+**第一至四階段已實作並完成 Windows／WSL 驗收；Mac 來源及乾淨 SDK 功能與成本矩陣也已補驗。** Context 調查已定位並修正 Host 收尾競爭，本次回歸狀態見上述驗收紀錄。使用者同意控制工作與 Topic callback 並行、
 先結束框架 callback 再執行 `on_stop()`，以及 Python 的 GIL 限制。
 本文件是本次改動的主契約；SDK／搬移及成本結果見第四階段，不能宣稱三平台全部驗收完成或所有已知問題均已解決。
 

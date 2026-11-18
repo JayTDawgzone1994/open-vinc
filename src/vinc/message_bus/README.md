@@ -55,9 +55,10 @@ The [control-plane repair contract / 控制面修復開工契約](CONTROL_PLANE_
 
 Stage 5 Windows/WSL Debug and Release integration, load and clean C++/Python SDK checks
 passed on 2026-11-16. The linked report distinguishes sampled storage, whole-process
-memory and the old wire-format size model; native macOS acceptance remains pending.
+memory and the old wire-format size model. Native results are recorded in the
+[macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md).
 第五階段 Windows／WSL Debug、Release 的整合、負載與乾淨 C++／Python SDK 驗收已通過。
-成本取樣與限制見上述報告；不能以此代替 macOS 原生驗收。
+成本取樣與限制見上述報告，後續 Mac 原生結果另列。
 
 A Subscriber skips a missing Publisher mapping while the Host checks its registration in the background. Other Publishers remain readable. 若同一 Topic 的所有來源都沒有可讀資料，`get_last()` 回 `NoPublishedData`，pump 繼續派送其他工作。中央確認仍有登記且重新開啟仍失敗時，讀取端會收到原始錯誤。見[退場驗收](CONTROL_PLANE_REPAIR.md#第四階段延後套用更新與第一次開啟共享區)。
 

@@ -32,7 +32,7 @@ Socket 與 Bus；不是 mock，也不代表外部 MMDD 的 491 筆初始化通�
 Measurements / 量測邊界：
 
 - `phases.csv`: central-process CPU time, wall time, supervisor passes/wait returns,
-  threads, handles (Windows) or FDs (Linux), RSS and process-lifetime peak RSS.
+  threads, handles (Windows) or FDs (Linux/macOS), RSS and process-lifetime peak RSS.
 - `parent.csv` / `child.csv`: fixed-capacity in-memory frame checkpoints, written
   after shutdown. Paired using generation/domain/operation/request IDs. Durations
   subtract timestamps only within one process, not across clock epochs.
@@ -49,7 +49,9 @@ Measurements / 量測邊界：
   follows from this cost fixture. Behavioral regression and SDK relocation are
   separate acceptance gates.
 
-The resource sampler currently supports Windows and Linux. macOS needs native
-sampling and a fresh comparison; Windows/WSL results do not establish Mac costs.
-Mac 功能與 installed SDK 驗收仍按根 TODO／CONTROL_WAKEUP 契約執行；本工具的
-Mac 資源採樣尚未實作，不應假裝是已完成的跨平台效能測試。
+The macOS sampler queries libproc for threads, resident bytes and open FDs.
+`getrusage(RUSAGE_SELF)` provides central CPU time and process-lifetime peak RSS
+in bytes. The sample includes the cost of querying the process.
+
+macOS 以 libproc 取得中央執行緒數、當下 RSS 與開啟的 FD，並以
+`getrusage(RUSAGE_SELF)` 取得 CPU 時間及程序生命週期 RSS 峰值（bytes）。

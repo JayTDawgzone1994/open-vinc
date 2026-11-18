@@ -463,3 +463,6 @@ acceptance is tracked in the root TODO.
 [第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)已由新 Debug／Release SDK-only producers
 重跑 installed Recorder，含搬移後 64 筆錄製與關閉；另驗兩個 C++ App 的 Recorder／退出隔離。
 512 筆內容／順序及受控等待分支仍由第二階段來源測試負責，不混成相同工作負載。
+
+2026-11-19 macOS 原生 Debug／Release 的 Bag v3、乾淨 SDK／搬移雙 App 及 Release 成本結果
+見[Recorder 與控制面補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。

@@ -12,13 +12,13 @@ Plugin entry 23 additionally identifies Context's internal image dispatch layout
 See [image subscriptions](../bag/IMAGE_RECORDING.md#stage-2-validation) and
 [fresh SDK acceptance](../bag/IMAGE_RECORDING.md#stage-4-validation).
 Plugin entry 23 另包含 Context 通用映像派送結構；Windows／WSL Debug、Release
-已通過本輪乾淨 SDK／雙 App 搬移驗收，Mac 仍待原生驗證。
+已通過本輪乾淨 SDK／雙 App 搬移驗收，Mac 後續也完成[原生驗收](MACOS_RECORDER_CONTROL_VALIDATION.md)。
 
 Central receive-wakeup integration is also exercised by fresh Debug/Release SDK
 producers and relocated consumers on Windows/WSL; see the [acceptance report](../module_system/CONTROL_WAKEUP_VALIDATION.md)
 for actual counts, retries and native macOS handoff. No new public SDK API was added.
 中央接收喚醒已納入 Windows／WSL 乾淨 SDK 與搬移驗收；沒有新增公開 SDK API，
-實際結果、重跑限制及 Mac 待驗清單統一見上述報告。
+實際結果與重跑限制見 Windows／WSL 報告及上述 Mac 原生報告。
 
 `<vinc/module/pump_options.hpp>` is included in the installed header tree and
 the public first-include smoke check. `sdk.installed_python` now enables two

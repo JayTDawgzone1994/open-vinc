@@ -1,7 +1,7 @@
 # Central receive wakeup acceptance / 中央接收喚醒驗收
 
-Status: stage-four Windows/WSL acceptance completed (2026-11-17); native macOS
-remains pending. This report records
+Status: stage-four Windows/WSL acceptance completed (2026-11-17). The
+[2026-11-19 macOS report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records the native follow-up. This report records
 actual runs, including unsuccessful attempts; it does not replace the approved
 [contract](CONTROL_WAKEUP.md).
 
@@ -187,5 +187,5 @@ output; compact results and source hashes accompany this report.
 macOS must rebuild this same content and run Debug/Release receive-wake, fair
 scheduler/RPC-full, lifecycle/exit, Bus, Param, RPC and fresh installed SDK plus
 relocation. The cost sampler requires native Mac implementation/measurement.
-No Windows/WSL evidence substitutes for that work. Root TODO retains the handoff.
+The [macOS report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records this follow-up on the later integrated revision.
 The external MMDD 491-registration / 30-second Ready acceptance remains separate.
