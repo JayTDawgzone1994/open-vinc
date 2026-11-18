@@ -1,12 +1,12 @@
 # Central control wakeup / 中央控制接收喚醒契約
 
-**Status: stages one through four completed on Windows/WSL (2026-11-17); native macOS remains pending.**
+**Status: stages one through four completed on Windows/WSL (2026-11-17). The [macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records later native results.**
 The central supervisor wakes on received control work while retaining its
 single-owner lifecycle model, bounded fair passes and 20 ms supervision fallback.
 This document owns the cross-component change contract and acceptance plan.
 It does not authorize later stages or imply completion beyond the recorded validation.
 
-**狀態：2026-11-17 Windows／WSL 四階段完成；Mac 原生驗收另列待辦。** 最新整合、乾淨 SDK／搬移與成本結果見[第四階段驗收](CONTROL_WAKEUP_VALIDATION.md)。各階段仍依
+**狀態：2026-11-17 Windows／WSL 四階段完成；Mac 原生結果見上述報告。** 最新整合、乾淨 SDK／搬移與成本結果見[第四階段驗收](CONTROL_WAKEUP_VALIDATION.md)。各階段仍依
 [AGENTS](../../../AGENTS.md) 的開工規則執行。Control Channel 的一般契約見
 [README](../control_channel/README.md)，Module 生命週期見 [Module System README](README.md)。
 

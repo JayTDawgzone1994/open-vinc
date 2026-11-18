@@ -20,7 +20,9 @@ REPETITIONS = 3
 def run(command, cwd, log, compiler=False):
     start = time.perf_counter()
     statistics = {}
-    if compiler and os.name != "nt":
+    if compiler and sys.platform == "darwin":
+        command = ["/usr/bin/time", "-l", *shlex.split(command)]
+    elif compiler and os.name != "nt":
         command = ["/usr/bin/time", "-v", "-o", str(log.with_suffix(".time")), *shlex.split(command)]
     with log.open("wb") as output:
         process = subprocess.Popen(command, cwd=cwd, stdout=output, stderr=subprocess.STDOUT,
@@ -57,6 +59,13 @@ def run(command, cwd, log, compiler=False):
             raise ctypes.WinError(ctypes.get_last_error())
         statistics["peak_rss_bytes"] = counters.PeakWorkingSetSize
         statistics["peak_commit_bytes"] = counters.PeakPagefileUsage
+    elif compiler and sys.platform == "darwin":
+        # BSD time reports the compiler invocation's peak RSS in bytes.
+        report = log.read_text()
+        match = re.search(r"^\s*(\d+)\s+maximum resident set size\s*$", report, re.MULTILINE)
+        if not match or int(match[1]) == 0:
+            raise RuntimeError(f"Missing Darwin peak RSS sample; see {log}")
+        statistics["peak_rss_bytes"] = int(match[1])
     elif compiler:
         report = log.with_suffix(".time").read_text()
         statistics["peak_rss_bytes"] = int(re.search(r"Maximum resident set size \(kbytes\): (\d+)", report)[1]) * 1024
@@ -73,8 +82,8 @@ def main():
     parser.add_argument("--ninja", default="ninja")
     parser.add_argument("--msvc-state", type=Path)
     args = parser.parse_args()
-    if os.name != "nt" and sys.platform != "linux":
-        parser.error("This cost sampler needs a native macOS implementation; do not substitute Linux RSS data.")
+    if os.name != "nt" and sys.platform not in ("darwin", "linux"):
+        parser.error("Build cost sampling supports Windows, Linux and macOS.")
     if args.msvc_state:
         state = json.loads(args.msvc_state.read_text("utf-8"))["toolchain"]["msvc_environment"]
         os.environ.update(state)

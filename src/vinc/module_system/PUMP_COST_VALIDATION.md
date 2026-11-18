@@ -16,7 +16,7 @@ priority was imposed. Other desktop/OS activity was not eliminated.
 | --- | --- |
 | Windows 11 x64, build 26200 | MSVC 19.51.36257, CMake 4.3.2, Ninja, Release `/O2 /MD`; driver CPython 3.13.12 |
 | WSL2 Ubuntu 24.04 x64, kernel 6.18.54.1, glibc 2.39 | GCC/libstdc++ 13.3.0, CMake 3.28.3, Ninja, Release `-O3`; driver CPython 3.12.3 |
-| Native macOS | Pending; root TODO contains the native test/cost matrix |
+| Native macOS arm64 | Release cost matrix recorded separately on entry 23 in the [November 19 report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md#parallel-pump) |
 
 The driver executes 48 fresh Module processes per platform: 0/1/2/4 additional
 workers × 1/4 Topics × cheap/heavy callbacks × 3 repetitions, deterministically
@@ -138,3 +138,5 @@ maintained beside them. Ignored Windows logs/Tcl/environment metadata are under
 The earlier concurrent-build pilot is excluded from these CSVs and conclusions.
 Windows Module SHA-256: `3f1b2ba0aedc00fdf8dfca94bbdbacc2060b9891b96f9d4a1e7fe310cb2787d7`.
 WSL Module SHA-256: `db144012890c44c0e9201c80918bc3582afc03e927b561097654abf0aa61ddb5`.
+
+macOS arm64 的 Release 成本矩陣於 2026-11-19 在 entry 23／Bus v6 以同一 fixture 補驗，見[原生報告](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。

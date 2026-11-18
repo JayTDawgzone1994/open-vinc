@@ -1,6 +1,6 @@
 # Message Bus control-plane repair / Message Bus 控制面修復契約
 
-**2026-11-16，第一至五階段的 Windows／WSL 功能、負載與成本驗收見文末；macOS 原生驗收仍待完成。** 基線為 PR #35 的 `fc27d27`，本輪測試使用其上的未提交工作樹，不能當成未修改基線的結果。Bus v5 的三個缺陷已有可執行的回歸測試，回收 ACK 後的請求期限與 Publisher 預留交接已修正。
+**2026-11-16，第一至五階段的 Windows／WSL 功能、負載與成本驗收見文末；後續 macOS 原生驗收見[獨立報告](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。** 基線為 PR #35 的 `fc27d27`，本輪測試使用其上的未提交工作樹，不能當成未修改基線的結果。Bus v5 的三個缺陷已有可執行的回歸測試，回收 ACK 後的請求期限與 Publisher 預留交接已修正。
 
 ## 已確認的同步範圍與落後政策
 
@@ -250,5 +250,5 @@ Bus／RPC／Param／pump、C++ 互通、SDK／App 搬移、錯誤 ABI 拒絕、m
 這是 installed SDK 的 Python 整合範圍，不代表另跑了全專案所有 Python 測試。
 
 macOS 需以同一提交重建並重跑原生 Debug／Release、負載、SDK 與搬移流程，
-另記 compiler、標準庫、SDK、Python 及成本計數。Windows／WSL 結果不替代 Mac；
-待驗項目保留在根目錄 TODO。
+另記 compiler、標準庫、SDK、Python 及成本計數。整合後的 macOS 原生結果見
+[2026-11-19 補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。

@@ -3,13 +3,13 @@
 Date / 日期：2026-11-17
 
 **Status: stages 1–3 implemented on 2026-11-18; validation is recorded per stage below.
-Stage 4 Windows/WSL acceptance is complete; native macOS remains pending.**
+Stage 4 Windows/WSL acceptance is complete. See the [macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) for native results.**
 The owner approved structural validation without concrete field-schema validation,
 and recording valid payloads even when the Recorder has no corresponding C++ type.
 This document does not authorize implementation; each stage follows the project
 [authorization rules](../../../AGENTS.md).
 
-**狀態：第一至三階段已實作；第四階段 Windows／WSL 驗收完成，Mac 待原生驗證。**
+**狀態：第一至三階段已實作；第四階段 Windows／WSL 驗收完成，Mac 結果見上述原生報告。**
 使用者已同意下方兩項行為取捨。已實作的 Storage、Bus、Context 與 Recorder 契約由各自 README 維護；
 後續乾淨 SDK／搬移與成本驗收仍依分階段授權執行。現況見 [Bag README](README.md)。
 
@@ -423,7 +423,7 @@ SDK recipe 檢查另以 `VINC_INSTALL_SDK=ON` 配置並建置 `vinc_ribosome_sdk
 Windows and WSL functional acceptance passed on the stage 1–3 working tree.
 The following records distinguish compilation cost from Recorder process usage;
 they do not establish a saturated throughput guarantee or validate MMDD's workload.
-Native macOS remains pending, with the handoff below and in the root TODO.
+The [2026-11-19 macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records the later native runs on the integrated revision.
 
 ### Environment and integration / 環境與整合
 
@@ -545,5 +545,5 @@ Mac 必須以同版 native Debug／Release 重建，重跑上述元件與新 SDK
 App，驗正文、順序、metadata、finish 及真實回收。確認名稱表的 installed generator
 輸出一致、Recorder 依賴清單不帶具體 class，並重跑 Python typed 回歸。
 成本比較沿用相同 137 class／queue／ring／尺寸／筆數，先補 Mac 原生 CPU／RSS
-採樣（目前工具明確拒絕 Darwin，不能拿 Linux `/proc` 結果代用），記錄三次樣本、
+採樣（後續 Darwin 取樣方法見[成本工具](tests/image_cost/README.md)），記錄三次樣本、
 工具鏈／標準庫／架構與初次失敗。不以既有 typed Recorder 或其他平台通過取代。

@@ -24,6 +24,23 @@ QUEUE_BYTES = 64 * 1024 * 1024
 MESSAGE_BYTES = 128 * 1024
 
 
+class DarwinUsage(ctypes.Structure):
+    # Matches rusage_info_v0 in the Darwin SDK. CPU counters are Mach ticks.
+    _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [
+        (name, ctypes.c_uint64) for name in (
+            "user_time", "system_time", "package_idle_wakeups", "interrupt_wakeups",
+            "pageins", "wired_size", "resident_size", "physical_footprint",
+            "start_abstime", "exit_abstime")]
+
+
+RUSAGE_INFO_V0 = 0
+NANOSECONDS_PER_SECOND = 1_000_000_000
+
+
+class DarwinTimebase(ctypes.Structure):
+    _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+
 class Usage:
     def __init__(self, pid):
         self.pid = pid
@@ -41,8 +58,28 @@ class Usage:
                 raise ctypes.WinError(ctypes.get_last_error())
             self.psapi = ctypes.WinDLL("psapi", use_last_error=True)
             self.psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
+        elif sys.platform == "darwin":
+            self.darwin = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+            self.darwin.proc_pid_rusage.argtypes = [
+                ctypes.c_int, ctypes.c_int, ctypes.POINTER(DarwinUsage)]
+            self.darwin.proc_pid_rusage.restype = ctypes.c_int
+            self.darwin.mach_timebase_info.argtypes = [ctypes.POINTER(DarwinTimebase)]
+            self.darwin.mach_timebase_info.restype = ctypes.c_int
+            timebase = DarwinTimebase()
+            result = self.darwin.mach_timebase_info(ctypes.byref(timebase))
+            if result != 0 or not timebase.numer or not timebase.denom:
+                raise RuntimeError(f"mach_timebase_info failed ({result})")
+            self.seconds_per_tick = timebase.numer / timebase.denom / NANOSECONDS_PER_SECOND
 
     def read(self):
+        if sys.platform == "darwin":
+            counters = DarwinUsage()
+            result = self.darwin.proc_pid_rusage(self.pid, RUSAGE_INFO_V0, ctypes.byref(counters))
+            if result != 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error), self.pid)
+            cpu = (counters.user_time + counters.system_time) * self.seconds_per_tick
+            return cpu, counters.resident_size
         if os.name != "nt":
             values = Path(f"/proc/{self.pid}/stat").read_text().rsplit(")", 1)[1].split()
             cpu = (int(values[11]) + int(values[12])) / os.sysconf("SC_CLK_TCK")
@@ -189,8 +226,8 @@ def main():
     parser.add_argument("work", type=Path)
     parser.add_argument("--run-name", default="runtime")
     args = parser.parse_args()
-    if os.name != "nt" and sys.platform != "linux":
-        parser.error("Recorder CPU/RSS sampling currently supports Windows and Linux only.")
+    if os.name != "nt" and sys.platform not in ("darwin", "linux"):
+        parser.error("Recorder CPU/RSS sampling supports Windows, Linux and macOS.")
     spec = importlib.util.spec_from_file_location("runtime_fixture", args.repository / "src/vinc/sdk/tests/multi_app_runtime.py")
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)

@@ -6,9 +6,9 @@
 ReceiveWake primitive below. Existing receive_until callers retain their original
 queue/wait API; I/O publication invokes no upper-layer callbacks. See the
 [central control wakeup contract](../module_system/CONTROL_WAKEUP.md) for fair dispatch,
-deferred RPC backpressure, and [stage-four acceptance](../module_system/CONTROL_WAKEUP_VALIDATION.md) for Windows/WSL SDK/relocation/cost results and pending native macOS verification.
+deferred RPC backpressure, and [stage-four acceptance](../module_system/CONTROL_WAKEUP_VALIDATION.md) for Windows/WSL results. The [macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records native ReceiveWake and supervisor tests.
 **中央已接線：** ReceiveWake 供單一 supervisor 共用；原接收 API 不變，I/O thread
-不執行上層 callback。第一階段紀錄仍是修復前基線，Windows／WSL 整合與成本見第四階段報告；Mac 未驗證。
+不執行上層 callback。第一階段紀錄仍是修復前基線，Windows／WSL 整合與後續 Mac 原生驗收各見上述報告。
 
 ## Internal receive wake / 內部接收通知原語
 

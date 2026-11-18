@@ -1,6 +1,6 @@
 # Topic registration failure recovery / Topic 註冊失敗回收契約
 
-**狀態（2026-11-12）**　Windows 與 WSL 已驗證兩個 App 同時收發同名 Topic，以及其中一個中央崩潰後的重啟隔離。macOS 原生驗收待執行。
+**狀態（2026-11-12）**　Windows 與 WSL 已驗證兩個 App 同時收發同名 Topic，以及其中一個中央崩潰後的重啟隔離。後續 macOS 同名 Topic、FD 耗盡與回收結果見[原生補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。
 
 When exclusive creation of a Topic counter fails, the central process must retire its journal reservation as soon as it knows that this attempt left no owned native object to clean up. An uncertain rollback must remain recoverable after a crash.
 

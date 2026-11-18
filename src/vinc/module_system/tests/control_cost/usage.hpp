@@ -9,6 +9,11 @@
 #include <Windows.h>
 #include <Psapi.h>
 #include <TlHelp32.h>
+#elif defined(__APPLE__)
+#include <libproc.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#include <vector>
 #else
 #include <sys/resource.h>
 #endif
@@ -99,6 +104,39 @@ inline Usage usage() {
         throw std::runtime_error("getrusage failed");
     }
     result.peak_rss_bytes = std::uint64_t(counters.ru_maxrss) * 1024;
+    result.cpu_ms = double(counters.ru_utime.tv_sec + counters.ru_stime.tv_sec) * 1000.0 +
+        double(counters.ru_utime.tv_usec + counters.ru_stime.tv_usec) / 1000.0;
+#elif defined(__APPLE__)
+    const auto pid = getpid();
+    struct proc_taskinfo task{};
+    if (proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, sizeof(task)) != sizeof(task)) {
+        throw std::runtime_error("proc_pidinfo task sample unavailable");
+    }
+    result.rss_bytes = task.pti_resident_size;
+    result.threads = task.pti_threadnum;
+
+    const auto estimated_bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nullptr, 0);
+    if (estimated_bytes <= 0) {
+        throw std::runtime_error("proc_pidinfo FD size unavailable");
+    }
+    // The descriptor table may grow between the two calls.
+    constexpr std::size_t descriptor_headroom = 32;
+    std::vector<struct proc_fdinfo> descriptors(
+        std::size_t(estimated_bytes) / sizeof(struct proc_fdinfo) + descriptor_headroom);
+    const auto capacity_bytes = int(descriptors.size() * sizeof(struct proc_fdinfo));
+    const auto listed_bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, descriptors.data(), capacity_bytes);
+    if (listed_bytes <= 0 || listed_bytes >= capacity_bytes ||
+        listed_bytes % sizeof(struct proc_fdinfo) != 0) {
+        throw std::runtime_error("proc_pidinfo FD sample incomplete");
+    }
+    result.handles_or_fds = std::size_t(listed_bytes) / sizeof(struct proc_fdinfo);
+
+    rusage counters{};
+    if (getrusage(RUSAGE_SELF, &counters) != 0) {
+        throw std::runtime_error("getrusage failed");
+    }
+    // Darwin reports ru_maxrss in bytes.
+    result.peak_rss_bytes = std::uint64_t(counters.ru_maxrss);
     result.cpu_ms = double(counters.ru_utime.tv_sec + counters.ru_stime.tv_sec) * 1000.0 +
         double(counters.ru_utime.tv_usec + counters.ru_stime.tv_usec) / 1000.0;
 #else
