@@ -12,6 +12,7 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <variant>
 
 namespace vinc {
 namespace detail {
@@ -22,6 +23,7 @@ class TopicScheduler;
 struct ContextLockAccess;
 struct ContextLanguageAccess;
 struct ContextRpcAccess;
+struct ContextImageAccess;
 }
 
 struct PumpStats {
@@ -36,15 +38,20 @@ struct PumpStats {
 class Context {
     friend struct detail::ContextLanguageAccess;
     friend struct detail::ContextRpcAccess;
+    friend struct detail::ContextImageAccess;
     friend struct detail::ContextLockAccess;
     friend class detail::ModuleObject;
     friend class detail::ModuleMessageBusAccess;
     struct Subscription {
         std::string topic;
         std::shared_ptr<message_bus::detail::SubscriberCore> core;
-        const message::detail::Schema* schema;
-        message_bus::detail::Factory factory;
+        const message::detail::Schema* schema = nullptr;
+        message_bus::detail::Factory factory = nullptr;
         std::function<void(std::unique_ptr<BaseMessage>)> callback;
+        std::function<void(message_bus::detail::ImageDelivery)> image_callback;
+        using Delivery = std::variant<std::unique_ptr<BaseMessage>, message_bus::detail::ImageDelivery>;
+        Result<Delivery> read(const message_bus::detail::ReadBatch&);
+        void deliver(Delivery);
     };
     Context() = default;
     std::shared_ptr<message_bus::Client> client_;

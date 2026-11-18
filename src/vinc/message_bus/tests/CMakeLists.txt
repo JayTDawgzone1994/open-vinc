@@ -94,3 +94,6 @@ add_test(NAME message_bus.counter_registration COMMAND message_bus_cleanup_tests
 set_tests_properties(message_bus.counter_registration PROPERTIES TIMEOUT 30)
 add_test(NAME message_bus.notification_snapshots COMMAND message_bus_cleanup_tests notification-snapshots)
 set_tests_properties(message_bus.notification_snapshots PROPERTIES TIMEOUT 30)
+
+add_test(NAME message_bus.images COMMAND message_bus_cleanup_tests images)
+set_tests_properties(message_bus.images PROPERTIES TIMEOUT 45)

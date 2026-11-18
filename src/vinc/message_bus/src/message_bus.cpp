@@ -1298,10 +1298,11 @@ vinc::Result<void> refresh(SubscriberCore& subscriber) {
 
 // Merge one candidate per Publisher. Protect only the selected payload during memcpy;
 // validation and C++ facade construction happen after releasing the shared read lease.
-vinc::Result<std::unique_ptr<BaseMessage>> read_impl(const std::shared_ptr<SubscriberCore>& subscriber, bool latest,
-                                          const message::detail::Schema& schema, Factory factory, const ReadBatch* batch) {
+template<class Value, class Decode>
+Result<Value> read_impl(const std::shared_ptr<SubscriberCore>& subscriber, bool latest,
+                        const ReadBatch* batch, Decode decode) {
     const auto operation = latest ? ErrorOperation::GetLast : ErrorOperation::Next;
-    return guarded(operation, [&]() -> vinc::Result<std::unique_ptr<BaseMessage>> {
+    return guarded(operation, [&]() -> Result<Value> {
         if (!subscriber) {
             return std::unexpected(vinc::make_error(ErrorCode::Closed, operation));
         }
@@ -1386,13 +1387,11 @@ vinc::Result<std::unique_ptr<BaseMessage>> read_impl(const std::shared_ptr<Subsc
 
             std::memcpy(bytes.data(), ring_buffer.payload(candidate).data(), bytes.size());
             ring_buffer.unprotect(reader); // Only the bounded payload copy held the lease.
-            auto binding = message::detail::adopt_record(std::move(bytes), schema);
-            if (!binding) {
-                return std::unexpected(storage_error(binding.error(), operation));
+            auto value = decode(std::move(bytes), *subscriber, selected->attachment.descriptor, candidate);
+            if (!value) {
+                return std::unexpected(storage_error(value.error(), operation));
             }
 
-            auto value = factory(std::move(*binding));
-            MessageAccess::metadata(*value, subscriber->topic, selected->attachment.descriptor, candidate);
             // Advance only after a complete local message exists. get_last() intentionally
             // leaves all next() cursors unchanged, including when it returns the same message again.
             if (!latest) {
@@ -1457,14 +1456,71 @@ Result<ReadBatch> capture(const std::shared_ptr<SubscriberCore>& subscriber) {
     });
 }
 
+// Both decoders run after unprotect, while the local operation lock still owns
+// cursor advancement. A rejected image must not silently consume that cursor.
+Result<std::unique_ptr<BaseMessage>> decode_message(std::vector<std::byte> bytes,
+    const SubscriberCore& subscriber, const Descriptor& publisher, const Metadata& metadata,
+    const message::detail::Schema& schema, Factory factory) {
+    auto binding = message::detail::adopt_record(std::move(bytes), schema);
+    if (!binding) {
+        return std::unexpected(binding.error());
+    }
+
+    auto value = factory(std::move(*binding));
+    MessageAccess::metadata(*value, subscriber.topic, publisher, metadata);
+    return value;
+}
+
+Result<ImageDelivery> decode_image(std::vector<std::byte> bytes,
+    const SubscriberCore& subscriber, const Descriptor& publisher, const Metadata& metadata) {
+    const auto capacity = bytes.capacity();
+    const auto maximum = static_cast<std::uint64_t>(bytes.size());
+    auto image = message::detail::FrameworkAccess::adopt_image(std::move(bytes), subscriber.schema, maximum);
+    if (!image) {
+        return std::unexpected(image.error());
+    }
+
+    return std::make_unique<const ReceivedImage>(ReceivedImage{
+        std::move(*image), subscriber.topic, publisher.publisher, subscriber.schema,
+        publisher.id, metadata.count, metadata.timestamp, metadata.monotonic_timestamp, capacity});
+}
+
 Result<std::unique_ptr<BaseMessage>> read_batch(const std::shared_ptr<SubscriberCore>& subscriber,
     const ReadBatch& batch, const message::detail::Schema& schema, Factory factory) {
-    return read_impl(subscriber, false, schema, factory, &batch);
+    return read_impl<std::unique_ptr<BaseMessage>>(subscriber, false, &batch,
+        [&](auto bytes, const auto& core, const auto& publisher, const auto& metadata) {
+            return decode_message(std::move(bytes), core, publisher, metadata, schema, factory);
+        });
 }
 
 Result<std::unique_ptr<BaseMessage>> read(const std::shared_ptr<SubscriberCore>& subscriber,
     bool latest, const message::detail::Schema& schema, Factory factory) {
-    return read_impl(subscriber, latest, schema, factory, nullptr);
+    return read_impl<std::unique_ptr<BaseMessage>>(subscriber, latest, nullptr,
+        [&](auto bytes, const auto& core, const auto& publisher, const auto& metadata) {
+            return decode_message(std::move(bytes), core, publisher, metadata, schema, factory);
+        });
+}
+
+Result<ImageDelivery> read_image_batch(const std::shared_ptr<SubscriberCore>& subscriber, const ReadBatch& batch) {
+    return read_impl<ImageDelivery>(subscriber, false, &batch, decode_image);
+}
+
+Result<ImageDelivery> ImageSubscriber::get_last() {
+    return read_impl<ImageDelivery>(core_, true, nullptr, decode_image);
+}
+
+Result<ImageSubscriber> ImageAccess::subscribe(Client& client, std::string topic,
+    std::uint64_t schema_hash, SubscriberOptions options) {
+    if (!schema_hash) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Subscribe});
+    }
+
+    auto core = client.subscribe_raw(std::move(topic), schema_hash, options);
+    if (!core) {
+        return std::unexpected(core.error());
+    }
+
+    return ImageSubscriber(std::move(*core));
 }
 
 }

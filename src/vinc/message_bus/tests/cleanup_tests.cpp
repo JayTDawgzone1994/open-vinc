@@ -9,6 +9,8 @@
 #include <vinc_messages/Frame.hpp>
 #include <vinc/time.hpp>
 #include <vinc/common_error.hpp>
+#include <vinc/message/detail/framework_access.hpp>
+#include <vinc/message/detail/image_format.hpp>
 #include <algorithm>
 #include <atomic>
 #include <future>
@@ -328,6 +330,115 @@ void test_publication_notification_failure() {
     control::put_u32(invalid.payload, 0);
     auto rejected = detail::RuntimeAccess::receive(*connection.client, std::move(invalid));
     check(!rejected && rejected.error().is(bus::ErrorCode::Protocol), "zero Publisher route identity is malformed");
+}
+
+void test_image_validation() {
+    namespace format = message::detail::format;
+    Connection connection;
+    auto source = descriptor();
+    // The fixture writes wire bytes directly, so malformed input reaches the real reader.
+    auto ring = take(detail::RingBuffer::create(source));
+    auto pending = std::async(std::launch::async, [&] {
+        return detail::ImageAccess::subscribe(*connection.client, "image-validation", source.schema);
+    });
+    connection.reply(take(connection.central->receive_until(deadline())), subscription(42, &source));
+    auto images = take(pending.get());
+    auto typed_pending = std::async(std::launch::async, [&] {
+        return connection.client->subscribe<Frame>("image-validation");
+    });
+    control::Bytes typed_body;
+    control::put_u64(typed_body, 43);
+    control::put_u32(typed_body, 1);
+    ok(detail::encode_attachment(typed_body, {source, 1, 0}));
+    connection.reply(take(connection.central->receive_until(deadline())), std::move(typed_body));
+    auto typed = take(typed_pending.get());
+    auto message = make_message<Frame>();
+    message->data().sequence = 17;
+    const auto original = take(message->snapshot());
+    auto bytes = std::vector<std::byte>(original.bytes().begin(), original.bytes().end());
+    auto read = [&](std::size_t offset) {
+        std::uint64_t value = 0;
+        for (unsigned index = 0; index < format::integer_bytes; ++index) {
+            value |= std::uint64_t(std::to_integer<unsigned>(bytes.at(offset + index))) << (index * 8);
+        }
+        return value;
+    };
+    auto write = [&](std::size_t offset, std::uint64_t value, unsigned width = format::integer_bytes) {
+        for (unsigned index = 0; index < width; ++index) {
+            bytes.at(offset + index) = std::byte((value >> (index * 8)) & 255);
+        }
+    };
+    const auto table = read(format::header::descriptor_table);
+    const auto root = read(format::header::size);
+    const auto root_descriptor = table + root * format::descriptor::size;
+    const auto first_field = read(read(root_descriptor));
+    const auto field_descriptor = table + first_field * format::descriptor::size;
+    std::atomic<bool> closed{false};
+    std::uint64_t count = 0;
+    auto publish_bytes = [&] {
+        auto reserved = take(ring->reserve(closed));
+        check(bytes.size() <= reserved.bytes.size(), "image fixture capacity");
+        std::copy(bytes.begin(), bytes.end(), reserved.bytes.begin());
+        ++count;
+        ok(ring->publish(reserved, bytes.size(), count, count, count));
+    };
+    publish_bytes();
+    auto valid = take(images.get_last());
+    auto typed_value = take(typed.get_last());
+    check(valid->publisher_id == source.id && valid->publisher_name == source.publisher &&
+          valid->timestamp == typed_value->get_message_timestamp() &&
+          valid->monotonic_timestamp == typed_value->get_message_monotonic_timestamp() &&
+          valid->topic_count == typed_value->get_topic_count(), "typed/image metadata mismatch");
+
+    // uint64 -> double has the same layout width, but disagrees with Frame's field schema.
+    constexpr std::uint32_t double_scalar_code = 10;
+    write(field_descriptor + format::descriptor::scalar, double_scalar_code, format::tag_bytes);
+    publish_bytes();
+    auto structural = take(images.get_last());
+    auto rejected = typed.get_last();
+    check(!rejected && rejected.error().is(bus::ErrorCode::TypeMismatch), "typed field validation relaxed");
+    auto canonical = take(message::detail::FrameworkAccess::canonical_image(structural->image, message_bytes));
+    check(!Frame::from_bytes(canonical.bytes()), "generic validation claimed typed compatibility");
+    check(detail::shared_load(ring->reader(0).token) == 0 && detail::shared_load(ring->reader(1).token) == 0,
+          "validation retained a shared Reader lease");
+
+    write(root_descriptor + format::descriptor::schema_hash, source.schema ^ 1);
+    publish_bytes();
+    auto batch = take(detail::capture(detail::ImageAccess::core(images)));
+    // Consume the retained structural record, then repeatedly reject the bad one.
+    take(detail::read_image_batch(detail::ImageAccess::core(images), batch));
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+        auto failed = detail::read_image_batch(detail::ImageAccess::core(images), batch);
+        check(!failed && failed.error().is(bus::ErrorCode::TypeMismatch), "failed image advanced cursor");
+    }
+    auto bad = images.get_last();
+    check(!bad && bad.error().is(bus::ErrorCode::TypeMismatch) && !bad.error().causes().empty(),
+          "image schema mismatch lost storage cause");
+    write(root_descriptor + format::descriptor::schema_hash, source.schema);
+    write(format::header::descriptor_table, UINT64_MAX);
+    publish_bytes();
+    bad = images.get_last();
+    check(!bad && bad.error().is(bus::ErrorCode::InvalidData), "malformed image accepted");
+    check(detail::shared_load(ring->reader(0).token) == 0, "failed image validation retained lease");
+    check(take(Frame::from_bytes(valid->image.bytes()))->data().sequence.get() == 17,
+          "later corruption changed retained image");
+
+    // An unknown hash needs no C++ class or decoder registry.
+    bytes.assign(original.bytes().begin(), original.bytes().end());
+    constexpr std::uint64_t unknown_hash = 0x123456789abcdefULL;
+    write(root_descriptor + format::descriptor::schema_hash, unknown_hash);
+    source = descriptor();
+    source.schema = unknown_hash;
+    auto unknown_ring = take(detail::RingBuffer::create(source));
+    auto unknown_pending = std::async(std::launch::async, [&] {
+        return detail::ImageAccess::subscribe(*connection.client, "unknown-image", unknown_hash);
+    });
+    connection.reply(take(connection.central->receive_until(deadline())), subscription(44, &source));
+    auto unknown = take(unknown_pending.get());
+    auto reserved = take(unknown_ring->reserve(closed));
+    std::copy(bytes.begin(), bytes.end(), reserved.bytes.begin());
+    ok(unknown_ring->publish(reserved, bytes.size(), 1, 1, 1));
+    check(take(unknown.get_last())->schema_hash == unknown_hash, "unknown schema was not delivered");
 }
 
 void test_publication_times() {
@@ -694,15 +805,54 @@ detail::Attachment register_subscriber(detail::BusManager& manager, Connection& 
 
 template <class Action>
 auto client_request(detail::BusManager& manager, Connection& connection, std::uint64_t owner,
-                    Action action, FaultPoint point = FaultPoint::None) {
+                    Action action, FaultPoint point = FaultPoint::None, std::string notification = {}) {
     auto pending = std::async(std::launch::async, std::move(action));
     auto request = take(connection.central->receive_until(deadline()));
-    ok(manager.submit(owner, "rollback-owner", connection.central, std::move(request)));
+    ok(manager.submit(owner, "rollback-owner", connection.central, std::move(request), std::move(notification)));
     auto response = take(connection.module->receive_until(deadline()));
     arm(point);
     ok(detail::RuntimeAccess::receive(*connection.client, std::move(response)));
     check(pending.wait_until(deadline()) == std::future_status::ready, "client request must finish");
     return pending.get();
+}
+
+void test_image_notification_route() {
+    Connection writer;
+    Connection reader;
+    auto manager = take(detail::BusManager::create());
+    const auto name = detail::shared_name('n');
+    auto receiver = take(osal::NotificationReceiver::create(name));
+    struct Cleanup {
+        const std::string& name;
+        ~Cleanup() {
+            (void)osal::NotificationReceiver::unlink_name(name);
+        }
+    } cleanup{name};
+    const std::string topic = "images/notification";
+    auto publisher = take(client_request(*manager, writer, 1, [&] {
+        return writer.client->advertise<Frame>(topic, {.slots = fixture_slots, .max_message_bytes = message_bytes});
+    }));
+    auto subscriber = take(client_request(*manager, reader, 2, [&] {
+        return detail::ImageAccess::subscribe(*reader.client, topic, Frame::schema().hash);
+    }, FaultPoint::None, name));
+    ok(client_request(*manager, reader, 2, [&] {
+        return detail::enable_notifications(detail::ImageAccess::core(subscriber));
+    }, FaultPoint::None, name));
+    // Install the real central route and its receipt through the Host dispatcher.
+    ok(detail::RuntimeAccess::receive(*writer.client, take(writer.module->receive_until(deadline()))));
+    ok(manager->submit(1, "rollback-owner", writer.central, take(writer.central->receive_until(deadline()))));
+    ok(receiver.wait_until(deadline())); // Route installation catch-up hint.
+    auto empty = receiver.wait_until(control::Clock::now());
+    check(!empty && empty.error().is(osal::ErrorCode::Timeout), "notification was not drained");
+    auto value = make_message<Frame>();
+    value->data().sequence = 51;
+    ok(publisher.push(*value));
+    // This is a native notification wait, not Context's periodic fallback.
+    ok(receiver.wait_until(deadline()));
+    auto batch = take(detail::capture(detail::ImageAccess::core(subscriber)));
+    auto image = take(detail::read_image_batch(detail::ImageAccess::core(subscriber), batch));
+    check(take(Frame::from_bytes(image->image.bytes()))->data().sequence.get() == 51,
+          "notified image payload was not dispatchable");
 }
 
 void process_release(detail::BusManager& manager, Connection& connection, std::uint64_t owner,
@@ -1572,6 +1722,7 @@ void test_publisher_reservation(unsigned collide_on, bool reject_retire = false)
 
 // Hold an authentic Detach in the application queue while the ring has no
 // remaining handles. This isolates the lazy-open race from queue overflow.
+template<bool Images = false>
 void test_retired_source_before_dispatch(bool with_other_publisher) {
     Connection writer;
     Connection reader;
@@ -1591,7 +1742,11 @@ void test_retired_source_before_dispatch(bool with_other_publisher) {
         ok(live->push(*value));
     }
     auto subscribed = take(client_request(*manager, reader, reader_owner, [&] {
-        return reader.client->subscribe<Frame>(topic);
+        if constexpr (Images) {
+            return detail::ImageAccess::subscribe(*reader.client, topic, Frame::schema().hash);
+        } else {
+            return reader.client->subscribe<Frame>(topic);
+        }
     }));
     manager->exited(writer_owner);
     ok(manager->drain_until(deadline()));
@@ -1602,15 +1757,29 @@ void test_retired_source_before_dispatch(bool with_other_publisher) {
     check(captured.size() == (live ? 1u : 0u), "pump includes only usable sources before Detach");
     const auto last = subscribed.get_last();
     if (live) {
-        check(last && (*last)->data().sequence == 42, "retirement must not hide another Publisher");
+        check(bool(last), "retirement must not hide another Publisher");
+        if constexpr (Images) {
+            check(take(Frame::from_bytes((*last)->image.bytes()))->data().sequence.get() == 42,
+                  "retirement changed another Publisher image");
+        } else {
+            check((*last)->data().sequence == 42, "retirement changed another Publisher message");
+        }
         check(captured.front().upper == 1, "live publication is dispatchable in this pump");
-        const auto factory = [](message::detail::Binding binding) -> std::unique_ptr<BaseMessage> {
-            return std::unique_ptr<Frame>(new Frame(message::detail::RecordAccess::bind<Frame>(std::move(binding))));
-        };
-        auto delivered = take(detail::read_batch(core, captured, Frame::schema(), factory));
-        check(static_cast<Frame&>(*delivered).data().sequence == 42, "pump delivers live data before confirmation");
-        auto exhausted = detail::read_batch(core, captured, Frame::schema(), factory);
-        check(!exhausted && exhausted.error().is(bus::ErrorCode::NoNewData), "pump finishes its batch");
+        if constexpr (Images) {
+            auto delivered = take(detail::read_image_batch(core, captured));
+            check(take(Frame::from_bytes(delivered->image.bytes()))->data().sequence.get() == 42,
+                  "image pump delivers live data before confirmation");
+            auto exhausted = detail::read_image_batch(core, captured);
+            check(!exhausted && exhausted.error().is(bus::ErrorCode::NoNewData), "image pump finishes its batch");
+        } else {
+            const auto factory = [](message::detail::Binding binding) -> std::unique_ptr<BaseMessage> {
+                return std::unique_ptr<Frame>(new Frame(message::detail::RecordAccess::bind<Frame>(std::move(binding))));
+            };
+            auto delivered = take(detail::read_batch(core, captured, Frame::schema(), factory));
+            check(static_cast<Frame&>(*delivered).data().sequence == 42, "pump delivers live data before confirmation");
+            auto exhausted = detail::read_batch(core, captured, Frame::schema(), factory);
+            check(!exhausted && exhausted.error().is(bus::ErrorCode::NoNewData), "pump finishes its batch");
+        }
     } else {
         check(!last && last.error().is(bus::ErrorCode::NoPublishedData), "no visible publication before Detach");
     }
@@ -1631,11 +1800,16 @@ void test_retired_source_before_dispatch(bool with_other_publisher) {
     check(live ? bool(after) : (!after && after.error().is(bus::ErrorCode::NoPublishedData)), "retirement after dispatch");
 }
 
+template<bool Images = false>
 void test_confirmed_missing_source(bool repair_mapping) {
     Connection connection;
     const auto source = descriptor();
     auto pending = std::async(std::launch::async, [&] {
-        return connection.client->subscribe<Frame>("missing/confirmed");
+        if constexpr (Images) {
+            return detail::ImageAccess::subscribe(*connection.client, "missing/confirmed", Frame::schema().hash);
+        } else {
+            return connection.client->subscribe<Frame>("missing/confirmed");
+        }
     });
     constexpr std::uint64_t subscription_id = 77;
     connection.reply(take(connection.central->receive_until(deadline())), subscription(subscription_id, &source));
@@ -1984,6 +2158,15 @@ int main(int argc, char** argv) {
         if (argc == 2) {
             const std::string_view scenario = argv[1];
             phase = argv[1];
+            if (scenario == "images") {
+                test_image_validation();
+                test_image_notification_route();
+                test_retired_source_before_dispatch<true>(false);
+                test_retired_source_before_dispatch<true>(true);
+                test_confirmed_missing_source<true>(false);
+                test_confirmed_missing_source<true>(true);
+                return 0;
+            }
             if (scenario == "topology-load") {
                 vinc::message_bus::detail::testing::run_topology_load_tests();
                 return 0;

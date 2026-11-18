@@ -49,7 +49,7 @@ add_test(NAME message.generated
 )
 set_tests_properties(message.generated PROPERTIES TIMEOUT 90)
 
-add_executable(message_access_tests access_tests.cpp snapshot_tests.cpp)
+add_executable(message_access_tests access_tests.cpp snapshot_tests.cpp image_tests.cpp)
 target_link_libraries(message_access_tests PRIVATE vinc_message_fixture vinc::osal)
 if(MSVC)
     target_compile_options(message_access_tests PRIVATE /W4 /utf-8)

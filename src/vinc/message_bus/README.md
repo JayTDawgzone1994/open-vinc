@@ -2,6 +2,46 @@
 
 # Shared Memory Message Bus / 共享記憶體訊息匯流排
 
+<a id="framework-image-subscriptions"></a>
+
+## Framework image subscriptions / 框架映像訂閱
+
+`detail/image_subscription.hpp` supplies `ImageAccess::subscribe(client, topic,
+schema_hash, options)` and the move-only `ImageSubscriber`. This designated
+framework seam uses the existing Host Client, registration, source checks,
+notification routes, close ACK and cursor machinery. It is not a public raw-data
+API or a separate authorization mechanism. A zero schema hash is rejected before
+registration. The Bus wire and shared RingBuffer layout are unchanged.
+
+框架專用 `ImageSubscriber` 共用既有 Client、註冊、來源補查、通知、游標與 close ACK；
+不建立第二個控制服務，不增加一般使用者 raw API 或權限機制。
+零 schema hash 在註冊前拒絕，Bus wire／RingBuffer 布局不變。
+
+`get_last()` and `detail::read_image_batch()` deliver
+`unique_ptr<const ReceivedImage>`. The envelope owns a local immutable Snapshot,
+Topic/hash, Publisher name/ID (not MID), Topic count and original UTC/monotonic
+timestamps. The reader releases shared protection immediately after its one
+bounded copy, before Storage validation, metadata construction or callback.
+`payload_capacity` reports the adopted vector's capacity, not total allocation or
+RSS: validator metadata, envelope/strings and downstream copies are additional.
+The image remains valid after later reads, ring reuse, close and publisher exit.
+
+交付物可 move 留存；後續讀取、Ring 覆寫、退訂與發布者退出不會改寫它。
+共享保護只涵蓋一次有界複製。`payload_capacity` 供後續 queue 計帳，僅代表所持有
+payload vector 的容量，不包含 validator metadata、envelope／字串或程序總 RAM。
+
+The common reader selects sources, applies captured ceilings, counts loss and
+skips oversized callback images before allocation. Only the post-copy decoder
+differs: typed subscriptions validate the full field schema; image subscriptions
+validate Storage structure, one record root and the expected nonzero hash. Unknown
+C++ types are accepted when these checks pass. Schema mismatch remains
+`MessageBus/TypeMismatch`; malformed structure is `InvalidData`, retaining the
+Storage cause. Failed validation does not advance the selected cursor.
+
+typed 與通用路徑共用來源選擇／批次上限／遺失統計／配置前容量檢查。
+通用路徑不保證具體欄位語意，typed 驗證維持完整；失敗保留 Storage 原因且不前進該筆游標。
+Recorder 替換與整合驗收依 [分階段契約](../bag/IMAGE_RECORDING.md)，本階段不修改 Recorder。
+
 Message Bus connects OSAL SharedMemory, generated messages, and process Modules. Use inherited Context advertise/subscribe from on_start, not constructors. Each Publisher owns a ring; topics may have several. Bulk payload stays shared, while sockets exchange registration/unsubscribe/topology control.
 
 `vinc::message_bus` 接上 OSAL SharedMemory、Ribosome 生成訊息及獨立程序 Module。
@@ -23,10 +63,10 @@ A Subscriber skips a missing Publisher mapping while the Host checks its registr
 
 Omitted Publisher capacities use two central Param values; explicit options and
 existing rings remain independent. See [Publisher defaults](PUBLISHER_DEFAULTS.md)
-for last-effective correction and standalone use. Current endpoint release uses Bus v6 / Plugin entry 22.
+for last-effective correction and standalone use. Current endpoint release uses Bus v6 / Plugin entry 23.
 
 省略的 Publisher 容量改用兩項中央 Param，明確指定及既有 Ring 不受影響。
-最後有效值修正與獨立使用見上述專題契約。現行端點回收使用 Bus v6／Plugin entry 22。
+最後有效值修正與獨立使用見上述專題契約。現行端點回收使用 Bus v6／Plugin entry 23。
 
 Sequential delivery runs through Context pump callbacks; get_last reads the latest. No per-message data Socket notifications.
 

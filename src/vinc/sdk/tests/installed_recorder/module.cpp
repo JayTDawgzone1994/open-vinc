@@ -41,8 +41,18 @@ public:
         }
         if (args.size() == 1 && args[0] == "burst") {
             auto message = vinc::make_message<vinc::RecorderSample>();
+            auto label = message->data().label.assign("relocated recorder");
+            if (!label) {
+                return std::unexpected(label.error());
+            }
+            constexpr std::size_t payload_bytes = 32;
             for (std::uint64_t sequence = 1; sequence <= record_count; ++sequence) {
                 message->data().sequence = sequence;
+                auto filled = message->data().payload.copy_from(
+                    std::vector<std::uint8_t>(payload_bytes, static_cast<std::uint8_t>(sequence)));
+                if (!filled) {
+                    return std::unexpected(filled.error());
+                }
                 auto published = publisher_->push(*message);
                 if (!published) {
                     return std::unexpected(published.error());

@@ -1,4 +1,8 @@
 #include <vinc/bag/detail/database.hpp>
+#include <vinc/message/detail/framework_access.hpp>
+#ifdef VINC_BAG_TESTING
+#include "../tests/recorder_gate.hpp"
+#endif
 #include <vinc/osal/shared_atomic.hpp>
 #include <vinc/osal/error.hpp>
 #include <condition_variable>
@@ -46,7 +50,11 @@ struct Recorder::Impl {
         }
 
         for (const auto& record : batch) {
-            auto image = record.encode(*record.message, options.message_bytes);
+#ifdef VINC_BAG_TESTING
+            test::before_canonical();
+#endif
+            auto image = message::detail::FrameworkAccess::canonical_image(
+                record.message->image, options.message_bytes);
             if (!image) {
                 return std::unexpected(
                     wrap_error(ErrorCode::StorageFailed, ErrorOperation::Write, image.error()));
@@ -205,9 +213,9 @@ Result<void> Recorder::discover(Topic topic) {
     return {};
 }
 
-Result<void> Recorder::enqueue(std::unique_ptr<BaseMessage> message, std::uint64_t retained_bytes,
-                               Encoder encoder) {
-    if (!message || !encoder || !retained_bytes) {
+Result<void> Recorder::enqueue(message_bus::detail::ImageDelivery message) {
+    if (!message || message->image.bytes().empty() ||
+        message->payload_capacity < message->image.bytes().size()) {
         return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Enqueue});
     }
 
@@ -217,24 +225,25 @@ Result<void> Recorder::enqueue(std::unique_ptr<BaseMessage> message, std::uint64
         return std::unexpected(Error{ErrorCode::Closed, ErrorOperation::Enqueue});
     }
 
-    const auto found = impl_->topics.find({message->topic_name(), message->type_hash()});
-    if (found == impl_->topics.end() || !found->second.supported) {
+    const auto found = impl_->topics.find({message->topic, message->schema_hash});
+    if (found == impl_->topics.end()) {
         return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::Enqueue});
     }
 
     ++state.counters.received;
-    if (retained_bytes > impl_->options.message_bytes) {
+    if (message->image.bytes().size() > impl_->options.message_bytes) {
         ++state.counters.oversized;
         return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::Enqueue});
     }
 
+    const auto retained_bytes = message->payload_capacity;
     if (retained_bytes > impl_->options.queue_bytes - state.pending_bytes ||
         state.pending_records >= impl_->options.queue_records) {
         ++state.counters.queue_dropped;
         return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::Enqueue});
     }
 
-    impl_->queue.push_back({std::move(message), retained_bytes, osal::monotonic_nanoseconds(), encoder});
+    impl_->queue.push_back({std::move(message), retained_bytes, osal::monotonic_nanoseconds()});
     state.pending_bytes += retained_bytes;
     ++state.pending_records;
     impl_->ready.notify_one();

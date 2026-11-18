@@ -10,7 +10,7 @@
 namespace vinc::bag {
 namespace {
 constexpr int application_id = 0x56424147; // VBAG; independent of message image version.
-constexpr int format_version = 2;
+constexpr int format_version = 3;
 constexpr std::uint64_t page_bytes = 4096;
 // SQLite's pinned format limit; multiply only after widening to uint64_t.
 constexpr std::uint64_t maximum_page_count = 4294967294ULL;
@@ -209,12 +209,12 @@ Result<void> initialize_schema(sqlite3* database) {
     auto schema = execute(database, R"SQL(
         BEGIN IMMEDIATE;
         PRAGMA application_id=1447182663;
-        PRAGMA user_version=2;
+        PRAGMA user_version=3;
         CREATE TABLE recording(id INTEGER PRIMARY KEY CHECK(id=1), start_utc_ns TEXT NOT NULL,
             completed INTEGER NOT NULL, received INTEGER NOT NULL, written INTEGER NOT NULL,
             queue_dropped INTEGER NOT NULL, oversized INTEGER NOT NULL, bus_lost INTEGER NOT NULL);
         CREATE TABLE topics(name TEXT NOT NULL, schema TEXT NOT NULL, type TEXT NOT NULL,
-            supported INTEGER NOT NULL, PRIMARY KEY(name,schema));
+            type_known INTEGER NOT NULL, PRIMARY KEY(name,schema));
         CREATE TABLE messages(id INTEGER PRIMARY KEY, topic TEXT NOT NULL, schema TEXT NOT NULL,
             publisher TEXT NOT NULL, publisher_id TEXT NOT NULL, sequence TEXT NOT NULL,
             source_utc_ns TEXT NOT NULL, source_monotonic_ns TEXT NOT NULL, receive_monotonic_ns TEXT NOT NULL,
@@ -277,7 +277,7 @@ Result<void> read_header(sqlite3* database, Info& result) {
 Result<void> read_topics(sqlite3* database, Info& result) {
     Statement topics(database,
                      "SELECT "
-                     "t.name,t.schema,t.type,t.supported,COUNT(m.id),COALESCE(MIN(m.source_utc_ns),'"
+                     "t.name,t.schema,t.type,t.type_known,COUNT(m.id),COALESCE(MIN(m.source_utc_ns),'"
                      "00000000000000000000'),COALESCE(MAX(m.source_utc_ns),'00000000000000000000') FROM topics t "
                      "LEFT JOIN messages m ON m.topic=t.name AND m.schema=t.schema GROUP BY t.name,t.schema");
     for (;;) {
@@ -293,7 +293,7 @@ Result<void> read_topics(sqlite3* database, Info& result) {
         auto name = topics.string(0);
         auto schema = unsigned_column(topics, 1);
         auto type = topics.string(2);
-        auto supported = topics.count(3);
+        auto type_known = topics.count(3);
         auto count = topics.count(4);
         auto first = unsigned_column(topics, 5);
         auto last = unsigned_column(topics, 6);
@@ -301,12 +301,12 @@ Result<void> read_topics(sqlite3* database, Info& result) {
             return std::unexpected(Error{ErrorCode::CapacityExceeded, ErrorOperation::Inspect});
         }
 
-        if (!name || name->empty() || !schema || !*schema || !type || !supported || *supported > 1 ||
+        if (!name || name->empty() || !schema || !*schema || !type || !type_known || *type_known > 1 ||
             !count || !first || !last) {
             return std::unexpected(Error{ErrorCode::InvalidFormat, ErrorOperation::Inspect});
         }
 
-        result.topics.push_back({{*name, *type, *schema, *supported != 0}, *count, *first, *last});
+        result.topics.push_back({{*name, *type, *schema, *type_known != 0}, *count, *first, *last});
     }
 
     return {};
@@ -396,24 +396,24 @@ Result<void> Database::begin() {
 
 Result<void> Database::topic(const Topic& value) {
     Statement statement(db_, "INSERT INTO topics VALUES(?,?,?,?) ON CONFLICT(name,schema) DO UPDATE SET "
-                             "type=excluded.type,supported=excluded.supported");
+                             "type=excluded.type,type_known=excluded.type_known");
     statement.text(1, value.name);
     statement.text(2, number(value.schema));
     statement.text(3, value.type);
-    statement.integer(4, value.supported);
+    statement.integer(4, value.type_known);
     return done(statement, ErrorOperation::Write);
 }
 
 Result<void> Database::append(const Record& record, std::span<const std::byte> bytes) {
     const auto& message = *record.message;
     Statement statement(db_, "INSERT INTO messages VALUES(NULL,?,?,?,?,?,?,?,?,?,?)");
-    statement.text(1, message.topic_name());
-    statement.text(2, number(message.type_hash()));
-    statement.text(3, message.publisher_name());
-    statement.text(4, number(message.publisher_instance()));
-    statement.text(5, number(message.get_topic_count()));
-    statement.text(6, number(message.get_message_timestamp()));
-    statement.text(7, number(message.get_message_monotonic_timestamp()));
+    statement.text(1, message.topic);
+    statement.text(2, number(message.schema_hash));
+    statement.text(3, message.publisher_name);
+    statement.text(4, number(message.publisher_id));
+    statement.text(5, number(message.topic_count));
+    statement.text(6, number(message.timestamp));
+    statement.text(7, number(message.monotonic_timestamp));
     statement.text(8, number(record.receive_ns));
     statement.integer(9, message::detail::format::version);
     statement.blob(10, bytes);

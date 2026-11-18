@@ -93,6 +93,7 @@ if(BUILD_TESTING)
         DEPENDS ribosome ${regression_inputs} "${CMAKE_CURRENT_SOURCE_DIR}/data/message_sample.txt"
         BYPRODUCTS "${regression_root}/vinc_messages/all_messages.hpp"
             "${regression_root}/vinc_messages/message_types.hpp"
+            "${regression_root}/vinc_messages/message_names.hpp"
             "${regression_root}/vinc_messages/Constants.hpp"
             "${regression_root}/vinc_messages/Names.hpp"
             "${regression_root}/vinc_messages/Point.hpp"
@@ -107,4 +108,9 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME ribosome.generated COMMAND ribosome_generated_tests)
     set_tests_properties(ribosome.generated PROPERTIES TIMEOUT 20)
+    # No Storage include path: a class-header dependency here must fail compilation.
+    add_executable(ribosome_names_tests tests/names_tests.cpp "${regression_root}/generation.stamp")
+    target_include_directories(ribosome_names_tests PRIVATE "${regression_root}")
+    add_test(NAME ribosome.names COMMAND ribosome_names_tests)
+    set_tests_properties(ribosome.names PROPERTIES TIMEOUT 20)
 endif()
