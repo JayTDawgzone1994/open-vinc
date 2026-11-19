@@ -164,7 +164,7 @@ These ignored artifacts are not shipped in the SDK.
 
 本機證據位於 `build/log-params/`，不隨 SDK 交付。Linux 核對 724 個非 Markdown
 來源檔案一致，無殘留測試程序；其後僅同步 SDK 整套期限調整，Linux 原本已在較嚴格
-期限內通過。macOS 當時尚待同分支來源與乾淨 SDK 補驗；來源後續結果見下節，乾淨 SDK 仍待驗。
+期限內通過。macOS 當時尚待同分支來源與乾淨 SDK 補驗；來源及後續乾淨 SDK 結果見下節連結。
 
 ## macOS 來源補驗（2026-11-11）
 

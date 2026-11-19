@@ -844,10 +844,10 @@ Recorded Windows local/real-TCP tests verified notices/help/output-off; see [Mod
   使用者已親自檢視並確認畫面正常。此為使用者驗收，並非助手截圖驗證；新
   `write_console()` 路徑的 Linux／macOS 驗證仍待完成。
 
-Remote input redraw/login are deferred in root TODO/SOCKET. Native Linux/macOS build/deployment/cancel/exit and PuTTY GUI remain unverified. Native Tcl blocking work may delay cancel; no central-thread force-abort promise.
+Remote input redraw/login are deferred in root TODO/SOCKET. Later [Mac source](../module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md) and [SDK deployment](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md) reports record automated Shell/App coverage. They do not establish interactive PuTTY or terminal visual acceptance. Native Tcl blocking work may delay cancel; no central-thread force-abort promise.
 
 - 遠端背景輸出期間的輸入列重繪、密碼登入維持延後決策，見根目錄 TODO 與 SOCKET。
-- Linux／macOS 的原生建置、部署、取消與退出行為仍待驗證；PuTTY GUI 亦未實測。
+- Mac 後續來源／部署已有上述自動驗收，不再籠統標成全部未驗證；PuTTY GUI 與跨平台終端目視仍無完成證據。
 - 原生 Tcl 擴充或阻塞操作可能延遲取消，不承諾強制中止中央執行緒。
 
 <a id="sdk-邊界與文件恢復2026-10-06"></a>

@@ -1,7 +1,9 @@
 # Central receive wakeup acceptance / 中央接收喚醒驗收
 
-Status: stage-four Windows/WSL acceptance completed (2026-11-17). The
-[2026-11-19 macOS report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records the native follow-up. This report records
+Status: Windows/WSL acceptance includes the PR #35 review correction below
+(2026-11-17). The original WSL Debug run is not valid full-suite evidence;
+rebuilding the damaged test artifacts and rerunning the related suite passed.
+The [2026-11-19 Mac report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records the later native follow-up. This report records
 actual runs, including unsuccessful attempts; it does not replace the approved
 [contract](CONTROL_WAKEUP.md).
 
@@ -22,18 +24,23 @@ actual runs, including unsuccessful attempts; it does not replace the approved
 
 ## Integration / 整合
 
+**Original recorded results, retained for audit.** The WSL Debug entry below
+records what CTest reported, not a valid full-suite pass. See the
+[PR #35 correction](#pr35-review-correction) for the replacement evidence.
+
 | Platform | Debug related CTest | Release related CTest | Fresh SDK: consumer / App / Python |
 | --- | --- | --- | --- |
 | Windows | 69/69, 258.03 s | 69/69, 237.86 s | Debug 3/3; Release 3/3 |
-| WSL Ubuntu 24.04 | 70/70, 95.21 s | 72/72, 129.10 s | Debug 3/3; Release 3/3 |
+| WSL Ubuntu 24.04 | Reported 70/70, 95.21 s — invalid full-suite evidence; see correction | 72/72, 129.10 s | Debug 3/3; Release 3/3 |
 
 The final Param first-appearance guard was additionally rebuilt and verified with
 five consecutive `param.process` runs in each OS/configuration (20/20 total).
 Other production/test content in the table is unchanged by that last test fix.
 
-Windows／WSL 的 Debug／Release 相關回歸共 280 次通過，四份乾淨 SDK 各完成
-consumer、App、Python 三項驗收。Param 最後的首次出現等待補強另驗 20/20；
-不是重新宣稱四組整合矩陣是在該測試補強後全數重跑。
+原本「Windows／WSL 的 Debug／Release 相關回歸共 280 次通過」的彙總宣稱撤回：
+其中 WSL Debug 有空執行檔造成的誤判，不能把原表四列直接加總作為有效證據。
+其餘三組及四份乾淨 SDK 的原始紀錄保留；本次沒有重新驗證 Release／SDK。
+Param 最後的首次出現等待補強另驗 20/20；不是重新宣稱四組整合矩陣是在該測試補強後全數重跑。
 
 The selected matrix is
 `^(control\.|module\.|message_bus\.|rpc\.|param\.)`, not all project tests.
@@ -48,6 +55,60 @@ and SDK paths, retains custom schemas/Bus/Bag/UI, and verifies shutdown. Python
 also covers RPC/Param, native/Python parallel callbacks, ABI rejection, incremental
 schemas/sources, deployment repair and disabled-feature cleanup. Installed private
 ReceiveWake headers and static linking are exercised through the real Manager.
+
+<a id="pr35-review-correction"></a>
+
+## PR #35 review correction (2026-11-17) / 重審更正與補驗
+
+The review tested commit `9d67474f856296d55ce6d12908dc0dae41444b20`,
+the final PR #35 head. Merge commit `bdde615` has the same tree. The OS and
+toolchains are those listed above. No production code, test logic or deadline
+was changed for this rerun.
+
+**Confirmed evidence defect:** in the existing WSL Debug build,
+`message_bus_cleanup_tests` and `message_bus_topic_registration_tests`, together
+with their respective `cleanup_tests.cpp.o` and `topic_registration_tests.cpp.o`,
+were zero-byte files. CTest reported success when launching those empty test
+executables. The retained original `wsl-debug/ctest.log` likewise reports 0.00 s
+for the affected cases, including `expired-request`, which actually waits about
+ten seconds. That run cannot establish that the Bus assertions executed.
+
+An ordinary incremental build initially reported no work to do. Removing the
+empty cleanup executable and relinking exposed missing `main` and test-hook
+symbols from its empty object. Rebuilding the two affected objects and
+executables restored runnable tests. The cause of the zero-byte files remains
+unconfirmed; the earlier interrupted builds are context, not proof of causation.
+This finding is not evidence of a Bus, OSAL rollback or ReceiveWake runtime bug.
+
+**確認的是驗收證據缺口：** 空檔被算成成功，原紀錄不能採信為完整通過。
+重新編譯兩個測試後，沿用原測試與期限補跑；`expired-request` 實際執行約 10 秒，
+FD 耗盡案例也實際執行。沒有放寬斷言或修改正式行為。空檔形成原因仍待釐清。
+
+| Review rerun | Actual result | Scope |
+| --- | --- | --- |
+| Windows Debug focused tests | 23/23, 47.58 s | OSAL shared memory, receive wake, Topic limit, release routes, cleanup, all 15 `control_plane` scenarios, counter registration, notification snapshots and Module wakeup |
+| Windows Debug scheduler | 1/1, 1.39 s | `module.control_scheduler`; separate invocation, including RPC saturation/fairness |
+| WSL Debug related suite after rebuilding both tests | 70/70, 132.54 s | Full related-suite selection shown above; replaces the original WSL Debug full-suite evidence |
+
+Windows 合計 24 項是兩次執行的相關案例，**不是重跑完整 Windows 69 項矩陣**。
+WSL 這次 70 項是完整的上述相關套件，**不是全專案 CTest**。中途只修好一個執行檔時
+取得的 25/25 不作為補驗結論，因為另一個空執行檔當時尚未重建。
+本次沒有重跑 Release、乾淨 installed SDK、搬移部署或成本矩陣；它們仍是先前的獨立證據。
+此次更正時 macOS 原生驗收尚未完成；後續結果見上述 2026-11-19 Mac 報告。
+
+Retained local logs (build artifacts, not repository files):
+
+- Original: `build/control-wakeup-stage4/wsl-debug/ctest.log`; its original hash
+  remains in `tests/control_cost/results/source-manifest.json` without replacement.
+- Review: `build/pr35-review/windows-debug.log` (23 test details),
+  `build/pr35-review/windows-scheduler.log` (separate scheduler summary), and
+  `build/pr35-review/wsl-debug.log` (70 test details).
+
+**Remaining follow-up:** diagnose how the empty artifacts were produced and
+evaluate a pre-test native-artifact check or explicit test-completion evidence.
+These are proposals, not implemented safeguards. A successful incremental build
+or CTest exit code alone did not detect this incident. Track this separately from
+the completed functional rerun in the root TODO.
 
 ## Retained failures and corrections / 原始失敗與處理
 
@@ -65,8 +126,10 @@ ReceiveWake headers and static linking are exercised through the real Manager.
    an empty Linux `message_bus_recovery_app`, an unusable object and Windows PDB
    errors. Artifacts were retained and rebuilt. Three in-progress files (the new
    cost fixture/runner and SDK README) also contained zero bytes and were restored
-   from recorded task content / the clean HEAD plus intended edits. The final
-   source scan and builds passed; the interruption's cause is not established. Initial Linux failures were
+   from recorded task content / the clean HEAD plus intended edits. The source scan
+   and builds were reported as passing, but the later [PR #35 review](#pr35-review-correction)
+   found two additional empty test artifacts that had escaped this recovery.
+   The interruption's cause is not established. Initial Linux failures were
    `Exec format error` before entering Bus/OSAL. They are not rollback failures.
    The Windows Param fixture also retained a November 10 Plugin; entry-version
    rejection was correct, and rebuilding that fixture fixed its mismatch.
@@ -187,5 +250,6 @@ output; compact results and source hashes accompany this report.
 macOS must rebuild this same content and run Debug/Release receive-wake, fair
 scheduler/RPC-full, lifecycle/exit, Bus, Param, RPC and fresh installed SDK plus
 relocation. The cost sampler requires native Mac implementation/measurement.
-The [macOS report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records this follow-up on the later integrated revision.
+No Windows/WSL evidence substitutes for that work. Root TODO retains the handoff.
+The [macOS report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records the follow-up on the later integrated revision.
 The external MMDD 491-registration / 30-second Ready acceptance remains separate.

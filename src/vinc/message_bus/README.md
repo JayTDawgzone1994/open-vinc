@@ -51,7 +51,7 @@ Socket 控制通道只交換註冊、退訂與 Publisher 增減資訊。
 
 The Topic counter and both Publisher mappings retire failed reservations individually when cleanup is confirmed. Topic 計數器、Publisher 控制區與資料區各自確認清理結果，再撤銷自己的預留。跨 App 同名 Topic、中央重啟與資源額滿驗收見 [Topic registration failure recovery / Topic 註冊失敗回收契約](TOPIC_REGISTRATION_RECOVERY.md)。
 
-The [control-plane repair contract / 控制面修復開工契約](CONTROL_PLANE_REPAIR.md) records the deadline and reservation fixes and the versioned Host topology protocol and its validation.
+The [control-plane repair contract / 控制面契約](CONTROL_PLANE_REPAIR.md) records the deadline and reservation fixes and the versioned Host topology protocol and its validation.
 
 Stage 5 Windows/WSL Debug and Release integration, load and clean C++/Python SDK checks
 passed on 2026-11-16. The linked report distinguishes sampled storage, whole-process
@@ -60,7 +60,7 @@ memory and the old wire-format size model. Native results are recorded in the
 第五階段 Windows／WSL Debug、Release 的整合、負載與乾淨 C++／Python SDK 驗收已通過。
 成本取樣與限制見上述報告，後續 Mac 原生結果另列。
 
-A Subscriber skips a missing Publisher mapping while the Host checks its registration in the background. Other Publishers remain readable. 若同一 Topic 的所有來源都沒有可讀資料，`get_last()` 回 `NoPublishedData`，pump 繼續派送其他工作。中央確認仍有登記且重新開啟仍失敗時，讀取端會收到原始錯誤。見[退場驗收](CONTROL_PLANE_REPAIR.md#第四階段延後套用更新與第一次開啟共享區)。
+A Subscriber skips a missing Publisher mapping while the Host checks its registration in the background. Other Publishers remain readable. 若同一 Topic 的所有來源都沒有可讀資料，`get_last()` 回 `NoPublishedData`，pump 繼續派送其他工作。中央確認仍有登記且重新開啟仍失敗時，讀取端會收到原始錯誤。見[退場驗收](CONTROL_PLANE_VALIDATION.md#第四階段延後套用更新與第一次開啟共享區)。
 
 Omitted Publisher capacities use two central Param values; explicit options and
 existing rings remain independent. See [Publisher defaults](PUBLISHER_DEFAULTS.md)

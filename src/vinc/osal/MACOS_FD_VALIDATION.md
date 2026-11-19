@@ -182,8 +182,8 @@ trace 時間為單調奈秒。`watch_end`／`wake_end` 的 errno 欄只在原生
 
 ## 重現、交付與限制
 
-正式測試可依 [第二階段](FD_SPAWN_PLAN.md#stage-2-implementation) 與
-[整合驗收](FD_SPAWN_PLAN.md#stage-4-acceptance) 的 CMake／CTest 指令，
+正式測試可依 [第二階段](FD_SPAWN_VALIDATION.md#stage-2-implementation) 與
+[整合驗收](FD_SPAWN_VALIDATION.md#stage-4-acceptance) 的 CMake／CTest 指令，
 在本文件版本分別建立 Debug／Release。不要以只重跑失敗項目取代原始整輪紀錄。
 
 本機完整建置與原始工作目錄：`/private/tmp/open-vinc-macos-fd-20261103`（暫存）。

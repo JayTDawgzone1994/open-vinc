@@ -720,7 +720,7 @@ Snapshot through the same layout/renderer as typed snapshots. Neither operation
 needs concrete C++ message classes or performs their field-schema validation.
 Public typed reception/view validation is unchanged. These are internal seams,
 not a public raw subscription API; integration status and evidence belong to the
-[recording contract](../../bag/IMAGE_RECORDING.md#stage-1-validation).
+[recording contract](../../bag/IMAGE_RECORDING_VALIDATION.md#stage-1-validation).
 
 指定內部入口 `<vinc/message/detail/framework_access.hpp>`：
 
@@ -747,4 +747,4 @@ canonical 使用 `Snapshot`，空物件回 `Closed`、借用物件回 `InvalidAr
 
 第一階段只新增無狀態內部函式與測試，當時未改映像版本、公開型別布局或 Plugin entry。
 後續 Bus／Context／Recorder 已接入；Context 布局與 Plugin entry 的更新由 Module System
-契約維護。Windows／WSL 結果、原始失敗與 Mac 待驗見上述分階段驗收紀錄。
+契約維護。Windows／WSL 結果與原始失敗見上述驗收紀錄；後續 [Mac 原生結果](../../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)已完成。

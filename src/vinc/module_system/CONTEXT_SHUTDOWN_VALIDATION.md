@@ -3,7 +3,7 @@
 Date: 2026-11-10. **Windows/WSL acceptance completed / Windows／WSL 驗收完成**.
 Subsequent native Mac Debug/Release C++ Host/Context acceptance is recorded in the
 [Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md). The Windows/WSL tables below
-retain their original configuration and results; source Python/GIL remains a separate Mac stage.
+retain their original configuration and results; later [Python/GIL and SDK acceptance](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) has its own tested revision.
 The [repair contract](CONTEXT_SHUTDOWN_FIX.md) owns behavior and scope; the
 [investigation](CONTEXT_SHUTDOWN_INVESTIGATION.md) preserves the original failures
 and controlled old-order/new-order proof.
@@ -113,10 +113,9 @@ installing software or changing framework/toolchain policy. Preserve both the
 original full log and `shutdown-stage3-wsl-external-consumer-path.log`.
 
 Native Mac Debug/Release C++ Host/Context follow-up is complete; see the
-[Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md) and retained
-[reproduction checklist](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md). Prior FD/spawn,
+[Mac report and reproduction commands](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md). Prior FD/spawn,
 process-exit and Plugin classification results retain their original revisions.
-The Mac source-Python and SDK-only acceptance stages remain distinct.
+Later source-Python and SDK-only acceptance is recorded separately in the report linked above.
 
 本輪只處理收尾修復驗收與文件，不改正式 Runtime。Windows Debug 156/156、Release
 149/149；WSL 首輪 170/171，唯一 Node PATH 環境失敗補驗 1/1 通過，不改寫成一次

@@ -7,7 +7,7 @@ one owned image, Context delivers it, and the existing disk worker canonicalizes
 and writes it. Concrete message classes and per-type subscription/Encoder templates
 are no longer compiled into Recorder. Unknown names do not prevent recording.
 Windows/WSL Debug and Release regressions, clean relocated SDKs and controlled
-cost comparisons passed; see [stage 4](IMAGE_RECORDING.md#stage-4-validation).
+cost comparisons passed; see [stage 4](IMAGE_RECORDING_VALIDATION.md#stage-4-validation).
 Recorder compilation improved in this fixture; runtime is not uniformly faster.
 
 Recorder 已改用通用映像路徑，不再編譯逐型別訂閱／Encoder。Bus 驗證結構及 hash，
@@ -326,8 +326,8 @@ Hot rollback journals can require write access for recovery; read-only info may 
 
 ## Recorded validation and outstanding work / 驗證與待處理事項
 
-Current generic Recorder evidence: [stage 4 validation](IMAGE_RECORDING.md#stage-4-validation).
-以下為歷史 typed Recorder 驗收；本次通用路徑、乾淨 SDK／搬移、成本與 Mac 待驗見上述連結。
+Current generic Recorder evidence: [stage 4 validation](IMAGE_RECORDING_VALIDATION.md#stage-4-validation).
+通用路徑、乾淨 SDK／搬移及成本見上述連結與 [Mac 原生補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。以下保留歷史 typed Recorder 結果。
 
 Outstanding performance investigation: Windows' three 1 KiB paced runs measured
 higher generic median Recorder CPU (0.641 vs 0.281 seconds per 1,000 records),
@@ -367,13 +367,13 @@ FULL is induced by page quota, not by filling a real disk. These tests are not r
 
 SQLite FULL 由 page quota 製造；未將測試磁碟實際寫滿。上述測試不構成錄製吞吐量 benchmark。
 
-- The initial round did not validate Linux/macOS. Later WSL evidence is recorded under [Recorder wait validation](#recorder-wait-validation); native macOS remains pending.
+- The initial round did not validate Linux/macOS. Later WSL evidence is recorded under [Recorder wait validation](#recorder-wait-validation); later native macOS evidence is in the [Mac report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md).
 - Main-database-only capacity, no directory-total hard cap.
 - No read-only hot-journal auto-repair or Bag repair command.
 - Player/speed/timing replay, file rotation, dynamic schemas remain unimplemented.
 - Tests do not cover actual power loss, hardware corruption, or every filesystem synchronization behavior; transactions are not a hardware durability guarantee.
 
-- 初版未驗 Linux／macOS；後續 WSL 證據見下方通知等待驗收，原生 macOS 仍待驗。
+- 初版未驗 Linux／macOS；後續 WSL 證據見下方通知等待驗收，後續原生 macOS 結果見 [Mac 報告](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。
 - 已確認邊界：只限制主資料庫；交易暫存空間另計，不提供目錄總容量硬限制。
 - 已知限制：唯讀查詢不自動修復 hot journal；未做 Bag 專用復原命令。
 - 尚未實作：Player、播放速度／重播時序、錄製切檔、動態 schema 擴充。

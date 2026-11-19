@@ -15,17 +15,14 @@ Windows／WSL 驗收依各元件原報告追溯。
 
 ## Module System：中央控制接收喚醒
 
+- [ ] 釐清 WSL Debug 兩個 Bus 測試執行檔及對應 object 變成 0 bytes 的原因，並評估執行前原生產物檢查或明確完成證據（尚未實作）。原 70/70、95.21 s 含空檔誤判，不作完整驗收依據；重建後同版相關套件已實測 70/70、132.54 s，Windows Debug 另驗 23+1 項。功能補驗已完成，此項只追蹤產物完整性／驗收流程；不能把先前建置中斷直接認定為根因。原始紀錄與補驗邊界見[PR #35 更正](src/vinc/module_system/CONTROL_WAKEUP_VALIDATION.md#pr35-review-correction)。
+
 - [ ] 外部應用另核對 callback 容量及 pin，保留原 491 筆／30 秒 Ready 條件，不以框架局部通過替代完整應用驗收。
 
-## Parallel pump：macOS 與後續觀察
+## Parallel pump：成本後續觀察
 
-Windows Debug／Release 與 WSL Release 的乾淨 SDK／搬移驗收已完成；兩平台各 48 組成本對照亦完成。Recorder 未自動啟用 worker。
-
-範圍與進度見 [多執行緒 pump 契約](src/vinc/module_system/PARALLEL_PUMP.md)。
-Mac Host 收尾與 C++ 回歸已有[第一階段原生證據](src/vinc/module_system/MACOS_CONTEXT_SHUTDOWN_VALIDATION.md)；
-來源 Python／GIL、parallel、RPC／Param 已補[第二階段 Debug／Release 證據](src/vinc/module_system/MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)；
-SDK-only／搬移／分類部署／輸出位置已有[第三階段證據](src/vinc/sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)。
-本輪在 entry 23 的 Release SDK 補跑 Mac 成本矩陣，結果見[原生補驗](src/vinc/sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。
+Windows／WSL 與 Mac 的驗收、成本及限制見 [pump 契約](src/vinc/module_system/PARALLEL_PUMP.md)
+與 [Mac 原生報告](src/vinc/sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。
 
 - [ ] 成本後續評估（提案，未授權改排程）：profile `Context::dispatch_parallel()` 空 Topic batch 重建與 `TopicScheduler::finish()` 全員喚醒的成本；若要量化 Windows 閒置增量，需更長的獨立取樣。不能因此直接取消 10ms fallback、縮弱快照／同 Topic 序列／停止契約。實測方法與限制見 [成本報告](src/vinc/module_system/PUMP_COST_VALIDATION.md)。
 

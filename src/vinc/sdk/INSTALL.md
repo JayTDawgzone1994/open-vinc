@@ -745,7 +745,7 @@ It checks shared ownership/exclusion, deadlines, cancellation, invalid/late bind
 and unloading while the owner remains alive. Test sources are copied into the
 consumer workspace; they are not installed as SDK APIs or linked from producer outputs.
 Current FD/spawn repair acceptance and platform limitations are recorded in the
-[stage 4 evidence](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance).
+[stage 4 evidence](../osal/FD_SPAWN_VALIDATION.md#stage-4-acceptance).
 
 `sdk.installed_consumer` 會安裝、搬移 SDK、獨立建置外部專案，執行安裝版 Ribosome、
 存取生成訊息、初始化 Tcl，並以明確 Host 路徑建立／關閉 Manager 服務及比對授權檔。
