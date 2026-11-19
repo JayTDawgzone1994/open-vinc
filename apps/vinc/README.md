@@ -68,30 +68,15 @@ covered this fixture.
 前次選定 target 的 Release 建置未涵蓋此故障測試。
 
 
-The confirmed next-step design is tracked in the
-[Multi-App composition plan](MULTI_APP.md): shared Modules/messages, per-App Kconfig
-selection and deployment, and automatic official UI/Bag startup. Stage 2 adds the
-shared source/installed `vinc_add_app()` constructor, per-App catalogs and optional
-shared Python bindings. Stage 3 adds independent deployment/install and automatic official startup.
-All application paths now use the common constructor documented in
-the [SDK composition guide](../../src/vinc/sdk/INSTALL.md#c-application-composition--c-應用組裝).
+App composition uses `vinc_add_app()` for source and installed SDK builds.
+The [composition contract](MULTI_APP.md) covers shared Modules/messages, per-App
+Kconfig and deployment. The [single-entry contract](SINGLE_EXECUTABLE.md) covers
+central/Host dispatch through one framework-owned executable.
 
-已確認的下一輪設計見 [多 App 組裝開工文件](MULTI_APP.md)：共用 Module／Message、
-各 App 獨立 Kconfig 選擇與部署，以及官方 UI／Bag 自動啟動。第二階段接上來源／安裝式
-共用的 `vinc_add_app()`、各自 catalog 與選用的共用 Python 綁定；第三階段已接上
-獨立部署／安裝及官方 Module 自動啟動。所有 App 已統一使用共用建構器，見上方 SDK 組裝指南。
-
-The framework supplies the sole supported production App entry; user-defined or
-replacement central/Host mains are unsupported. Entry ownership and
-executable consolidation are documented in the
-[Single executable application plan](SINGLE_EXECUTABLE.md). App dispatches both roles and launches itself. Production standalone Host targets
-and SDK export/copy references are removed. Clean SDK-only and relocated C++ App
-validation and final integration regressions passed on Windows/WSL; the plan
-tracks the remaining native macOS validation.
-正式 App 的唯一入口由框架提供，不支援使用者自訂或替換中央／Host main。
-入口所有權與合併步驟見上述契約；App 已分流角色並啟動自己，正式獨立 Host target 與
-SDK 匯出／複製引用已移除。乾淨 SDK-only 與搬移 C++ App 已通過 Windows／WSL 驗證；
-最終整合回歸亦通過；剩餘 macOS 原生驗證由計畫追蹤。
+來源版與 installed SDK 已共用 App 建構器；使用者不另寫中央／Host main。
+目前操作見 [SDK 組裝指南](../../src/vinc/sdk/INSTALL.md#c-application-composition--c-應用組裝)。
+Windows／WSL 原始結果由上述契約連至驗收文件；後續 Mac 來源、乾淨 SDK 與搬移
+結果見 [Mac 報告](../../src/vinc/sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。
 
 The `app.entry` fixtures compile this production main in plain and embedded-script
 forms. Additional `app.*` tests reuse Module lifecycle, Context, fatal, debug,

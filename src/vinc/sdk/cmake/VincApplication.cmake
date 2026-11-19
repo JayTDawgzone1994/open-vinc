@@ -168,6 +168,8 @@ function(vinc_prepare_official_modules app)
         if(MSVC)
             target_compile_options(${bag} PRIVATE /utf-8)
         endif()
+        # Generation supplies only the lightweight hash/name header to Recorder;
+        # the adapter includes no concrete message classes or typed visitor.
         target_link_libraries(${bag} PRIVATE vinc::sdk vinc::bag vinc::messages)
         set_target_properties(${bag} PROPERTIES EXCLUDE_FROM_ALL TRUE
             VINC_MODULE_TYPE bagRecorder VINC_STOP_TIMEOUT_CONFIG bag_stop_timeout

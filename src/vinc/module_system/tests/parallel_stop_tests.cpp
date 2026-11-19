@@ -51,7 +51,7 @@ struct Directory {
         std::filesystem::remove_all(path, ignored);
     }
 };
-void run_case(const std::filesystem::path& plugin, const std::string& mode) {
+void run_case(const std::filesystem::path& plugin, const std::string& mode, bool images) {
     Directory directory;
     // Manager dies before the owned directory, including on test failure.
     auto manager = take(vinc::test::create_manager());
@@ -60,7 +60,11 @@ void run_case(const std::filesystem::path& plugin, const std::string& mode) {
     type.policy.stop_timeout = stop_grace;
     take(manager->register_module_type(type));
     const auto launched_at = control::Clock::now();
-    auto mid = take(manager->start_module(type.name, {mode, directory.path.string()}));
+    auto arguments = std::vector<std::string>{mode, directory.path.string()};
+    if (images) {
+        arguments.push_back("images");
+    }
+    auto mid = take(manager->start_module(type.name, std::move(arguments)));
     // This short Manual main can already be Finishing before wait_started sees
     // Running. The callback marker proves dispatch began without waiting for
     // normal completion, which itself requires our release gate below.
@@ -112,9 +116,9 @@ void run_case(const std::filesystem::path& plugin, const std::string& mode) {
 }
 int main(int argc, char** argv) {
     try {
-        check(argc == 2, "lifecycle Plugin argument required");
+        check(argc == 2 || argc == 3, "lifecycle Plugin argument required");
         for (const auto* mode : {"return", "replace", "throw", "stall"}) {
-            run_case(argv[1], mode);
+            run_case(argv[1], mode, argc == 3);
         }
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

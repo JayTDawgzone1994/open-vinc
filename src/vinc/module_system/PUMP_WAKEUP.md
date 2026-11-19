@@ -1,6 +1,4 @@
-# Pump wakeup change contract / pump 喚醒改動契約
-
-Date / 日期: 2026-10-28.
+# Pump wakeup / pump 喚醒契約
 
 ## Status and ownership / 狀態與文件責任
 
@@ -13,23 +11,13 @@ identifies the environments actually exercised; it is not a hard real-time guara
 **已接通 Bus 路由、Host pump 等待、故障恢復及 UI 診斷。** 本文件維護跨元件契約；
 原語、資源生命週期與控制格式分別由上述文件維護。實際驗證環境見文末，不承諾硬即時。
 
-## Motivation and evidence / 問題與證據
-
-Before this change, `Context::pumpLoop()` calls `pump_batch()` and waits when it dispatches no callbacks or commands. Host `wait()` uses `module_pump_idle_interval` (10 ms); its predicate covers stop, commands, and RPC readiness, not shared-memory Bus publication. A publication does not itself wake this wait.
-
-修改前，沒有 callback 或命令時，`pumpLoop()` 使用預設 10 ms 等待；Bus 發布到共享記憶體不會直接喚醒它。
-
-The 2026-10-28 investigation used source `91d26bca95d80a6354323c58bea3f5fab9f9fe2c`, Windows 10.0.26200 x64, Ryzen 7 5700X3D, MSVC 19.51, and Release. Each case used 1 MiB, eight slots, 64 warmups, and 1,000 measured publications at a requested 100 Hz. Across twelve cases, all 12,000 measured messages arrived without collisions, overwrites, or integrity errors. Default pump P99 was approximately 16 ms; continuous `pumpOnce()` reduced measured P99 below 0.7 ms but consumed approximately one logical core. Instrumented default waits had medians of 15.2–15.4 ms. These are environment-specific observations, not hard latency bounds or measurements of the proposed implementation.
-
-調查重現約 16 ms 的尾延遲；持續 pump 可降低延遲，但約占一個邏輯核心。這支持改進等待策略，不代表已驗證新通知方案，也不是三平台的固定時間保證。舊基準的方法與限制見 [benchmark](../message_bus/benchmarks/README.md)。
-
-## Approved behavioral boundary / 已同意的行為邊界
+## Behavior / 行為
 
 | Area / 範圍 | Contract / 契約 |
 | --- | --- |
 | `pumpOnce()` | Still executes one caller-initiated bounded batch and returns. It does not gain idle waiting, self-execution, or a worker thread. 仍由呼叫端主動執行一批後返回，不新增閒置等待、自行執行或執行緒。 |
 | `pumpLoop()` | Keeps dispatching; when idle, blocks in an OS wait that a work notification can release. 沒工作時交給 OS 阻塞等待，有通知即可解除等待。 |
-| Callbacks | Stay on the pump caller's thread, with existing ownership, ordering, exception, and reentrancy contracts. 不由通知端或 heartbeat 執行使用者 callback。 |
+| Callbacks | Use the configured pump dispatch model: serial by default, optional Topic workers per [parallel pump](PARALLEL_PUMP.md). 不由通知端或 heartbeat 執行使用者 callback；同 Topic 維持序列。 |
 | Data path | Payloads remain in shared memory; notifications carry no message payload and do not replace RingBuffer state. 資料仍走共享記憶體，通知不是訊息內容或訊息筆數。 |
 | Bus semantics | Preserve batch ceilings, ordering, cursors, loss accounting, capacity, reader protection, and collision waiting. 不改變既有 RingBuffer 與批次處理語意。 |
 | Manual mode | The caller still chooses when to invoke `pumpOnce()` or enter `pumpLoop()`. A notification cannot make absent pump calls happen. 不替使用者自訂迴圈自動呼叫 pump。 |
@@ -111,63 +99,7 @@ the Context-only validation below.
 Plugin entry 17 須整套重建；bootstrap／Bus／RPC wire 不變。Recorder 後續接線與
 驗收由 Bag README 維護，下列 Context 驗收不代替 Recorder 負載驗證。
 
-### Manual wait validation / Manual 等待驗收
-
-Validated on 2026-11-09. `module.context_wait` checks actual native notification
-outcomes, deadlines, admission/quiescence, stop, degradation and reopen.
-`module.context` uses a real Plugin to verify no-dispatch waits, callback rejection
-and a Manual command/stop loop. `module.python` covers timeout conversion, GIL
-release and command reentrancy. Installed Python SDK tests exercise both C++ and
-Python wait linkage after relocation.
-
-| Environment / 環境 | Results / 結果 |
-| --- | --- |
-| Windows x64, MSVC 19.51.36257, CMake 4.3.2, Ninja | Debug and Release each passed 6/6: Context, Context wait, Runtime faults, Plugin, synchronous RPC and synchronous transport. SDK header smoke built. Debug CPython 3.13.12 passed 4/4 Python Module/message/service/RPC tests. |
-| WSL Ubuntu 24.04.5 x64, GCC/libstdc++ 13.3.0, CMake 3.28.3, CPython 3.12.3, Release | The same six native and four Python cases passed: nine passed the first run; Context wait passed after correcting its FIFO fixture assumption below. SDK header smoke built. |
-| Windows Debug, Windows Release, WSL Release | Final Context wait test repeated 20 times per configuration, all passed. Real cross-process `message_bus.module` also passed in each configuration. |
-| Fresh Release SDK producers on Windows and WSL | Both `installed_consumer` and `installed_python` passed on each platform, including relocated C++/Python wait calls, custom messages, Bus/RPC/Param, ABI failure isolation, incremental generation, deployment repair and cleanup. |
-
-Initial failures are retained rather than counted as successful runs:
-
-- Windows initially reused an ABI-16 RPC fixture; rebuilding the omitted fixture
-  target at entry 17 fixed the mismatch before the complete 6/6 rerun. A separate
-  Python build attempt correctly rejected PATH selecting a different interpreter;
-  using the existing CPython 3.13 environment restored the intended configuration.
-- The first WSL Context wait test assumed a hint survives closure of the last FIFO
-  reader. OSAL does not promise that. The corrected test signals at the native-wait
-  boundary **after reopen** and requires a notification result, not fallback timeout.
-  Production OSAL behavior was not changed to satisfy the test.
-
-Local evidence (generated, not committed): Windows `build/wait-tests-{debug,release}.log`,
-`build/wait-python-tests.log`, `build/wait-final-{debug,release}.log`,
-`build/wait-repeat-{debug,release}.log` and `build/wait-sdk-release/`;
-WSL validation workspace `wait-tests-first.log`, `wait-final-repeat.log`,
-`wait-bus-tests.log` and `wait-sdk-release/`. Installed flow logs include
-`INSTALLED_CPP_WAIT_OK` and `INSTALLED_PYTHON_WAIT_OK` before normal shutdown.
-
-本輪 Windows Debug／Release 各六項、Windows Python 四項及 WSL 十項相關案例已通過；
-WSL 首輪九項通過，修正 FIFO 測試假設後補過等待案例。最終等待測試三個組態各重跑
-20 次，真實跨程序 Bus 測試亦各通過。Windows／WSL 乾淨 Release SDK 的 consumer 與
-Python 兩套驗收完成，含搬移部署後 C++／Python 新介面及正常關閉。
-首次 ABI fixture、Python PATH 配置與 FIFO 假設失敗紀錄保留，不以成功重跑抹除。
-
-This is targeted acceptance, not a full-project CTest run or a new latency/CPU
-benchmark. Native macOS, minimum MSVC 19.44, and Debug installed SDK were not
-revalidated in this round. Recorder and Combat Bar workload acceptance remain
-separate; see the root TODO and Bag README.
-
-本輪為針對性驗收，未宣稱完整專案／新效能基準通過。原生 macOS、最低 MSVC 19.44
-及 Debug installed SDK 本輪未重驗；Recorder 與 Combat Bar 負載改善另行驗證。
-
-### macOS 來源補驗（2026-11-11）
-
-[第二階段主報告](MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)補齊目前 entry-19 的 Debug／Release
-`module.context_wait`、Context／Runtime／Plugin、來源 Python／GIL、RPC 與 Recorder 功能證據。
-上方歷史輪次未驗 Mac 的限制保留；後續[第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)
-已補乾淨 SDK-only C++／Python 搬移等待接線及正常停止。
-本輪不量測延遲／CPU，也不宣稱 Combat Bar 負載驗收完成。
-
-## Confirmed first-release policy / 已確認的第一版政策
+## Delivery and failure policy / 交付與失敗政策
 
 The following policies were approved for this integration. / 以下政策已獲本輪實作授權。
 
@@ -288,38 +220,9 @@ a successful OS signal does not acknowledge receipt or callback execution.
 無活動故障的回報，黃色為通知降級，紅色為生命週期失敗／等待重啟，灰色為未活動／未觀察／
 身分未解析。狀態可延遲，不是即時 heartbeat，也不證明 callback 健康或已收到每筆通知。
 
-## Implementation sequence / 實作步驟
-
-| Step / 步驟 | Deliverable / 交付 | Acceptance gate / 階段驗收 |
-| --- | --- | --- |
-| 1. OSAL notification | Finalize primitive contract; implement common API/native backends, error catalog, tests, and OSAL documentation. 定義與實作通用通知原語。 | Cross-process signal-before-wait/during-wait, timeout, multiple producers, bounded coalescing, failure cleanup, and platform-specific signal/handle/FD tests. |
-| 2. Host resource lifetime | Add receiver ownership, instance resource records, endpoint identity exchange, and stop cleanup. 補上 Host／中央生命週期。 | Repeated starts/stops, same machine different instances, crash leftovers, stale generations, and no extra worker. |
-| 3. Bus notification routes | Extend control protocol for callback destinations, registration handover, deduplication, and post-publication signals. 補上 Bus 目標與提交後通知。 | Both push/loan, dynamic subscribe/unsubscribe, multiple Publishers/Modules, no per-publication central relay, failure after commit without duplicate resend. |
-| 4. Context wait integration | Connect pump idle wait and relevant local work/stop notifications; preserve fallback. 整合 pump 等待與備援。 | pumpOnce batch/threading contract unchanged; no lost wake between check/wait; RPC/Param/Shell and shutdown regression tests; bounded behavior during notification floods/failures. |
-| 5. Integration and performance | Rebuild consumers, verify protocol/ABI rejection where changed, run correctness and latency/resource comparisons, update docs. 整合、效能與文件驗收。 | Actual platform reports; benchmark before/after under identical conditions; no claimed completion for unrun checks. |
-
-Each step is reviewable and testable; completing a primitive alone does not mean Bus wakeup works. Public documentation must keep the whole feature marked incomplete until end-to-end checks pass. Preserve unrelated work and use a dedicated topic branch; publication follows AGENTS only when requested.
-
-每一步都可獨立驗收，但原語完成不等於 Bus 接通。需端到端驗證後才能宣稱功能完成；提交／推送另依 AGENTS 與使用者指示。
-
-Control protocol and Host/Plugin detail ABI changes require explicit version handling and rebuilding connected C++ SDK consumers and Python native adapters. Do not select version numbers from historical README passages; inspect current constants during implementation. No user-facing Python pump API redesign is included.
-
-控制協定與 Host／Plugin detail ABI 若改變，須更新相容性辨識並重建 SDK／Python 原生接線；實際版號以當時程式為準。本輪不重設 Python 公開 pump API。
-
-## Final validation / 最終驗證
-
-- Deterministically exercise publication before wait, during wait admission, during dispatch, and immediately after fallback expiry. Repeated success alone does not establish absence of a lost-wakeup race.
-- Inject post-publication notify failures and receiver-wait failures; check publication success, continued fallback, diagnostics, other destinations, and unchanged message counts.
-- Cover hot/cold topics, several Publishers and callback subscriptions, get-last-only readers, route installation/removal races, slow callbacks, and stop during waiting/flooding.
-- Repeat comparable paced benchmarks for 1–128 MiB and add genuinely small payloads. Keep payload, capacity, rate, build, and CPU conditions recorded. Report achieved rate, P50/P90/P99, send cost, collisions/loss, idle/active CPU, and subscriber fan-out cost. Notification coalescing does not prove zero per-publication system calls.
-- Verify Windows, Linux (including the available Ubuntu 24.04 WSL environment), and macOS on the same implementation revision. Earlier platform validation remains valid for its tested scope; it does not validate this new feature.
-- Do not change priority, affinity, global timer resolution, signal disposition, or unrelated application settings to make latency results look better.
-
-驗收同時涵蓋競爭、故障、生命週期與實際資源成本；不可只看 P99 變漂亮。三平台既有驗證保留，新功能另附同版本證據。
-
 ## Integration status / 接線狀態
 
-Steps 1–4 are implemented. Publisher `push` and loan `commit` signal a retained route snapshot
+Publisher `push` and loan `commit` signal a retained route snapshot
 after successful RingBuffer publication. Destinations are deduplicated per Publisher and Module
 generation; several callback subscriptions in the same Module share a destination. Get-last-only
 subscriptions create no notification route. Route installation and callback registration send
@@ -327,72 +230,17 @@ catch-up hints. In-flight snapshots keep retired senders alive; no shared pendin
 only hint when a producer crashes. Cost remains O(destination Modules) per publish, with native
 calls and short per-destination locks; this is not a wait-free or constant-cost broadcast.
 
-第一至四步已接通。push／commit 成功發布後通知，每個 Publisher 對同一 Module 世代只留一個
+push／commit 成功發布後通知，每個 Publisher 對同一 Module 世代只留一個
 目標；純 get_last 不加入路由。路由及 callback 安裝後補送提示；進行中快照保住 sender 生命週期。
 每次發布成本仍隨目標 Module 數量增加，包含 OS 呼叫與短期鎖，不宣稱 wait-free 或固定成本廣播。
 
-This notification stage introduced Bus control v3, Module bootstrap v16, Plugin entry 10, Module query v2, notification report v1,
-and graph HTTP v2. Current Plugin/bootstrap versions follow [Module System](README.md). Rebuild central, Hosts, Plugins, SDK consumers and Python native adapters together.
-Old formats are rejected. RingBuffer/message layouts and public Python pump syntax are unchanged.
+Control protocols and Plugin entry compatibility follow [Module System](README.md).
+Connected Host/Plugin/SDK/Python artifacts must be rebuilt together when those interfaces
+change; old incompatible formats are rejected. Notifications do not change message layouts.
 
-上述協定／入口已更新；所有相連產物須重建，舊格式明確拒絕。RingBuffer／訊息布局及 Python
-公開 pump 語法不變。原有平台驗證紀錄保留；本輪新增行為的證據另記於下方。
+## Validation / 驗證
 
-## Validation record (2026-10-28) / 本輪驗證
-
-- Windows 11 x64 (10.0.26200), Ryzen 7 5700X3D, MSVC 19.51.36257 / toolset
-  14.51.36231, SDK 10.0.26100.0, CMake 4.3.2, Ninja 1.13.2: complete Debug and
-  Release builds passed. The 50 selected Common/OSAL Notification/Control/Bus/
-  Module/Param/RPC/UI/Shell CTests passed in each configuration. After final
-  admission/format/diagnostic refinements, Debug's 11 and Release's 12 focused checks passed; the latter includes the independent external SDK consumer build/deployment test.
-- WSL2 Ubuntu 24.04.5 x86_64, GCC/libstdc++ 13.3, glibc 2.39, CMake 3.28.3,
-  Ninja 1.11.1: Bus/Module **23/23** passed; the final eight affected tests also
-  passed. This is WSL functional evidence, not a native Linux latency benchmark.
-- Vue TypeScript checking passed. Chromium **6/6** passed, including yellow
-  degradation, retained causes/target MID, recovery to green, red lifecycle
-  priority, safe error text and manual refresh. Run browser tests only after the
-  matching asset/server build finishes; a mixed-build trust fixture was rejected
-  and passed after rerunning with matching artifacts. Trust checks were unchanged.
-
-Windows Debug／Release 完整建置與各 50 項相關回歸通過；最後差異再驗證 Debug 11 項、Release 12 項（含外部 SDK 獨立建置／部署）。
-Ubuntu 24.04 WSL 的 Bus／Module 23 項及最後差異 8 項通過。TypeScript 與 Chromium 6 項通過。
-WSL 不當作原生 Linux 效能證據；瀏覽器須使用同版資產／伺服器，不能與重建並行混用。
-
-Fault tests cover both publication paths, one failed destination while another
-continues, immediate next-send retry, repeated-failure throttling, existing-name
-reopening/catch-up, invalid receiver fallback without spinning, stop cancellation,
-route deduplication/removal/subscriber-first registration, reader cleanup despite
-route-encoding allocation failure, wire-capacity rejection/reuse, invalid identities,
-unknown diagnostic codes, full cause chains and truncated/version-mismatched reports.
-The existing process/Context tests cover batch/callback ownership, command dispatch,
-stop/restart, callback failure, Python, RPC and Param regressions. Primitive pre-wait
-retention/concurrent signals/cancellation evidence remains in the OSAL report.
-
-故障測試涵蓋 push／loan、單一目標失敗不阻斷其他目標、重試／節流／恢復、失效 receiver
-備援等待、停止取消、路由合併／退訂／先訂閱後發布、通知配置失敗不阻斷回收、容量拒絕後重用、
-非法身分、完整錯誤原因鏈與截斷／版本錯誤。既有跨程序測試保留 batch、callback、Shell、
-Python、RPC、Param 及生命週期回歸證據。原語的等待前通知與取消證據仍由 OSAL 文件維護。
-
-### Outstanding validation / 待補驗證
-
-Native macOS functional validation was added on 2026-11-02 after the
-[portable notification snapshot repair](../message_bus/README.md#macos-notification-snapshot-blocker).
-That record owns the mutex/lifetime contracts and snapshot tests; the
-[Mac integration record](python/README.md#macos-snapshot-repair-validation) owns
-the tested environment, Release scope and limited Debug coverage. Earlier
-platform reports remain valid only for their recorded revisions. Native Linux
-latency, pure idle CPU, very high-rate/topology-churn stress and maximum fan-out
-resource limits have not been established by these tests. Retaining the fallback
-means idle wake frequency is not promised to decrease. A native signal success is
-only a hint acceptance, never proof of callback progress or durable delivery.
-
-2026-11-02 已補通知快照修正及 macOS 功能驗證，範圍與限制見上述紀錄；不視為 Windows／Linux
-已重跑這份 mutex 實作。本次依使用者決定不跑 benchmark。原生 Linux 延遲、
-純閒置 CPU、高頻拓樸變動壓力與最大扇出資源極限仍待量測；保留補查不承諾降低閒置喚醒頻率。
-通知成功不等於 callback 已執行或資料可靠交付。
-
-### Performance evidence / 效能證據
-
-The [measurement report](../message_bus/benchmarks/NOTIFICATION_RESULTS_2026-10-28.md) records 64 B–128 MiB, push/loan, 1,000 measured messages per case, 4 GiB shared budget, raw evidence paths and 0/1/8/32 receiver fan-out. All formal runs were clean; rejected large-payload pilots remain visible. On this Windows host, 1 MiB push/loan P99 was 0.5890/0.3668 ms versus the earlier approximately 16 ms polling observation. Pure idle CPU and native Linux/macOS latency remain outside this report.
-
-量測報告保留所有正式與未合格試跑；正式組均零碰撞／零遺失／無完整性錯誤。此 Windows 主機的 1 MiB push／loan P99 為 0.5890／0.3668 ms，相較先前輪詢約 16 ms；不推廣為跨平台保證，純閒置與原生 Linux／macOS 延遲另待量測。
+[Windows／WSL and historical Mac follow-up](PUMP_WAKEUP_VALIDATION.md) preserve the
+original 16 ms investigation, Manual wait tests and notification benchmarks.
+[Later native Mac source/SDK/cost results](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)
+have their own revision and workload. No hard real-time or universal latency guarantee is implied.

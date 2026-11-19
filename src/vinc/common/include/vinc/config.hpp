@@ -145,8 +145,8 @@ static_assert(error_chain_max_depth >= 2, "Error chains require at least two rec
 inline constexpr std::uint32_t message_bus_default_slots = 2;
 // 每個 RingBuffer 槽位的完整訊息映像預設容量（bytes，含 metadata）。
 inline constexpr std::uint64_t message_bus_default_message_bytes = 1024 * 1024;
-// Bus 預設允許的不同 Topic 數量上限。
-inline constexpr std::uint32_t message_bus_default_topics = 128;
+// Zero disables only the distinct-Topic count limit. 每個 App 的 Topic 數量預設不限。
+inline constexpr std::uint32_t message_bus_default_topics = 0;
 // 每個 Topic 預設可登記的 Publisher 數量上限。
 inline constexpr std::uint32_t message_bus_default_publishers_per_topic = 32;
 // 每個 Topic 預設可登記的 Subscriber 數量上限。
@@ -159,6 +159,13 @@ inline constexpr std::uint64_t message_bus_default_shared_bytes = 1024ULL * 1024
 inline constexpr std::size_t message_bus_pending_requests = 32;
 // BusManager 控制工作佇列的筆數上限；不存放訊息 payload。
 inline constexpr std::size_t message_bus_manager_queue_size = 256;
+// Per Host: bounded mutation history while a page is awaiting its receipt.
+// One additional wire page per direction can be pending transport admission.
+inline constexpr std::size_t message_bus_topology_history_records = 64;
+inline constexpr std::size_t message_bus_topology_history_bytes = 64 * 1024;
+// All Host histories share this budget, excluding active endpoint relationships.
+inline constexpr std::size_t message_bus_topology_total_history_bytes = 4 * 1024 * 1024;
+inline constexpr auto message_bus_topology_send_retry = std::chrono::milliseconds(10);
 // Bus 登記等控制請求等待回覆的期限（秒），不是 Reader 競爭等待期限。
 inline constexpr auto message_bus_request_timeout = std::chrono::seconds(10);
 

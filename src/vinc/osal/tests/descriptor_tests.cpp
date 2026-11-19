@@ -1,6 +1,7 @@
 // Each closed-stdio/resource-limit scenario runs in a fresh, single-threaded
 // fork child. No live OSAL service or FileLock is carried across fork.
 #include <vinc/osal/file_lock.hpp>
+#include <vinc/osal/detail/shared_memory_create.hpp>
 #include <vinc/osal/process.hpp>
 #include <vinc/osal/shared_memory.hpp>
 #include <cerrno>
@@ -273,10 +274,12 @@ void relocation_failure() {
         require_missing_stdio();
         require(!std::filesystem::exists(workspace.lock), "failed lock left a new name");
 
-        auto memory = SharedMemory::create(workspace.memory_name, memory_bytes);
+        detail::SharedMemoryCreateAttempt attempt;
+        auto memory = attempt.create(workspace.memory_name, memory_bytes);
         require(!memory && memory.error().is(ErrorCode::ResourceExhausted), "memory relocation failure");
         require(memory.error().is_operation(ErrorOperation::CreateSharedMemory), "memory operation");
         require(memory.error().native.value() == EMFILE, "memory native error");
+        require(!attempt.name_cleanup_error, "successful relocation rollback reported pending cleanup");
         require_missing_stdio();
 
         auto service = ProcessService::create();

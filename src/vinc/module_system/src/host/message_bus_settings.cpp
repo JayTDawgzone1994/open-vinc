@@ -1,4 +1,4 @@
-#include <vinc/module/detail/publisher_defaults.hpp>
+#include <vinc/module/detail/message_bus_settings.hpp>
 #include <vinc/module/error.hpp>
 
 namespace vinc::detail {
@@ -7,6 +7,8 @@ constexpr char slots_name[] = "pub_default_slots";
 constexpr char bytes_name[] = "pub_default_message_bytes";
 constexpr char full_slots_name[] = "vinc.pub_default_slots";
 constexpr char full_bytes_name[] = "vinc.pub_default_message_bytes";
+constexpr char topic_limit_name[] = "message_bus_max_topics";
+constexpr char full_topic_limit_name[] = "vinc.message_bus_max_topics";
 
 Error parameter_failure(const Error& cause) {
     return wrap_error(module_system::ErrorCode::ParamFailed,
@@ -37,11 +39,54 @@ Result<void> register_setting(param::detail::ParamManager& params, const char* n
 }
 }
 
-PublisherDefaults::PublisherDefaults(param::detail::ParamManager& params, message_bus::Limits limits)
+MessageBusSettings::MessageBusSettings(param::detail::ParamManager& params, message_bus::Limits limits)
     : params_(params), limits_(limits) {
 }
 
-Result<void> PublisherDefaults::initialize() {
+Result<void> MessageBusSettings::initialize() {
+    auto registered = register_publisher_defaults();
+    if (!registered) {
+        return registered;
+    }
+
+    return register_topic_limit();
+}
+
+Result<void> MessageBusSettings::register_topic_limit() {
+    if (topic_limit_registered_) {
+        return {};
+    }
+
+    auto result = register_setting(params_, topic_limit_name, full_topic_limit_name, limits_.max_topics);
+    if (!result) {
+        return std::unexpected(parameter_failure(result.error()));
+    }
+
+    topic_limit_registered_ = true;
+    return {};
+}
+
+Result<std::uint32_t> MessageBusSettings::read_topic_limit() {
+    auto registered = register_topic_limit();
+    if (!registered) {
+        return std::unexpected(registered.error());
+    }
+
+    auto values = params_.read_current({full_topic_limit_name});
+    if (!values) {
+        return std::unexpected(parameter_failure(values.error()));
+    }
+
+    // All uint32 values are valid. Type or lookup failures must not disable admission control.
+    auto limit = values->at(full_topic_limit_name).get<std::uint32_t>();
+    if (!limit) {
+        return std::unexpected(parameter_failure(limit.error()));
+    }
+
+    return *limit;
+}
+
+Result<void> MessageBusSettings::register_publisher_defaults() {
     if (!slots_registered_) {
         auto registered = register_setting(params_, slots_name, full_slots_name, config::message_bus_default_slots);
         if (!registered) {
@@ -61,7 +106,7 @@ Result<void> PublisherDefaults::initialize() {
     return {};
 }
 
-Result<void> PublisherDefaults::restore(const param::ParamMap& values) {
+Result<void> MessageBusSettings::restore(const param::ParamMap& values) {
     std::optional<Error> failure;
     const auto restore_one = [&](const char* full, const char* name, param::Value value) {
         if (values.at(full).value == value) {
@@ -84,11 +129,11 @@ Result<void> PublisherDefaults::restore(const param::ParamMap& values) {
     return {};
 }
 
-Result<message_bus::detail::PublisherDefaults> PublisherDefaults::read() {
+Result<message_bus::detail::PublisherDefaults> MessageBusSettings::read_publisher_defaults() {
     // Component-level fixtures may omit file configuration. The production App
     // eagerly initializes after load; this path supplies the same live service
     // without requiring persistence or a second entry point.
-    auto initialized = initialize();
+    auto initialized = register_publisher_defaults();
     if (!initialized) {
         return std::unexpected(initialized.error());
     }

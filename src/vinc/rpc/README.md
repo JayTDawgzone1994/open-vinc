@@ -69,7 +69,7 @@ Run the last command for `installed_consumer`, `installed_python` and
 compiler/Python paths for the producer as recorded above. The fixtures own their
 named work directories under the producer and recreate those directories on each run.
 
-Coverage map for the [contract checklist](CLIENT_CONTRACT.md#acceptance-checklist--驗收條件):
+Coverage map for the [client contract](CLIENT_CONTRACT.md):
 
 | Contract | Evidence |
 | --- | --- |
@@ -166,10 +166,10 @@ No production toolchain/runtime protection was relaxed.
 
 This stage-3 record is focused source acceptance, **not** full-project or clean installed-SDK
 acceptance. Subsequent installed-consumer coverage is recorded in [stage 4](#integration-acceptance).
-Native macOS remains in root TODO. Historical stage-1/2 records below retain their original scope.
+Later [Mac source/SDK evidence](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) covers the integrated implementation. Historical stage-1/2 records below retain their original scope.
 
 第三階段紀錄僅涵蓋來源版重點回歸；後續乾淨 SDK 與搬移部署結果見第四階段，
-不回溯擴大較早紀錄的驗證範圍。原生 macOS 仍待驗。
+不回溯擴大較早紀錄的驗證範圍；後續 Mac 結果見上述連結。
 
 <a id="synchronous-calls"></a>
 
@@ -319,8 +319,8 @@ a fixed script after argument expansion failed before copying/building.
 Windows Debug／Release、WSL Release 各 **2/2** 通過，SDK 公開標頭獨立編譯亦通過。
 僅驗證上述本機 foundations 與既有契約；未重跑全專案、完整跨程序 RPC、Python、
 最低 MSVC 19.44、乾淨 installed SDK 或原生 macOS。本次結果不能當成同步傳輸已完成。
-後續接線與 Mac 待驗項目已列入根目錄 TODO；完整
-當時尚未完成的[驗收清單](CLIENT_CONTRACT.md#acceptance-checklist--驗收條件)，以第四階段紀錄更新目前狀態。
+後續接線已完成；[整合驗收](#integration-acceptance)與文末 Mac 報告記錄後續結果，
+[Client 契約](CLIENT_CONTRACT.md)維護目前行為。
 
 RPC is synchronous/asynchronous typed Module-to-Module request/response through inherited Context. The native official UI Module can use it; a browser-plugin RPC bridge remains future work.
 

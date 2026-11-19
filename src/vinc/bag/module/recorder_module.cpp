@@ -2,7 +2,8 @@
 #include <vinc/time.hpp>
 #include <vinc/module/base_module.hpp>
 #include <vinc/osal/path.hpp>
-#include <vinc_messages/message_types.hpp>
+#include <vinc_messages/message_names.hpp>
+#include <vinc/module/detail/context_image_access.hpp>
 #include <charconv>
 #include <iostream>
 #include <map>
@@ -14,8 +15,7 @@ using namespace vinc::bag;
 
 struct Subscription {
     std::uint64_t schema = 0;
-    std::function<message_bus::SubscriberStats()> stats;
-    std::function<void()> close;
+    message_bus::detail::ImageSubscriber subscriber;
     std::uint64_t lost = 0;
     std::uint64_t oversized = 0;
 };
@@ -27,7 +27,7 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
     std::unique_ptr<Recorder> recorder_;
     std::map<std::string, Subscription> subscriptions_;
     std::set<std::string> selected_;
-    std::set<std::pair<std::string, std::uint64_t>> unsupported_;
+    std::set<std::pair<std::string, std::uint64_t>> unknown_types_;
     std::optional<Error> callback_failure_;
     Options options_;
     bool all_ = false;
@@ -35,7 +35,7 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
     std::chrono::steady_clock::time_point next_discovery_{};
 
     void losses(Subscription& subscription) {
-        const auto stats = subscription.stats();
+        const auto stats = subscription.subscriber.stats();
         recorder_->observe_losses(stats.lost_messages - subscription.lost,
                                   stats.oversized_messages - subscription.oversized);
         subscription.lost = stats.lost_messages;
@@ -45,7 +45,6 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
     void finish() {
         for (auto& [name, subscription] : subscriptions_) {
             losses(subscription);
-            subscription.close();
         }
 
         subscriptions_.clear();
@@ -54,21 +53,11 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
         }
     }
 
-    template <class T> Result<Subscription> subscribe(const std::string& topic) {
-        auto subscribed = context.subscribe<T>(
-            topic,
-            [this](std::unique_ptr<T> message) {
-                auto usage = message->usage();
-                if (!usage) {
-                    callback_failure_ =
-                        wrap_error(ErrorCode::StorageFailed, ErrorOperation::Enqueue, usage.error());
-                    return;
-                }
-
-                auto result = recorder_->enqueue(std::move(message), usage->allocated_bytes,
-                                                 [](const BaseMessage& value, std::uint64_t maximum) {
-                                                     return static_cast<const T&>(value).snapshot(maximum);
-                                                 });
+    Result<Subscription> subscribe(const std::string& topic, std::uint64_t schema) {
+        auto subscribed = vinc::detail::ContextImageAccess::subscribe(
+            context, topic, schema,
+            [this](message_bus::detail::ImageDelivery image) {
+                auto result = recorder_->enqueue(std::move(image));
                 if (!result && !result.error().is(ErrorCode::CapacityExceeded) &&
                     !result.error().is(ErrorCode::Closed)) {
                     callback_failure_ = result.error();
@@ -80,14 +69,7 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
                 wrap_error(ErrorCode::BusFailed, ErrorOperation::Discover, subscribed.error()));
         }
 
-        auto owner = std::make_shared<message_bus::Subscriber<T>>(std::move(*subscribed));
-        return Subscription{T::schema().hash,
-                            [owner] {
-                                return owner->stats();
-                            },
-                            [owner] {
-                                owner->close();
-                            }};
+        return Subscription{schema, std::move(*subscribed)};
     }
 
     Result<void> discover() {
@@ -114,7 +96,6 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
             auto present = topics.find(iterator->first);
             if (present == topics.end() || present->second.schema != iterator->second.schema) {
                 losses(iterator->second);
-                iterator->second.close();
                 iterator = subscriptions_.erase(iterator);
             } else {
                 ++iterator;
@@ -126,42 +107,21 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
                 continue;
             }
 
-            bool matched = false;
-            Result<void> attached;
-            message::visit_types([&]<class T> {
-                if (matched || T::schema().hash != topic.schema) {
-                    return;
-                }
-
-                matched = true;
-                attached = recorder_->discover({name, std::string(T::message_name), topic.schema, true});
-                if (!attached) {
-                    return;
-                }
-
-                auto subscription = subscribe<T>(name);
-                if (!subscription) {
-                    attached = std::unexpected(subscription.error());
-                    return;
-                }
-
-                subscriptions_.emplace(name, std::move(*subscription));
-            });
-            if (!attached) {
-                return attached;
+            const auto type = message::name_for_hash(topic.schema);
+            auto saved = recorder_->discover({name, std::string(type), topic.schema, !type.empty()});
+            if (!saved) {
+                return saved;
             }
 
-            if (!matched) {
-                auto saved = recorder_->discover({name, "", topic.schema, false});
-                if (!saved) {
-                    return saved;
-                }
+            auto subscription = subscribe(name, topic.schema);
+            if (!subscription) {
+                return std::unexpected(subscription.error());
+            }
 
-                if (unsupported_.emplace(name, topic.schema).second) {
-                    std::cout << "bag: " << name << " hash=" << topic.schema
-                              << " unsupported type (not recorded)\n"
-                              << std::flush;
-                }
+            subscriptions_.emplace(name, std::move(*subscription));
+            if (type.empty() && unknown_types_.emplace(name, topic.schema).second) {
+                std::cout << "bag: " << name << " hash=" << topic.schema
+                          << " unknown type (recording image)\n" << std::flush;
             }
         }
 
@@ -241,7 +201,7 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
         options_ = options;
         selected_ = std::move(selected);
         all_ = all;
-        unsupported_.clear();
+        unknown_types_.clear();
         callback_failure_.reset();
         failure_reported_ = false;
         next_discovery_ = {};
@@ -265,12 +225,8 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
                   << " bus_lost=" << result->counters.bus_lost << " oversized=" << result->counters.oversized
                   << " start_utc_ns=" << result->start_utc_ns << '\n';
         for (const auto& entry : result->topics) {
-            bool known = false;
-            bool same_name = false;
-            message::visit_types([&]<class T> {
-                known = known || T::schema().hash == entry.topic.schema;
-                same_name = same_name || T::message_name == entry.topic.type;
-            });
+            const bool known = !message::name_for_hash(entry.topic.schema).empty();
+            const bool same_name = message::hash_for_name(entry.topic.type) != 0;
             const char* state = "unknown type";
             if (known) {
                 state = "known type";
@@ -279,7 +235,7 @@ class RecorderModule final : public BaseModule<RunMode::Manual> {
             }
 
             std::cout << entry.topic.name << " type=" << entry.topic.type << " hash=" << entry.topic.schema
-                      << " supported_at_recording=" << entry.topic.supported << " records=" << entry.records
+                      << " type_known_at_recording=" << entry.topic.type_known << " records=" << entry.records
                       << " first_utc=" << vinc::format_utc(entry.first_timestamp)
                       << " last_utc=" << vinc::format_utc(entry.last_timestamp) << " "
                       << state << '\n';
@@ -429,7 +385,7 @@ public:
                           << " bus_lost=" << state.counters.bus_lost
                           << " oversized=" << state.counters.oversized
                           << " pending_bytes=" << state.pending_bytes
-                          << " unsupported_topics=" << unsupported_.size()
+                          << " unknown_types_topics=" << unknown_types_.size()
                           << " failed=" << (state.failure.has_value() || callback_failure_.has_value())
                           << '\n';
             }

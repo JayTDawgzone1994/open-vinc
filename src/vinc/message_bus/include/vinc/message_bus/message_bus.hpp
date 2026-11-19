@@ -50,6 +50,7 @@ struct TopicPage {
 };
 
 struct Limits {
+    // Initial per-App Param value, or the fixed standalone limit. Zero disables the count check.
     std::uint32_t max_topics = config::message_bus_default_topics;
     std::uint32_t publishers_per_topic = config::message_bus_default_publishers_per_topic;
     std::uint32_t subscribers_per_topic = config::message_bus_default_subscribers_per_topic;
@@ -136,6 +137,7 @@ struct TopicConnectionsPage {
 namespace detail {
 struct PublisherCore;
 struct SubscriberCore;
+class ImageAccess;
 struct LoanCore;
 class RuntimeAccess;
 class DispatchAccess;
@@ -152,8 +154,10 @@ bool usable(const std::shared_ptr<LoanCore>&) noexcept;
 vinc::Result<void> commit(const std::shared_ptr<PublisherCore>&, const std::shared_ptr<LoanCore>&,
                     message::detail::Binding);
 vinc::Result<void> push(const std::shared_ptr<PublisherCore>&, message::detail::Binding);
-void close(const std::shared_ptr<PublisherCore>&) noexcept;
-void close(const std::shared_ptr<SubscriberCore>&) noexcept;
+void retire(const std::shared_ptr<PublisherCore>&) noexcept;
+vinc::Result<void> close_confirmed(const std::shared_ptr<PublisherCore>&);
+void retire(const std::shared_ptr<SubscriberCore>&) noexcept;
+vinc::Result<void> close_confirmed(const std::shared_ptr<SubscriberCore>&);
 PublisherStats stats(const std::shared_ptr<PublisherCore>&);
 SubscriberStats stats(const std::shared_ptr<SubscriberCore>&);
 using Factory = std::unique_ptr<BaseMessage> (*)(message::detail::Binding);
@@ -214,6 +218,7 @@ public:
 // Registration may wait for the central BusManager; normal payload transfers use shared memory.
 class Client {
     friend class detail::RuntimeAccess;
+    friend class detail::ImageAccess;
     struct Impl;
     std::shared_ptr<Impl> impl_;
     explicit Client(std::shared_ptr<Impl>);
@@ -265,7 +270,7 @@ public:
 
     Publisher& operator=(Publisher&& other) noexcept {
         if (this != &other) {
-            close();
+            detail::retire(core_);
             core_ = std::move(other.core_);
         }
 
@@ -273,7 +278,7 @@ public:
     }
 
     ~Publisher() {
-        close();
+        detail::retire(core_);
     }
 
     // Reserve the next write slot. Overwrite waits for existing readers to finish their
@@ -319,9 +324,10 @@ public:
         return detail::stats(core_);
     }
 
-    void close() noexcept {
-        detail::close(core_);
-        core_.reset();
+    // Local use ends immediately. Success confirms central release, including Topic capacity.
+    vinc::Result<void> close() {
+        auto closing = std::move(core_);
+        return detail::close_confirmed(closing);
     }
 };
 
@@ -352,7 +358,7 @@ public:
 
     Subscriber& operator=(Subscriber&& other) noexcept {
         if (this != &other) {
-            close();
+            detail::retire(core_);
             core_ = std::move(other.core_);
         }
 
@@ -360,7 +366,7 @@ public:
     }
 
     ~Subscriber() {
-        close();
+        detail::retire(core_);
     }
 
     SubscriberStats stats() const {
@@ -373,9 +379,10 @@ public:
         return receive(true);
     }
 
-    void close() noexcept {
-        detail::close(core_);
-        core_.reset();
+    // Local use ends immediately. Success confirms central release, including Topic capacity.
+    vinc::Result<void> close() {
+        auto closing = std::move(core_);
+        return detail::close_confirmed(closing);
     }
 };
 }

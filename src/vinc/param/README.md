@@ -153,17 +153,10 @@ Python 可省略 `permission=`／`restart_hint=`，Entry 的標記唯讀；列�
 `vinc.param.RestartHint.None_`、Module、App（None 是 Python 關鍵字）。只監聽時若帶入
 非預設的權限或標記，回 VincError，不悄悄忽略。
 
-Delivery stages / 實作階段：
-
-1. **Implemented:** options, native/Python registration, cross-process snapshot
-   metadata, invalid-input/version rejection and source tests. / **已實作：** 註冊選項、
-   C++／Python、跨程序 metadata、非法輸入／舊版拒絕及來源測試。
-2. **Implemented:** Shell get/list/set reminders and native/Python examples. / **已實作：**
-   Shell get/list/set 提醒及 C++／Python 範例。
-3. Fresh installed-SDK acceptance for this ABI change is tracked in
-   [stage 3](#restart-hints-stage-three). Earlier SDK results below predate restart hints.
-   / 此次 ABI 變更的乾淨 installed SDK 驗收見[第三階段](#restart-hints-stage-three)；
-   下方較早的 SDK 結果不能替重啟標記背書。
+Registration metadata, Shell reminders and C++/Python examples are implemented.
+[Installed SDK acceptance](#restart-hints-stage-three) and
+[Mac acceptance](../sdk/MACOS_PARAM_VALIDATION.md) record the tested ABI and scope.
+註冊、跨程序標記、Shell 提醒與範例均已接通；驗收版本與範圍見上述報告。
 
 Stage 1 validation (2026-11-03, this working tree, Release):
 
@@ -818,6 +811,16 @@ Two shared slots serve all parameters and consume one module_lock_limit mutex. E
 <a id="驗證與待處理事項"></a>
 
 ## Recorded validation and outstanding issues / 驗證與待處理事項
+
+**Cache convergence test correction (2026-11-17):** `tests/process_tests.cpp` now
+checks committed writes through `read_current()` and waits separately for another
+Module's pump cache, including a newly appearing watch. It no longer assumes that
+a write acknowledgement means another pump has applied the value. No Param runtime
+contract changed. Windows/WSL evidence and the original intermittent failure are
+recorded in [central receive-wakeup acceptance](../module_system/CONTROL_WAKEUP_VALIDATION.md).
+
+**快取收斂測試修正：**寫入 ACK 不保證其他 Module 的 pump 已更新；測試分別驗中央已提交
+及快取最終收斂，首次出現的監聽先確認 present。原始失敗與四組態結果見上述報告。
 
 <a id="param-redesign-stage-one"></a>
 

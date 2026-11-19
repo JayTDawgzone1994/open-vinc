@@ -46,6 +46,7 @@ struct Options {
 namespace detail {
 struct Peer;
 struct Engine;
+struct ReceiveWakeAccess;
 constexpr std::size_t default_session_capacity = 256;
 }
 
@@ -70,6 +71,7 @@ public:
 
 private:
     friend class Service;
+    friend struct detail::ReceiveWakeAccess;
     explicit Session(std::shared_ptr<detail::Peer> peer);
     std::shared_ptr<detail::Peer> peer_;
 };

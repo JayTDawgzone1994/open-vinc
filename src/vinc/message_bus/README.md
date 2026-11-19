@@ -2,6 +2,46 @@
 
 # Shared Memory Message Bus / 共享記憶體訊息匯流排
 
+<a id="framework-image-subscriptions"></a>
+
+## Framework image subscriptions / 框架映像訂閱
+
+`detail/image_subscription.hpp` supplies `ImageAccess::subscribe(client, topic,
+schema_hash, options)` and the move-only `ImageSubscriber`. This designated
+framework seam uses the existing Host Client, registration, source checks,
+notification routes, close ACK and cursor machinery. It is not a public raw-data
+API or a separate authorization mechanism. A zero schema hash is rejected before
+registration. The Bus wire and shared RingBuffer layout are unchanged.
+
+框架專用 `ImageSubscriber` 共用既有 Client、註冊、來源補查、通知、游標與 close ACK；
+不建立第二個控制服務，不增加一般使用者 raw API 或權限機制。
+零 schema hash 在註冊前拒絕，Bus wire／RingBuffer 布局不變。
+
+`get_last()` and `detail::read_image_batch()` deliver
+`unique_ptr<const ReceivedImage>`. The envelope owns a local immutable Snapshot,
+Topic/hash, Publisher name/ID (not MID), Topic count and original UTC/monotonic
+timestamps. The reader releases shared protection immediately after its one
+bounded copy, before Storage validation, metadata construction or callback.
+`payload_capacity` reports the adopted vector's capacity, not total allocation or
+RSS: validator metadata, envelope/strings and downstream copies are additional.
+The image remains valid after later reads, ring reuse, close and publisher exit.
+
+交付物可 move 留存；後續讀取、Ring 覆寫、退訂與發布者退出不會改寫它。
+共享保護只涵蓋一次有界複製。`payload_capacity` 供後續 queue 計帳，僅代表所持有
+payload vector 的容量，不包含 validator metadata、envelope／字串或程序總 RAM。
+
+The common reader selects sources, applies captured ceilings, counts loss and
+skips oversized callback images before allocation. Only the post-copy decoder
+differs: typed subscriptions validate the full field schema; image subscriptions
+validate Storage structure, one record root and the expected nonzero hash. Unknown
+C++ types are accepted when these checks pass. Schema mismatch remains
+`MessageBus/TypeMismatch`; malformed structure is `InvalidData`, retaining the
+Storage cause. Failed validation does not advance the selected cursor.
+
+typed 與通用路徑共用來源選擇／批次上限／遺失統計／配置前容量檢查。
+通用路徑不保證具體欄位語意，typed 驗證維持完整；失敗保留 Storage 原因且不前進該筆游標。
+Recorder 替換與整合驗收依 [分階段契約](../bag/IMAGE_RECORDING.md)，本階段不修改 Recorder。
+
 Message Bus connects OSAL SharedMemory, generated messages, and process Modules. Use inherited Context advertise/subscribe from on_start, not constructors. Each Publisher owns a ring; topics may have several. Bulk payload stays shared, while sockets exchange registration/unsubscribe/topology control.
 
 `vinc::message_bus` 接上 OSAL SharedMemory、Ribosome 生成訊息及獨立程序 Module。
@@ -9,12 +49,25 @@ Message Bus connects OSAL SharedMemory, generated messages, and process Modules.
 每個 Publisher 擁有獨立 RingBuffer，同一 topic 可有多個 Publisher。大量訊息留在共享記憶體，
 Socket 控制通道只交換註冊、退訂與 Publisher 增減資訊。
 
+The Topic counter and both Publisher mappings retire failed reservations individually when cleanup is confirmed. Topic 計數器、Publisher 控制區與資料區各自確認清理結果，再撤銷自己的預留。跨 App 同名 Topic、中央重啟與資源額滿驗收見 [Topic registration failure recovery / Topic 註冊失敗回收契約](TOPIC_REGISTRATION_RECOVERY.md)。
+
+The [control-plane repair contract / 控制面契約](CONTROL_PLANE_REPAIR.md) records the deadline and reservation fixes and the versioned Host topology protocol and its validation.
+
+Stage 5 Windows/WSL Debug and Release integration, load and clean C++/Python SDK checks
+passed on 2026-11-16. The linked report distinguishes sampled storage, whole-process
+memory and the old wire-format size model. Native results are recorded in the
+[macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md).
+第五階段 Windows／WSL Debug、Release 的整合、負載與乾淨 C++／Python SDK 驗收已通過。
+成本取樣與限制見上述報告，後續 Mac 原生結果另列。
+
+A Subscriber skips a missing Publisher mapping while the Host checks its registration in the background. Other Publishers remain readable. 若同一 Topic 的所有來源都沒有可讀資料，`get_last()` 回 `NoPublishedData`，pump 繼續派送其他工作。中央確認仍有登記且重新開啟仍失敗時，讀取端會收到原始錯誤。見[退場驗收](CONTROL_PLANE_VALIDATION.md#第四階段延後套用更新與第一次開啟共享區)。
+
 Omitted Publisher capacities use two central Param values; explicit options and
 existing rings remain independent. See [Publisher defaults](PUBLISHER_DEFAULTS.md)
-for last-effective correction, standalone use and Bus v4 / Plugin entry 14.
+for last-effective correction and standalone use. Current endpoint release uses Bus v6 / Plugin entry 23.
 
 省略的 Publisher 容量改用兩項中央 Param，明確指定及既有 Ring 不受影響。
-最後有效值修正、獨立使用與 Bus v4／Plugin entry 14 見上述專題契約。
+最後有效值修正與獨立使用見上述專題契約。現行端點回收使用 Bus v6／Plugin entry 23。
 
 Sequential delivery runs through Context pump callbacks; get_last reads the latest. No per-message data Socket notifications.
 
@@ -173,10 +226,9 @@ The2026-10-03 readability pass expanded flow/declarations/lifetime comments, ret
 | `include/vinc/message_bus/detail/ring_buffer.hpp` | 固定共享布局、generation token、payload 對齊及版本限制 |
 | `include/vinc/message_bus/detail/protocol.hpp` | Descriptor／Attachment 的欄位編碼順序及控制面上限 |
 
-Acquisition helpers immediately transfer resources to RingBuffer; later failure uses its destructor, with only creators unlinking their own names. RegistrationCleanup handles remote rollback; failed Publisher attachment sends closure before releasing core mappings. Detailed failure policy is below.
+RingBuffer holds each acquired handle and mapping immediately. Pending names have separate rollback owners until the ring is ready. RegistrationCleanup handles remote rollback; failed Publisher attachment sends closure before releasing core mappings. Detailed failure policy is below.
 
-RingBuffer 的 acquisition helper 把成功取得的資源立即交回 RingBuffer 持有；後續失敗由 RingBuffer 析構回收，
-只有建立者移除自己成功建立的名稱。Client 的遠端註冊回滾由 `RegistrationCleanup` 維護，
+RingBuffer 持有已取得的 handle 與 mapping；建立期間兩筆名稱各有回滾責任，整個 RingBuffer 就緒才一併移交。Client 的遠端註冊回滾由 `RegistrationCleanup` 維護，
 `attach_publisher_resources` 失敗時，先送關閉事件，再釋放本機 core 持有的映射；完整失敗行為見下方重審修正。
 
 Compile-time message_bus_* config centralizes capacities/budgets/control waits/retries and publicly propagates Common. Values were preserved during readability work; protocol/layout/test constants remain owned locally. This is not runtime Param rebinding.
@@ -393,11 +445,27 @@ Overlapping data operations on one Pub/Sub return OperationInProgress; different
 
 ## Limits and implementation scope / 限制與實作邊界
 
-Manager Bus limits default 128 topics,32 Publishers/topic,128 Subscribers, 1 GiB active shared bytes. Maximum 65536 slots,4096 Subscribers,32 Publishers due to bounded descriptors. Names/topics<=256 UTF-8 bytes. Each Client has 32 pending controls, manager 256 application requests; accepted exit recovery is not dropped by that cap.
+The per-App framework Param `vinc.message_bus_max_topics` (uint32, Limited, no restart) defaults to **0**, which disables the distinct-Topic count check. A subscriber-only Topic counts once. Additional endpoints on the same name and schema share its entry. Lowering the limit retains all live Topics; a new name is admitted only when the live count is below the new limit or the limit is zero. The last endpoint's release frees that entry after Bus cleanup.
+
+The Bus worker reads the committed setting only when creating a distinct name, before reserving shared resources. A read failure rejects that creation with its cause. ModuleManager registers the initial `Limits::max_topics` after loading Param persistence; a standalone Bus uses its supplied limit directly. Use `param set vinc.message_bus_max_topics 256` for a live change and `param save` to retain it across restart.
+
+每個 App 各自計算仍存活的不同 Topic；只有 Subscriber 也算一筆。將上限從 142 降為 100 時，既有 Topic 可繼續收發及加入端點，降到 99 筆才有一個新名稱的名額。設回 0 即解除數量限制。參數只在建立新名稱時讀取，讀取失敗會拒絕該次建立並保留原因鏈。手動調整後用 `param save` 保存。
+
+Release validation on 2026-11-12 passed the targeted Windows x64 suite (MSVC 19.51, 8/8) and the WSL Ubuntu 24.04 x86-64 suite (GCC 13.3, 9/9 including FD exhaustion). On each platform `message_bus.topic_limit_param` also passed three consecutive runs with 142 live names, two independent Apps, and a saved limit restored after restart. Native macOS verification is tracked in the [project TODO](../../../TODO.md).
+
+**Closing an endpoint.** `Publisher::close()` and `Subscriber::close()` consume the handle and return `Result<void>`. Success means the central has reclaimed that registration and pruned any empty Topic. Another owner can use newly available capacity immediately. Close waits within the Bus request deadline without pumping callbacks. A lost acknowledgement leaves the remote outcome unknown. Repeating close on the consumed handle returns `Closed`. Python exposes a successful close as `None` and an error as `VincError`.
+
+**關閉與批次退訂。** 明確呼叫 `close()` 會等中央確認。析構、移動賦值替換舊端點、容器 `clear()` 會先結束本機使用，再將回收交給 Host。後續同一 Host 的 Bus 登記或查詢會等待呼叫前已排入的回收，沿用同一份請求期限。可在同一個 callback 清空訂閱後立即重新訂閱，無須額外 pump 或 sleep。其他 Host 可在中央釋出名額後先行取得；空出的名額不專屬於原持有人。
+
+The old Windows reproduction filled the central receive queue with 64 individual close frames before the next unsubscribe arrived. Bus v5 uses bounded acknowledged batches. See the [release protocol](DESIGN.md#endpoint-release) and the macOS validation item in the root TODO.
+
+2026-11-12 Release validation on Windows x64 (MSVC 19.51) and WSL Ubuntu 24.04 passed both 141-endpoint cases. `message_bus.topic_limit_param` clears 141 subscriber-only Topics and immediately admits a replacement at a reduced limit. `message_bus.release_routes` removes 141 callback subscriptions with live remote Publishers, registers them again, then closes the Publishers and checks communication between the same two Hosts. `message_bus.cleanup` passed five consecutive runs per platform with delayed replies, send backpressure, ownership checks, disconnection and concurrent release ordering. Windows also passed `module.python_services`.
+
+Other Manager budgets default to 32 Publishers/topic, 128 Subscribers/topic and 1 GiB of active shared bytes. Maximum 65536 slots,4096 Subscribers,32 Publishers due to bounded descriptors. Names/topics<=256 UTF-8 bytes. Each Client has 32 pending controls, manager 256 application requests; accepted exit recovery is not dropped by that cap.
 
 框架內部 `ModuleManager::create(limits, host_executable)` 可設定中央預算，Host 路徑由框架提供：
-預設 128 topics、每 topic 32 Publishers、
-128 Subscribers、1 GiB 活躍共享配置。每 Publisher 最多 65,536 slots；Subscriber 上限可設到 4,096，
+Topic 數量預設不限。每個 Topic 預設最多 32 個 Publisher 和 128 個 Subscriber。
+每個 App 的 Bus 預設合計可配置 1 GiB 活躍共享記憶體。每個 Publisher 最多 65,536 slots；Subscriber 上限可設到 4,096，
 Publisher 上限目前不可超過 32（控制封包有界）。Publisher 名稱及 topic 最多 256 UTF-8 bytes。
 每個 Client 最多 32 個控制請求等待，BusManager 應用請求佇列最多 256；退出回收事件不因該上限被丟棄。
 
@@ -495,9 +563,15 @@ Result alias 與 `to_error()`；呼叫端以 `error.is(message_bus::ErrorCode::.
   錯誤遷移輪次沒有全面攔截 STL 例外或宣告所有操作不拋例外。
 - 通知送出與析構路徑維持既有關閉會話政策，未新增背景故障查詢介面。
 
-Current control protocol is Bus v3: high operation byte 3, original operations 1–6 in the low byte, plus list/inspect/connection and callback-notification operations. Old/unknown versions reject before queue/topology, without adapters. Frame stays v1; current bootstrap is v16, ring layout v3, Storage image v2. Historical migration preserved its then-current bootstrap/ring versions, not those values forever. Rebuild all connected participants.
+Current control protocol is Bus v6: high operation byte 6, including registration,
+queries, callback notification routes, release batches, source checks and versioned
+topology pages/ACKs. See [the protocol table](DESIGN.md) for operation identities.
+Old/unknown versions reject before queue/topology, without adapters. Frame stays v1;
+current bootstrap is v16, ring layout v3, Storage image v2. Historical migration
+preserved its then-current bootstrap/ring versions, not those values forever.
+Rebuild all connected participants.
 
-目前 Bus 控制協定為 v3，高 byte 為 3，低 byte 保留原 1–6，另含清單／診斷／連線及 callback 通知操作。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v16、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
+目前 Bus 控制協定為 v6，高 byte 為 6，包含登記、查詢、callback 通知路由、回收批次、來源補查及版本化拓樸頁面／ACK；操作編號以 DESIGN 為準。舊／未知版本在入列或拓樸處理前拒絕，不相容轉接。外層 frame v1；目前 bootstrap v16、RingBuffer v3、Storage 映像 v2。遷移當時保留舊 bootstrap／ring 不表示它們永不升版；相連程式須一起重建。
 
 Failure responses explicitly encode current error/causes/count/truncation/native fields; same-layer remote Bus errors pass through. Unknown codes stay numeric; malformed packets close Sessions. Text resolves in local catalogs, never object-layout transport. [DESIGN](DESIGN.md) owns bytes. detail/error_protocol is only Bus codec/runtime/test integration, independent of Module-private protocol; Module wraps Bus failures at its boundary.
 
@@ -536,7 +610,7 @@ Three recovery gaps were fixed:
 本輪重審的三項回收缺口已修正：
 
 - Detach failure no longer aborts exit cleanup: retire ring/reclaim active budget/remove registration before notifying each subscriber. Encoding/send exceptions/Results close only that receiver and do not interrupt remaining notifications/topic readers/peers/pruning, leaving no consumed-but-unfinished exit job on this path.
-- RegistrationCleanup takes ownership immediately after successful response. Trusted IDs send ClosePublisher/Unsubscribe and remove local topology; untrusted/truncated/zero/mismatched/invalid descriptors close the Session. Mapping/counter/decode failures stay covered until core delivery.
+- RegistrationCleanup takes ownership immediately after a successful response. Trusted IDs enter the release queue and retire local topology. Untrusted, truncated or invalid descriptors close the Session. The guard covers mapping, counter and decode failures until core delivery.
 - PendingCleanup removes pending entries on every exit. Send/body-copy exceptions before safe response delivery close the Session/no retry; valid remote errors return normally, success does not close. Existing outer exception classification remains.
 
 - **退出清理不受 Detach 失敗中斷。** `remove_publisher()` 先退役 RingBuffer、扣回活躍預算並移除登記，
@@ -544,7 +618,7 @@ Three recovery gaps were fixed:
   不阻斷其他通知、後續 topic 的 Reader 清理、peer 移除與空 topic 回收。
   因此已接受的退出工作不再因這條通知失敗路徑提前消耗卻留下死亡 Reader token。
 - **註冊回滾涵蓋 handle 交付前的完整階段。** `RegistrationCleanup` 在成功 RPC 返回後立即接管，
-  有可信 ID 時送 ClosePublisher／Unsubscribe，退訂亦移除本機 topology；
+  有可信 ID 時排入回收佇列，退訂亦移除本機 topology；
   尚無可信身分、Descriptor 截斷、零 ID、schema 不符或共享布局／尺寸不合法時關閉會話。
   映射、counter 開啟及本機解碼失敗均受保護；成功交付 core 後才解除 guard。
 - **pending 名額由作用域清理。** `PendingCleanup` 在請求入列後建立，所有出口都移除該 pending。
@@ -659,11 +733,12 @@ Bus 原有 ring buffer 共享布局及 writer 等待政策維持。
 
 ## Central resource-name service (2026-10-08) / 中央共享資源名稱服務（2026-10-08）
 
-Production Manager injects private ResourceNames into BusManager. Counter/control/data names reserve persistent records before SharedMemory creation; retire only after unlink success/already absent or Windows retirement. Incomplete cleanup stays recorded for next startup. Standalone uninjected tests use random names without cross-crash cleanup guarantees. No payload/order/wait/Reader change or per-message file I/O; see [Instance](../module_system/INSTANCE.md).
+Production Manager injects private ResourceNames into BusManager. Counter/control/data names reserve persistent records before SharedMemory creation. Owners retire after unlink succeeds, the name is already absent, or Windows retirement. A failed exclusive create retires only its own reservation when OSAL confirms no owned name remains. Incomplete cleanup retains the affected record. Standalone uninjected tests use random names without cross-crash cleanup guarantees. See [Instance](../module_system/INSTANCE.md).
 
 正式 Manager 組裝時向 `BusManager::create()` 注入 common 的私有 `ResourceNames`。
 Topic counter、RingBuffer control／data 都先 reserve 留下紀錄，再建立 OSAL SharedMemory；
-建立者 unlink 成功／名稱已不存在或 Windows 退役時，才 retire 記錄。清理未完成則保留供下次中央處理。
+建立者在 unlink 成功、名稱已不存在或 Windows 退役後撤銷登記。任一共享區排他建立失敗且 OSAL
+確認無自有名稱待清理時，也直接撤銷自己的預留。清理未獲確認則保留登記。
 無注入的獨立 Bus 測試仍採原有隨機名稱；這不提供跨中央崩潰的持久清理保證。
 本接線不改 payload、排序、等待或 Reader 回收協定，也不增加每筆 pub/sub 的檔案操作。
 跨世代與名稱生命週期契約見 [Module System INSTANCE.md](../module_system/INSTANCE.md)。

@@ -1,8 +1,72 @@
+#include <vinc/module/detail/context_image_access.hpp>
 #include <vinc/module/detail/context_runtime.hpp>
 #include <vinc/config.hpp>
 #include <algorithm>
 
 namespace vinc {
+Result<Context::Subscription::Delivery> Context::Subscription::read(
+    const message_bus::detail::ReadBatch& boundary) {
+    if (image_callback) {
+        auto result = message_bus::detail::read_image_batch(core, boundary);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+
+        return Delivery{std::move(*result)};
+    }
+
+    auto result = message_bus::detail::read_batch(core, boundary, *schema, factory);
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+
+    return Delivery{std::move(*result)};
+}
+
+void Context::Subscription::deliver(Delivery delivery) {
+    if (image_callback) {
+        image_callback(std::move(std::get<message_bus::detail::ImageDelivery>(delivery)));
+    } else {
+        callback(std::move(std::get<std::unique_ptr<BaseMessage>>(delivery)));
+    }
+}
+
+Result<message_bus::detail::ImageSubscriber> detail::ContextImageAccess::subscribe(
+    Context& context, std::string topic, std::uint64_t schema_hash,
+    std::function<void(message_bus::detail::ImageDelivery)> callback, message_bus::SubscriberOptions options) {
+    using module_system::ErrorCode;
+    using module_system::ErrorOperation;
+    if (!callback) {
+        return std::unexpected(Error{ErrorCode::InvalidArgument, ErrorOperation::AccessMessageBus});
+    }
+
+    auto access = context.client();
+    if (!access) {
+        return std::unexpected(access.error());
+    }
+
+    auto subscriber = message_bus::detail::ImageAccess::subscribe(access->get(), topic, schema_hash, options);
+    if (!subscriber) {
+        return std::unexpected(wrap_error(ErrorCode::BusFailed, ErrorOperation::AccessMessageBus, subscriber.error()));
+    }
+
+    auto notifications = message_bus::detail::enable_notifications(message_bus::detail::ImageAccess::core(*subscriber));
+    if (!notifications) {
+        return std::unexpected(wrap_error(ErrorCode::BusFailed, ErrorOperation::AccessMessageBus, notifications.error()));
+    }
+
+    auto subscription = std::make_shared<Context::Subscription>();
+    subscription->topic = std::move(topic);
+    subscription->core = message_bus::detail::ImageAccess::core(*subscriber);
+    subscription->image_callback = std::move(callback);
+    auto registered = context.register_callback(std::move(subscription));
+    if (!registered) {
+        return std::unexpected(registered.error());
+    }
+
+    return subscriber;
+}
+
 Result<std::unique_ptr<detail::ContextLock>> detail::ContextLockAccess::lock(
     Context& context, std::uint64_t id, Deadline deadline) {
     if (!context.runtime_ || !context.living()) {
@@ -155,8 +219,7 @@ Result<PumpStats> Context::pump_batch() {
         auto& subscription = *item.subscription;
         const auto before = message_bus::detail::stats(subscription.core);
         while (living() && !message_bus::detail::closed(subscription.core)) {
-            auto message = message_bus::detail::read_batch(subscription.core, item.boundary,
-                                                          *subscription.schema, subscription.factory);
+            auto message = subscription.read(item.boundary);
             if (!message) {
                 if (message.error().is(message_bus::ErrorCode::NoNewData) ||
                     message.error().is(message_bus::ErrorCode::Closed)) {
@@ -171,7 +234,7 @@ Result<PumpStats> Context::pump_batch() {
             }
 
             try {
-                subscription.callback(std::move(*message));
+                subscription.deliver(std::move(*message));
             } catch (...) {
                 const Error error{ErrorCode::HookException, ErrorOperation::SubscriptionCallback};
                 // Latch at Host level: ignoring the returned Result cannot keep this Module alive.

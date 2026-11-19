@@ -112,7 +112,7 @@ void test_case(const std::filesystem::path& plugin, const std::string& mode, boo
     } else {
         check(final->state == ModuleState::Failed && final->restarts == 1, "failed generation follows retry budget");
         check(final->last_failure.has_value() || final->cleanup_failure.has_value(), "retain failure diagnostic");
-        if (mode == "callback-error") {
+        if (mode == "callback-error" || mode == "image-error") {
             check(final->last_failure && final->last_failure->error.is(module_system::ErrorCode::HookException) &&
                   final->last_failure->error.is_operation(module_system::ErrorOperation::SubscriptionCallback),
                   "callback exception retains its specific diagnostic");
@@ -128,11 +128,11 @@ void test_case(const std::filesystem::path& plugin, const std::string& mode, boo
 int main(int argc, char** argv) {
     try {
         check(argc == 2, "plugin argument");
-        for (const auto* mode : {"finish", "batch", "loss", "cancel", "topology", "new-only"}) {
+        for (const auto* mode : {"finish", "batch", "loss", "cancel", "topology", "new-only", "image-batch", "image-new-only", "image-loss", "image-oversized", "image-cancel"}) {
             test_case(argv[1], mode, true, false);
         }
 
-        for (const auto* mode : {"error", "exit-zero", "cleanup-error", "cleanup-stall", "callback-error"}) {
+        for (const auto* mode : {"error", "exit-zero", "cleanup-error", "cleanup-stall", "callback-error", "image-error"}) {
             test_case(argv[1], mode, false, false);
         }
 

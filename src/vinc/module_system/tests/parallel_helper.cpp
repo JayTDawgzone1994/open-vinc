@@ -1,3 +1,4 @@
+#include <vinc/module/detail/context_image_access.hpp>
 #include <vinc/module/base_module.hpp>
 #include <vinc_messages/Frame.hpp>
 #include <array>
@@ -32,6 +33,8 @@ class ParallelModule final : public BaseModule<RunMode::FrameworkLoop> {
     std::thread::id control_thread_;
     std::array<std::optional<message_bus::Publisher<Frame>>, 2> publishers_;
     std::array<std::optional<message_bus::Subscriber<Frame>>, 3> subscribers_;
+    std::array<std::optional<message_bus::detail::ImageSubscriber>, 2> images_;
+    std::array<message_bus::detail::ImageDelivery, 2> retained_images_;
     std::array<std::atomic<int>, 2> active_{};
     std::array<std::uint64_t, 3> last_{};
     std::array<std::unique_ptr<Frame>, 3> retained_;
@@ -135,7 +138,7 @@ class ParallelModule final : public BaseModule<RunMode::FrameworkLoop> {
 public:
     ParallelModule() : BaseModule("parallelNode", {.topic_workers = 2}) {
     }
-    Result<void> on_start(const std::vector<std::string>&) override {
+    Result<void> on_start(const std::vector<std::string>& args) override {
         control_thread_ = std::this_thread::get_id();
         take(context.param.register_param("value", std::int32_t{0}));
         take(context.param.on_change([this](const param::ParamMap& values) {
@@ -179,8 +182,22 @@ public:
         publishers_[1].emplace(take(context.advertise<Frame>("parallel/b", {.slots = 8, .max_message_bytes = 8192})));
         for (std::size_t index = 0; index < subscribers_.size(); ++index) {
             const auto topic = index == 1 ? "parallel/b" : "parallel/a";
-            subscribers_[index].emplace(take(context.subscribe<Frame>(topic,
-                [this, index](std::unique_ptr<Frame> message) { receive(index, std::move(message)); })));
+            if (!args.empty() && index < images_.size()) {
+                images_[index].emplace(take(detail::ContextImageAccess::subscribe(context, topic, Frame::schema().hash,
+                    [this, index](message_bus::detail::ImageDelivery image) {
+                        auto decoded = take(Frame::from_bytes(image->image.bytes()));
+                        if (decoded->data().sequence.get() == 1) {
+                            retained_images_[index] = std::move(image);
+                        } else {
+                            check(take(Frame::from_bytes(retained_images_[index]->image.bytes()))->data().sequence.get() == 1,
+                                  "parallel retained image changed");
+                        }
+                        receive(index, std::move(decoded));
+                    })));
+            } else {
+                subscribers_[index].emplace(take(context.subscribe<Frame>(topic,
+                    [this, index](std::unique_ptr<Frame> message) { receive(index, std::move(message)); })));
+            }
         }
         for (std::uint64_t sequence = 1; sequence <= sample_count; ++sequence) {
             for (auto& publisher : publishers_) {

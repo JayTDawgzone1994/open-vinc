@@ -23,14 +23,14 @@ auto take(Result<T> result) {
 }
 int main(int argc, char** argv) {
     try {
-        if (argc != 2) {
+        if (argc != 2 && argc != 3) {
             throw std::runtime_error("parallel Plugin argument required");
         }
         auto manager = take(vinc::test::create_manager());
         ModuleType type{"parallelTest", argv[1], {}};
         type.policy.max_restarts = 0;
         take(manager->register_module_type(type));
-        auto mid = take(manager->start_module(type.name));
+        auto mid = take(manager->start_module(type.name, argc == 3 ? std::vector<std::string>{"images"} : std::vector<std::string>{}));
         take(manager->wait_running(mid, control::Clock::now() + test_timeout));
         bool completed = false;
         const auto deadline = control::Clock::now() + test_timeout;

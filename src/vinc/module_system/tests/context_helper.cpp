@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <thread>
 
+void verify_context_images(vinc::Context&, std::string_view);
+
 namespace {
 using namespace vinc;
 using namespace std::chrono_literals;
@@ -99,7 +101,7 @@ class ContextModule : public BaseModule<RunMode::Manual> {
     void verify_cancel() {
         create_bus();
         subscriber_.emplace(take(context.subscribe<Frame>(get_module_name(), [this](std::unique_ptr<Frame>) {
-            subscriber_->close();
+            take(subscriber_->close());
         })));
         publish(1);
         publish(2);
@@ -135,7 +137,7 @@ class ContextModule : public BaseModule<RunMode::Manual> {
         require(added_callbacks == 0, "new subscription waits for next pump");
         require(take(context.pumpOnce()).callbacks == 4, "new source and subscription participate next pump");
         require(received_.back() == 3 && added_callbacks == 3, "topology changes do not extend active batch");
-        subscriber_->close();
+        take(subscriber_->close());
     }
 
     void verify_new_only() {
@@ -161,7 +163,9 @@ public:
     }
 
     Result<void> main() override {
-        if (mode_ == "batch") {
+        if (mode_.starts_with("image-")) {
+            verify_context_images(context, mode_);
+        } else if (mode_ == "batch") {
             verify_batch();
         } else if (mode_ == "loss") {
             verify_loss();

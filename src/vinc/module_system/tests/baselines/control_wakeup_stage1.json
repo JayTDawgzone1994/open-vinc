@@ -1,0 +1,793 @@
+{
+  "date": "2026-11-16",
+  "stage": "pre-fix controlled baseline; no receive wake integration",
+  "head": "fc27d2788e74a163ea597f4e736004dbcfc6d529",
+  "working_tree": "Includes uncommitted Bus control-plane repair and stage-one test seams; not HEAD alone.",
+  "configuration": "Debug",
+  "hardware": "AMD Ryzen 7 5700X3D, 8 cores / 16 threads",
+  "trace_limits": "Application queue checkpoints; fixed preallocated trace. Durations subtract same-process timestamps only. Instrumentation overhead has not been independently quantified.",
+  "source_sha256": {
+    "src/vinc/control_channel/src/channel.cpp": "b4d7eb091c162c0a67a4f0f8f40b1b42472c1fbdf52d2b29d1b40d0616e50c6e",
+    "src/vinc/module_system/src/host/module_manager.cpp": "179a2ce4f927752757e572c504477172361848d36b598f0de60d1ed523a69114",
+    "src/vinc/module_system/tests/control_wakeup_analyze.py": "61a40985bb1fcfc86960b6a583f015316f4c4a480a3555263ae012254479886a",
+    "src/vinc/module_system/tests/control_wakeup_channel.cpp": "045a8961a1a9a62da136b1197f00c6f69f40e1e0fc8967d1676994d8fe2102e6",
+    "src/vinc/module_system/tests/control_wakeup_hooks.hpp": "8d929161708843c3a51423cea1ce976aed07dd6dfc4780a85996ef7a1a799264",
+    "src/vinc/module_system/tests/control_wakeup_host.cpp": "7aa6e20de4d44b9af184fdc8046452c5b8a6d14acca7b790872286d9c7c69538",
+    "src/vinc/module_system/tests/control_wakeup_tests.cpp": "87b4c55586c75e39a79bad1e02f7874fe4d1fd6acec5a3f5c680d293df821ec9",
+    "src/vinc/module_system/tests/control_wakeup_trace.hpp": "f7458cafa74dac81b99d44f4f0b4ddbf41047277d7ec0739d905fd3b3b89f548"
+  },
+  "platforms": {
+    "windows-debug": {
+      "environment": "Windows 11 Pro 10.0.26200, MSVC 19.51.36257 / MSVC STL 14.51.36231, CMake 4.3.2",
+      "runs": [
+        {
+          "run": 1,
+          "mode": "characterization",
+          "exit_code": 0,
+          "controlled": [
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.3564,
+              "inbox_to_take_ms": 30.4389
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 31.5839,
+              "inbox_to_take_ms": 31.6445
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 29.2946,
+              "inbox_to_take_ms": 29.3571
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 29.8081,
+              "inbox_to_take_ms": 29.8571
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.4744,
+              "inbox_to_take_ms": 30.8476
+            }
+          ],
+          "direct_receive_positive_control": "PASS",
+          "normal_exit_and_trace_collection": "PASS",
+          "callbacks": 64,
+          "command_workload_ms": 5969.25,
+          "timing": {
+            "units": "milliseconds",
+            "measurement": "application queue checkpoints, not physical wire timestamps",
+            "clock_rule": "durations use one process clock; no cross-process epoch subtraction",
+            "operations": {
+              "Subscribe": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 28.3815,
+                  "p50_ms": 29.9442,
+                  "p95_ms": 31.5776,
+                  "p99_ms": 32.7073,
+                  "max_ms": 32.7073
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.8827,
+                  "p50_ms": 1.1338,
+                  "p95_ms": 2.2642,
+                  "p99_ms": 3.566,
+                  "max_ms": 3.566
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 29.9645,
+                  "p50_ms": 31.5559,
+                  "p95_ms": 33.3792,
+                  "p99_ms": 34.277,
+                  "max_ms": 34.277
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.0204,
+                  "p50_ms": 0.0312,
+                  "p95_ms": 0.0486,
+                  "p99_ms": 0.0653,
+                  "max_ms": 0.0653
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.3372,
+                  "p50_ms": 0.4178,
+                  "p95_ms": 0.5315,
+                  "p99_ms": 0.5723,
+                  "max_ms": 0.5723
+                }
+              },
+              "EnableNotifications": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 27.3988,
+                  "p50_ms": 29.1922,
+                  "p95_ms": 30.3758,
+                  "p99_ms": 30.7429,
+                  "max_ms": 30.7429
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.1305,
+                  "p50_ms": 0.1972,
+                  "p95_ms": 0.3537,
+                  "p99_ms": 0.4479,
+                  "max_ms": 0.4479
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 28.0387,
+                  "p50_ms": 29.8343,
+                  "p95_ms": 30.9219,
+                  "p99_ms": 31.3969,
+                  "max_ms": 31.3969
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.0214,
+                  "p50_ms": 0.0371,
+                  "p95_ms": 0.1606,
+                  "p99_ms": 0.3581,
+                  "max_ms": 0.3581
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.3403,
+                  "p50_ms": 0.438,
+                  "p95_ms": 0.6386,
+                  "p99_ms": 1.1187,
+                  "max_ms": 1.1187
+                }
+              }
+            }
+          }
+        },
+        {
+          "run": 2,
+          "mode": "characterization",
+          "exit_code": 0,
+          "controlled": [
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.3305,
+              "inbox_to_take_ms": 30.3995
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.7253,
+              "inbox_to_take_ms": 30.8139
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.4167,
+              "inbox_to_take_ms": 30.4827
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.1857,
+              "inbox_to_take_ms": 30.2484
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.8626,
+              "inbox_to_take_ms": 30.9224
+            }
+          ],
+          "direct_receive_positive_control": "PASS",
+          "normal_exit_and_trace_collection": "PASS",
+          "callbacks": 64,
+          "command_workload_ms": 5978.4,
+          "timing": {
+            "units": "milliseconds",
+            "measurement": "application queue checkpoints, not physical wire timestamps",
+            "clock_rule": "durations use one process clock; no cross-process epoch subtraction",
+            "operations": {
+              "Subscribe": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 28.6359,
+                  "p50_ms": 30.0171,
+                  "p95_ms": 30.8241,
+                  "p99_ms": 31.3549,
+                  "max_ms": 31.3549
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.9072,
+                  "p50_ms": 1.1206,
+                  "p95_ms": 2.061,
+                  "p99_ms": 3.4577,
+                  "max_ms": 3.4577
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 30.1175,
+                  "p50_ms": 31.5889,
+                  "p95_ms": 32.8567,
+                  "p99_ms": 33.5576,
+                  "max_ms": 33.5576
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.0219,
+                  "p50_ms": 0.0311,
+                  "p95_ms": 0.0506,
+                  "p99_ms": 0.0937,
+                  "max_ms": 0.0937
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.3406,
+                  "p50_ms": 0.4178,
+                  "p95_ms": 0.4943,
+                  "p99_ms": 0.6085,
+                  "max_ms": 0.6085
+                }
+              },
+              "EnableNotifications": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 26.9368,
+                  "p50_ms": 29.2104,
+                  "p95_ms": 30.6483,
+                  "p99_ms": 31.0979,
+                  "max_ms": 31.0979
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.1442,
+                  "p50_ms": 0.1945,
+                  "p95_ms": 0.3266,
+                  "p99_ms": 0.79,
+                  "max_ms": 0.79
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 27.5736,
+                  "p50_ms": 29.9497,
+                  "p95_ms": 31.3607,
+                  "p99_ms": 31.6453,
+                  "max_ms": 31.6453
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.0208,
+                  "p50_ms": 0.0388,
+                  "p95_ms": 0.1038,
+                  "p99_ms": 0.3854,
+                  "max_ms": 0.3854
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.3239,
+                  "p50_ms": 0.4462,
+                  "p95_ms": 0.7018,
+                  "p99_ms": 0.7973,
+                  "max_ms": 0.7973
+                }
+              }
+            }
+          }
+        },
+        {
+          "run": 3,
+          "mode": "require-wakeup (expected regression failure)",
+          "exit_code": 1,
+          "controlled": [
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.1206,
+              "inbox_to_take_ms": 30.2721
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 29.8032,
+              "inbox_to_take_ms": 29.8805
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 29.7041,
+              "inbox_to_take_ms": 29.8324
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.2458,
+              "inbox_to_take_ms": 30.3003
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 30.1237,
+              "inbox_to_take_ms": 30.2122
+            }
+          ],
+          "direct_receive_positive_control": "PASS",
+          "normal_exit_and_trace_collection": "PASS",
+          "callbacks": 64,
+          "command_workload_ms": 5991.29,
+          "timing": {
+            "units": "milliseconds",
+            "measurement": "application queue checkpoints, not physical wire timestamps",
+            "clock_rule": "durations use one process clock; no cross-process epoch subtraction",
+            "operations": {
+              "Subscribe": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 28.4176,
+                  "p50_ms": 30.0087,
+                  "p95_ms": 31.1533,
+                  "p99_ms": 31.558,
+                  "max_ms": 31.558
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.7709,
+                  "p50_ms": 1.1306,
+                  "p95_ms": 1.7314,
+                  "p99_ms": 2.1262,
+                  "max_ms": 2.1262
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 29.5543,
+                  "p50_ms": 31.8528,
+                  "p95_ms": 32.7316,
+                  "p99_ms": 33.4883,
+                  "max_ms": 33.4883
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.0212,
+                  "p50_ms": 0.0338,
+                  "p95_ms": 0.0508,
+                  "p99_ms": 0.0672,
+                  "max_ms": 0.0672
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.3232,
+                  "p50_ms": 0.429,
+                  "p95_ms": 0.4964,
+                  "p99_ms": 1.0084,
+                  "max_ms": 1.0084
+                }
+              },
+              "EnableNotifications": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 27.8373,
+                  "p50_ms": 29.4027,
+                  "p95_ms": 30.6366,
+                  "p99_ms": 31.0795,
+                  "max_ms": 31.0795
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.1428,
+                  "p50_ms": 0.1928,
+                  "p95_ms": 0.287,
+                  "p99_ms": 0.7497,
+                  "max_ms": 0.7497
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 28.4776,
+                  "p50_ms": 30.0499,
+                  "p95_ms": 31.3275,
+                  "p99_ms": 31.6828,
+                  "max_ms": 31.6828
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.0214,
+                  "p50_ms": 0.0361,
+                  "p95_ms": 0.0533,
+                  "p99_ms": 0.063,
+                  "max_ms": 0.063
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.3571,
+                  "p50_ms": 0.4391,
+                  "p95_ms": 0.5813,
+                  "p99_ms": 0.7531,
+                  "max_ms": 0.7531
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "wsl-debug": {
+      "environment": "WSL2 Ubuntu 24.04.5, kernel 6.18.58.1, GCC/libstdc++ 13.3.0, glibc 2.39, CMake 3.28.3",
+      "runs": [
+        {
+          "run": 1,
+          "mode": "characterization",
+          "exit_code": 0,
+          "controlled": [
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.096,
+              "inbox_to_take_ms": 20.2194
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.1136,
+              "inbox_to_take_ms": 20.2403
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.1089,
+              "inbox_to_take_ms": 20.2272
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.0987,
+              "inbox_to_take_ms": 20.2192
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.0989,
+              "inbox_to_take_ms": 20.201
+            }
+          ],
+          "direct_receive_positive_control": "PASS",
+          "normal_exit_and_trace_collection": "PASS",
+          "callbacks": 64,
+          "command_workload_ms": 3877.25,
+          "timing": {
+            "units": "milliseconds",
+            "measurement": "application queue checkpoints, not physical wire timestamps",
+            "clock_rule": "durations use one process clock; no cross-process epoch subtraction",
+            "operations": {
+              "Subscribe": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 19.444531,
+                  "p50_ms": 19.602193,
+                  "p95_ms": 19.705702,
+                  "p99_ms": 19.792721,
+                  "max_ms": 19.792721
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.862676,
+                  "p50_ms": 1.051968,
+                  "p95_ms": 1.449766,
+                  "p99_ms": 1.508392,
+                  "max_ms": 1.508392
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 20.715257,
+                  "p50_ms": 20.962418,
+                  "p95_ms": 21.392551,
+                  "p99_ms": 21.587775,
+                  "max_ms": 21.587775
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.029032,
+                  "p50_ms": 0.03867,
+                  "p95_ms": 0.059323,
+                  "p99_ms": 0.125265,
+                  "max_ms": 0.125265
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.249399,
+                  "p50_ms": 0.30413,
+                  "p95_ms": 0.383923,
+                  "p99_ms": 0.460043,
+                  "max_ms": 0.460043
+                }
+              },
+              "EnableNotifications": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 18.213324,
+                  "p50_ms": 18.716069,
+                  "p95_ms": 18.957486,
+                  "p99_ms": 19.123144,
+                  "max_ms": 19.123144
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.074219,
+                  "p50_ms": 0.099184,
+                  "p95_ms": 0.138638,
+                  "p99_ms": 0.42373,
+                  "max_ms": 0.42373
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 18.622703,
+                  "p50_ms": 19.148229,
+                  "p95_ms": 19.347989,
+                  "p99_ms": 19.530652,
+                  "max_ms": 19.530652
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.032959,
+                  "p50_ms": 0.041705,
+                  "p95_ms": 0.067671,
+                  "p99_ms": 0.105024,
+                  "max_ms": 0.105024
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.260237,
+                  "p50_ms": 0.303059,
+                  "p95_ms": 0.394314,
+                  "p99_ms": 0.697031,
+                  "max_ms": 0.697031
+                }
+              }
+            }
+          }
+        },
+        {
+          "run": 2,
+          "mode": "characterization",
+          "exit_code": 0,
+          "controlled": [
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.104,
+              "inbox_to_take_ms": 20.1774
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.105,
+              "inbox_to_take_ms": 20.2049
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.1284,
+              "inbox_to_take_ms": 20.2317
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.1176,
+              "inbox_to_take_ms": 20.22
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.0916,
+              "inbox_to_take_ms": 20.2016
+            }
+          ],
+          "direct_receive_positive_control": "PASS",
+          "normal_exit_and_trace_collection": "PASS",
+          "callbacks": 64,
+          "command_workload_ms": 3877.64,
+          "timing": {
+            "units": "milliseconds",
+            "measurement": "application queue checkpoints, not physical wire timestamps",
+            "clock_rule": "durations use one process clock; no cross-process epoch subtraction",
+            "operations": {
+              "Subscribe": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 19.441512,
+                  "p50_ms": 19.615386,
+                  "p95_ms": 19.719338,
+                  "p99_ms": 19.809478,
+                  "max_ms": 19.809478
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.856511,
+                  "p50_ms": 1.042265,
+                  "p95_ms": 1.558183,
+                  "p99_ms": 1.969624,
+                  "max_ms": 1.969624
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 20.668454,
+                  "p50_ms": 20.964667,
+                  "p95_ms": 21.558231,
+                  "p99_ms": 21.969008,
+                  "max_ms": 21.969008
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.032282,
+                  "p50_ms": 0.042351,
+                  "p95_ms": 0.071307,
+                  "p99_ms": 0.094707,
+                  "max_ms": 0.094707
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.248002,
+                  "p50_ms": 0.300947,
+                  "p95_ms": 0.351482,
+                  "p99_ms": 0.406456,
+                  "max_ms": 0.406456
+                }
+              },
+              "EnableNotifications": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 17.740438,
+                  "p50_ms": 18.74356,
+                  "p95_ms": 18.951996,
+                  "p99_ms": 18.998027,
+                  "max_ms": 18.998027
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.0658,
+                  "p50_ms": 0.098609,
+                  "p95_ms": 0.124926,
+                  "p99_ms": 0.134316,
+                  "max_ms": 0.134316
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 18.144204,
+                  "p50_ms": 19.137039,
+                  "p95_ms": 19.346632,
+                  "p99_ms": 19.439201,
+                  "max_ms": 19.439201
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.035636,
+                  "p50_ms": 0.04781,
+                  "p95_ms": 0.062461,
+                  "p99_ms": 0.119425,
+                  "max_ms": 0.119425
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.250325,
+                  "p50_ms": 0.308465,
+                  "p95_ms": 0.403901,
+                  "p99_ms": 0.645965,
+                  "max_ms": 0.645965
+                }
+              }
+            }
+          }
+        },
+        {
+          "run": 3,
+          "mode": "require-wakeup (expected regression failure)",
+          "exit_code": 1,
+          "controlled": [
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.1087,
+              "inbox_to_take_ms": 20.211
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.0873,
+              "inbox_to_take_ms": 20.2076
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.0956,
+              "inbox_to_take_ms": 20.2773
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.194,
+              "inbox_to_take_ms": 20.3135
+            },
+            {
+              "wait_timeout": true,
+              "wait_ms": 20.1216,
+              "inbox_to_take_ms": 20.2233
+            }
+          ],
+          "direct_receive_positive_control": "PASS",
+          "normal_exit_and_trace_collection": "PASS",
+          "callbacks": 64,
+          "command_workload_ms": 3875.5,
+          "timing": {
+            "units": "milliseconds",
+            "measurement": "application queue checkpoints, not physical wire timestamps",
+            "clock_rule": "durations use one process clock; no cross-process epoch subtraction",
+            "operations": {
+              "Subscribe": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 19.206829,
+                  "p50_ms": 19.614842,
+                  "p95_ms": 19.698951,
+                  "p99_ms": 19.869877,
+                  "max_ms": 19.869877
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.846506,
+                  "p50_ms": 1.043439,
+                  "p95_ms": 1.352427,
+                  "p99_ms": 1.634688,
+                  "max_ms": 1.634688
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 20.394744,
+                  "p50_ms": 20.944927,
+                  "p95_ms": 21.373753,
+                  "p99_ms": 21.651793,
+                  "max_ms": 21.651793
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.03354,
+                  "p50_ms": 0.040412,
+                  "p95_ms": 0.056861,
+                  "p99_ms": 0.083607,
+                  "max_ms": 0.083607
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.243067,
+                  "p50_ms": 0.297304,
+                  "p95_ms": 0.363234,
+                  "p99_ms": 0.502712,
+                  "max_ms": 0.502712
+                }
+              },
+              "EnableNotifications": {
+                "central_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 18.104696,
+                  "p50_ms": 18.727955,
+                  "p95_ms": 18.955827,
+                  "p99_ms": 18.982212,
+                  "max_ms": 18.982212
+                },
+                "central_take_to_reply_enqueue": {
+                  "count": 64,
+                  "min_ms": 0.073225,
+                  "p50_ms": 0.096124,
+                  "p95_ms": 0.122347,
+                  "p99_ms": 0.259085,
+                  "max_ms": 0.259085
+                },
+                "child_request_enqueue_to_reply_take": {
+                  "count": 64,
+                  "min_ms": 18.50677,
+                  "p50_ms": 19.160348,
+                  "p95_ms": 19.365013,
+                  "p99_ms": 19.48976,
+                  "max_ms": 19.48976
+                },
+                "child_reply_inbox_to_take": {
+                  "count": 64,
+                  "min_ms": 0.034045,
+                  "p50_ms": 0.045045,
+                  "p95_ms": 0.058532,
+                  "p99_ms": 0.060436,
+                  "max_ms": 0.060436
+                },
+                "transport_and_child_dispatch_remainder": {
+                  "count": 64,
+                  "min_ms": 0.258415,
+                  "p50_ms": 0.306776,
+                  "p95_ms": 0.369652,
+                  "p99_ms": 0.461578,
+                  "max_ms": 0.461578
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

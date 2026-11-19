@@ -146,7 +146,6 @@ executable, not the central identity. See [installed SDK composition](src/vinc/s
 
 RPC is the typed request/response service used by Modules through Context. RpcManager centrally manages service registration, fixed shared slots, and reclamation. RpcStatus is the application result, separate from framework Error. See the [RPC README](src/vinc/rpc/README.md) for current implementation contracts.
 
-The confirmed redesign names the reusable typed asynchronous caller **RpcClient**, and
-the local Request/Response ownership pair **RpcMessages**. The target public address is
-`module.service`; it identifies an owned RPC service, not a Topic or a Param. Both synchronous and reusable asynchronous calls use this address in C++ and Python. API behavior, replacement
-scope and implementation status belong to the [RPC client change contract](src/vinc/rpc/CLIENT_CONTRACT.md).
+The reusable typed asynchronous caller is **RpcClient**, and
+the local Request/Response ownership pair **RpcMessages**. The public address is
+`module.service`; it identifies an owned RPC service, not a Topic or a Param. Both synchronous and reusable asynchronous calls use this address in C++ and Python. API behavior and ownership belong to the [RPC client contract](src/vinc/rpc/CLIENT_CONTRACT.md).

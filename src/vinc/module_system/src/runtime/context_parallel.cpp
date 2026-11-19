@@ -53,8 +53,7 @@ Result<bool> Context::pump_topic(TopicBatch& batch) {
             item.finished = true;
             continue;
         }
-        auto message = message_bus::detail::read_batch(subscription.core, item.boundary,
-            *subscription.schema, subscription.factory);
+        auto message = subscription.read(item.boundary);
         if (!message) {
             if (message.error().is(message_bus::ErrorCode::NoNewData) ||
                 message.error().is(message_bus::ErrorCode::Closed)) {
@@ -87,7 +86,7 @@ Result<bool> Context::pump_topic(TopicBatch& batch) {
         };
         try {
             CallbackScope scope{*this};
-            subscription.callback(std::move(*message));
+            subscription.deliver(std::move(*message));
         } catch (...) {
             const Error error{ErrorCode::HookException, ErrorOperation::SubscriptionCallback};
             runtime_->fail(error);

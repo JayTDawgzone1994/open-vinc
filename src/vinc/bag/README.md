@@ -2,6 +2,18 @@
 
 # Bag Recorder / Bag 錄製
 
+Recorder uses the [generic image path](IMAGE_RECORDING.md): Bus copies and validates
+one owned image, Context delivers it, and the existing disk worker canonicalizes
+and writes it. Concrete message classes and per-type subscription/Encoder templates
+are no longer compiled into Recorder. Unknown names do not prevent recording.
+Windows/WSL Debug and Release regressions, clean relocated SDKs and controlled
+cost comparisons passed; see [stage 4](IMAGE_RECORDING_VALIDATION.md#stage-4-validation).
+Recorder compilation improved in this fixture; runtime is not uniformly faster.
+
+Recorder 已改用通用映像路徑，不再編譯逐型別訂閱／Encoder。Bus 驗證結構及 hash，
+不核對具體欄位 schema；未知型別名稱也保存合法正文。Windows／WSL 的乾淨 SDK、
+搬移、多 App 與成本 A/B 已完成，結果見第四階段；不能外推所有負載或宣稱 runtime 全面更快。
+
 The first version provides a Recorder Module, SQLite format, and metadata queries. Player is planned as a separate Module but not implemented. There is no dynamic message loader/schema interpreter.
 
 第一版提供 **Recorder Module、SQLite 錄製格式及 metadata 查詢**。
@@ -11,16 +23,16 @@ Player 已決定另作 Module，播放功能不屬於本輪；沒有動態載入
 
 ## Usage / 使用
 
-Installed C++ applications also build this same typed Recorder adapter through
+Installed C++ applications also build this same generic Recorder adapter through
 [`vinc_add_app()`](../sdk/INSTALL.md); it is a mandatory App member. It is compiled
-against the application's merged message list; the core Bag library remains prebuilt.
+against the application's generated hash/name catalog only; the core Bag library remains prebuilt.
 
 安裝式 C++ 應用也會透過上述 `vinc_add_app()` 編譯相同的 Recorder 接線，為固定 App 成員。
-它依應用自己的合併訊息清單編譯，Bag 核心儲存庫仍使用預編譯版本。
+它只使用應用生成的 hash／名稱表，Bag 核心儲存庫仍使用預編譯版本。
 
-VINC_BUILD_APPS=ON builds/registers bagRecorder, default instance recorder. It is a Plugin loaded in its own Host process, not central.
+`vinc_add_app()` builds/registers bagRecorder, default instance recorder. It is a Plugin loaded in its own Host process, not central.
 
-`VINC_BUILD_APPS=ON` 會建置並登記 `bagRecorder` ModuleType，預設 Module 名稱是 `recorder`。
+`vinc_add_app()` 會建置並登記 `bagRecorder` ModuleType，預設 Module 名稱是 `recorder`。
 它是由 ModuleHost 啟動的 DLL／共享 library，不在中央程序內執行。
 
 Central starts `recorder` before the startup script and waits for Ready or failure.
@@ -121,20 +133,23 @@ no universal zero-loss/Hz guarantee or Combat Bar workload result is implied.
 移除的是收訊端固定睡眠，不代表吞吐無限；Bus 覆寫與寫入佇列滿載仍分開計數，
 不保證任意流量零遺失，也不宣稱已驗證 Combat Bar 實際負載。
 
-- vinc::bag owns SQLite storage/metadata/bounded Recorder worker, with private SQLite dependency.
-- recorder_module.cpp is an ordinary Manual BaseModule using Context/pumpOnce/typed subscribe.
-- Ribosome generates message_types.hpp/visit_types for compile-time dispatch, without runtime schema registry or Bag dependencies in messages.
-- Recorder compiles vinc::messages; added types require reconfigure/rebuild. SDK/other Modules need no SQLite linkage.
-- Expected failures use Common ErrorDomain::Bag=12 and native SQLite extended codes under source 11; error tables need no SQLite runtime.
+- `vinc::bag` owns SQLite, metadata and the bounded worker. SQLite remains private;
+  it consumes the designated Bus image envelope through `vinc::message_bus_client`,
+  not central control-service ownership.
+- Recorder remains a Manual BaseModule using Context/pumpOnce/waitForWork and
+  `detail::ContextImageAccess`. It never operates RingBuffer internals.
+- Ribosome generates `message_names.hpp`, a standard-library-only hash/name table.
+  `vinc::messages` supplies generation and include paths, but Recorder includes no
+  `all_messages.hpp`, typed visitor or concrete message class. The table is metadata,
+  not a decoder or runtime registry. Other Modules need no SQLite linkage.
+- Expected failures use ErrorDomain::Bag=12 and native SQLite extended codes under
+  source 11; error tables have no SQLite runtime dependency.
 
-- `vinc::bag`：SQLite 儲存、metadata 查詢及 bounded Recorder worker；SQLite 為私有相依。
-- `module/recorder_module.cpp`：一般 BaseModule Manual 模式，使用繼承 Context、pumpOnce 及 typed subscribe。
-- Ribosome 額外產生 `message_types.hpp` 的 `vinc::message::visit_types()`。這是建置時確定的 C++ 型別分派，
-  不增加 runtime schema registry，也不將 Bag 相依加進生成訊息。
-- Recorder 依 `vinc::messages` 編譯已知訊息；新增 `.msg` 後重新配置／建置 Recorder。
-  SDK 及其他 Module 不需連結 SQLite。
-- 所有 Bag 預期失敗使用 common Result／Error；ErrorDomain::Bag=12。SQLite extended result code
-  保存於 NativeErrorSource::Sqlite=11，錯誤表不相依 SQLite runtime。
+- Bag 透過指定的 Bus client 映像型別接收所有權，不依賴中央控制服務。
+- Recorder 維持 Manual pump 與既有 worker；不直接操作共享 RingBuffer。
+- 名稱表只包含 hash／字串；新增訊息會更新名稱表，但不再產生逐型別 Recorder 模板。
+  沒有動態解碼或 runtime registry；其他 Module 不需連結 SQLite。
+- 錯誤維持 Common Result／Error 與 Bag 分類，SQLite 原生診斷仍保留。
 
 <a id="topic-探索與資料路徑"></a>
 
@@ -146,11 +161,15 @@ Context `list_topics(after)` 經控制 Socket 取得有發布者的 topic、sche
 每頁上限 32 筆，依名稱排序；每頁一致，跨頁沒有全域原子快照。Recorder 預設每 500 ms 重查。
 不增加中央 payload 轉送或額外探索執行緒。
 
-Known hashes use `subscribe<T>` from NewOnly. Framework validates/copies locally and releases shared Reader protection before callback. Callback transfers ownership into a queue; worker creates a canonical Snapshot and writes SQLite. Recorder never bypasses Bus to operate rings directly.
+Every discovered schema uses the same image subscription from NewOnly. Bus copies
+under Reader protection, releases it, then Storage validates the v2 image structure
+and matching root hash. Context transfers an immutable owned image and metadata.
+The worker calls `FrameworkAccess::canonical_image()` outside the queue mutex;
+only canonical bytes enter SQLite. No second payload copy is made for admission.
 
-已知 hash 使用既有 `subscribe<T>()`，從 NewOnly 開始；框架驗證布局並複製到程序內，
-釋放共享 Reader 占用後才呼叫 callback。Callback 交付訊息所有權到 queue，worker 才建立
-canonical Snapshot 並送 SQLite。沒有直接操作 RingBuffer 的錄製捷徑。
+每種 hash 都透過同一條通用訂閱接線。複製後先釋放 Reader 保護，再驗通用結構與根 hash；
+callback 把不可變副本移入 queue。worker 在 mutex 外整理 canonical 映像再寫入。
+此驗證不保證具體欄位語意正確；後續 typed 解碼仍須核對 schema。
 
 SubscriberOptions::max_message_bytes is checked before receive-buffer allocation. Oversized callback reads advance that source cursor and increment oversized_messages; get_last returns CapacityExceeded without advancing. Default 0 preserves no extra receive cap.
 
@@ -164,10 +183,13 @@ All sources are recorded, including fresh Publisher IDs after restart. No-Publis
 會關閉訂閱，下輪可重新訂閱。短於探索週期的 topic、訂閱建立前已發布的內容、發布者退出時已退役
 的未讀資料可能沒有錄到；`--all` 不代表無損或全時段覆蓋。
 
-Unknown hashes preserve topic/hash with supported=false, report unsupported type, and skip payload while others continue. They must not be reported as fully recorded.
+Unknown names preserve topic/hash with `type_known=false` and still record valid
+payloads. `info` reports whether this build knows the hash/name, independently of
+recorded row counts. A known name is not proof of payload semantic compatibility
+or the presence of a Player/decoder in Recorder.
 
-未知 hash 會保存 topic／hash 及 supported=false，輸出 `unsupported type`，略過 payload；
-其他 topic 繼續。不會把「全部已錄成功」套用到這些項目。
+未知名稱以 `type_known=false` 保留，合法正文照常錄製。`info` 的本機名稱認識程度、
+錄製時認識程度與實際筆數分開；沒有名稱不等於無法錄製，有名稱也不等於已解碼驗證。
 
 <a id="有界-queue壓力與狀態"></a>
 
@@ -179,9 +201,9 @@ Default queue 256 MiB/4096 records includes worker-taken batches until commit/me
 滿載丟棄新到的訊息（DropNewest），不等待磁碟，也不保留共享 Reader lease。
 短 mutex 只保護 queue／計數／狀態；序列化與 SQLite I/O 都在 mutex 外。
 
-The budget counts pending allocated-image bytes, not process RSS. In-progress receives, indices/wrappers/current Snapshot, default 8 MiB SQLite cache, and OS cache are extra. Message/snapshot bounds and metadata source/topic/string limits apply separately.
+The budget counts pending payload vector capacity, not process RSS. In-progress receives, indices/wrappers/current Snapshot, default 8 MiB SQLite cache, and OS cache are extra. Message/snapshot bounds and metadata source/topic/string limits apply separately.
 
-此預算是待寫入訊息的 allocated image bytes，不是整個 process RSS。
+此預算是待寫入映像的 payload vector capacity（含預留容量），不是整個 process RSS。
 接收中訊息、儲存結構索引、訊息 wrapper、當前 Snapshot、SQLite cache（預設 8 MiB）及 OS cache 另計。
 單筆接收與 Snapshot 有 message_bytes 上限，metadata 有 topic／來源數及字串長度限制。
 
@@ -194,14 +216,14 @@ Counters are distinct:
 - queue_dropped: byte/count admission refusal.
 - oversized: Bus/Recorder size rejection.
 - bus_lost: measured ring overwrite loss, not all unobservable pre-subscription/exit loss.
-- unsupported_topics: discovered unsupported topic/hash combinations, also persisted individually.
+- unknown_type_topics: discovered topic/hash pairs absent from the name catalog; they are still recorded.
 
 - received：進入 Recorder enqueue 的訊息。
 - written：已提交 SQLite 的訊息。
 - queue_dropped：byte／筆數預算滿而拒收。
 - oversized：Bus 接收限制或 Recorder 單筆限制而略過。
 - bus_lost：Bus 回報的 ring 覆蓋遺失；不宣稱涵蓋訂閱前或 Publisher 退出時所有無法量測的遺失。
-- unsupported_topics：本次探索過但不支援的 topic/hash 組合，個別狀態也持久保存。
+- unknown_type_topics：名稱表未知的 topic/hash 組合；合法正文仍錄製，名稱認識狀態持久保存。
 
 Batches default to 256 records, 16 MiB, or 100 ms; one larger message occupies its own batch. Slow disks do not promise 100 ms persistence. No empty transactions occur without data/metadata/counter changes.
 
@@ -217,19 +239,23 @@ A Bag is a dedicated directory with recording.sqlite and transaction files. Atom
 一份 Bag 是獨立目錄，內含 `recording.sqlite` 及 SQLite 交易所需檔案。
 原子建立目錄避免兩個 Recorder 共用同一路徑。建立失敗後的部分目錄保留供診斷，不能當完整 Bag。
 
-Format v2 uses application_id0x56424147/user_version2; old/unknown versions return InvalidFormat without conversion/deletion:
+Format v3 uses application_id0x56424147/user_version3; old/unknown versions return InvalidFormat without conversion/deletion:
 
-格式 v2 使用 application_id `0x56424147`／user_version=2；舊版與未知版本回 InvalidFormat，不自動轉換或刪除：
+格式 v3 使用 application_id `0x56424147`／user_version=3；舊版與未知版本回 InvalidFormat，不自動轉換或刪除：
+
+v3 replaces v2's `supported` column with `type_known`; old v2 Bags are explicitly
+rejected, not silently reinterpreted. Message image version remains 2.
+v3 不沿用 v2「未知即不錄製」的欄位語意，舊 Bag 明確拒絕；訊息映像格式仍為 v2。
 
 - recording: uint64 start UTC nanoseconds as 20-digit TEXT, completion flag, counters.
-- topics: name, class name, schema hash, recorded support status.
+- topics: name, class name (empty if unknown), schema hash, `type_known` name-catalog knowledge.
 - messages: topic/hash, Publisher name/ID, original topic count, source_utc_ns/source_monotonic_ns/receive_monotonic_ns, image_version2, canonical BLOB. Recorder retains received publication times, not resampled replacements.
 - TopicSummary first/last timestamp is min/max recorded Unix nanoseconds, not necessarily insertion endpoints after clock adjustment. Shell displays UTC; future playback ordering requires monotonic time.
 - Info.start_utc_ns is uint64; unrepresentable current time returns TimestampUnavailable with Common cause.
 - Full uint64 metadata uses fixed 20-digit decimal TEXT to avoid signed SQLite truncation; payload is separate.
 
 - recording：開始 UTC nanoseconds（uint64，20 位 TEXT）、完成旗標、統計。
-- topics：topic、訊息類別名稱、schema hash、錄製時是否支援。
+- topics：topic、訊息類別名稱（未知則空）、schema hash、`type_known`（錄製時名稱表是否認識）。
 - messages：topic/hash、Publisher 名稱與 ID、原始 topic count、發布 `source_utc_ns`、
   發布 `source_monotonic_ns`、接收 `receive_monotonic_ns`、image_version=2 及 canonical BLOB。
   Recorder 保存收到的兩個發布時間，不重新取樣覆蓋它們。
@@ -300,6 +326,20 @@ Hot rollback journals can require write access for recovery; read-only info may 
 
 ## Recorded validation and outstanding work / 驗證與待處理事項
 
+Current generic Recorder evidence: [stage 4 validation](IMAGE_RECORDING_VALIDATION.md#stage-4-validation).
+通用路徑、乾淨 SDK／搬移及成本見上述連結與 [Mac 原生補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。以下保留歷史 typed Recorder 結果。
+
+Outstanding performance investigation: Windows' three 1 KiB paced runs measured
+higher generic median Recorder CPU (0.641 vs 0.281 seconds per 1,000 records),
+with overlapping ranges; WSL did not show the same direction. All payload/loss/
+shutdown assertions passed. The cause is unconfirmed. Profile image receipt,
+canonicalization and worker/commit costs under a real workload before claiming
+uniform runtime savings or changing those paths. This is not a proven functional bug.
+
+待確認的效能現象：Windows 1 KiB 小樣本 CPU 中位數較高、範圍重疊，WSL 未見相同方向；
+正文、零 loss/drop 與退出均通過。原因未定位，建議真實負載下分段 profiling，
+不先更動收訊／canonical／worker 路徑，也不宣稱已確認功能缺陷。
+
 Recorded 2026-10-12, Windows x64/MSVC 19.51.36257.0/CMake 4.3.2: initial Recorder Debug/Release full suites **70/70**. The later capacity policy has separate evidence below.
 
 2026-10-12：Windows x64、MSVC 19.51.36257.0、CMake 4.3.2。
@@ -327,13 +367,13 @@ FULL is induced by page quota, not by filling a real disk. These tests are not r
 
 SQLite FULL 由 page quota 製造；未將測試磁碟實際寫滿。上述測試不構成錄製吞吐量 benchmark。
 
-- The initial round did not validate Linux/macOS. Later WSL evidence is recorded under [Recorder wait validation](#recorder-wait-validation); native macOS remains pending.
+- The initial round did not validate Linux/macOS. Later WSL evidence is recorded under [Recorder wait validation](#recorder-wait-validation); later native macOS evidence is in the [Mac report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md).
 - Main-database-only capacity, no directory-total hard cap.
 - No read-only hot-journal auto-repair or Bag repair command.
 - Player/speed/timing replay, file rotation, dynamic schemas remain unimplemented.
 - Tests do not cover actual power loss, hardware corruption, or every filesystem synchronization behavior; transactions are not a hardware durability guarantee.
 
-- 初版未驗 Linux／macOS；後續 WSL 證據見下方通知等待驗收，原生 macOS 仍待驗。
+- 初版未驗 Linux／macOS；後續 WSL 證據見下方通知等待驗收，後續原生 macOS 結果見 [Mac 報告](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。
 - 已確認邊界：只限制主資料庫；交易暫存空間另計，不提供目錄總容量硬限制。
 - 已知限制：唯讀查詢不自動修復 hot journal；未做 Bag 專用復原命令。
 - 尚未實作：Player、播放速度／重播時序、錄製切檔、動態 schema 擴充。
@@ -423,3 +463,6 @@ acceptance is tracked in the root TODO.
 [第三階段](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)已由新 Debug／Release SDK-only producers
 重跑 installed Recorder，含搬移後 64 筆錄製與關閉；另驗兩個 C++ App 的 Recorder／退出隔離。
 512 筆內容／順序及受控等待分支仍由第二階段來源測試負責，不混成相同工作負載。
+
+2026-11-19 macOS 原生 Debug／Release 的 Bag v3、乾淨 SDK／搬移雙 App 及 Release 成本結果
+見[Recorder 與控制面補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。

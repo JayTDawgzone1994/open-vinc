@@ -48,6 +48,7 @@ struct Scope {
 }
 
 void snapshot_validation_tests();
+void generic_image_tests();
 
 void* operator new(std::size_t size) {
     allocation_watch::allocation();
@@ -202,6 +203,41 @@ void allocation_failure_tests() {
 #else
     constexpr std::size_t loan_capacity_bytes = 16 * 1024;
     constexpr std::size_t expanded_record_count = 3;
+
+    sweep_allocations("generic image adoption", [](std::size_t failure_index) {
+        vinc::Frame message;
+        ok(message.data().payload.resize(5));
+        auto original = take(message.snapshot());
+        auto bytes = saved_bytes(original);
+        auto result = fail_allocation(failure_index, [&] {
+            return vinc::message::detail::FrameworkAccess::adopt_image(
+                std::move(bytes), vinc::Frame::schema().hash, loan_capacity_bytes);
+        });
+        const bool finished = sweep_succeeded(result);
+        auto retry = vinc::message::detail::FrameworkAccess::adopt_image(
+            saved_bytes(original), vinc::Frame::schema().hash, loan_capacity_bytes);
+        check(bool(retry), "generic adoption retry failed");
+        return finished;
+    });
+
+    sweep_allocations("generic image canonicalization", [](std::size_t failure_index) {
+        vinc::Frame message;
+        ok(message.data().payload.resize(5));
+        ok(message.data().groups.resize(1));
+        ok(message.data().groups[0].resize(1));
+        auto original = take(message.snapshot());
+        auto image = take(vinc::message::detail::FrameworkAccess::adopt_image(
+            saved_bytes(original), vinc::Frame::schema().hash, loan_capacity_bytes));
+        const auto before = saved_bytes(image);
+        auto result = fail_allocation(failure_index, [&] {
+            return vinc::message::detail::FrameworkAccess::canonical_image(image, loan_capacity_bytes);
+        });
+        const bool finished = sweep_succeeded(result);
+        check(saved_bytes(image) == before, "canonical allocation failure changed source");
+        auto retry = take(vinc::message::detail::FrameworkAccess::canonical_image(image, loan_capacity_bytes));
+        check(saved_bytes(retry) == saved_bytes(original), "generic canonical retry changed content");
+        return finished;
+    });
 
     sweep_allocations("record at copy and wrappers", [](std::size_t failure_index) {
         vinc::MessageArray<vinc::Detection> records;
@@ -548,6 +584,7 @@ int main(int argc, char** argv) {
         array_access_tests();
         std::cerr << "Checking snapshot schemas\n";
         snapshot_validation_tests();
+        generic_image_tests();
         std::cerr << "Checking allocation rollback\n";
         allocation_failure_tests();
         std::cout << "PASS: allocation-free proxies, checked access, const, copies and contracts\n";

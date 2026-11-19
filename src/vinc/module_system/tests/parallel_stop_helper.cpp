@@ -1,3 +1,4 @@
+#include <vinc/module/detail/context_image_access.hpp>
 #include <vinc/module/base_module.hpp>
 #include <vinc_messages/Frame.hpp>
 #include <atomic>
@@ -35,6 +36,9 @@ class ParallelStopModule final : public BaseModule<RunMode::Manual> {
     std::optional<message_bus::Publisher<Frame>> publisher_;
     std::optional<message_bus::Subscriber<Frame>> subscriber_;
     std::optional<message_bus::Subscriber<Frame>> replacement_;
+    std::optional<message_bus::detail::ImageSubscriber> image_subscriber_;
+    std::optional<message_bus::detail::ImageSubscriber> image_replacement_;
+    bool images_ = false;
     std::jthread pump_;
     std::atomic<bool> active_{false};
     std::atomic<bool> entered_{false};
@@ -59,11 +63,20 @@ class ParallelStopModule final : public BaseModule<RunMode::Manual> {
         check(!active_.exchange(true), "old and replacement Topic overlapped");
         ++calls_;
         if (mode_ == "replace") {
-            subscriber_->close();
-            replacement_.emplace(take(context.subscribe<Frame>("stop/topic", [this](auto) {
-                check(!active_, "replacement bypassed active Topic owner");
-                replaced_ = true;
-            }, {.start = message_bus::StartPosition::NewOnly})));
+            if (images_) {
+                take(image_subscriber_->close());
+                image_replacement_.emplace(take(detail::ContextImageAccess::subscribe(context, "stop/topic", Frame::schema().hash,
+                    [this](message_bus::detail::ImageDelivery) {
+                        check(!active_, "image replacement bypassed active Topic owner");
+                        replaced_ = true;
+                    }, {.start = message_bus::StartPosition::NewOnly})));
+            } else {
+                take(subscriber_->close());
+                replacement_.emplace(take(context.subscribe<Frame>("stop/topic", [this](auto) {
+                    check(!active_, "replacement bypassed active Topic owner");
+                    replaced_ = true;
+                }, {.start = message_bus::StartPosition::NewOnly})));
+            }
             auto next = make_message<Frame>();
             take(publisher_->push(*next));
         }
@@ -82,9 +95,17 @@ public:
         mode_ = args.at(0);
         directory_ = args.at(1);
         publisher_.emplace(take(context.advertise<Frame>("stop/topic", {.slots = 8, .max_message_bytes = 8192})));
-        subscriber_.emplace(take(context.subscribe<Frame>("stop/topic", [this](auto message) {
-            receive(std::move(message));
-        })));
+        images_ = args.size() == 3;
+        if (images_) {
+            image_subscriber_.emplace(take(detail::ContextImageAccess::subscribe(context, "stop/topic", Frame::schema().hash,
+                [this](message_bus::detail::ImageDelivery image) {
+                    receive(take(Frame::from_bytes(image->image.bytes())));
+                })));
+        } else {
+            subscriber_.emplace(take(context.subscribe<Frame>("stop/topic", [this](auto message) {
+                receive(std::move(message));
+            })));
+        }
         auto message = make_message<Frame>();
         take(publisher_->push(*message));
         take(publisher_->push(*message));

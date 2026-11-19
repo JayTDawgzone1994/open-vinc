@@ -2,6 +2,13 @@
 
 # Message Storage and MessageArray / 訊息儲存與 MessageArray
 
+The framework-only owned-image seam for generic recording is implemented below
+([contract](#owned-record-images)); Bus, Context and Recorder now use this seam.
+Validation is recorded in the [staged recording plan](../../bag/IMAGE_RECORDING.md).
+
+通用錄製的 Storage 內部接管／canonical 能力已實作，契約見下方；
+Bus、Context 與 Recorder 已接入，分階段證據見上述錄製契約。
+
 This component supplies storage, array fields, and relocatable images for Ribosome-generated message classes. Normal entry is `vinc::make_message<GeneratedType>()`; MessageArray is a message-field container. Using it independently does not grant publication eligibility. C++23 and 64-bit platforms are currently required.
 
 本元件為 Ribosome 生成的訊息 class 提供儲存、陣列欄位與可搬移格式。
@@ -700,3 +707,44 @@ BaseMessage 的本機 C++ 布局變更需所有相連元件重建；發布與相
 呼叫端明確給文字 bytes、每陣列元素數、總走訪節點、深度及字串 bytes 預算，裁切標示省略與陣列原長度。
 文字為人讀取的診斷，不保證 JSON／可反序列化；不猜字串編碼，非 ASCII／控制 bytes 明確 escape。
 正常容器存取與 Result／contract violation 契約不變；UI 接收完整映像的上限另由 UI 管理。
+
+<a id="owned-record-images"></a>
+
+## Owned record images / 框架持有的通用訊息映像（2026-11-18）
+
+`detail::FrameworkAccess::adopt_image(bytes, expected_hash, maximum)` consumes an
+owned vector by value (including on failure), validates the existing v2 layout,
+and requires one record root with the expected nonzero hash. It moves the payload
+without copying it. `canonical_image(snapshot, maximum)` renders an owned record
+Snapshot through the same layout/renderer as typed snapshots. Neither operation
+needs concrete C++ message classes or performs their field-schema validation.
+Public typed reception/view validation is unchanged. These are internal seams,
+not a public raw subscription API; integration status and evidence belong to the
+[recording contract](../../bag/IMAGE_RECORDING_VALIDATION.md#stage-1-validation).
+
+指定內部入口 `<vinc/message/detail/framework_access.hpp>`：
+
+| API | 契約 |
+| --- | --- |
+| `adopt_image(vector<byte>, expected_hash, maximum)` | 呼叫端移交自己獨占的本機副本，先放掉共享 Reader 保護與可變別名。參數按值接收，成功／失敗均消耗移入的 vector；成功不另複製 payload。檢查輸入映像 bytes 上限、通用布局及單一 record 根／hash，回傳不可變 Snapshot。 |
+| `canonical_image(const Snapshot&, maximum)` | 只接受自己持有的單一 record 映像；拒絕共享借用 Snapshot。建立暫時的唯讀索引，沿用既有 renderer 移除預留容量、輸出 compact 映像；失敗不改原 Snapshot，原副本可重試及並行只讀。 |
+
+接管保留 vector 的 allocation／capacity；`maximum` 是映像 `size()` 上限，不是整個
+allocation 或程序 RAM 上限。上層 queue 後續接線仍須處理實際保留容量的計帳，
+不能僅據此宣稱所有 RAM 均受限。canonical 的上限在配置輸出 payload 前判定，
+驗證／布局索引的記憶體另計。
+
+非零 padding／未使用容量、非法 bool、版本／長度／offset、溢位、重複子節點與
+不可達節點沿用既有 validator 拒絕，不會先清洗損壞資料再當成合法輸入。
+結構合法但具體欄位不符的映像可錄製；`from_bytes()`／typed view 仍檢查該 schema。
+
+錯誤沿用 MessageStorage：接管使用 `ValidateImage`，零 expected hash 回
+`InvalidArgument`，根數不符或損壞資料回 `InvalidData`，根種類／hash 不符回
+`TypeMismatch`，輸入超限回 `CapacityExceeded`；外來算術溢位歸為 `InvalidData`。
+canonical 使用 `Snapshot`，空物件回 `Closed`、借用物件回 `InvalidArgument`、
+根數不符回 `InvalidData`、非 record 根回 `TypeMismatch`、輸出超限回
+`CapacityExceeded`。既有 allocation boundary 保留 `ResourceExhausted` 等診斷。
+
+第一階段只新增無狀態內部函式與測試，當時未改映像版本、公開型別布局或 Plugin entry。
+後續 Bus／Context／Recorder 已接入；Context 布局與 Plugin entry 的更新由 Module System
+契約維護。Windows／WSL 結果與原始失敗見上述驗收紀錄；後續 [Mac 原生結果](../../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)已完成。

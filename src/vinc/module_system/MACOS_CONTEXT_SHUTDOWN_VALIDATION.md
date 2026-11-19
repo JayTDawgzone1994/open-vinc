@@ -84,7 +84,7 @@ process／runtime_faults／manager_faults、Bus error／cleanup／notification_s
 `--no-tests=error` 避免空集合誤報成功，所有失敗保留首次輸出，沒有修改期限或斷言來重跑變綠。
 
 完整實際命令、退出碼、外層界限及耗時統一見 `results.json`／`run_validation.py`；
-可依 [Mac 交付清單](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md) 重跑，加入本輪的 matching compiler、
+重跑時使用下方配置，加入本輪的 matching compiler、
 Ninja／CPython 絕對路徑。新增的 `VINC_TEST_SDK_PYTHON_EXECUTABLE` 是測試配置選項，
 沒有改 framework App 的 Kconfig。完整套件使用下列配置；`<python>` 選擇本文的 CPython，
 兩組 `<build>` 必須是互不共用的新目錄：

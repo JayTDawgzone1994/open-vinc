@@ -2,6 +2,82 @@
 
 # Shared Socket control channel / 共用 Socket 控制通訊
 
+**Integrated with central supervision (2026-11-17):** ModuleManager now uses the
+ReceiveWake primitive below. Existing receive_until callers retain their original
+queue/wait API; I/O publication invokes no upper-layer callbacks. See the
+[central control wakeup contract](../module_system/CONTROL_WAKEUP.md) for fair dispatch,
+deferred RPC backpressure, and [stage-four acceptance](../module_system/CONTROL_WAKEUP_VALIDATION.md) for Windows/WSL results. The [macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) records native ReceiveWake and supervisor tests.
+**中央已接線：** ReceiveWake 供單一 supervisor 共用；原接收 API 不變，I/O thread
+不執行上層 callback。第一階段紀錄仍是修復前基線，Windows／WSL 整合與後續 Mac 原生驗收各見上述報告。
+
+## Internal receive wake / 內部接收通知原語
+
+`<vinc/control/detail/receive_wake.hpp>` is designated framework integration,
+not a general Module SDK API. A single consumer owns a `shared_ptr<ReceiveWake>`;
+many Sessions may bind through `ReceiveWakeAccess::bind(session, owner)`.
+The Session retains only a weak association. Empty owner detaches; a new owner
+replaces the old association. Binding is serialized with publication under the
+Peer mutex and rechecks queued frames, Open, closing and Closed states. Binding
+an already Open Session deliberately emits a hint even if its inbox is empty.
+
+這是框架內部接線，不加入 `<vinc/vinc.hpp>` 或 Context 公開 API。多個 Session
+可共用一個接收者；單一 consumer 負責掃描／等待，Session 只留弱引用。
+綁定／替換／解除與訊息入列使用同一把 Peer mutex；綁定時補查 backlog 及狀態，
+不等待下一筆訊息才補通知。Open 狀態即使無訊息，也會提供一次提示。
+
+- `notify()` sets one pending bit and wakes only on false→true. Repeated hints
+  coalesce; it stores no frames and invokes no receiver callback.
+- `consume()` clears that bit and returns its prior value. Call it **before**
+  scanning actual queues, never between the scan and wait.
+- `wait_until(deadline, stop)` waits on the same mutex/predicate and does not
+  consume pending. Stop returns `Cancelled / WaitReceiveWake`; expiry without
+  pending returns `Timeout / WaitReceiveWake`. Stop wins over pending; otherwise
+  pending wins over an expired deadline. Neither failure clears a hint.
+- The owner may use `notify()` for management work. Notification is only a hint;
+  it does not prove a frame exists, work succeeded, or a process exited.
+
+`consume()` 必須放在掃描前，掃描期間及入睡交界產生的提示才會保留。
+等待有 predicate，虛假喚醒不當作工作；取消也會喚醒，但不清除待處理提示。
+提示不消耗原 Session 佇列，也不改 `try_receive()`／`receive_until()` 行為。
+
+Successful application enqueue, validated handshake completion and transition
+to Closed publish hints. Normal heartbeat and rejected/dropped incoming frames
+do not publish application hints; a resulting terminal failure still does.
+Poller failure, worker exception and Service teardown use the same Closed path.
+Binding after closure also reports the terminal state. Notification does not
+change stored error precedence, receive overflow, FIFO or heartbeat deadlines.
+
+通知涵蓋應用訊息入列、握手完成、Session 關閉及綁定時已有的資料／狀態。
+正常 heartbeat 不逐筆通知；背壓或其他故障若導致關閉，仍提供終止提示。
+既有錯誤優先序、FIFO、滿載及 heartbeat 政策不變。
+
+Lock order is **Engine → Peer → ReceiveWake**, omitting locks when unnecessary.
+Wake operations never acquire Engine, Peer, Manager registry/record locks or run
+application code. Wait releases its own mutex while blocked. Never hold an
+owner's registry/record lock across waiting or worker join. A signal takes a
+temporary strong reference while holding Peer, so dropping the external owner
+cannot destroy an in-flight signal. Detach/rebind waits for that Peer operation;
+an old pending hint may remain, but subsequent publication targets the new owner.
+Expired owners are ignored without affecting reception. Wait callers retain a
+strong owner through the call; teardown stops and joins waiters before releasing
+the final owner. It does not implicitly close a Session or stop a Service.
+
+鎖順序為 Engine → Peer → ReceiveWake；通知不反向取得上層鎖、不呼叫 callback。
+入列後的短期 strong reference 保護通知途中 owner 被釋放的情境。解除／重綁會等
+該次 Peer 操作完成，但舊 owner 已有的 pending 可保留為無害提示。等待者須自己
+保留 strong owner；停止並 join 後才能釋放最後 owner，不靠 destructor 自動停止。
+
+There is no additional worker, Socket, named OS notification, second queue or
+per-hint allocation. Owner construction follows the existing standard-library
+allocation/exception policy. The implementation remains in `vinc::control`;
+protocol-only Plugins do not acquire runtime state. Frame/Hello versions and
+Session object layout are unchanged; this is not a promise of mixed-build ABI
+compatibility. Rebuild the connected framework artifacts.
+
+未新增 worker、Socket、命名 OS 通知、第二份佇列或逐次通知配置。原語建立沿用
+標準庫／配置例外政策，不擴大例外轉換範圍。實作由既有 `vinc::control` target 交付，
+不讓僅連結 protocol 的 Plugin 擁有新服務。wire 版本不變，連接產物仍應一起重建。
+
 `vinc::control` is shared by central and child runtimes and links OSAL. It depends on no BaseModule, Shell, Bus, or restart policy, and does not use Pipe.
 
 `vinc::control` 是中央與子程序共用的通訊元件，連結 `vinc::osal`。

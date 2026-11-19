@@ -5,7 +5,7 @@ with the existing uncommitted parallel-pump work. **Stages 1–2 completed:** th
 historical investigation below is preserved; production repair and focused
 validation are recorded under [Stage 2](#stage-2-repair-validation). Current
 stage-3 results are maintained in the [regression report](CONTEXT_SHUTDOWN_VALIDATION.md);
-native macOS acceptance is [handed off](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md).
+native macOS acceptance is [recorded](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md).
 
 ## Finding / 結論
 
@@ -322,17 +322,12 @@ are local evidence only. Nothing is uploaded.
 重現 exit 72。這是因果對照，不是靠延長 timeout 或重跑碰運氣。完整回歸、自然
 短命 Module 長跑及 Mac 原生驗收保留第三階段，原始偶發紀錄的證據限制仍然成立。
 
-## Repair plan / 修復計畫
+## Current contract and validation / 現行契約與驗收
 
-The [Host shutdown repair contract](CONTEXT_SHUTDOWN_FIX.md) owns the target
-lifecycle order, error classification, three implementation stages and acceptance
-gates. This report retains historical evidence. Stages 1–2 are complete;
-stage 3 was authorized on 2026-11-10. See the
-[regression report](CONTEXT_SHUTDOWN_VALIDATION.md) for current Windows/WSL coverage
-and the [Mac handoff](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md) for pending native acceptance.
-
-修復契約與三階段開工步驟集中於上述文件，本報告保留原始調查證據。
-第一、二階段完成；第三階段已獲授權，實際 Windows／WSL 結果集中於驗收報告，Mac 待原生驗收。
+See [Host shutdown](CONTEXT_SHUTDOWN_FIX.md) for ordering and failure semantics,
+[regression evidence](CONTEXT_SHUTDOWN_VALIDATION.md) and the
+[Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md) for results.
+開工清單已由正式收尾契約取代；上述原始失敗與因果限制保留供追溯。
 
 ## Local artifacts / 本地證據
 

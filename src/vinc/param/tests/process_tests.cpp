@@ -25,6 +25,37 @@ std::int32_t command(ModuleManager& manager, MID mid, std::vector<std::string> a
     return take(manager.command(mid, std::move(args), deadline()));
 }
 
+// A committed write does not update another pump's previously captured cache.
+// Poll from the controller so the Module can keep pumping; never sleep in its hook.
+void await_cached(ModuleManager& manager, MID mid, const std::string& name,
+                  std::int32_t expected, bool wait_for_watch = false) {
+    const auto end = deadline();
+    std::int32_t observed = 0;
+    bool observed_value = false;
+    do {
+        bool present = true;
+        if (wait_for_watch) {
+            const auto missing = take(manager.command(mid, {"missing", name}, end));
+            check(missing == 0 || missing == 1, "expected Param watch must be registered");
+            present = missing == 0;
+        }
+
+        if (present) {
+            observed = take(manager.command(mid, {"get", name}, end));
+            observed_value = true;
+            if (observed == expected) {
+                return;
+            }
+        }
+
+        std::this_thread::sleep_for(poll_interval);
+    } while (std::chrono::steady_clock::now() < end);
+
+    const auto actual = observed_value ? std::to_string(observed) : "missing";
+    throw std::runtime_error("Param cache did not converge: " + name + " expected=" +
+                             std::to_string(expected) + " observed=" + actual);
+}
+
 std::unique_ptr<ModuleManager> create(std::string name, const std::filesystem::path& plugin,
                                       const std::filesystem::path& root) {
     auto manager = take(Access::create(std::move(name), {}, vinc::test::host_path()));
@@ -195,7 +226,7 @@ void run(const std::filesystem::path& plugin) {
     const auto watcher = start(*manager, "watcher");
     check(command(*manager, watcher, {"missing", "camera.open"}) == 1, "watch before publisher exists");
     auto owner = start(*manager, "camera");
-    check(command(*manager, watcher, {"get", "camera.open"}) == 1, "late registration becomes visible");
+    await_cached(*manager, watcher, "camera.open", 1, /*wait_for_watch=*/true);
     command(*manager, owner, {"write", "fixed", "6"});
     check(command(*manager, owner, {"get", "fixed"}) == 6, "Limited owner can write");
     check(take(Access::param_snapshot(*manager)).entries.at("camera.fixed").restart_hint == param::RestartHint::Module,
@@ -203,7 +234,8 @@ void run(const std::filesystem::path& plugin) {
     command(*manager, owner, {"write", "fixed", "5"});
     check(command(*manager, watcher, {"denied", "camera.fixed"}) == 1, "other Module denied");
     command(*manager, watcher, {"write", "camera.open", "7"});
-    check(command(*manager, owner, {"get", "open"}) == 7, "Public permits every Module");
+    check(command(*manager, owner, {"current", "open"}) == 7, "Public permits every Module");
+    await_cached(*manager, owner, "open", 7);
     check(saved_value(file, "camera.open") == 1, "runtime write never silently saves");
     const auto callbacks = command(*manager, owner, {"coalesce"});
     check(command(*manager, owner, {"get", "open"}) == 30, "latest value after coalescing");
@@ -218,7 +250,8 @@ void run(const std::filesystem::path& plugin) {
     take(router.execute({"param", "save"}));
     check(saved_value(file, "camera.open") == 30, "explicit save captures live values");
     take(router.execute({"param", "set", "camera.fixed", "11"}));
-    check(command(*manager, owner, {"get", "fixed"}) == 11, "central can change protected parameter");
+    check(command(*manager, owner, {"current", "fixed"}) == 11, "central can change protected parameter");
+    await_cached(*manager, owner, "fixed", 11);
     check(saved_value(file, "camera.fixed") == 5, "central changes need save too");
     const auto unchanged = take(router.execute({"param", "set", "camera.fixed", "11"}));
     check(unchanged.code == 0 && unchanged.message.find("Restart hint: Module 'camera'") != std::string::npos,
@@ -236,7 +269,7 @@ void run(const std::filesystem::path& plugin) {
     check(manager->inspect(owner)->state == ModuleState::Running, "restart hint never stops the owner");
     check(saved_value(file, "camera.fixed") == 5, "restart reminders never imply save");
     const auto future = start(*manager, "future");
-    check(command(*manager, watcher, {"get", "future.value"}) == 42, "missing watch repaired by version");
+    await_cached(*manager, watcher, "future.value", 42, /*wait_for_watch=*/true);
     stop(*manager, future);
     check(command(*manager, watcher, {"get", "future.value"}) == 42, "Module stop retains last parameter");
     stop(*manager, owner);
@@ -265,8 +298,7 @@ void run(const std::filesystem::path& plugin) {
         std::this_thread::sleep_for(poll_interval);
     }
     check(manager->inspect(owner)->state == ModuleState::Failed, "bad callback terminates only its Module");
-    check(command(*manager, watcher, {"get", "camera.open"}) == 31,
-          "other Module and central survive callback fault");
+    await_cached(*manager, watcher, "camera.open", 31);
     shutdown(*manager);
     manager.reset();
 

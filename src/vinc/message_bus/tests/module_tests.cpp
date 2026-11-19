@@ -27,6 +27,9 @@ constexpr int no_published_data = -102;
 constexpr int outstanding_loan = -103;
 constexpr int capacity_exceeded = -106;
 constexpr int type_mismatch = -107;
+constexpr std::size_t topology_readers = 128;
+constexpr std::size_t topology_publishers = 16;
+constexpr std::size_t exit_topics = 160;
 }
 
 void check(bool value, const char* text) {
@@ -193,6 +196,40 @@ int main(int argc, char** argv) {
               "collision count and duration recorded");
         check(bool(manager.stop_module(blocked_writer, control::Clock::now() + shutdown_timeout)),
               "stop recovered writer");
+
+        // Real Host control dispatchers must survive both grouped release bursts
+        // and confirmed owner death. Keep an independent data path as the oracle.
+        auto load_writer = start({"pub", "load/independent", "2", "8192"});
+        auto load_reader = start({"sub", "load/independent"});
+        for (std::size_t index = 0; index < topology_readers; ++index) {
+            check(command(load_reader, {"hold-callback", "load/shared"}) == 0, "register fan-out reader");
+        }
+        for (std::size_t index = 0; index < topology_publishers; ++index) {
+            check(command(load_writer, {"hold-publisher", "load/shared"}) == 0, "register fan-out publisher");
+        }
+        check(command(load_writer, {"clear-publishers"}) == 0, "16 by 128 release ACK");
+        check(command(load_writer, {"push", "31"}) == 0, "independent publication after release burst");
+        check(eventually([&] { return command(load_reader, {"last"}) == 31; }),
+              "release burst must not disconnect the reader Host");
+        check(command(load_reader, {"clear-and-subscribe", "load/replacement"}) == 0,
+              "clear fan-out and immediately register again");
+
+        auto exiting_writer = start({"pub", "exit/base", "2", "8192"});
+        for (std::size_t index = 0; index < exit_topics; ++index) {
+            const auto topic = "exit/topic" + std::to_string(index);
+            check(command(load_reader, {"hold-callback", topic}) == 0, "register exit observer");
+            check(command(exiting_writer, {"hold-publisher", topic}) == 0, "register exit source");
+        }
+        (void)manager.command(exiting_writer, {"crash"}, control::Clock::now() + crash_command_timeout);
+        check(eventually([&] { return manager.inspect(exiting_writer)->state == ModuleState::Failed; }),
+              "large Topic owner must actually exit");
+        check(command(load_writer, {"push", "32"}) == 0, "unrelated publisher survives owner death");
+        check(eventually([&] { return command(load_reader, {"last"}) == 32; }),
+              "large Topic exit must preserve another Topic on the same reader Host");
+        check(command(load_reader, {"clear-and-subscribe", "exit/replacement"}) == 0,
+              "reuse registrations after large owner exit");
+        check(bool(manager.stop_module(load_writer, control::Clock::now() + shutdown_timeout)), "stop load writer");
+        check(bool(manager.stop_module(load_reader, control::Clock::now() + shutdown_timeout)), "stop load reader");
         for (const auto& module :
              {subscriber, history_subscriber, new_only_subscriber, secondary_publisher, restarted}) {
             check(bool(manager.stop_module(module, control::Clock::now() + shutdown_timeout)), "stop helper");

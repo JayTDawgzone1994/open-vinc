@@ -2,7 +2,7 @@ add_subdirectory("${VINC_REPOSITORY_ROOT}/library/sqlite" "${VINC_BUILD_ROOT}/li
 add_library(vinc_bag STATIC src/database.cpp src/recorder.cpp)
 add_library(vinc::bag ALIAS vinc_bag)
 target_include_directories(vinc_bag PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(vinc_bag PUBLIC vinc::message_storage PRIVATE vinc::sqlite vinc::osal)
+target_link_libraries(vinc_bag PUBLIC vinc::message_bus_client PRIVATE vinc::sqlite vinc::osal)
 target_compile_features(vinc_bag PUBLIC cxx_std_23)
 add_library(vinc_bag_errors INTERFACE)
 target_include_directories(vinc_bag_errors INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")

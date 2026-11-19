@@ -2,6 +2,19 @@
 
 # Module System / 模組系統
 
+**Central control wakeup integrated (2026-11-17):** ModuleManager now binds its
+single supervisor to ReceiveWake. Bounded fair passes continue runnable backlogs;
+RPC downstream saturation waits for the absolute supervision fallback. See the
+[central control wakeup contract](CONTROL_WAKEUP.md) and [stage-four acceptance](CONTROL_WAKEUP_VALIDATION.md) for Windows/WSL integration and matched costs. See [macOS follow-up](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) for native CTest, clean SDK and cost results.
+**中央已接線：** 收件、管理及停止共用可靠等待；每 Module 每輪最多 16 幀，RPC deferred
+依 20 ms 補查，滿載不自行忙迴圈。Windows／WSL 驗收及後續 Mac 原生結果各見上述報告。
+
+**Acceptance correction / 驗收更正：** The original WSL Debug run included empty
+test executables and is not valid full-suite evidence. Rebuilding the affected
+artifacts and rerunning passed 70/70; artifact corruption remains unexplained.
+原始紀錄保留，補驗結果與產物完整性待辦見
+[PR #35 correction / 重審更正](CONTROL_WAKEUP_VALIDATION.md#pr35-review-correction)。
+
 App packages group native Plugins under `modules/native/<ModuleType>/` and Python
 Modules under `modules/python/<ModuleType>/`. `add_python_module()` participates
 in per-App selection and managed deployment, while startup still discovers
@@ -16,7 +29,7 @@ Host notification ownership, Bus routes, notification-driven pumpLoop, bounded r
 Module notification diagnostics are implemented. `pumpOnce()` remains caller-driven. Startup
 preparation failure rejects only the affected Module; later notification failures retain the
 10 ms fallback. See the [pump wakeup contract](PUMP_WAKEUP.md) for policies and validation.
-Current bootstrap is **v16**, Plugin entry **19**, and Module query **v2**; rebuild connected artifacts.
+Current bootstrap is **v16**, Plugin entry **23**, and Module query **v2**. Rebuild connected artifacts for Bus v6 topology pages and receipts.
 Entry 19 adds Context-owned cross-image drain synchronization to the entry-18
 C++ Topic workers; see [parallel pump evidence and remaining work](PARALLEL_PUMP.md).
 Entry 17 exposes deadline-aware Manual waiting through Context; see [Manual wait](PUMP_WAKEUP.md#manual-wait-api-2026-11-09--manual-等待介面).
@@ -26,7 +39,7 @@ Entry 16 adds revocable async-client ownership to the entry-15 synchronous RPC w
 
 已接通通知資源、Bus 路由、pumpLoop 喚醒、故障恢復與診斷；pumpOnce 行為不變。
 準備失敗只拒絕該 Module 啟動，運行中的通知故障保留 10 ms 補查。契約及驗證見上述連結。
-目前 bootstrap v16、Plugin entry 19、Module query v2，所有接線產物須一起重建。
+目前 bootstrap v16、Plugin entry 23、Module query v2。Bus Client 的來源確認狀態由 Host 與 Plugin 共用，兩側靜態連結的 Client 布局必須一致。此版需一起重建中央、Host、Plugin 與 SDK 使用者。
 Entry 19 在 entry 18 的 Topic worker 布局加入 Context 持有的跨 image 收尾同步，見上述契約。
 Entry 17 加入 Context 的帶期限 Manual 等待入口，完整契約見上述 Manual 等待連結。
 Entry 16 加入可撤銷的非同步 Client 所有權，延續 Entry 15 同步 RPC／pump 防護；Entry 14 的可省略 Publisher 容量維持；Module System 持有上述參數消費端，Bus 不依賴 Param。
@@ -39,7 +52,7 @@ RuntimeServices remains fatal-only. Subsequent [native macOS acceptance and inve
 record passing App/Plugin/SDK suites and the original exit-observation gap. The subsequent [exit repair](../osal/PROCESS_EXIT_PROGRESS.md) and [Mac integration results](../osal/MACOS_EXIT_VALIDATION.md) retain original full-suite results of Debug 151/153 and Release 152/153. App/Python cases passed. The subsequent Plugin test repair and its separate acceptance results are documented below.
 
 Source App/Host/Plugin and moved-SDK integration results are maintained in the
-[stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance), including
+[stage 4 acceptance record](../osal/FD_SPAWN_VALIDATION.md#stage-4-acceptance), including
 the App test fixture correction and the separate macOS acceptance checklist.
 
 **前兩階段已實作：** Host／Plugin 共用協調接線、entry 11、失敗退出及 POSIX FD／spawn
@@ -914,17 +927,31 @@ ModuleSnapshot.last_failure and cleanup_failure each hold {mid, error}; the firs
 
 ## Outstanding issues / 待處理事項
 
+### GCC Release diagnostic follow-up (2026-11-17)
+
+Central-wakeup stage-three WSL Release builds report `-Wdangling-pointer` in
+`record_failure()` at the assignments from local `now` to `Record::stop_deadline`.
+Those assignments predate this change. Both fields are steady-clock time-point
+values; code review finds no retained reference to the local value. The related
+tests pass, but the compiler diagnostic has not been reduced to a standalone case.
+Next step: isolate the optimized GCC 13.3 case before classifying or suppressing
+the warning; do not change failure deadlines solely to silence it. Evidence:
+`build/control-wakeup-stage3/wsl-release/{build,closure-build}.log`.
+
+WSL Release 在既有 `record_failure()` 值複製處發出懸空指標警告；目前沒有確認
+實際生命週期缺陷。需另做最小重現，不能直接當作已證實誤報或修改故障期限語意。
+
 ### Parallel pump cost follow-up / 多執行緒 pump 成本後續
 
 Fresh installed SDK and Windows/WSL cost validation are recorded in
-[stage 4](PARALLEL_PUMP.md#stage-4-acceptance). Mac remains pending. The
+[acceptance](PARALLEL_PUMP_VALIDATION.md#stage-4-acceptance). Later [Mac acceptance](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md) includes the native cost matrix. The
 [cost report](PUMP_COST_VALIDATION.md) documents recurring empty Topic batch work
 and worker wakeups as profiling candidates; measurements do not attribute all
 idle cost to them. Windows short CPU samples cannot quantify a precise worker
 increment. Any optimization is a future proposal and must preserve the existing
 notification fallback and dispatch/stop contracts. Zero workers remains the default.
 
-SDK／搬移與成本已留下 Windows／WSL 證據；Mac 待驗。空 batch／喚醒值得後續 profile，
+SDK／搬移與成本已有 Windows／WSL 及上述 Mac 原生證據。空 batch／喚醒值得後續 profile，
 但本輪沒有修改排程，也不能以短時間的 Windows CPU 零值宣稱沒有成本。
 
 ### Context regression intermittency (2026-11-10) / Context 偶發驗收失敗
@@ -957,7 +984,7 @@ queries. Stage 3's broader results are recorded in the
 [shutdown regression report](CONTEXT_SHUTDOWN_VALIDATION.md). Native Mac C++
 Host/Context Debug/Release acceptance is complete in the
 [Mac report](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md); the
-[handoff checklist](MACOS_CONTEXT_SHUTDOWN_HANDOFF.md) remains a reproduction guide.
+[handoff checklist](MACOS_CONTEXT_SHUTDOWN_VALIDATION.md) remains a reproduction guide.
 Source Python/GIL and SDK-only acceptance remain separate follow-ups.
 Original logs remain preserved; their missing internal cause cannot be recovered
 retrospectively with certainty.
@@ -1644,6 +1671,20 @@ API、backpressure、fence 與容量見 [Log](../log/README.md)。
 
 ## Recorder integration (2026-10-12) / Recorder 接線（2026-10-12）
 
+Framework-only `detail::ContextImageAccess::subscribe()` now registers an owned
+image callback on the inherited Context. Its returned `ImageSubscriber` must be
+retained. It shares typed subscriptions' finite batches, same-Topic sequencing,
+cross-Topic workers, notification waits, exception classification and callback
+drain before `on_stop()`. No image callback is exposed to public Python or the
+Context API. See the [Bus image contract](../message_bus/README.md#framework-image-subscriptions)
+and [Recorder stage plan](../bag/IMAGE_RECORDING.md).
+
+框架專用 `ContextImageAccess` 把通用映像 callback 接入既有 pump，仍須保留訂閱 handle。
+同 Topic 序列、跨 Topic 並行、通知等待、故障分類與停止排空規則均共用；
+Recorder 已改用這條路徑；Python 公開介面維持 typed 訂閱，沒有公開 raw image API。
+Context 訂閱派送結構改變，因此 Plugin entry 升為 **23**，Host／Plugin／Python binding
+與 SDK 使用者必須一起重建；不改 Bus wire 或 bootstrap 版本。
+
 Context list_topics(after) borrows the existing Host Bus Client/control Session. Bag Recorder is Manual: main calls pumpOnce and bounded periodic discovery; a dedicated disk worker writes. config::bag_stop_timeout is 30 seconds for the built-in recorder. CMake STOP_TIMEOUT_CONFIG changes only that ModuleType policy, not other defaults or central shutdown. See [Bag](../bag/README.md).
 
 Context 新增 list_topics(after)，仍借用 Host 的既有 Bus Client／控制 Session。
@@ -1762,12 +1803,11 @@ owns request-specific wait/cleanup records; no extra worker or Plugin control se
 Full APIs, lifetime and validation are owned by the [RPC README](../rpc/README.md#synchronous-calls).
 
 Windows Debug/Release and WSL Release each passed the focused 13-test RPC/Context/Plugin/
-fault suite. Native macOS entry-15 regression remains in TODO; these runs do not replace
-Python or installed-SDK acceptance. Existing user-thread shutdown responsibilities remain.
+fault suite. Later macOS source/Python/SDK acceptance is linked in the RPC README; these original runs cover only their recorded scope. Existing user-thread shutdown responsibilities remain.
 
 Plugin entry 15 加入 Context 本體的 pump 執行緒紀錄；Shell hook 跨 Host／Plugin 也會受防護。
 同步等待／回收由 Host 負責，未新增背景執行緒。Windows 兩組態與 WSL 各 13/13；
-原生 Mac 仍待驗，不表示 Python／installed SDK 已驗收。
+後續 Mac、Python 與 installed SDK 結果見 RPC README，各紀錄保留原版本範圍。
 
 ## Reusable RPC Context wiring / 可重複 RPC Context 接線
 
@@ -1777,16 +1817,16 @@ validation, Python GIL/exception behavior and subsequent installed-SDK/macOS acc
 are maintained in the [RPC record](../rpc/README.md#integration-acceptance).
 
 Plugin entry 16 加入 Context 持有的可撤銷端點，C++／Python 沿用 Host 單一通訊服務。
-實際驗證、installed SDK 結果及 Mac 待驗項目統一見 RPC 紀錄，避免重複維護。
+實際驗證、installed SDK 及 Mac 結果統一見 RPC 紀錄，避免重複維護。
 
 ## macOS 來源功能補驗（2026-11-11）
 
 [第二階段報告](MACOS_SOURCE_FUNCTIONAL_VALIDATION.md)補齊 entry-19 的來源 Python／GIL、
 parallel pump、十項 RPC、Recorder 與三項 Param 遷移 Debug／Release 功能驗收，
-並保留兩項首輪失敗及共用 fixture／教學輸出的最小修正。後續乾淨 SDK-only 見下節第三階段；成本另列 TODO。
+並保留兩項首輪失敗及共用 fixture／教學輸出的最小修正。後續乾淨 SDK-only 見下節；最新成本結果見 [Mac 補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。
 
 ### macOS 第三階段交付補驗（2026-11-11）
 
 [乾淨 SDK／搬移報告](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md)補齊目前 entry-19 的
 Debug／Release SDK-only C++／Python／App、多 App／System Module 隔離、公開標頭與部署位置。
-功能補驗已完成；成本矩陣仍依決定未執行，來源／Host 歷史報告維持各自測試範圍。
+功能補驗已完成；當時未執行成本矩陣，後續結果見 [Mac 補驗](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md)。來源／Host 歷史報告維持各自測試範圍。
