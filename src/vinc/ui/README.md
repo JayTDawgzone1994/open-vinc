@@ -665,11 +665,12 @@ TypeScript 檢查與 Chromium **6/6** 通過；圖形測試涵蓋首次量測縮
 截圖與 log 保留於本機 build，不提交生成檔。
 
 Outstanding validation: very large graph layout responsiveness, sustained adversarial
-refresh load, and native Linux/macOS remain unverified. Graph pages intentionally have
+refresh load and native Linux/macOS browser visual acceptance. Later [Mac SDK tests](../sdk/MACOS_SDK_DEPLOYMENT_VALIDATION.md) cover HTTP/graph identity and App isolation, not interactive browser layout. Graph pages intentionally have
 no global consistency token; refresh during registration/restart may show a transient
 unresolved node until a subsequent refresh.
 
-待驗證：大型圖排版效能、持續惡意刷新負載、Linux／macOS 實機。
+待驗證：大型圖排版效能、持續惡意刷新負載、Linux／macOS 瀏覽器目視操作。
+Mac 後續 SDK 報告已有 HTTP／graph 身分及 App 隔離證據，不等於人工畫面驗收。
 分頁刻意不提供全域一致性 token；登記／重啟中的暫態 unresolved 可能到下次刷新才消失。
 
 ### Notification health on Module Graph / 關係圖通知健康狀態

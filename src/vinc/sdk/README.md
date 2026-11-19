@@ -9,14 +9,14 @@ Publisher 預設搬移改變選項 ABI，目前使用 Bus v6／Plugin entry 23�
 下方較早驗收仍僅適用其記錄版本，不能替本次改動背書。
 
 Plugin entry 23 additionally identifies Context's internal image dispatch layout.
-See [image subscriptions](../bag/IMAGE_RECORDING.md#stage-2-validation) and
-[fresh SDK acceptance](../bag/IMAGE_RECORDING.md#stage-4-validation).
+See [image subscriptions](../bag/IMAGE_RECORDING_VALIDATION.md#stage-2-validation) and
+[fresh SDK acceptance](../bag/IMAGE_RECORDING_VALIDATION.md#stage-4-validation).
 Plugin entry 23 另包含 Context 通用映像派送結構；Windows／WSL Debug、Release
 已通過本輪乾淨 SDK／雙 App 搬移驗收，Mac 後續也完成[原生驗收](MACOS_RECORDER_CONTROL_VALIDATION.md)。
 
 Central receive-wakeup integration is also exercised by fresh Debug/Release SDK
 producers and relocated consumers on Windows/WSL; see the [acceptance report](../module_system/CONTROL_WAKEUP_VALIDATION.md)
-for actual counts, retries and native macOS handoff. No new public SDK API was added.
+for actual counts and retries; native macOS results are in the report linked above. No new public SDK API was added.
 中央接收喚醒已納入 Windows／WSL 乾淨 SDK 與搬移驗收；沒有新增公開 SDK API，
 實際結果與重跑限制見 Windows／WSL 報告及上述 Mac 原生報告。
 
@@ -25,12 +25,12 @@ the public first-include smoke check. `sdk.installed_python` now enables two
 Topic workers in both its native Plugin and Python peer, uses bounded rendezvous
 to require real cross-Topic overlap, and retains independent messages through
 shutdown. It still checks custom schemas, RPC/Param and rejected incompatible
-Python environments. Current integration/cost results and the Mac checklist are
-owned by [parallel pump acceptance](../module_system/PARALLEL_PUMP.md#stage-4-acceptance).
+Python environments. Current integration/cost results and the native Mac follow-up are
+owned by [parallel pump acceptance](../module_system/PARALLEL_PUMP_VALIDATION.md#stage-4-acceptance).
 
 SDK 已交付 PumpOptions 標頭並納入獨立 include 驗證；搬移 Python App 驗收同時要求
 C++／Python 雙 Topic callback 真正交會、持有獨立副本到停止及正常收尾。
-本輪結果與 Mac 待驗清單見上述共用紀錄，不以舊 SDK 驗收代替。
+本輪結果與 Mac 原生補驗見上述共用紀錄，不以舊 SDK 驗收代替。
 
 `Context::waitForWork()` and Python `context.waitForWork(timeout=None)` are shipped
 through the normal SDK, using the Host-owned receiver and existing fallback.
@@ -42,7 +42,7 @@ it does not instantiate one subscriber/encoder per generated class. The installe
 Ribosome and shared `VincMessages.cmake` emit the same lightweight catalog. Bag's
 exported dependency is the Bus **client**, not central control ownership. Rebuild
 the Bag library, generator and adapter together. Fresh relocated SDK acceptance
-is recorded in stage 4 of [image recording](../bag/IMAGE_RECORDING.md#stage-4-validation).
+is recorded in stage 4 of [image recording](../bag/IMAGE_RECORDING_VALIDATION.md#stage-4-validation).
 Recorder 已改用通用映像與名稱表；來源／SDK 共用生成接線，Bag 相依只到 Bus client。
 本次乾淨 SDK 搬移結果見第四階段，包含正文／順序／metadata 與退出驗證。
 
@@ -411,7 +411,7 @@ current entry **19** follows [Module System](../module_system/README.md).
 `vinc::module` explicitly
 depends on OSAL; its component install rules carry the new header/archive and the
 existing Plugin helper carries the new entry. Static linking and ABI/CRT requirements
-remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_PLAN.md#stage-4-acceptance)
+remain; RuntimeServices is fatal-only. The [stage 4 acceptance record](../osal/FD_SPAWN_VALIDATION.md#stage-4-acceptance)
 owns the earlier source/moved-SDK results. Mac exit-repair evidence is in the
 [current summary](../osal/MACOS_EXIT_VALIDATION.md#current-acceptance-status); newer Param entry-13 SDK acceptance remains separate.
 該第一階段以 entry 11 接上共用協調器；Param RegisterOptions／重啟標記當時升為 entry 13，
@@ -594,7 +594,7 @@ Windows x64／MSVC／Ninja 驗證：
   Windows 舊工具鏈與 Runtime 門檻歷史診斷見上述評估；Python 已改用上述靜態庫，
   原生 C++ 動態 CRT 契約不變。原生 MSVC 最低為 19.44，可使用較新版；
   預編譯 SDK 的編譯器／ABI 比對仍維持原契約，不把同工具鏈成功擴張成混用版本保證。
-- Multi-App acceptance is recorded in the [plan](../../../apps/vinc/MULTI_APP.md#stage-4-acceptance).
+- Multi-App acceptance is recorded in the [plan](../../../apps/vinc/MULTI_APP_VALIDATION.md#stage-4-acceptance).
   The later Python Runtime policy has its own
   [integration acceptance](INSTALL.md#runtime-final-acceptance), including
   installed multi-App/System Module checks and an explicit native macOS handoff.

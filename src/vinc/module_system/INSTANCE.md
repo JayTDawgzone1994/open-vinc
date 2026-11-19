@@ -44,7 +44,7 @@
 **內部名稱的保留範圍。** 透過 Context 註冊的 Topic 名稱可以在不同 App 重複；
 原生資源名稱由各自的 Instance 分配。POSIX 重啟時，`clean_epoch()` 依上述已驗證的舊登記 unlink。
 同帳號程序若繞過框架，用原生 API 搶占已預留的完整名稱，該物件也可能被 unlink；
-框架只承諾正常 App 之間的隔離。相關實測見 [Topic 重啟驗收](../message_bus/TOPIC_REGISTRATION_RECOVERY.md#第四步驗收)。
+框架只承諾正常 App 之間的隔離。相關實測見 [Topic 重啟驗收](../message_bus/TOPIC_REGISTRATION_VALIDATION.md#第四步驗收)。
 
 新名稱由 epoch＋不回繞的序號組合，符合 OSAL 的 24 個 ASCII 字元限制。
 同一狀態目錄的已用 epoch 前綴保留，不再次分配，因此舊 Module 尚未退出也不會接觸新世代。

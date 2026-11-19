@@ -15,6 +15,11 @@ See the Component Documentation Index below for README entry points. If a README
 
 Give each rule one primary maintenance location according to the responsibilities above. Other documents should reference it with a brief summary and a link, rather than maintain complete duplicate copies. When updating a decision, check its referring summaries to prevent divergence. Keep shared cross-component contracts here; component documents own their specific APIs and implementation details.
 
+After implementation is complete, remove completed work sequences and authorization
+checklists from contract documents. Keep current behavior, boundaries and limitations
+in concise, readable contracts; keep dated evidence and original failures in linked
+validation records. TODO lists contain only unresolved or explicitly deferred work.
+
 ## Document Precedence
 
 - The user's latest explicit decisions take precedence over existing project documents. Proposals, candidate approaches, and TODOs in documents are not approved decisions.

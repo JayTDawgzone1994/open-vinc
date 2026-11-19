@@ -143,10 +143,10 @@ ctest --test-dir BUILD -j1 --no-tests=error --repeat until-fail:3 -V \
 ```
 
 SDK、成本與各案例重跑入口見
-[Recorder 映像契約](../bag/IMAGE_RECORDING.md#stage-4-validation)、
+[Recorder 映像契約](../bag/IMAGE_RECORDING_VALIDATION.md#stage-4-validation)、
 [控制接收喚醒](../module_system/CONTROL_WAKEUP_VALIDATION.md)、
 [Bus 控制面](../message_bus/CONTROL_PLANE_REPAIR.md)與
-[Topic 登記回收](../message_bus/TOPIC_REGISTRATION_RECOVERY.md#第四步驗收)。
+[Topic 登記回收](../message_bus/TOPIC_REGISTRATION_VALIDATION.md#第四步驗收)。
 完整命令與環境、JUnit、LastTest、成本 JSON／phase traces 另外保存在
 `open-vinc-macos-recorder-control-20261119/evidence.tar.gz`。
 

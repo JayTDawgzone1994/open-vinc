@@ -2,22 +2,13 @@
 
 Date / 日期: 2026-11-06.
 
-## Status and scope / 狀態與範圍
+## Scope / 範圍
 
-**Stages 1–4 implemented and accepted on Windows/WSL.** Source and clean installed-SDK
-results, the initial Release UI failure and successful retry are recorded in the
-[RPC README](README.md#integration-acceptance). Native macOS remains pending.
-
-**第一至四階段已完成 Windows／WSL 驗收。** 來源、乾淨 SDK、Release UI 首輪失敗與
-成功重跑見 README；原生 macOS 尚待驗證，不能以其他平台結果取代。
-
-This document owns the change contract and acceptance plan. The [RPC README](README.md)
-continues to describe the current implementation until the corresponding work is
-completed and verified. [NAMING.md](../../../NAMING.md) owns terminology;
-[Module System](../module_system/README.md) owns Context/pump lifecycle;
-[Message Storage](../components/message_storage/README.md) owns message access and
-ownership. Do not duplicate those contracts here or treat historical test results as
-validation of this redesign.
+This document owns client ownership, waiting and callback contracts. The
+[RPC README](README.md) owns current signatures, Python adapters and validation.
+[NAMING.md](../../../NAMING.md), [Module System](../module_system/README.md) and
+[Message Storage](../components/message_storage/README.md) own their shared contracts.
+本頁說明 Client 的所有權、等待與 callback 邊界；操作與驗收由 RPC README 維護。
 
 ## Goals and exclusions / 目標與排除範圍
 
@@ -36,7 +27,7 @@ validation of this redesign.
 同步呼叫自行推進必要通訊；非同步回覆由 pump 派送。框架拒絕可明確辨識的不允許
 呼叫情境，不宣稱能偵測使用者所有 mutex、跨 Module 等待循環或無限迴圈。
 
-## Target API / 目標 API
+## API example / 介面範例
 
 The following expresses the agreed API shape, not compilable evidence of implementation.
 Request and Response must be Ribosome-generated messages. Ordinary message construction
@@ -142,10 +133,9 @@ and tested as the implementation is integrated.
 
 Track the current execution context with scoped state that restores the previous state
 on normal or exceptional exit. Indirect calls through application helpers must still be
-recognized. Host and Plugin must use the same authoritative execution state; duplicated
-DLL-local thread-local markers cannot establish correctness. Test through a real Plugin,
-not only a monolithic unit-test executable. Do not publish an arbitrary numeric error code
-in this plan; allocate the new typed error/operation in the existing RPC catalog.
+recognized. Host and Plugin share the authoritative execution state; duplicated
+DLL-local markers are insufficient. The rejection is `ErrorCode::BlockingCallInPump`
+in the RPC catalog.
 
 此防護依據目前呼叫執行緒，而非「Context 有 pump 在跑就禁止其他執行緒同步呼叫」。
 它是明確的 API 使用限制，不是一般死鎖偵測器。
@@ -174,70 +164,9 @@ in this plan; allocate the new typed error/operation in the existing RPC catalog
 - Preserve per-service submission ordering, schema/layout validation, cause chains,
   callback exception policy and failure isolation. No public cancellation API is added.
 
-## Component changes / 元件改動邊界
+## Validation / 驗證
 
-| Component | Work |
-| --- | --- |
-| RPC | Public client/messages helpers, address parsing, synchronous progress, bounded wait routing, errors, cleanup and async lifecycle. |
-| Module System | Context entry points, pump execution state, stop wakeups and active-call lifetime integration. |
-| Host/Plugin integration | Designated Access interface changes and matching ABI identity updates; rebuild all connected artifacts. |
-| Python binding | Equivalent client/messages/synchronous behavior using existing Python error conventions; release GIL during native waits, acquire it for Python object work. No Python execution on watchdog. |
-| SDK/examples/docs | Public header export/smoke tests, C++/Python examples, installed consumers, current documentation and validation records. |
-
-Reuse existing component targets and ownership boundaries. Update protocol versions only
-where wire changes actually require it; reject incompatible layouts rather than reading
-them as old formats. Python-facing spelling/adapters must be documented during stage 3;
-the Python signatures and GIL/lifetime behavior are specified in the RPC README.
-
-## Implementation stages / 開工步驟
-
-Stages 1–4 are complete for the Windows/WSL scope; native macOS remains a follow-up.
-Intermediate stages need not be independently shippable; final correctness and the
-acceptance evidence below are required.
-
-1. **Contract and API foundations:** implement address parsing, RpcMessages and RpcClient
-   foundations; add type, ownership and malformed-address tests. Keep documentation clear
-   about any paths not yet connected.
-2. **Synchronous transport and cleanup:** integrate Host routing/waiting, pump guard,
-   stop/deadline handling, late-event recovery and native Plugin ABI wiring. Prove progress
-   and cleanup without caller pump before claiming the synchronous API works.
-3. **Async and language integration:** complete reusable-client callback lifetimes,
-   Python bindings and teardown/GIL behavior; replace old call sites and examples, then
-   update current API documentation. Preserve bounded async pump dispatch.
-4. **Integration acceptance:** Windows Debug/Release, WSL Linux, clean installed SDK
-   with custom messages and cross-language RPC. Record native macOS follow-up in root
-   TODO and relevant component records; no unexecuted platform is marked passed.
-
-New major dependency/lifecycle trade-offs discovered during implementation require a pause
-and owner agreement, even inside an authorized stage. Record unresolved concerns with
-evidence and next steps in the owning component documentation.
-
-## Acceptance checklist / 驗收條件
-
-Checked items refer to the Windows/WSL evidence and limitations in the
-[coverage map](README.md#integration-acceptance), not universal platform or race-freedom guarantees.
-勾選僅代表所列 Windows／WSL 案例通過；不宣稱跨平台已全驗或任意並行程式皆安全。
-
-- [x] Normal replies and nonzero application status with valid typed Response.
-- [x] Invalid addresses, unavailable service, schema mismatch, large payloads and capacities.
-- [x] Client Busy, local/remote QueueFull and repaired/repeated calls without automatic retry.
-- [x] No-pump synchronous success, timeout, late Grant/Reply cleanup and repeat capacity reuse.
-- [x] Concurrent synchronous callers plus async pump without event theft or duplicate delivery.
-- [x] Real Plugin pump guard, indirect helper calls, scope restoration, async self-call and
-      synchronous self-call rejection before submission.
-- [x] Callback-driven resubmission, handle move/close/destruction and shutdown races.
-- [x] Target crash/restart/MID isolation, channel failure and local stop wakeups.
-- [x] Duplicate/late events, lease recovery and retained Response on framework failure.
-- [x] Only pump executes user callbacks; heartbeat remains independent of waiting/transfers.
-- [x] Python native waits release GIL; callback exceptions, lifetime and C++/Python exchange.
-- [x] SDK public headers, fresh installed consumer, generated custom messages and normal exit.
-- [x] Record actual platform/toolchain/configuration, commands, results and skipped coverage.
-
-- [ ] Native macOS source and clean installed-SDK acceptance with matching rebuilt
-      Host/Plugins/Python; tracked in root TODO.
-
-Stage-specific evidence belongs to the [RPC README](README.md#integration-acceptance).
-The controlled restart-identity test is paired with real target-death tests, not claimed
-as an additional automatic-restart stress run. Existing handle concurrency and application
-thread-join responsibilities remain unchanged. Historical pre-redesign validation does
-not automatically satisfy this checklist.
+Current APIs, Python signatures and acceptance records are maintained in the
+[RPC README](README.md#integration-acceptance). Later native Mac source and clean SDK
+coverage is recorded in the [Mac report](../sdk/MACOS_RECORDER_CONTROL_VALIDATION.md).
+Historical failures remain scoped to their recorded revisions.

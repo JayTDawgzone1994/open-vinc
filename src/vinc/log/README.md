@@ -239,7 +239,7 @@ Recorded 2026-10-09 on Windows x64/MSVC: Debug/Release builds and full **67/67**
 ### Outstanding issues / 待處理事項
 
 - OS limitation: synchronous filesystem I/O can block indefinitely, preventing bounded writer join. File work does not hold the central Log mutex, so collector/Module control do not wait on that lock. No detach-based abandoned-worker fallback exists.
-- Native macOS acceptance of the current file-Param change remains pending. Keep platform/revision evidence separate; see [file-Param validation](FILE_PARAMS.md#validation--驗證).
+- Native Mac source and SDK follow-up is recorded in [file-Param validation](FILE_PARAMS.md#validation--驗證); each report retains its tested revision and scope.
 - Crashes, unflushed CRT output, unfenced disconnects, or disk failures can lose records. Log is not a crash-dump tool.
 
 - 已知 OS 能力限制：同步檔案 I/O 若被 OS／filesystem 長期卡住，writer join 無法保證有限時間；
